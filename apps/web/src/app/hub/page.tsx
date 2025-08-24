@@ -4,7 +4,7 @@ import Link from "next/link";
 
 type GameCard = {
   title: string;
-  href: string;
+  href: string;     // keep as plain string in your data
   blurb?: string;
   tone: string;
   cta?: string;
@@ -64,6 +64,10 @@ function CardIcon() {
 }
 
 function GameTile({ card }: { card: GameCard }) {
+  const baseButtonClasses = "inline-flex items-center rounded-full border border-stone-300 px-5 py-2 text-sm font-semibold text-zinc-800";
+  const disabledButtonClasses = "cursor-not-allowed bg-zinc-100 text-zinc-400";
+  const secondaryLabel = (t: string) => (t === "Realations" ? "Past Puzzles" : "Archive");
+
   return (
     <div className="group overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
       {/* Header */}
@@ -85,19 +89,34 @@ function GameTile({ card }: { card: GameCard }) {
           <p className="text-center text-sm text-neutral-500 leading-tight">{card.blurb}</p>
         )}
         <div className="flex justify-center gap-3">
-          <Link
-            href={card.href as any}
-            className="inline-flex items-center rounded-full border border-stone-300 px-5 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-          >
-            {card.cta ?? "Play"}
-          </Link>
-          {["Realations", "Realitease", "Connections"].includes(card.title) && (
-            <Link
-              href={`${card.href}/archive` as any}
-              className="inline-flex items-center rounded-full border border-stone-300 px-5 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-            >
-              {card.title === "Realations" ? "Past Puzzles" : "Archive"}
-            </Link>
+          {card.title === "Realitease" ? (
+            <>
+              <Link
+                href={{ pathname: card.href }}
+                className={baseButtonClasses + " hover:bg-zinc-50"}
+              >
+                {card.cta ?? "Play"}
+              </Link>
+              {["Realations", "Realitease", "Connections"].includes(card.title) && (
+                <Link
+                  href={{ pathname: `${card.href}/archive` }}
+                  className={baseButtonClasses + " hover:bg-zinc-50"}
+                >
+                  {secondaryLabel(card.title)}
+                </Link>
+              )}
+            </>
+          ) : (
+            <>
+              <span className={baseButtonClasses + " " + disabledButtonClasses}>
+                {card.cta ?? "Play"}
+              </span>
+              {["Realations", "Realitease", "Connections"].includes(card.title) && (
+                <button disabled className={baseButtonClasses + " " + disabledButtonClasses}>
+                  {secondaryLabel(card.title)}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -105,7 +124,7 @@ function GameTile({ card }: { card: GameCard }) {
   );
 }
 
-export default function Page(): React.ReactElement {
+export default function Page() {
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
       <section className="mx-auto max-w-6xl">
@@ -120,7 +139,7 @@ export default function Page(): React.ReactElement {
 
         {/* Responsive 3/2/1 grid */}
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {CARDS.map((card: GameCard) => (
+          {CARDS.map((card) => (
             <GameTile key={card.title} card={card} />
           ))}
         </div>

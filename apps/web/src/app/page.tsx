@@ -5,7 +5,7 @@ import { onUser, signInWithGoogle, logout, initAnalytics } from "@/lib/firebase"
 import { logEvent } from "firebase/analytics";
 import type { User } from "firebase/auth";
 
-export default function AuthPage() {
+export default function Page() {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {

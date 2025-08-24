@@ -1,16 +1,40 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { onUser, signInWithGoogle, logout, initAnalytics } from "@/lib/firebase";
 import type { User } from "firebase/auth";
 
 export default function AuthPage() {
   const [user, setUser] = useState<User | null>(null);
+  const [pending, setPending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     initAnalytics();
-    return onUser(setUser);
-  }, []);
+    return onUser((user) => {
+      setUser(user);
+      if (user) {
+        router.replace("/hub");
+      }
+    });
+  }, [router]);
+
+  const handleGoogle = async () => {
+    if (pending) return;
+    setPending(true);
+    setErr(null);
+    try {
+      await signInWithGoogle();
+      router.replace("/hub");
+    } catch (e: any) {
+      // Only “real” errors reach here (cancellations are ignored in the lib)
+      setErr(e?.message ?? "Sign-in failed.");
+    } finally {
+      setPending(false);
+    }
+  };
 
   if (user) {
     return (
@@ -27,8 +51,13 @@ export default function AuthPage() {
   return (
     <main className="mx-auto max-w-xl p-8 space-y-4">
       <h1 className="text-3xl font-serif">Sign in</h1>
-      <button className="px-4 py-2 border rounded" onClick={() => signInWithGoogle()}>
-        Continue with Google
+      {err && <p className="text-sm text-red-600">{err}</p>}
+      <button
+        className="px-4 py-2 border rounded disabled:opacity-60"
+        disabled={pending}
+        onClick={handleGoogle}
+      >
+        {pending ? "Opening…" : "Continue with Google"}
       </button>
     </main>
   );
