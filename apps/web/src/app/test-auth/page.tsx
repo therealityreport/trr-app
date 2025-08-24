@@ -28,9 +28,17 @@ export default function AuthPage() {
     try {
       await signInWithGoogle();
       router.replace("/hub");
-    } catch (e: any) {
+    } catch (err: unknown) {
       // Only “real” errors reach here (cancellations are ignored in the lib)
-      setErr(e?.message ?? "Sign-in failed.");
+      const getMessage = (e: unknown): string => {
+        if (typeof e === "string") return e;
+        if (typeof e === "object" && e !== null) {
+          const maybe = (e as { message?: unknown }).message;
+          if (typeof maybe === "string") return maybe;
+        }
+        return "Sign-in failed.";
+      };
+      setErr(getMessage(err));
     } finally {
       setPending(false);
     }

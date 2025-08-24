@@ -12,9 +12,9 @@ export default function Page() {
     // initialize analytics (no-op on unsupported envs) and log a page_view
     (async () => {
       try {
-  const a = await initAnalytics();
-  if (a) logEvent(a, "page_view");
-      } catch (e) {
+        const a = await initAnalytics();
+        if (a) logEvent(a, "page_view");
+      } catch {
         // ignore analytics init errors in unsupported environments
       }
     })();

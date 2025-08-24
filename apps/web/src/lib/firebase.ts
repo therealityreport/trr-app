@@ -40,12 +40,10 @@ export async function signInWithGoogle(): Promise<void> {
   try {
     const provider = new GoogleAuthProvider();
     await signInWithPopup(auth, provider);
-  } catch (e: any) {
-    if (
-      e?.code !== "auth/cancelled-popup-request" &&
-      e?.code !== "auth/popup-closed-by-user"
-    ) {
-      throw e;
+  } catch (err: unknown) {
+    const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
+    if (code !== "auth/cancelled-popup-request" && code !== "auth/popup-closed-by-user") {
+      throw err;
     }
   } finally {
     signinInFlight = false;
