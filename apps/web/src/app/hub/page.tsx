@@ -14,17 +14,43 @@ type GameCard = {
 const CARDS: GameCard[] = [
   { title: "Realations",  href: "/realations",  tone: "bg-yellow-400", cta: "Play" },
   { title: "Realitease",  href: "/realitease",  tone: "bg-neutral-200", cta: "Play" },
-  { title: "Realtime",    href: "/realtime",    tone: "bg-pink-300",   cta: "Play", badge: "New",
-    blurb: "Place every domino into the right spot." },
-  { title: "Strands",     href: "/strands",     tone: "bg-slate-300",  cta: "Play",
-    blurb: "Find hidden words and uncover the day’s theme." },
+  {
+    title: "Realtime",
+    href: "/realtime",
+    tone: "bg-pink-300",
+    cta: "Play",
+    badge: "New",
+    blurb: "Place every domino into the right spot.",
+  },
+  {
+    title: "Strands",
+    href: "/strands",
+    tone: "bg-slate-300",
+    cta: "Play",
+    blurb: "Find hidden words and uncover the day’s theme.",
+  },
   { title: "Connections", href: "/connections", tone: "bg-indigo-300", cta: "Play" },
-  { title: "Letter Boxed",href: "/letter-boxed",tone: "bg-red-400",    cta: "Play",
-    blurb: "Create words using letters around the square." },
-  { title: "Tiles",       href: "/tiles",       tone: "bg-lime-300",   cta: "Play",
-    blurb: "Match tiles to keep your chain going." },
-  { title: "Sudoku",      href: "/sudoku",      tone: "bg-amber-500",  cta: "Play",
-    blurb: "Try this numbers game—minus the math." },
+  {
+    title: "Letter Boxed",
+    href: "/letter-boxed",
+    tone: "bg-red-400",
+    cta: "Play",
+    blurb: "Create words using letters around the square.",
+  },
+  {
+    title: "Tiles",
+    href: "/tiles",
+    tone: "bg-lime-300",
+    cta: "Play",
+    blurb: "Match tiles to keep your chain going.",
+  },
+  {
+    title: "Sudoku",
+    href: "/sudoku",
+    tone: "bg-amber-500",
+    cta: "Play",
+    blurb: "Try this numbers game—minus the math.",
+  },
 ];
 
 function CardIcon() {
@@ -40,6 +66,7 @@ function CardIcon() {
 function GameTile({ card }: { card: GameCard }) {
   return (
     <div className="group overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      {/* Header */}
       <div className={`${card.tone} relative grid place-items-center p-6`}>
         <CardIcon />
         <h3 className="mt-6 text-center font-sans text-2xl font-bold text-zinc-900">
@@ -52,6 +79,7 @@ function GameTile({ card }: { card: GameCard }) {
         )}
       </div>
 
+      {/* Body */}
       <div className="space-y-4 p-5">
         {card.blurb && (
           <p className="text-center text-sm text-neutral-500 leading-tight">{card.blurb}</p>
@@ -63,7 +91,7 @@ function GameTile({ card }: { card: GameCard }) {
           >
             {card.cta ?? "Play"}
           </Link>
-          {["Realations","Realitease","Connections"].includes(card.title) && (
+          {["Realations", "Realitease", "Connections"].includes(card.title) && (
             <Link
               href={`${card.href}/archive` as any}
               className="inline-flex items-center rounded-full border border-stone-300 px-5 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
@@ -77,7 +105,7 @@ function GameTile({ card }: { card: GameCard }) {
   );
 }
 
-export default function Page() {
+export default function Page(): React.ReactElement {
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
       <section className="mx-auto max-w-6xl">
@@ -90,8 +118,9 @@ export default function Page() {
           </p>
         </header>
 
+        {/* Responsive 3/2/1 grid */}
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {CARDS.map((card) => (
+          {CARDS.map((card: GameCard) => (
             <GameTile key={card.title} card={card} />
           ))}
         </div>
