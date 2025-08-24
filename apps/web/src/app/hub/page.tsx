@@ -1,0 +1,101 @@
+// apps/web/src/app/hub/page.tsx
+import React from "react";
+import Link from "next/link";
+
+type GameCard = {
+  title: string;
+  href: string;
+  blurb?: string;
+  tone: string;
+  cta?: string;
+  badge?: string;
+};
+
+const CARDS: GameCard[] = [
+  { title: "Realations",  href: "/realations",  tone: "bg-yellow-400", cta: "Play" },
+  { title: "Realitease",  href: "/realitease",  tone: "bg-neutral-200", cta: "Play" },
+  { title: "Realtime",    href: "/realtime",    tone: "bg-pink-300",   cta: "Play", badge: "New",
+    blurb: "Place every domino into the right spot." },
+  { title: "Strands",     href: "/strands",     tone: "bg-slate-300",  cta: "Play",
+    blurb: "Find hidden words and uncover the day’s theme." },
+  { title: "Connections", href: "/connections", tone: "bg-indigo-300", cta: "Play" },
+  { title: "Letter Boxed",href: "/letter-boxed",tone: "bg-red-400",    cta: "Play",
+    blurb: "Create words using letters around the square." },
+  { title: "Tiles",       href: "/tiles",       tone: "bg-lime-300",   cta: "Play",
+    blurb: "Match tiles to keep your chain going." },
+  { title: "Sudoku",      href: "/sudoku",      tone: "bg-amber-500",  cta: "Play",
+    blurb: "Try this numbers game—minus the math." },
+];
+
+function CardIcon() {
+  return (
+    <svg viewBox="0 0 64 64" aria-hidden className="size-16 text-black/90">
+      <rect x="8" y="8" width="48" height="48" rx="8" className="fill-black" />
+      <circle cx="24" cy="24" r="4" className="fill-white" />
+      <circle cx="40" cy="40" r="4" className="fill-white" />
+    </svg>
+  );
+}
+
+function GameTile({ card }: { card: GameCard }) {
+  return (
+    <div className="group overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      <div className={`${card.tone} relative grid place-items-center p-6`}>
+        <CardIcon />
+        <h3 className="mt-6 text-center font-sans text-2xl font-bold text-zinc-900">
+          {card.title}
+        </h3>
+        {card.badge && (
+          <span className="absolute right-3 top-3 rounded-md bg-neutral-700 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+            {card.badge}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-4 p-5">
+        {card.blurb && (
+          <p className="text-center text-sm text-neutral-500 leading-tight">{card.blurb}</p>
+        )}
+        <div className="flex justify-center gap-3">
+          <Link
+            href={card.href as any}
+            className="inline-flex items-center rounded-full border border-stone-300 px-5 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
+          >
+            {card.cta ?? "Play"}
+          </Link>
+          {["Realations","Realitease","Connections"].includes(card.title) && (
+            <Link
+              href={`${card.href}/archive` as any}
+              className="inline-flex items-center rounded-full border border-stone-300 px-5 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
+            >
+              {card.title === "Realations" ? "Past Puzzles" : "Archive"}
+            </Link>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
+      <section className="mx-auto max-w-6xl">
+        <header className="mb-10 text-center">
+          <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">
+            Pick a game
+          </h1>
+          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+            Daily puzzles and prototypes. More coming soon.
+          </p>
+        </header>
+
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {CARDS.map((card) => (
+            <GameTile key={card.title} card={card} />
+          ))}
+        </div>
+      </section>
+    </main>
+  );
+}

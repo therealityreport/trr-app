@@ -1,26 +1,50 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* Tailwind v4 theme tokens */
+@theme {
+  /* Colors */
+  --color-background: #ffffff;
+  --color-foreground: #171717;
+  --color-accent: #0B57D0;
+  --color-ink: #111111;
+  --color-line: #E6E6E6;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  /* Fonts (mapped via next/font in layout.tsx) */
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-figma-serif), Georgia, "Times New Roman", serif;
 }
 
+/* Dark scheme overrides */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  @theme {
+    --color-background: #0a0a0a;
+    --color-foreground: #ededed;
   }
 }
 
+/* Base element styling */
+@layer base {
+  html, body {
+    min-height: 100%;
+    background-color: theme(--color-background);
+    color: theme(--color-foreground);
+  }
+
+  h1, h2, h3 {
+    @apply font-serif tracking-tight;
+  }
+
+  p {
+    @apply leading-7;
+  }
+
+  a {
+    color: theme(--color-accent);
+    text-underline-offset: 2px;
+  }
+}
+
+/* Default body font */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
