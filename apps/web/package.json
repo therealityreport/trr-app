@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "dev:emu": "NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true next dev --turbopack",
+    "dev:emu": "NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true next dev --turbopack -p ${PORT:-3000}",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint"

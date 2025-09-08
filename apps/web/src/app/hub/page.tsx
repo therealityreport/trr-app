@@ -1,6 +1,7 @@
 // apps/web/src/app/hub/page.tsx
 import React from "react";
 import Link from "next/link";
+import SignOutButton from "@/components/SignOutButton";
 
 type GameCard = {
   title: string;
@@ -127,6 +128,9 @@ function GameTile({ card }: { card: GameCard }) {
 export default async function Page() {
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
+      <div className="max-w-6xl mx-auto flex justify-end mb-4">
+        <SignOutButton />
+      </div>
       <section className="mx-auto max-w-6xl">
         <header className="mb-10 text-center">
           <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">

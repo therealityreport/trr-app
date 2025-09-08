@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, OAuthProvider, signInWithPopup } from "firebase/auth";
+import { signInWithGoogle } from "@/lib/firebase";
 import { getUserByUsername, createUserProfile, upsertUserProfile } from "@/lib/db/users";
 import {
   validateEmail,
@@ -46,7 +47,7 @@ export default function RegisterPage() {
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((u) => {
       if (u && !holdRedirect) {
-        router.replace("/realitease");
+        router.replace("/hub");
       }
     });
     return () => unsub();
@@ -109,7 +110,7 @@ export default function RegisterPage() {
       };
       await createUserProfile(user.uid, profile);
       sessionStorage.setItem("toastMessage", "Account created");
-      router.replace("/realitease");
+      router.replace("/hub");
     } catch (err: unknown) {
       const message = getFriendlyError(err);
       setFormError(message);
@@ -170,6 +171,29 @@ export default function RegisterPage() {
     <main className="mx-auto max-w-xl p-8">
       <h1 className="font-serif text-3xl">Create your account</h1>
       <p className="text-gray-600 mt-1">Join the community of Reality TV fans.</p>
+
+      {/* Top-level auth options */}
+      <div className="mt-4 flex flex-col gap-3">
+        <button
+          type="button"
+          className="px-4 py-2 border rounded disabled:opacity-60"
+          onClick={async () => { if (!pending) { setPending(true); setFormError(null); try { await signInWithGoogle(); router.replace("/auth/complete"); } catch (e) { setFormError(getFriendlyError(e)); } finally { setPending(false); } }}}
+          disabled={pending}
+        >
+          {pending ? "Opening Google…" : "Continue with Google"}
+        </button>
+        {ENABLE_APPLE && !appleFlow && (
+          <button
+            type="button"
+            className="px-4 py-2 border rounded disabled:opacity-60"
+            onClick={startApple}
+            disabled={pending}
+          >
+            {pending ? "Opening Apple…" : "Continue with Apple"}
+          </button>
+        )}
+        <div className="text-xs text-gray-500">or continue with email</div>
+      </div>
 
       <form className="mt-6 space-y-4" onSubmit={appleFlow ? completeAppleProfile : handleEmailSignup} noValidate>
         {formError && (
@@ -279,16 +303,7 @@ export default function RegisterPage() {
             {pending ? (appleFlow ? "Completing…" : "Creating…") : (appleFlow ? "Complete Profile" : "Sign up with email")}
           </button>
 
-          {ENABLE_APPLE && !appleFlow && (
-            <button
-              type="button"
-              className="px-4 py-2 border rounded disabled:opacity-60"
-              onClick={startApple}
-              disabled={pending}
-            >
-              {pending ? "Opening Apple…" : "Sign in with Apple"}
-            </button>
-          )}
+          {/* Apple button moved to top options */}
         </div>
       </form>
     </main>

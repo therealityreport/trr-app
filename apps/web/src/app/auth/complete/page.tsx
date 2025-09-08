@@ -29,7 +29,7 @@ export default function CompleteProfilePage() {
       }
       const existing = await getUserProfile(u.uid);
       if (existing) {
-        router.replace("/realitease");
+        router.replace("/hub");
         return;
       }
       // Pre-fill username hint from email prefix if available and sane
@@ -95,7 +95,7 @@ export default function CompleteProfilePage() {
       };
       await upsertUserProfile(u.uid, payload);
       sessionStorage.setItem("toastMessage", "Profile completed");
-      router.replace("/realitease");
+      router.replace("/hub");
     } catch (err: unknown) {
       setFormError(getFriendlyError(err));
     } finally {

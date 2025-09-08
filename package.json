@@ -6,6 +6,7 @@
   "scripts": {
     "emulators": "firebase emulators:start --import=.emulator-data --export-on-exit",
     "dev:local": "concurrently -k -n emu,web -c blue,green \"npm run emulators\" \"npm --prefix apps/web run dev:emu\"",
+    "dev:local:3001": "concurrently -k -n emu,web -c blue,green \"npm run emulators\" \"PORT=3001 npm run web:emu\"",
     "web:emu": "npm --prefix apps/web run dev:emu",
     "web:dev": "npm --prefix apps/web run dev",
     "web:build": "npm --prefix apps/web run build",
