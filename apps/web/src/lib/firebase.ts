@@ -56,6 +56,8 @@ export async function signInWithGoogle(): Promise<void> {
   signinInFlight = true;
   try {
     const provider = new GoogleAuthProvider();
+    // Always open account chooser to allow switching users
+    provider.setCustomParameters({ prompt: "select_account" });
     await signInWithPopup(auth, provider);
     // Establish a server session cookie for SSR guards
     const idToken = await auth.currentUser?.getIdToken();
