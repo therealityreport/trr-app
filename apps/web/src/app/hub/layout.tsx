@@ -19,5 +19,5 @@ async function guard() {
 
 export default async function HubLayout({ children }: { children: ReactNode }) {
   await guard();
-  return children as unknown as JSX.Element;
+  return children;
 }

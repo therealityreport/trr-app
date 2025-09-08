@@ -19,5 +19,5 @@ async function guard() {
 
 export default async function RealiteaseLayout({ children }: { children: ReactNode }) {
   await guard();
-  return children as unknown as JSX.Element;
+  return children;
 }
