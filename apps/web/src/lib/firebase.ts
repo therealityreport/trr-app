@@ -56,9 +56,35 @@ export async function signInWithGoogle(): Promise<void> {
   signinInFlight = true;
   try {
     const provider = new GoogleAuthProvider();
-    // Always open account chooser to allow switching users
+    // Always open account chooser; ask for birthday scope (People API)
     provider.setCustomParameters({ prompt: "select_account" });
-    await signInWithPopup(auth, provider);
+    provider.addScope("https://www.googleapis.com/auth/user.birthday.read");
+    const result = await signInWithPopup(auth, provider);
+    // Try to prefill birthday from Google People API (best-effort)
+    try {
+      const cred = GoogleAuthProvider.credentialFromResult(result);
+      const accessToken = (cred as unknown as { accessToken?: string })?.accessToken;
+      if (accessToken) {
+        const resp = await fetch("https://people.googleapis.com/v1/people/me?personFields=birthdays", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          const bdays = Array.isArray(data?.birthdays) ? data.birthdays : [];
+          const pick = bdays.find((b: any) => b?.date?.year) || bdays[0];
+          const d = pick?.date;
+          if (d && d.month && d.day) {
+            const yyyy = d.year ? String(d.year).padStart(4, "0") : "";
+            const mm = String(d.month).padStart(2, "0");
+            const dd = String(d.day).padStart(2, "0");
+            const iso = yyyy ? `${yyyy}-${mm}-${dd}` : "";
+            if (iso) {
+              try { sessionStorage.setItem("finish_birthday", iso); } catch {}
+            }
+          }
+        }
+      }
+    } catch {}
     // Establish a server session cookie for SSR guards
     const idToken = await auth.currentUser?.getIdToken();
     if (idToken) {

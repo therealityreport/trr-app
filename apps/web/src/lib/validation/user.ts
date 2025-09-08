@@ -25,6 +25,8 @@ export function validateEmail(email: string): string | null {
 export function validatePassword(password: string): string | null {
   if (!password) return "Password is required.";
   if (password.length < 8) return "Password must be at least 8 characters.";
+  // Require at least one digit or symbol for basic strength
+  if (!/[0-9\W]/.test(password)) return "Include at least one number or symbol.";
   return null;
 }
 
@@ -47,6 +49,11 @@ export function validateBirthday(birthday: string): string | null {
   const year = dt.getUTCFullYear();
   if (year < 1900) return "Birthday year seems too early.";
   if (dt > today) return "Birthday cannot be in the future.";
+  // Must be 13+ years old
+  const age = today.getUTCFullYear() - dt.getUTCFullYear() - (
+    today.getUTCMonth() < dt.getUTCMonth() || (today.getUTCMonth() === dt.getUTCMonth() && today.getUTCDate() < dt.getUTCDate()) ? 1 : 0
+  );
+  if (age < 13) return "You must be at least 13 years old.";
   return null;
 }
 
