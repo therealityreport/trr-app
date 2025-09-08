@@ -124,7 +124,7 @@ function GameTile({ card }: { card: GameCard }) {
   );
 }
 
-export default function Page() {
+export default async function Page() {
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
       <section className="mx-auto max-w-6xl">

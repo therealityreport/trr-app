@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { onUser, signInWithGoogle, logout, initAnalytics } from "@/lib/firebase";
 import { logEvent } from "firebase/analytics";
 import type { User } from "firebase/auth";
 
 export default function Page() {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
@@ -34,10 +36,19 @@ export default function Page() {
     );
   }
 
+  const handleGoogle = async () => {
+    try {
+      await signInWithGoogle();
+      router.replace("/auth/complete");
+    } catch {
+      // ignored: signInWithGoogle filters benign errors
+    }
+  };
+
   return (
     <main className="mx-auto max-w-xl p-8 space-y-4">
       <h1 className="text-3xl font-serif">Sign in</h1>
-      <button className="px-4 py-2 border rounded" onClick={() => signInWithGoogle()}>
+      <button className="px-4 py-2 border rounded" onClick={handleGoogle}>
         Continue with Google
       </button>
     </main>

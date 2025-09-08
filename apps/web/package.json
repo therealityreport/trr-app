@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:emu": "NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
     "firebase": "^12.1.0",
+    "firebase-admin": "^12.6.0",
     "next": "15.5.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
