@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "firebase": "^12.1.0"
+  },
+  "scripts": {
+    "emulators": "firebase emulators:start"
   }
 }
