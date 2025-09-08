@@ -7,3 +7,6 @@ build
 .env.local
 .firebase/
 .emulator-data/
+firebase-debug.log
+firestore-debug.log
+*-debug.log
