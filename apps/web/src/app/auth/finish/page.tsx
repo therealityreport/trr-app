@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { getUserByUsername, getUserProfile, upsertUserProfile } from "@/lib/db/users";
-import { validateBirthday, validateUsername, parseShows, type UserProfile } from "@/lib/validation/user";
+import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
 import { ALL_SHOWS } from "@/lib/data/shows";
 
 type FieldErrors = Partial<Record<"username" | "birthday" | "shows", string>>;
@@ -83,7 +83,8 @@ export default function FinishProfilePage() {
       const bErr = validateBirthday(birthday);
       if (bErr) next.birthday = bErr;
     }
-    if (selectedShows.length < 3) next.shows = "Select at least 3 shows.";
+    const showsErr = validateShowsMin(selectedShows, 3);
+    if (showsErr) next.shows = showsErr;
     setErrors(next);
     return Object.keys(next).length === 0;
   };

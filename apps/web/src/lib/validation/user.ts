@@ -66,3 +66,8 @@ export function parseShows(input: string | string[]): string[] {
   }
   return out;
 }
+
+// Ensure at least `min` shows are selected
+export function validateShowsMin(shows: string[], min = 3): string | null {
+  return shows.length >= min ? null : `Select at least ${min} shows.`;
+}
