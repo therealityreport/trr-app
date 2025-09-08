@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       path: "/",
     });
     return res;
-  } catch (e) {
+  } catch {
     return NextResponse.json({ error: "failed" }, { status: 400 });
   }
 }
