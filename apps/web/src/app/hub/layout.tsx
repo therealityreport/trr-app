@@ -11,7 +11,10 @@ async function guard() {
     const decoded = await adminAuth.verifySessionCookie(cookie, true);
     const uid = decoded.uid;
     const snap = await adminDb.collection("users").doc(uid).get();
-    if (!snap.exists) redirect("/auth/complete");
+    if (!snap.exists) redirect("/auth/finish");
+    const data = snap.data();
+    const complete = data && data.username && Array.isArray(data.shows) && data.shows.length >= 3 && data.birthday;
+    if (!complete) redirect("/auth/finish");
   } catch {
     redirect("/auth/register");
   }
