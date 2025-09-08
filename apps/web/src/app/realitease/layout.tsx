@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 
 async function guard() {
   const { adminAuth, adminDb } = await import("@/lib/firebaseAdmin");
-  const cookie = cookies().get("__session")?.value;
+  const cookieStore = await cookies();
+  const cookie = cookieStore.get("__session")?.value;
   if (!cookie) redirect("/auth/register");
   try {
     const decoded = await adminAuth.verifySessionCookie(cookie, true);
@@ -20,4 +21,3 @@ export default async function RealiteaseLayout({ children }: { children: ReactNo
   await guard();
   return children as unknown as JSX.Element;
 }
-

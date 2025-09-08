@@ -17,7 +17,8 @@ async function guard() {
   }
 }
 
-export default async function HubLayout({ children }: { children: ReactNode }) {
+export default async function RealationsLayout({ children }: { children: ReactNode }) {
   await guard();
   return children as unknown as JSX.Element;
 }
+
