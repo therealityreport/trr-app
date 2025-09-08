@@ -4,6 +4,7 @@ import { Timestamp, FieldValue } from "firebase/firestore";
 export type UserProfile = {
   uid: string;
   email: string | null;
+  name?: string; // optional display name from email flow
   username: string; // lowercase, 3-20, [a-z0-9_]
   birthday: string; // ISO date YYYY-MM-DD
   shows: string[];
@@ -65,4 +66,3 @@ export function parseShows(input: string | string[]): string[] {
   }
   return out;
 }
-

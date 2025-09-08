@@ -43,12 +43,30 @@ export default function FinishProfilePage() {
         const base = u.email.split("@")[0]?.toLowerCase().replace(/[^a-z0-9_]/g, "_");
         if (base && base.length >= 3 && base.length <= 20) setUsername(base);
       }
+      // Restore any saved finish state
+      try {
+        const sUser = sessionStorage.getItem("finish_username");
+        const sShows = sessionStorage.getItem("finish_shows");
+        const sB = sessionStorage.getItem("finish_birthday");
+        if (sUser) setUsername(sUser);
+        if (sB && !prof?.birthday) setBirthday(sB);
+        if (sShows) {
+          const arr: string[] = JSON.parse(sShows);
+          const map: Record<string, boolean> = {};
+          for (const s of arr) map[s] = true;
+          setShowSelections(map);
+        }
+      } catch {}
     });
     return () => unsub();
   }, [router]);
 
   const selectedShows = useMemo(() => Object.keys(showSelections).filter((s) => showSelections[s]), [showSelections]);
-  const toggleShow = (name: string) => setShowSelections((prev) => ({ ...prev, [name]: !prev[name] }));
+  const toggleShow = (name: string) => setShowSelections((prev) => {
+    const next = { ...prev, [name]: !prev[name] };
+    try { sessionStorage.setItem("finish_shows", JSON.stringify(Object.keys(next).filter((k) => next[k]))); } catch {}
+    return next;
+  });
 
   const checkUsernameUnique = async (u: string): Promise<string | null> => {
     const baseErr = validateUsername(u);
@@ -73,6 +91,7 @@ export default function FinishProfilePage() {
   const onBlurUsername = async () => {
     const e = await checkUsernameUnique(username);
     setErrors((prev) => ({ ...prev, username: e ?? undefined }));
+    try { sessionStorage.setItem("finish_username", username); } catch {}
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -106,6 +125,11 @@ export default function FinishProfilePage() {
       };
       await upsertUserProfile(u.uid, payload);
       sessionStorage.setItem("toastMessage", "Profile completed");
+      try {
+        sessionStorage.removeItem("finish_username");
+        sessionStorage.removeItem("finish_shows");
+        sessionStorage.removeItem("finish_birthday");
+      } catch {}
       router.replace("/hub");
     } catch (err: unknown) {
       setFormError(getFriendlyError(err));
@@ -203,4 +227,3 @@ function getFriendlyError(err: unknown): string {
   }
   return "Something went wrong. Please try again.";
 }
-

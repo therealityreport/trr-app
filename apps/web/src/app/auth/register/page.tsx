@@ -29,6 +29,17 @@ export default function RegisterPage() {
 
   // Redirect signed-in users away from register
   useEffect(() => {
+    // Restore any saved form state
+    try {
+      const savedStage = sessionStorage.getItem("reg_stage");
+      if (savedStage === "details") setStage("details");
+      const sEmail = sessionStorage.getItem("reg_email");
+      const sName = sessionStorage.getItem("reg_name");
+      const sBirthday = sessionStorage.getItem("reg_birthday");
+      if (sEmail) setEmail(sEmail);
+      if (sName) setName(sName);
+      if (sBirthday) setBirthday(sBirthday);
+    } catch {}
     const unsub = auth.onAuthStateChanged((u) => {
       if (u) router.replace("/hub");
     });
@@ -44,6 +55,10 @@ export default function RegisterPage() {
     }
     setErrors({});
     setStage("details");
+    try {
+      sessionStorage.setItem("reg_stage", "details");
+      sessionStorage.setItem("reg_email", email);
+    } catch {}
   };
 
   const handleEmailSignup = async (e: React.FormEvent) => {
@@ -94,10 +109,17 @@ export default function RegisterPage() {
       await upsertUserProfile(user.uid, {
         uid: user.uid,
         email: user.email ?? email.trim(),
+        name: name.trim(),
         birthday: birthday.trim(),
         provider: "password",
       });
       sessionStorage.setItem("toastMessage", "Account created");
+      try {
+        sessionStorage.removeItem("reg_stage");
+        sessionStorage.removeItem("reg_email");
+        sessionStorage.removeItem("reg_name");
+        sessionStorage.removeItem("reg_birthday");
+      } catch {}
       router.replace("/auth/finish");
     } catch (err: unknown) {
       const message = getFriendlyError(err);
@@ -137,7 +159,8 @@ export default function RegisterPage() {
       <h1 className="font-serif text-3xl">Log in or create an account</h1>
       <p className="text-gray-600 mt-1">Use Google or continue with email.</p>
 
-      {/* Top-level auth options */}
+      {/* Top-level auth options (only in Stage A) */}
+      {stage === "email" && (
       <div className="mt-4 flex flex-col gap-3">
         <button
           type="button"
@@ -159,6 +182,7 @@ export default function RegisterPage() {
         )}
         <div className="text-xs text-gray-500">or continue with email</div>
       </div>
+      )}
 
       <form className="mt-6 space-y-4" onSubmit={stage === "email" ? goDetails : handleEmailSignup} noValidate>
         {formError && (
@@ -176,7 +200,7 @@ export default function RegisterPage() {
               autoComplete="email"
               className="mt-1 w-full border rounded px-3 py-2 focus:outline-none focus:ring"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => { setEmail(e.target.value); try { sessionStorage.setItem("reg_email", e.target.value); } catch {} }}
               disabled={emailDisabled || pending}
               required
             />
@@ -189,12 +213,12 @@ export default function RegisterPage() {
             <div className="text-sm text-gray-700">{email} <button type="button" className="ml-2 underline" onClick={() => setStage("email")}>Edit</button></div>
             <div>
               <label htmlFor="name" className="block text-sm font-medium">Name</label>
-              <input id="name" type="text" className="mt-1 w-full border rounded px-3 py-2 focus:outline-none focus:ring" value={name} onChange={(e) => setName(e.target.value)} disabled={pending} required />
+              <input id="name" type="text" className="mt-1 w-full border rounded px-3 py-2 focus:outline-none focus:ring" value={name} onChange={(e) => { setName(e.target.value); try { sessionStorage.setItem("reg_name", e.target.value); } catch {} }} disabled={pending} required />
               {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
             </div>
             <div>
               <label htmlFor="birthday" className="block text-sm font-medium">Birthday</label>
-              <input id="birthday" type="date" className="mt-1 w-full border rounded px-3 py-2 focus:outline-none focus:ring" value={birthday} onChange={(e) => setBirthday(e.target.value)} disabled={pending} required />
+              <input id="birthday" type="date" className="mt-1 w-full border rounded px-3 py-2 focus:outline-none focus:ring" value={birthday} onChange={(e) => { setBirthday(e.target.value); try { sessionStorage.setItem("reg_birthday", e.target.value); } catch {} }} disabled={pending} required />
               {errors.birthday && <p className="mt-1 text-sm text-red-600">{errors.birthday}</p>}
             </div>
             <div>
