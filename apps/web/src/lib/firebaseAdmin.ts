@@ -14,10 +14,19 @@ if (USE_EMULATORS) {
 function initAdmin() {
   if (getApps().length) return;
   const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (USE_EMULATORS) {
+    // No credentials needed for local emulators
+    const projectId = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_PROJECT_ID
+      || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+      || "demo-trr";
+    initializeApp({ projectId });
+    return;
+  }
   if (sa) {
     const creds = JSON.parse(sa);
     initializeApp({ credential: cert(creds), projectId: creds.project_id });
   } else {
+    // Production dev without explicit SA: try ADC
     initializeApp({ credential: applicationDefault(), projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID });
   }
 }
@@ -26,4 +35,3 @@ initAdmin();
 
 export const adminAuth = getAuth();
 export const adminDb = getFirestore();
-
