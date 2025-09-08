@@ -20,6 +20,17 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Firebase Emulator (Auth + Firestore)
+
+- Enable: set `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true` (see `.env.example`). Optionally set `NEXT_PUBLIC_FIREBASE_EMULATOR_PROJECT_ID=demo-trr` so the Emulator UI shows your data.
+- Start emulators: from repo root run `npm run emulators`. This uses `firebase.json` ports (Auth `9099`, Firestore `8080`) and persists data in `.emulator-data/`.
+- Start the app against emulators: from `apps/web/`, run `npm run dev:emu`. Alternatively, export the env var inline: `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true npm run dev`.
+- Toggle back to prod: set `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=false` (or use the default `dev` script) and restart the dev server.
+
+Notes
+- The client SDK auto-connects to emulators when the flag is on; no production data is read or written.
+- Keeping a distinct emulator project ID (e.g., `demo-trr`) helps the Emulator UI display the same namespace your client uses.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
