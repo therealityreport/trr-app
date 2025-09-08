@@ -29,7 +29,7 @@ export default function RegisterPage() {
 
   // Redirect signed-in users away from register
   useEffect(() => {
-    // Restore any saved form state
+    // Restore any saved form state (client-only)
     try {
       const savedStage = sessionStorage.getItem("reg_stage");
       if (savedStage === "details") setStage("details");
@@ -40,11 +40,7 @@ export default function RegisterPage() {
       if (sName) setName(sName);
       if (sBirthday) setBirthday(sBirthday);
     } catch {}
-    const unsub = auth.onAuthStateChanged((u) => {
-      if (u) router.replace("/hub");
-    });
-    return () => unsub();
-  }, [router]);
+  }, []);
 
   const goDetails = (e: React.FormEvent) => {
     e.preventDefault();

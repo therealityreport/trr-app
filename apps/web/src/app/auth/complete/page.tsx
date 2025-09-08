@@ -2,17 +2,23 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { getUserProfile } from "@/lib/db/users";
 
 export default function OAuthCallbackRedirect() {
   const router = useRouter();
+  const search = useSearchParams();
+  const ran = useRef(false); // neutralize StrictMode double invoke in dev
 
   useEffect(() => {
+    if (ran.current) return;
+    ran.current = true;
     const unsub = auth.onAuthStateChanged(async (u) => {
       if (!u) {
+        // Fail fast: if no OAuth params and no session, bounce to register
+        const hasOAuthParams = !!(search.get("code") || search.get("state") || search.get("oauth") || search.get("provider"));
         router.replace("/auth/register");
         return;
       }
@@ -30,7 +36,7 @@ export default function OAuthCallbackRedirect() {
       router.replace(complete ? "/hub" : "/auth/finish");
     });
     return () => unsub();
-  }, [router]);
+  }, [router, search]);
 
   return (
     <main className="mx-auto max-w-xl p-12 text-center text-sm text-gray-600">
