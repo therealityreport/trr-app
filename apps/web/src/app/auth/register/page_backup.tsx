@@ -337,56 +337,58 @@ export default function RegisterPage() {
           {/* Email Field */}
           {(stage === "email" || stage === "login") && (
             <>
-              <div className="w-[450px] left-[-27px] absolute" style={{ top: formError ? "140px" : "60px" }}>
-                <div className="h-[21px] mb-2">
-                  <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
-                    Email address
-                  </label>
-                </div>
-                <div className="h-11 mb-1 relative">
-                  <input
-                    id="email"
-                    name="email"
-                    type="email"
-                    maxLength={64}
-                    autoCapitalize="off"
-                    autoComplete="username"
-                    tabIndex={0}
-                    className="w-full h-full bg-white rounded-[3px] border border-zinc-500 px-3 pr-12 text-black text-base font-hamburg font-medium outline-none"
-                    value={email}
-                    onChange={(e) => { setEmail(e.target.value); try { sessionStorage.setItem("reg_email", e.target.value); } catch {} }}
-                    disabled={emailLocked || pending}
-                    required
-                  />
-                  {emailLocked && (
-                    <button 
-                      type="button" 
-                      className="absolute right-3 top-3 text-sm text-gray-500 font-hamburg hover:text-black transition-colors"
-                      onClick={() => {
-                        sessionStorage.clear();
-                        router.push("/");
-                      }}
-                    >
-                      Edit
-                    </button>
-                  )}
-                </div>
-                {errors.email && <p className="text-sm text-red-600 font-hamburg">{errors.email}</p>}
+              {/* Email Label Container - 450 x 21 */}
+              <div className="w-[450px] h-[21px] left-[-27px] top-16 absolute">
+                <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  Email address
+                </label>
               </div>
+
+              {/* Email Input Container - 448 x 44 */}
+              <div className="w-[448px] h-11 left-[-26px] top-[100px] absolute">
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  maxLength={64}
+                  autoCapitalize="off"
+                  autoComplete="username"
+                  tabIndex={0}
+                  className="w-full h-full bg-white rounded-[3px] border border-zinc-500 px-3 pr-12 text-black text-base font-hamburg font-medium outline-none"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); try { sessionStorage.setItem("reg_email", e.target.value); } catch {} }}
+                  disabled={emailLocked || pending}
+                  required
+                />
+                {emailLocked && (
+                  <button 
+                    type="button" 
+                    className="absolute right-3 top-3 text-sm text-gray-500 font-hamburg hover:text-black transition-colors"
+                    onClick={() => {
+                      sessionStorage.clear();
+                      router.push("/");
+                    }}
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
+              
+              {errors.email && <p className="absolute left-[-27px] top-[125px] text-sm text-red-600">{errors.email}</p>}
             </>
           )}
 
           {/* Email Display for Details Stage */}
           {stage === "details" && (
             <>
-              <div className="w-[450px] left-[-27px] absolute" style={{ top: "60px" }}>
-                <div className="h-[21px] mb-2">
-                  <label htmlFor="email-display" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
-                    Email address
-                  </label>
-                </div>
-                <div className="h-11 mb-1 relative">
-                  <div className="w-full h-11 bg-gray-50 rounded-[3px] border border-black px-3 py-2 flex items-center justify-between">
+              <div className="w-[450px] h-[21px] left-[-27px] top-16 absolute">
+                <label htmlFor="email-display" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  Email address
+                </label>
+              </div>
+              <div className="w-[450px] h-[48px] left-[-27px] top-[100px] absolute">
+                <div className="w-full h-11 left-0 top-0 absolute rounded-[3px] border border-black bg-gray-50 transition-all duration-200 hover:bg-gray-100">
+                  <div className="w-full h-11 bg-gray-50 rounded-[3px] px-3 py-2 flex items-center justify-between">
                     <span className="text-gray-600 font-hamburg text-sm">{email}</span>
                     <button 
                       type="button" 
@@ -407,17 +409,17 @@ export default function RegisterPage() {
           {/* First Name & Last Name Fields - Only for details stage */}
           {stage === "details" && (
             <>
-              <div className="w-[450px] left-[-27px] absolute" style={{ top: "145px" }}>
-                <div className="h-[21px] mb-2">
-                  <label htmlFor="firstName" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
-                    First Name
-                  </label>
-                  <label htmlFor="lastName" className="text-black text-sm font-hamburg font-medium leading-[21px] absolute left-[225px]" style={{letterSpacing: '0.1px'}}>
-                    Last Name
-                  </label>
-                </div>
-                <div className="h-11 mb-1 relative">
-                  <div className="w-[218px] h-11 left-[0px] top-0 absolute">
+              <div className="w-[450px] h-[21px] left-[-27px] top-[164px] absolute">
+                <label htmlFor="firstName" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  First Name
+                </label>
+                <label htmlFor="lastName" className="text-black text-sm font-hamburg font-medium leading-[21px] absolute left-[225px]" style={{letterSpacing: '0.1px'}}>
+                  Last Name
+                </label>
+              </div>
+              <div className="w-[450px] h-[64px] left-[-27px] top-[208px] absolute">
+                <div className="w-[218px] h-11 left-[0px] top-0 absolute">
+                  <div className="w-full h-11 left-0 top-0 absolute rounded-[3px] border border-black transition-all duration-200">
                     <input
                       id="firstName"
                       name="firstName"
@@ -426,7 +428,7 @@ export default function RegisterPage() {
                       autoCapitalize="words"
                       autoComplete="given-name"
                       tabIndex={0}
-                      className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
+                      className="w-full h-full bg-white rounded-[3px] px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black border-0 text-black"
                       value={name.split(' ')[0] || ''}
                       onChange={(e) => {
                         const lastName = name.split(' ').slice(1).join(' ');
@@ -438,7 +440,9 @@ export default function RegisterPage() {
                       required
                     />
                   </div>
-                  <div className="w-[218px] h-11 left-[225px] top-0 absolute">
+                </div>
+                <div className="w-[218px] h-11 left-[225px] top-0 absolute">
+                  <div className="w-full h-11 left-0 top-0 absolute rounded-[3px] border border-black transition-all duration-200">
                     <input
                       id="lastName"
                       name="lastName"
@@ -447,7 +451,7 @@ export default function RegisterPage() {
                       autoCapitalize="words"
                       autoComplete="family-name"
                       tabIndex={0}
-                      className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
+                      className="w-full h-full bg-white rounded-[3px] px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black border-0 text-black"
                       value={name.split(' ').slice(1).join(' ')}
                       onChange={(e) => {
                         const firstName = name.split(' ')[0] || '';
@@ -459,21 +463,21 @@ export default function RegisterPage() {
                     />
                   </div>
                 </div>
-                {errors.name && <p className="text-sm text-red-600 font-hamburg">{errors.name}</p>}
               </div>
+              {errors.name && <p className="absolute left-[-27px] top-[233px] text-sm text-red-600">{errors.name}</p>}
             </>
           )}
 
           {/* Password Field */}
           {(stage === "details" || stage === "login") && (
             <>
-              <div className={`w-[450px] left-[-27px] absolute`} style={{ top: stage === "details" ? "230px" : (formError ? "225px" : "145px") }}>
-                <div className="h-[21px] mb-2">
-                  <label htmlFor="password" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
-                    Password
-                  </label>
-                </div>
-                <div className="h-11 mb-1 relative">
+              <div className={`w-[450px] h-[21px] left-[-27px] absolute ${stage === "details" ? "top-[272px]" : "top-[164px]"}`}>
+                <label htmlFor="password" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  Password
+                </label>
+              </div>
+              <div className={`w-[450px] h-[64px] left-[-27px] absolute ${stage === "details" ? "top-[316px]" : "top-[208px]"}`}>
+                <div className="w-full h-11 left-0 top-0 absolute rounded-[3px] border border-black transition-all duration-200">
                   <input
                     id="password"
                     name="password"
@@ -481,28 +485,28 @@ export default function RegisterPage() {
                     maxLength={128}
                     autoComplete={stage === "login" ? "current-password" : "new-password"}
                     tabIndex={0}
-                    className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
+                    className="w-full h-full bg-white rounded-[3px] px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black border-0 text-black"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     disabled={pending}
                     required
                   />
                 </div>
-                {errors.password && <p className="text-sm text-red-600 font-hamburg">{errors.password}</p>}
               </div>
+              {errors.password && <p className={`absolute left-[-27px] text-sm text-red-600 ${stage === "details" ? "top-[341px]" : "top-[233px]"}`}>{errors.password}</p>}
             </>
           )}
 
           {/* Confirm Password Field - Only for details stage */}
           {stage === "details" && (
             <>
-              <div className="w-[450px] left-[-27px] absolute" style={{ top: "315px" }}>
-                <div className="h-[21px] mb-2">
-                  <label htmlFor="confirm" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
-                    Re-enter password
-                  </label>
-                </div>
-                <div className="h-11 mb-1 relative">
+              <div className="w-[450px] h-[21px] left-[-27px] top-[380px] absolute">
+                <label htmlFor="confirm" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  Re-enter password
+                </label>
+              </div>
+              <div className="w-[450px] h-[64px] left-[-27px] top-[424px] absolute">
+                <div className="w-full h-11 left-0 top-0 absolute rounded-[3px] border border-black transition-all duration-200">
                   <input
                     id="confirm"
                     name="confirm"
@@ -510,24 +514,24 @@ export default function RegisterPage() {
                     maxLength={128}
                     autoComplete="new-password"
                     tabIndex={0}
-                    className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
+                    className="w-full h-full bg-white rounded-[3px] px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black border-0 text-black"
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
                     disabled={pending}
                     required
                   />
                 </div>
-                {errors.confirm && <p className="text-sm text-red-600 font-hamburg">{errors.confirm}</p>}
               </div>
+              {errors.confirm && <p className="absolute left-[-27px] top-[449px] text-sm text-red-600">{errors.confirm}</p>}
             </>
           )}
 
           {/* Continue Button */}
-          <div className={`w-[450px] h-11 left-[-27px] absolute bg-neutral-900 rounded-[3px] border border-black transition-all duration-300 ease-in-out hover:bg-black transform hover:scale-[1.02]`} style={{ 
-            top: stage === "email" ? (formError ? "205px" : "125px") : 
-                 stage === "login" ? (formError ? "290px" : "210px") : 
-                 "400px"
-          }}>
+          <div className={`w-[450px] h-11 left-[-27px] absolute bg-neutral-900 rounded-[3px] border border-black transition-all duration-300 ease-in-out hover:bg-black transform hover:scale-[1.02] ${
+            stage === "email" ? "top-[164px]" : 
+            stage === "login" ? "top-[272px]" : 
+            "top-[488px]"
+          }`}>
             <button
               type="submit"
               className="w-full h-full bg-transparent text-center justify-center text-white text-base font-hamburg font-bold leading-9 disabled:opacity-60 transition-all duration-200"
@@ -545,19 +549,14 @@ export default function RegisterPage() {
         {/* Google/Apple Sign In Options - Show in email and login stages */}
         {(stage === "email" || stage === "login") && (
           <>
-            <div className={`w-[450px] h-[21px] left-[-27px] absolute flex items-center`} style={{ 
-              top: stage === "email" ? (formError ? "269px" : "189px") : (formError ? "354px" : "274px")
-            }}>
+            <div className={`w-[450px] h-[21px] left-[-27px] absolute flex items-center ${stage === "email" ? "top-[228px]" : "top-[336px]"}`}>
               <div className="flex-1 h-px bg-neutral-200"></div>
               <div className="px-4 text-black text-sm font-hamburg font-medium leading-[21px]">or</div>
               <div className="flex-1 h-px bg-neutral-200"></div>
             </div>
             <button
               type="button"
-              className={`w-[450px] h-11 left-[-27px] absolute bg-white rounded-[3px] border border-black disabled:opacity-60 flex items-center justify-center gap-3`}
-              style={{ 
-                top: stage === "email" ? (formError ? "310px" : "230px") : (formError ? "395px" : "315px")
-              }}
+              className={`w-[450px] h-11 left-[-27px] absolute bg-white rounded-[3px] border border-black disabled:opacity-60 flex items-center justify-center gap-3 ${stage === "email" ? "top-[269px]" : "top-[377px]"}`}
               onClick={async () => { 
                 if (!pending) { 
                   setPending(true); 
@@ -587,10 +586,7 @@ export default function RegisterPage() {
             {ENABLE_APPLE && (
               <button
                 type="button"
-                className={`w-[450px] h-11 left-[-27px] absolute bg-white rounded-[3px] border border-black disabled:opacity-60`}
-                style={{ 
-                  top: stage === "email" ? (formError ? "354px" : "274px") : (formError ? "439px" : "359px")
-                }}
+                className={`w-[450px] h-11 left-[-27px] absolute bg-white rounded-[3px] border border-black disabled:opacity-60 ${stage === "email" ? "top-[313px]" : "top-[421px]"}`}
                 onClick={startApple}
                 disabled={pending}
               >
@@ -601,9 +597,7 @@ export default function RegisterPage() {
             )}
             
             {/* Terms and Privacy */}
-            <div className={`w-[450px] left-[-27px] absolute text-center`} style={{ 
-              top: stage === "email" ? (formError ? "398px" : "318px") : (formError ? "483px" : "403px")
-            }}>
+            <div className={`w-[450px] left-[-27px] absolute text-center ${stage === "email" ? "top-[357px]" : "top-[465px]"}`}>
               <p className="text-sm text-gray-600 font-hamburg">
                 By continuing, you agree to the{" "}
                 <a href="/terms-of-sale" className="text-black underline hover:no-underline">

@@ -1,8 +1,7 @@
-// @ts-nocheck
+// @ts-nocheck - Test files use different module resolution
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock cookies and redirects
-const redirects: string[] = [];
 vi.mock('next/navigation', () => ({
   redirect: (path: string) => { throw new Error(`REDIRECT:${path}`); },
 }));
@@ -12,8 +11,16 @@ vi.mock('next/headers', () => ({
 }));
 
 // Mocks for Admin SDK used by layouts
-const makeDoc = (exists: boolean, data?: any) => ({ get: async () => ({ exists, data: () => data }) });
-const collection = (docData: any) => ({ doc: () => makeDoc(!!docData, docData) });
+interface MockDocData {
+  [key: string]: unknown;
+}
+
+const makeDoc = (exists: boolean, data?: MockDocData) => ({ 
+  get: async () => ({ exists, data: () => data }) 
+});
+const collection = (docData: MockDocData) => ({ 
+  doc: () => makeDoc(!!docData, docData) 
+});
 
 describe('SSR guards', () => {
   beforeEach(() => {

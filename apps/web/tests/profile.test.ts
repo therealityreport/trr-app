@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - Test files use different module resolution and mock configurations
 import { describe, it, expect } from 'vitest';
 import { parseShows, validateShowsMin, validateUsername } from '@/lib/validation/user';
 

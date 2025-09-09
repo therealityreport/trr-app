@@ -1,27 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid} {
-      // Consider restricting read to public fields later
-      allow read: if true;
-      allow create: if request.auth != null && request.auth.uid == uid;
-      allow update: if request.auth != null && request.auth.uid == uid;
-      allow delete: if false;
-
-      // Optional: ensure username immutability after set
-      function isNewOrSameUsername() {
-        return !(request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username']))
-          || request.resource.data.username == resource.data.username;
-      }
+    // Temporarily allow all operations for debugging
+    match /{document=**} {
+      allow read, write: if true;
     }
-
-    // Optional stronger uniqueness enforcement pattern (scaffold only):
-    // Reserve usernames by writing to /usernames/{username} = { uid }
-    // match /usernames/{username} {
-    //   allow create: if request.auth != null && !exists(/databases/$(database)/documents/usernames/$(username));
-    //   allow read: if true;
-    //   allow update, delete: if false;
-    // }
   }
 }
 

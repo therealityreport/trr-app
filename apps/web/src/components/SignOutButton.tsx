@@ -7,7 +7,7 @@ export default function SignOutButton() {
     try {
       await logout();
     } finally {
-      window.location.href = "/auth/register";
+      window.location.href = "/";
     }
   };
   return (

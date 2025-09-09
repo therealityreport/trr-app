@@ -27,8 +27,14 @@ function initAdmin() {
     const creds = JSON.parse(sa);
     initializeApp({ credential: cert(creds), projectId: creds.project_id });
   } else {
-    // Production dev without explicit SA: try ADC
-    initializeApp({ credential: applicationDefault(), projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID });
+    // For development without service account, we'll disable admin features
+    // This prevents the app from trying to use ADC and failing
+    console.warn("Firebase Admin SDK: No service account provided. Some features will be disabled.");
+    // Initialize with minimal config to prevent crashes
+    const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+    if (projectId) {
+      initializeApp({ projectId });
+    }
   }
 }
 

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "../styles/components.css";
 
 /* Tailwind v4 theme tokens */
 @theme {
@@ -10,8 +11,10 @@
   --color-line: #E6E6E6;
 
   /* Fonts (mapped via next/font in layout.tsx) */
-  --font-sans: var(--font-geist-sans);
-  --font-serif: var(--font-figma-serif), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-hamburg), var(--font-inter), var(--font-geist-sans);
+  --font-serif: var(--font-gloucester), var(--font-playfair), var(--font-figma-serif), Georgia, "Times New Roman", serif;
+  --font-display: var(--font-gloucester);
+  --font-body: var(--font-hamburg);
 }
 
 /* Dark scheme overrides */
@@ -47,4 +50,14 @@
 /* Default body font */
 body {
   font-family: var(--font-sans);
+}
+
+/* Hide scrollbars for horizontal show selection */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
 }

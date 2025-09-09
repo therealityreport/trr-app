@@ -1,5 +1,5 @@
 // Minimal test stubs. Configure your runner (e.g., Vitest/Jest) to execute.
-// @ts-nocheck
+// @ts-nocheck - Test files use different module resolution and mock configurations
 import { describe, it, expect } from "vitest";
 import { validateUsername, parseShows, validateBirthday } from "@/lib/validation/user";
 

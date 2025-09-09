@@ -20,6 +20,18 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    files: ["tests/**/*"],
+    rules: {
+      "@typescript-eslint/ban-ts-comment": [
+        "error",
+        {
+          "ts-nocheck": "allow-with-description",
+        },
+      ],
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

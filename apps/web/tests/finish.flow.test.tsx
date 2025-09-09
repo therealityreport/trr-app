@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - Test files use different module resolution and mock configurations
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';

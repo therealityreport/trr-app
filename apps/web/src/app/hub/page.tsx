@@ -2,6 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import SignOutButton from "@/components/SignOutButton";
+import ClientAuthGuard from "@/components/ClientAuthGuard";
 
 type GameCard = {
   title: string;
@@ -127,27 +128,29 @@ function GameTile({ card }: { card: GameCard }) {
 
 export default async function Page() {
   return (
-    <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
-      <div className="max-w-6xl mx-auto flex justify-end mb-4">
-        <SignOutButton />
-      </div>
-      <section className="mx-auto max-w-6xl">
-        <header className="mb-10 text-center">
-          <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">
-            Pick a game
-          </h1>
-          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-            Daily puzzles and prototypes. More coming soon.
-          </p>
-        </header>
-
-        {/* Responsive 3/2/1 grid */}
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {CARDS.map((card) => (
-            <GameTile key={card.title} card={card} />
-          ))}
+    <ClientAuthGuard requireComplete={true}>
+      <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
+        <div className="max-w-6xl mx-auto flex justify-end mb-4">
+          <SignOutButton />
         </div>
-      </section>
-    </main>
+        <section className="mx-auto max-w-6xl">
+          <header className="mb-10 text-center">
+            <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">
+              Pick a game
+            </h1>
+            <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+              Daily puzzles and prototypes. More coming soon.
+            </p>
+          </header>
+
+          {/* Responsive 3/2/1 grid */}
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {CARDS.map((card) => (
+              <GameTile key={card.title} card={card} />
+            ))}
+          </div>
+        </section>
+      </main>
+    </ClientAuthGuard>
   );
 }

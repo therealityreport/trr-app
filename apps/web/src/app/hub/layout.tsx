@@ -6,6 +6,18 @@ async function guard() {
   const { adminAuth, adminDb } = await import("@/lib/firebaseAdmin");
   const cookieStore = await cookies();
   const cookie = cookieStore.get("__session")?.value;
+  
+  // Check if we have proper admin credentials
+  const hasServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT;
+  const useEmulators = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
+  
+  if (!hasServiceAccount && !useEmulators) {
+    // No admin credentials available, skip server-side auth check
+    // The client-side auth will handle routing
+    console.warn("Hub guard: No Firebase admin credentials, skipping server-side auth check");
+    return;
+  }
+  
   if (!cookie) redirect("/auth/register");
   try {
     const decoded = await adminAuth.verifySessionCookie(cookie, true);

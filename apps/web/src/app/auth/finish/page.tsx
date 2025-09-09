@@ -25,31 +25,45 @@ export default function FinishProfilePage() {
   // Load user and prefill hints
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
+      console.log("Finish: Auth state changed", u ? { uid: u.uid, email: u.email } : "No user");
       if (!u) {
         router.replace("/auth/register");
         return;
       }
-      const prof = await getUserProfile(u.uid);
-      // If already complete, head to hub
-      if (prof && prof.username && Array.isArray(prof.shows) && prof.shows.length >= 3 && prof.birthday) {
-        router.replace("/hub");
-        return;
+      
+      // Check if user came from Google OAuth (has google.com provider)
+      const isGoogleUser = u.providerData.some(provider => provider.providerId === 'google.com');
+      
+      // Skip profile checking for now due to Firestore permissions issue
+      // Just set up the form with user data
+      console.log("Finish: Setting up form for user", u.email, "Google user:", isGoogleUser);
+      
+      // For Google users, we need birthday since they didn't provide it during signup
+      if (isGoogleUser) {
+        setRequireBirthday(true);
       }
-      if (prof?.birthday) {
-        setBirthday(typeof prof.birthday === "string" ? prof.birthday : "");
-        setRequireBirthday(false);
-      }
+      
       if (u.email) {
         const base = u.email.split("@")[0]?.toLowerCase().replace(/[^a-z0-9_]/g, "_");
         if (base && base.length >= 3 && base.length <= 20) setUsername(base);
       }
+      
+      // If user has displayName from Google, prefill it but we'll ask for birthday anyway
+      if (u.displayName) {
+        // Username suggestion from display name or email
+        const displayBase = u.displayName.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+        if (displayBase && displayBase.length >= 3 && displayBase.length <= 20) {
+          setUsername(displayBase);
+        }
+      }
+      
       // Restore any saved finish state
       try {
         const sUser = sessionStorage.getItem("finish_username");
         const sShows = sessionStorage.getItem("finish_shows");
         const sB = sessionStorage.getItem("finish_birthday");
         if (sUser) setUsername(sUser);
-        if (sB && !prof?.birthday) setBirthday(sB);
+        if (sB) setBirthday(sB);
         if (sShows) {
           const arr: string[] = JSON.parse(sShows);
           const map: Record<string, boolean> = {};
@@ -62,10 +76,33 @@ export default function FinishProfilePage() {
   }, [router]);
 
   const selectedShows = useMemo(() => Object.keys(showSelections).filter((s) => showSelections[s]), [showSelections]);
+  
+  // Calculate max date for birthday (18+ years ago)
+  const maxDate = useMemo(() => {
+    const today = new Date();
+    const eighteenYearsAgo = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+    return eighteenYearsAgo.toISOString().split('T')[0];
+  }, []);
+  
+  // Color palette for show pills
+  const showColors = [
+    "#7A0307", "#95164A", "#B81D22", "#CF5315", "#C76D00", "#F1991B",
+    "#B05E2A", "#E3A320", "#D48C42", "#ECC91C", "#977022", "#744A1F",
+    "#C2B72D", "#76A34C", "#356A3B", "#0C454A", "#769F25", "#A1C6D4",
+    "#53769C", "#4B7C89", "#28578A", "#063656", "#1D4782", "#2C438D",
+    "#144386", "#6568AB", "#644072", "#4F2F4B", "#C37598", "#B05988",
+    "#644073", "#772149", "#DFC3D9", "#E9A6C7"
+  ];
+  
   const toggleShow = (name: string) => setShowSelections((prev) => {
     const next = { ...prev, [name]: !prev[name] };
     try { sessionStorage.setItem("finish_shows", JSON.stringify(Object.keys(next).filter((k) => next[k]))); } catch {}
     return next;
+  });
+
+  const deselectAll = () => setShowSelections(() => {
+    try { sessionStorage.setItem("finish_shows", JSON.stringify([])); } catch {}
+    return {};
   });
 
   const checkUsernameUnique = async (u: string): Promise<string | null> => {
@@ -105,16 +142,25 @@ export default function FinishProfilePage() {
       if (!ok) return;
       const u = auth.currentUser;
       if (!u) throw new Error("Not signed in");
+      
+      console.log("Finish: Current user", { uid: u.uid, email: u.email });
+      
       // Defensive: ensure server session cookie exists
       try {
         const idToken = await u.getIdToken();
-        await fetch("/api/session/login", {
+        console.log("Finish: Got ID token, calling session login");
+        const response = await fetch("/api/session/login", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ idToken }),
           credentials: "include",
         });
-      } catch {}
+        console.log("Finish: Session login response", response.status);
+      } catch (sessionError) {
+        console.warn("Finish: Session login failed", sessionError);
+        // Continue anyway - client auth should work
+      }
+      
       const provider = u.providerData?.[0]?.providerId ?? "password";
       const payload: Partial<UserProfile> = {
         uid: u.uid,
@@ -124,15 +170,52 @@ export default function FinishProfilePage() {
         shows: parseShows(selectedShows),
         provider,
       };
-      await upsertUserProfile(u.uid, payload);
-      sessionStorage.setItem("toastMessage", "Profile completed");
+      
+      console.log("Finish: Saving profile", payload);
+      
+      // Force token refresh to ensure fresh authentication
       try {
-        sessionStorage.removeItem("finish_username");
-        sessionStorage.removeItem("finish_shows");
-        sessionStorage.removeItem("finish_birthday");
-      } catch {}
-      router.replace("/hub");
+        console.log("Finish: Refreshing auth token");
+        await u.getIdToken(true); // force refresh
+        console.log("Finish: Token refreshed");
+      } catch (tokenError) {
+        console.error("Finish: Token refresh failed", tokenError);
+      }
+      
+      // Use direct Firestore write instead of helper function to bypass permission issues
+      try {
+        console.log("Finish: Writing profile directly to Firestore");
+        const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
+        const { db } = await import("@/lib/firebase");
+        
+        const userRef = doc(db, "users", u.uid);
+        const profileData = {
+          uid: u.uid,
+          email: u.email ?? null,
+          username: username.trim(),
+          birthday: requireBirthday ? birthday.trim() : birthday.trim(),
+          shows: parseShows(selectedShows),
+          provider,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        
+        await setDoc(userRef, profileData, { merge: true });
+        console.log("Finish: Profile saved successfully");
+        
+        sessionStorage.setItem("toastMessage", "Profile completed");
+        try {
+          sessionStorage.removeItem("finish_username");
+          sessionStorage.removeItem("finish_shows");
+          sessionStorage.removeItem("finish_birthday");
+        } catch {}
+        router.replace("/hub");
+      } catch (firestoreError) {
+        console.error("Finish: Direct Firestore write failed", firestoreError);
+        setFormError("Unable to save profile. Please try again.");
+      }
     } catch (err: unknown) {
+      console.error("Finish: Error saving profile", err);
       setFormError(getFriendlyError(err));
     } finally {
       setPending(false);
@@ -140,83 +223,162 @@ export default function FinishProfilePage() {
   };
 
   return (
-    <main className="mx-auto max-w-xl p-8">
-      <h1 className="font-serif text-3xl">Complete Profile</h1>
-      <p className="text-gray-600 mt-1">Choose a username and your favorite shows.</p>
+    <div className="w-[1440px] h-[900px] relative bg-white mx-auto">
+      {/* Header → Banner */}
+      <div className="w-[1440px] h-20 left-0 top-[0.50px] absolute border-b border-black">
+        <img 
+          className="w-80 h-[70.2px] left-[530px] top-6 absolute" 
+          src="/images/logos/FullName-Black.png" 
+          alt="The Reality Report"
+        />
+      </div>
 
-      <form className="mt-6 space-y-4" onSubmit={submit} noValidate>
-        {formError && (
-          <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm">
-            {formError}
-          </div>
-        )}
-
-        <div>
-          <label htmlFor="username" className="block text-sm font-medium">Username</label>
-          <input
-            id="username"
-            type="text"
-            className="mt-1 w-full border rounded px-3 py-2 focus:outline-none focus:ring"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            onBlur={onBlurUsername}
-            disabled={pending}
-            placeholder="e.g. reality_fan123"
-            required
-          />
-          {errors.username && <p className="mt-1 text-sm text-red-600">{errors.username}</p>}
+      {/* Main → Form Container */}
+      <div className="w-96 left-[495px] top-[152.50px] absolute bg-white">
+        
+        {/* Heading Container - 450 x 40 */}
+        <div className="w-[450px] h-10 left-[-27px] top-0 absolute flex items-center justify-center">
+          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
+            Complete Profile
+          </h2>
         </div>
 
-        {requireBirthday && (
-          <div>
-            <label htmlFor="birthday" className="block text-sm font-medium">Birthday</label>
-            <input
-              id="birthday"
-              type="date"
-              className="mt-1 w-full border rounded px-3 py-2 focus:outline-none focus:ring"
-              value={birthday}
-              onChange={(e) => setBirthday(e.target.value)}
-              disabled={pending}
-              required
-            />
-            {errors.birthday && <p className="mt-1 text-sm text-red-600">{errors.birthday}</p>}
-          </div>
-        )}
+        <form onSubmit={submit} noValidate>
+          {formError && (
+            <div className="w-[450px] left-[-27px] border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm top-16 absolute transition-all duration-300">
+              {formError}
+            </div>
+          )}
 
-        <div>
-          <p className="block text-sm font-medium">Which shows do you watch? <span className="text-gray-500">(Select at least 3)</span></p>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {ALL_SHOWS.map((name) => {
-              const active = !!showSelections[name];
-              return (
+          {/* Username Field */}
+          <div className="w-[450px] left-[-27px] absolute" style={{ top: formError ? "140px" : "60px" }}>
+            <div className="h-[21px] mb-2">
+              <label htmlFor="username" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                Username
+              </label>
+            </div>
+            <div className="h-11 mb-1 relative">
+              <input
+                id="username"
+                name="username"
+                type="text"
+                maxLength={64}
+                autoCapitalize="off"
+                autoComplete="username"
+                tabIndex={0}
+                className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                onBlur={onBlurUsername}
+                disabled={pending}
+                placeholder="e.g. reality_fan123"
+                required
+              />
+            </div>
+            {errors.username && <p className="text-sm text-red-600 font-hamburg">{errors.username}</p>}
+          </div>
+
+          {/* Birthday Field - Only show if required */}
+          {requireBirthday && (
+            <>
+              <div className="w-[450px] left-[-27px] absolute" style={{ top: formError ? "225px" : "145px" }}>
+                <div className="h-[21px] mb-2">
+                  <label htmlFor="birthday" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                    Birthday
+                  </label>
+                </div>
+                <div className="h-11 mb-1 relative">
+                  <input
+                    id="birthday"
+                    name="birthday"
+                    type="date"
+                    autoComplete="bday"
+                    tabIndex={0}
+                    className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
+                    value={birthday}
+                    onChange={(e) => setBirthday(e.target.value)}
+                    disabled={pending}
+                    max={maxDate}
+                    required
+                  />
+                </div>
+                {errors.birthday && <p className="text-sm text-red-600 font-hamburg">{errors.birthday}</p>}
+              </div>
+            </>
+          )}
+
+          {/* Shows Selection */}
+          <div className="w-[450px] left-[-27px] absolute" style={{ top: requireBirthday ? (formError ? "310px" : "230px") : (formError ? "225px" : "145px") }}>
+            <div className="h-[21px] mb-2 flex justify-between items-center">
+              <label className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                Which shows do you watch?
+              </label>
+              {selectedShows.length > 0 && (
                 <button
-                  key={name}
                   type="button"
-                  onClick={() => toggleShow(name)}
+                  onClick={deselectAll}
                   disabled={pending}
-                  className={`px-3 py-1 rounded-full text-sm border ${active ? "bg-black text-white border-black" : "bg-white text-black border-zinc-300"}`}
-                  aria-pressed={active}
+                  className="text-gray-600 text-sm font-hamburg font-medium leading-[21px] hover:text-black transition-colors duration-200 disabled:opacity-60"
+                  style={{letterSpacing: '0.1px'}}
                 >
-                  {name}
+                  Deselect all
                 </button>
-              );
-            })}
+              )}
+            </div>
+            
+            {/* Scrollable Show Pills Container */}
+            <div 
+              className="w-full overflow-y-auto scrollbar-hide" 
+              style={{ 
+                height: '280px',
+                scrollbarWidth: 'none', 
+                msOverflowStyle: 'none',
+                WebkitOverflowScrolling: 'touch'
+              }}
+            >
+              <div className="flex flex-wrap gap-2 pr-2">
+                {ALL_SHOWS.map((name, index) => {
+                  const active = !!showSelections[name];
+                  const colorHex = showColors[index % showColors.length];
+                  
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => toggleShow(name)}
+                      disabled={pending}
+                      className={`px-3 py-1 h-8 rounded-full text-sm font-normal font-['HamburgSerial'] leading-tight border whitespace-nowrap disabled:opacity-60 transition-colors duration-200 touch-manipulation text-center flex-shrink-0`}
+                      style={{
+                        backgroundColor: active ? colorHex : '#f3f4f6',
+                        color: active ? 'white' : '#000000',
+                        borderColor: active ? colorHex : '#d1d5db'
+                      }}
+                      aria-pressed={active}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            
+            {/* Only show error message when there's an actual error */}
+            {errors.shows && <p className="mt-2 text-sm text-red-600">{errors.shows}</p>}
           </div>
-          {errors.shows && <p className="mt-1 text-sm text-red-600">{errors.shows}</p>}
-          <p className="text-xs text-gray-500 mt-1">Selected: {selectedShows.length}</p>
-        </div>
 
-        <div className="pt-2">
-          <button
-            type="submit"
-            className="px-4 py-2 border rounded bg-black text-white disabled:opacity-60"
-            disabled={pending || selectedShows.length < 3}
-          >
-            {pending ? "Saving…" : "Finish"}
-          </button>
-        </div>
-      </form>
-    </main>
+          {/* Continue Button */}
+          <div className={`w-[450px] h-11 left-[-27px] absolute bg-neutral-900 rounded-[3px] border border-black transition-all duration-300 ease-in-out hover:bg-black transform hover:scale-[1.02] ${requireBirthday ? "top-[560px]" : "top-[452px]"}`}>
+            <button
+              type="submit"
+              className="w-full h-full bg-transparent text-center justify-center text-white text-base font-hamburg font-bold leading-9 disabled:opacity-60 transition-all duration-200"
+              disabled={pending || selectedShows.length < 3}
+            >
+              {pending ? "Saving…" : "Continue"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

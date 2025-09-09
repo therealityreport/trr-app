@@ -9,6 +9,7 @@ import { logEvent } from "firebase/analytics";
 import type { User } from "firebase/auth";
 import { OAuthProvider, signInWithPopup } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { checkUserExists } from "@/lib/db/users";
 
 export default function Page() {
   const router = useRouter();
@@ -28,14 +29,20 @@ export default function Page() {
     return onUser(setUser);
   }, []);
 
+  useEffect(() => {
+    // Redirect authenticated users to hub
+    if (user) {
+      router.replace("/hub");
+    }
+  }, [user, router]);
+
   if (user) {
+    // Show loading state while redirecting
     return (
-      <main className="mx-auto max-w-xl p-8 space-y-4">
-        <h1 className="text-3xl font-serif">Signed in</h1>
-        <p className="text-lg">Welcome, {user.displayName ?? user.email}</p>
-        <button className="px-4 py-2 border rounded" onClick={() => logout()}>
-          Sign out
-        </button>
+      <main className="w-[1440px] h-[900px] relative bg-white mx-auto">
+        <div className="w-full h-full flex items-center justify-center">
+          <p className="text-lg font-body">Redirecting to hub...</p>
+        </div>
       </main>
     );
   }
@@ -67,21 +74,107 @@ export default function Page() {
   };
 
   return (
-    <main className="mx-auto max-w-xl p-8 space-y-4">
-      <h1 className="text-3xl font-serif">Sign in</h1>
-      <div className="flex flex-col gap-3">
-        <button className="px-4 py-2 border rounded" onClick={handleGoogle}>
-          Continue with Google
-        </button>
-        {(process.env.NEXT_PUBLIC_ENABLE_APPLE ?? "false").toLowerCase() === "true" && (
-          <button className="px-4 py-2 border rounded" onClick={handleApple}>
-            Continue with Apple
-          </button>
-        )}
-        <button className="px-4 py-2 border rounded" onClick={() => router.push("/auth/register") }>
-          Continue with Email
-        </button>
+    <div className="w-[1440px] h-[900px] relative bg-white mx-auto">
+      {/* Header → Banner */}
+      <div className="w-[1440px] h-20 left-0 top-[0.50px] absolute border-b border-black">
+        <img 
+          className="w-80 h-[70.2px] left-[530px] top-6 absolute" 
+          src="/images/logos/FullName-Black.png" 
+          alt="The Reality Report"
+        />
       </div>
-    </main>
+
+      {/* Main → Form */}
+      <form onSubmit={async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.currentTarget);
+        const email = formData.get('email') as string;
+        if (email?.trim()) {
+          try {
+            // Check if user exists first
+            const userExists = await checkUserExists(email.trim());
+            if (userExists) {
+              // User exists, redirect to login
+              router.push(`/login?email=${encodeURIComponent(email.trim())}`);
+            } else {
+              // New user, redirect to register
+              router.push(`/auth/register?email=${encodeURIComponent(email.trim())}`);
+            }
+          } catch (error) {
+            console.error("Error checking user existence:", error);
+            // On error, default to register flow
+            router.push(`/auth/register?email=${encodeURIComponent(email.trim())}`);
+          }
+        }
+      }} noValidate className="w-96 left-[495px] top-[152.50px] absolute bg-white">
+        
+        {/* Heading Container - 450 x 40 */}
+        <div className="w-[450px] h-10 left-[-27px] top-0 absolute flex items-center justify-center">
+          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
+            Log in or create an account
+          </h2>
+        </div>
+
+        {/* Email Label Container - 450 x 21 */}
+        <div className="w-[450px] h-[21px] left-[-27px] top-16 absolute">
+          <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+            Email address
+          </label>
+        </div>
+
+        {/* Email Input Container - 448 x 44 */}
+        <div className="w-[448px] h-11 left-[-26px] top-[100px] absolute">
+          <input 
+            type="email"
+            name="email"
+            id="email"
+            required
+            className="w-full h-full bg-white rounded-[3px] border border-zinc-500 px-3 text-black text-base font-hamburg font-medium outline-none"
+            placeholder=""
+          />
+        </div>
+
+        {/* Continue Button Container - 450 x 44 */}
+        <button 
+          type="submit"
+          className="w-[450px] h-11 left-[-27px] top-[164px] absolute bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center"
+        >
+          Continue
+        </button>
+
+        {/* OR Separator Container - 450 x 21 */}
+        <div className="w-[450px] h-[21px] left-[-27px] top-[228px] absolute flex items-center">
+          <div className="flex-1 h-px bg-neutral-200"></div>
+          <div className="px-4 text-black text-sm font-hamburg font-medium leading-[21px]">or</div>
+          <div className="flex-1 h-px bg-neutral-200"></div>
+        </div>
+
+        {/* Google Button Container - 450 x 52 */}
+        <button 
+          type="button"
+          onClick={handleGoogle}
+          className="w-[450px] h-[52px] left-[-27px] top-[269px] absolute bg-white rounded-[3px] border border-black hover:bg-gray-50 transition-colors flex items-center justify-center gap-3"
+        >
+          <svg width="19" height="19" viewBox="0 0 19 19" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fillRule="evenodd" clipRule="evenodd" d="M17.77 9.64468C17.77 9.0065 17.7127 8.39286 17.6064 7.80377H9.13V11.2851H13.9736C13.765 12.4101 13.1309 13.3633 12.1777 14.0015V16.2597H15.0864C16.7882 14.6929 17.77 12.3856 17.77 9.64468Z" fill="#4285F4"/>
+            <path fillRule="evenodd" clipRule="evenodd" d="M9.12976 18.44C11.5598 18.44 13.597 17.6341 15.0861 16.2595L12.1775 14.0013C11.3716 14.5413 10.3407 14.8604 9.12976 14.8604C6.78567 14.8604 4.80159 13.2772 4.09386 11.15H1.08704V13.4818C2.56795 16.4231 5.61158 18.44 9.12976 18.44Z" fill="#34A853"/>
+            <path fillRule="evenodd" clipRule="evenodd" d="M4.09409 11.1498C3.91409 10.6098 3.81182 10.033 3.81182 9.43983C3.81182 8.84664 3.91409 8.26983 4.09409 7.72983V5.39801H1.08728C0.477732 6.61301 0.130005 7.98755 0.130005 9.43983C0.130005 10.8921 0.477732 12.2666 1.08728 13.4816L4.09409 11.1498Z" fill="#FBBC05"/>
+            <path fillRule="evenodd" clipRule="evenodd" d="M9.12976 4.01955C10.4511 4.01955 11.6375 4.47364 12.5702 5.36545L15.1516 2.78409C13.5929 1.33182 11.5557 0.440002 9.12976 0.440002C5.61158 0.440002 2.56795 2.45682 1.08704 5.39818L4.09386 7.73C4.80159 5.60273 6.78567 4.01955 9.12976 4.01955Z" fill="#EA4335"/>
+          </svg>
+          <span className="text-neutral-900 text-base font-hamburg font-normal leading-6">
+            Continue with Google
+          </span>
+        </button>
+
+        {/* Terms Text Container - 450 x 42 */}
+        <div className="w-[450px] h-[42px] left-[-27px] top-[341px] absolute flex items-center justify-center">
+          <p className="text-black text-sm font-hamburg font-normal leading-[21px] text-center">
+            By continuing, you agree to the{" "}
+            <span className="underline">Terms of Sale</span>, <span className="underline">Terms of Service</span>, and<br/>
+            <span className="underline">Privacy Policy</span>.
+          </p>
+        </div>
+      </form>
+    </div>
   );
 }

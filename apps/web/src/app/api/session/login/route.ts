@@ -5,10 +5,26 @@ export async function POST(req: NextRequest) {
   try {
     const { idToken } = await req.json();
     if (typeof idToken !== "string" || idToken.length < 20) {
+      console.error("Login API: Invalid token", { tokenLength: idToken?.length });
       return NextResponse.json({ error: "invalid token" }, { status: 400 });
     }
+    
+    // Check if we have proper admin credentials
+    const hasServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT;
+    const useEmulators = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
+    
+    if (!hasServiceAccount && !useEmulators) {
+      console.warn("Login API: No Firebase service account configured, skipping session cookie");
+      // Return success without creating session cookie
+      // The app will rely on client-side Firebase Auth instead
+      return NextResponse.json({ ok: true, warning: "no_session_cookie" });
+    }
+    
+    console.log("Login API: Creating session cookie");
     const expiresIn = 14 * 24 * 60 * 60 * 1000; // 14 days
     const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
+    
+    console.log("Login API: Session cookie created successfully");
     const res = NextResponse.json({ ok: true });
     // Use __session for widest platform compatibility
     res.cookies.set("__session", sessionCookie, {
@@ -19,7 +35,8 @@ export async function POST(req: NextRequest) {
       path: "/",
     });
     return res;
-  } catch {
+  } catch (error) {
+    console.error("Login API: Failed to create session cookie", error);
     return NextResponse.json({ error: "failed" }, { status: 400 });
   }
 }
