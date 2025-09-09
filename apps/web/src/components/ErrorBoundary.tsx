@@ -38,7 +38,7 @@ export class ErrorBoundary extends React.Component<
               Something went wrong
             </h2>
             <p className="text-gray-600 font-hamburg mb-4">
-              We're having trouble loading this page. Please try refreshing or contact support if the problem persists.
+              We&apos;re having trouble loading this page. Please try refreshing or contact support if the problem persists.
             </p>
             <button
               onClick={() => window.location.reload()}

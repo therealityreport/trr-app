@@ -26,15 +26,31 @@ export default function Page() {
       }
     })();
 
-    return onUser(setUser);
-  }, []);
+    const unsub = onUser(async (currentUser) => {
+      setUser(currentUser);
+      
+      if (currentUser) {
+        // Check if user has a complete profile before redirecting to hub
+        try {
+          const { getUserProfile } = await import("@/lib/db/users");
+          const profile = await getUserProfile(currentUser.uid);
+          const isComplete = profile && profile.username && Array.isArray(profile.shows) && profile.shows.length >= 3 && profile.birthday;
+          
+          if (isComplete) {
+            router.replace("/hub");
+          } else {
+            router.replace("/auth/finish");
+          }
+        } catch (error) {
+          console.error("Error checking profile:", error);
+          // If we can't check the profile, let them try to finish it
+          router.replace("/auth/finish");
+        }
+      }
+    });
 
-  useEffect(() => {
-    // Redirect authenticated users to hub
-    if (user) {
-      router.replace("/hub");
-    }
-  }, [user, router]);
+    return unsub;
+  }, [router]);
 
   if (user) {
     // Show loading state while redirecting

@@ -18,7 +18,8 @@ export default function ClientAuthGuard({ children, requireComplete = false }: C
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (user) => {
       if (!user) {
-        router.replace("/auth/register");
+        // Redirect to main page for authentication
+        router.replace("/");
         return;
       }
 
