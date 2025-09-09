@@ -61,26 +61,51 @@ export async function signInWithGoogle(): Promise<void> {
     // Don't request birthday scope to avoid 403 errors
     // provider.addScope("https://www.googleapis.com/auth/user.birthday.read");
     
+    console.log("Starting Google sign-in popup...");
     const result = await signInWithPopup(auth, provider);
+    console.log("Google sign-in successful, user:", result.user.email);
     
     // Skip Google People API call since it's causing 403 errors
     // The birthday field will be filled in the finish form instead
     
     // Establish a server session cookie for SSR guards
     const idToken = await auth.currentUser?.getIdToken();
+    console.log("Got ID token, length:", idToken?.length);
+    
     if (idToken) {
-      await fetch("/api/session/login", {
+      console.log("Calling session login API...");
+      const response = await fetch("/api/session/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ idToken }),
         credentials: "include",
-      }).catch(() => {});
+      });
+      
+      if (!response.ok) {
+        console.error("Session login failed:", response.status, await response.text());
+      } else {
+        console.log("Session login successful");
+      }
+    } else {
+      console.warn("No ID token available");
     }
   } catch (err: unknown) {
     const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
-    if (code !== "auth/cancelled-popup-request" && code !== "auth/popup-closed-by-user") {
-      throw err;
+    const message = typeof err === "object" && err !== null && "message" in err ? (err as { message?: unknown }).message : undefined;
+    
+    console.error("Google sign-in error:", { code, message });
+    
+    // Handle CORS-related errors more gracefully
+    if (
+      code === "auth/cancelled-popup-request" || 
+      code === "auth/popup-closed-by-user" ||
+      (typeof message === "string" && message.includes("Cross-Origin-Opener-Policy"))
+    ) {
+      console.log("Sign-in cancelled or blocked by CORS policy");
+      return; // Don't throw error for these cases
     }
+    
+    throw err;
   } finally {
     signinInFlight = false;
   }

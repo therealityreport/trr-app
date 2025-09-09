@@ -10,3 +10,4 @@ build
 firebase-debug.log
 firestore-debug.log
 *-debug.log
+.vercel
