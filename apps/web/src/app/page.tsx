@@ -89,12 +89,24 @@ export default function Page() {
 
   const handleHubNavigation = () => {
     AuthDebugger.log("Main page: User clicked 'Go to Hub' button");
-    router.push("/hub");
+    AuthDebugger.log("Main page: Attempting navigation to /hub");
+    try {
+      router.push("/hub");
+      AuthDebugger.log("Main page: router.push('/hub') called successfully");
+    } catch (error) {
+      AuthDebugger.log("Main page: Navigation error", { error: error?.toString() });
+    }
   };
 
   const handleProfileNavigation = () => {
     AuthDebugger.log("Main page: User clicked 'Complete Profile' button");
-    router.push("/auth/finish");
+    AuthDebugger.log("Main page: Attempting navigation to /auth/finish");
+    try {
+      router.push("/auth/finish");
+      AuthDebugger.log("Main page: router.push('/auth/finish') called successfully");
+    } catch (error) {
+      AuthDebugger.log("Main page: Profile navigation error", { error: error?.toString() });
+    }
   };
 
   const handleSignOut = async () => {

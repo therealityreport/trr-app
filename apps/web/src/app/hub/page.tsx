@@ -1,8 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
+import { AuthDebugger } from "@/lib/debug";
 
 export default function HubPage() {
+  useEffect(() => {
+    AuthDebugger.log("Hub page: Component mounted and rendered");
+    return () => {
+      AuthDebugger.log("Hub page: Component unmounting");
+    };
+  }, []);
+
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
       <section className="mx-auto max-w-6xl">
