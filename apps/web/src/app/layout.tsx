@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import ToastHost from "@/components/ToastHost";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import DebugPanel from "@/components/DebugPanel";
 import React from "react";
 
 const geistSans = Geist({
@@ -53,6 +54,7 @@ export default function RootLayout({
         <ErrorBoundary>
           <ToastHost />
           {children}
+          <DebugPanel />
         </ErrorBoundary>
       </body>
     </html>

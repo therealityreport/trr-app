@@ -225,48 +225,45 @@ function FinishProfileContent() {
 
   return (
     <ClientOnly fallback={
-      <div className="min-h-screen w-full flex items-center justify-center bg-white">
+      <div className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="font-hamburg text-sm text-gray-600">Loading...</p>
+          <p className="font-hamburg text-sm text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>
     }>
-      <div className="min-h-screen w-full relative bg-white">
-      {/* Header → Banner */}
-      <div className="w-full h-20 border-b border-black flex items-center justify-center">
-        <img 
-          className="w-80 h-[70.2px]" 
-          src="/images/logos/FullName-Black.png" 
-          alt="The Reality Report"
-        />
-      </div>
-
-      {/* Main → Form Container */}
-      <div className="w-full max-w-md mx-auto mt-16 px-4">
-        
-        {/* Heading Container */}
-        <div className="w-full flex items-center justify-center mb-6">
-          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
-            Complete Profile
-          </h2>
+      <div className="min-h-screen bg-zinc-50 dark:bg-black">
+        {/* Header */}
+        <div className="w-full h-20 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-center px-4">
+          <img 
+            className="w-80 h-[70.2px] max-w-full" 
+            src="/images/logos/FullName-Black.png" 
+            alt="The Reality Report"
+          />
         </div>
 
-        <form onSubmit={submit} noValidate className="space-y-4">
-          {formError && (
-            <div className="w-full border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm mb-4 transition-all duration-300">
-              {formError}
-            </div>
-          )}
+        {/* Main Content */}
+        <div className="w-full max-w-md mx-auto px-6 py-16">
+          
+          {/* Heading */}
+          <div className="text-center mb-8">
+            <h2 className="text-zinc-900 dark:text-zinc-100 text-3xl font-gloucester font-normal leading-10">
+              Complete Profile
+            </h2>
+          </div>
 
-          {/* Username Field */}
-          <div className="w-full">
-            <div className="h-[21px] mb-2">
-              <label htmlFor="username" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+          <form onSubmit={submit} noValidate className="space-y-6">
+            {formError && (
+              <div className="border border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200 rounded-lg p-4 text-sm">
+                {formError}
+              </div>
+            )}
+
+            {/* Username Field */}
+            <div className="space-y-2">
+              <label htmlFor="username" className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
                 Username
               </label>
-            </div>
-            <div className="h-11 mb-1 relative">
               <input
                 id="username"
                 name="username"
@@ -274,8 +271,7 @@ function FinishProfileContent() {
                 maxLength={64}
                 autoCapitalize="off"
                 autoComplete="username"
-                tabIndex={0}
-                className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
+                className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 onBlur={onBlurUsername}
@@ -283,111 +279,91 @@ function FinishProfileContent() {
                 placeholder="e.g. reality_fan123"
                 required
               />
+              {errors.username && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.username}</p>}
             </div>
-            {errors.username && <p className="text-sm text-red-600 font-hamburg">{errors.username}</p>}
-          </div>
 
-          {/* Birthday Field - Only show if required */}
-          {requireBirthday && (
-            <>
-              <div className="w-[450px] left-[-27px] absolute" style={{ top: formError ? "225px" : "145px" }}>
-                <div className="h-[21px] mb-2">
-                  <label htmlFor="birthday" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
-                    Birthday
-                  </label>
-                </div>
-                <div className="h-11 mb-1 relative">
-                  <input
-                    id="birthday"
-                    name="birthday"
-                    type="date"
-                    autoComplete="bday"
-                    tabIndex={0}
-                    className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
-                    value={birthday}
-                    onChange={(e) => setBirthday(e.target.value)}
-                    disabled={pending}
-                    max={maxDate}
-                    required
-                  />
-                </div>
-                {errors.birthday && <p className="text-sm text-red-600 font-hamburg">{errors.birthday}</p>}
-              </div>
-            </>
-          )}
-
-          {/* Shows Selection */}
-          <div className="w-[450px] left-[-27px] absolute" style={{ top: requireBirthday ? (formError ? "310px" : "230px") : (formError ? "225px" : "145px") }}>
-            <div className="h-[21px] mb-2 flex justify-between items-center">
-              <label className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
-                Which shows do you watch?
-              </label>
-              {selectedShows.length > 0 && (
-                <button
-                  type="button"
-                  onClick={deselectAll}
+            {/* Birthday Field - Only show if required */}
+            {requireBirthday && (
+              <div className="space-y-2">
+                <label htmlFor="birthday" className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
+                  Birthday
+                </label>
+                <input
+                  id="birthday"
+                  name="birthday"
+                  type="date"
+                  autoComplete="bday"
+                  className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
+                  value={birthday}
+                  onChange={(e) => setBirthday(e.target.value)}
                   disabled={pending}
-                  className="text-gray-600 text-sm font-hamburg font-medium leading-[21px] hover:text-black transition-colors duration-200 disabled:opacity-60"
-                  style={{letterSpacing: '0.1px'}}
-                >
-                  Deselect all
-                </button>
-              )}
-            </div>
-            
-            {/* Scrollable Show Pills Container */}
-            <div 
-              className="w-full overflow-y-auto scrollbar-hide" 
-              style={{ 
-                height: '280px',
-                scrollbarWidth: 'none', 
-                msOverflowStyle: 'none',
-                WebkitOverflowScrolling: 'touch'
-              }}
-            >
-              <div className="flex flex-wrap gap-2 pr-2">
-                {ALL_SHOWS.map((name, index) => {
-                  const active = !!showSelections[name];
-                  const colorHex = showColors[index % showColors.length];
-                  
-                  return (
-                    <button
-                      key={name}
-                      type="button"
-                      onClick={() => toggleShow(name)}
-                      disabled={pending}
-                      className={`px-3 py-1 h-8 rounded-full text-sm font-normal font-['HamburgSerial'] leading-tight border whitespace-nowrap disabled:opacity-60 transition-colors duration-200 touch-manipulation text-center flex-shrink-0`}
-                      style={{
-                        backgroundColor: active ? colorHex : '#f3f4f6',
-                        color: active ? 'white' : '#000000',
-                        borderColor: active ? colorHex : '#d1d5db'
-                      }}
-                      aria-pressed={active}
-                    >
-                      {name}
-                    </button>
-                  );
-                })}
+                  max={maxDate}
+                  required
+                />
+                {errors.birthday && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.birthday}</p>}
               </div>
-            </div>
-            
-            {/* Only show error message when there's an actual error */}
-            {errors.shows && <p className="mt-2 text-sm text-red-600">{errors.shows}</p>}
-          </div>
+            )}
 
-          {/* Continue Button */}
-          <div className={`w-[450px] h-11 left-[-27px] absolute bg-neutral-900 rounded-[3px] border border-black transition-all duration-300 ease-in-out hover:bg-black transform hover:scale-[1.02] ${requireBirthday ? "top-[560px]" : "top-[452px]"}`}>
+            {/* Shows Selection */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
+                  Which shows do you watch?
+                </label>
+                {selectedShows.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={deselectAll}
+                    disabled={pending}
+                    className="text-zinc-600 dark:text-zinc-400 text-sm font-hamburg font-medium hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-200 disabled:opacity-60"
+                  >
+                    Deselect all
+                  </button>
+                )}
+              </div>
+              
+              {/* Scrollable Show Pills Container */}
+              <div className="w-full h-64 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 bg-white dark:bg-zinc-900">
+                <div className="flex flex-wrap gap-2">
+                  {ALL_SHOWS.map((name, index) => {
+                    const active = !!showSelections[name];
+                    const colorHex = showColors[index % showColors.length];
+                    
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => toggleShow(name)}
+                        disabled={pending}
+                        className="px-3 py-1 h-8 rounded-full text-sm font-normal font-hamburg leading-tight border whitespace-nowrap disabled:opacity-60 transition-colors duration-200 flex-shrink-0"
+                        style={{
+                          backgroundColor: active ? colorHex : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#f3f4f6'),
+                          color: active ? 'white' : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#000000'),
+                          borderColor: active ? colorHex : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#4b5563' : '#d1d5db')
+                        }}
+                        aria-pressed={active}
+                      >
+                        {name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              {errors.shows && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.shows}</p>}
+            </div>
+
+            {/* Continue Button */}
             <button
               type="submit"
-              className="w-full h-full bg-transparent text-center justify-center text-white text-base font-hamburg font-bold leading-9 disabled:opacity-60 transition-all duration-200"
+              className="w-full h-11 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded font-hamburg font-bold hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors duration-200 disabled:opacity-60"
               disabled={pending || selectedShows.length < 3}
             >
               {pending ? "Saving…" : "Continue"}
             </button>
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
-    </div>
     </ClientOnly>
   );
 }
@@ -395,10 +371,10 @@ function FinishProfileContent() {
 export default function FinishProfilePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen w-full flex items-center justify-center bg-white">
+      <div className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="font-hamburg text-sm text-gray-600">Loading...</p>
+          <p className="font-hamburg text-sm text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>
     }>

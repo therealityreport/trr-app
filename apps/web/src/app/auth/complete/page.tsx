@@ -179,8 +179,15 @@ function OAuthCallbackRedirectContent() {
   }, [router, search]);
 
   return (
-    <main className="mx-auto max-w-xl p-12 text-center text-sm text-gray-600">
-      Finishing sign-in…
+    <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
+      <div className="mx-auto max-w-md w-full text-center">
+        <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-800 p-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900 dark:border-zinc-100 mx-auto mb-4"></div>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Finishing sign-in…
+          </p>
+        </div>
+      </div>
     </main>
   );
 }
@@ -188,8 +195,15 @@ function OAuthCallbackRedirectContent() {
 export default function OAuthCallbackRedirect() {
   return (
     <Suspense fallback={
-      <main className="mx-auto max-w-xl p-12 text-center text-sm text-gray-600">
-        Loading…
+      <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
+        <div className="mx-auto max-w-md w-full text-center">
+          <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-800 p-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900 dark:border-zinc-100 mx-auto mb-4"></div>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Loading…
+            </p>
+          </div>
+        </div>
       </main>
     }>
       <OAuthCallbackRedirectContent />

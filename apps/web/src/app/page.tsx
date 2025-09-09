@@ -10,43 +10,66 @@ import type { User } from "firebase/auth";
 import { OAuthProvider, signInWithPopup } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { checkUserExists } from "@/lib/db/users";
+import { AuthDebugger, EnvUtils } from "@/lib/debug";
 
 export default function Page() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
+    AuthDebugger.log("Main page: Component mounted", {
+      environment: EnvUtils.getEnvironmentInfo(),
+    });
+
     // initialize analytics (no-op on unsupported envs) and log a page_view
     (async () => {
       try {
         const a = await initAnalytics();
-        if (a) logEvent(a, "page_view");
-      } catch {
-        // ignore analytics init errors in unsupported environments
+        if (a) {
+          logEvent(a, "page_view");
+          AuthDebugger.log("Main page: Analytics initialized and page_view logged");
+        }
+      } catch (error) {
+        AuthDebugger.log("Main page: Analytics init error (expected in some environments)", { error: error?.toString() });
       }
     })();
 
     const unsub = onUser(async (currentUser) => {
+      AuthDebugger.log("Main page: User state changed", { 
+        hasUser: !!currentUser, 
+        email: currentUser?.email,
+        uid: currentUser?.uid?.substring(0, 8) + '...',
+        environment: EnvUtils.isProduction() ? 'production' : 'local',
+      });
+      
       setUser(currentUser);
       
       // Don't automatically redirect - let users navigate manually to prevent glitching
       // The hub page will handle its own authentication requirements
+      AuthDebugger.log("Main page: No automatic redirects - manual navigation only");
     });
 
-    return unsub;
+    return () => {
+      AuthDebugger.log("Main page: Component unmounting, cleaning up user listener");
+      unsub();
+    };
   }, [router]);
 
   const handleGoogle = async () => {
     try {
+      AuthDebugger.log("Main page: Starting Google sign-in");
       await signInWithGoogle();
+      AuthDebugger.log("Main page: Google sign-in successful, redirecting to complete");
       router.replace("/auth/complete");
-    } catch {
+    } catch (error) {
+      AuthDebugger.log("Main page: Google sign-in error", { error: error?.toString() });
       // ignored: signInWithGoogle filters benign errors
     }
   };
 
   const handleApple = async () => {
     try {
+      AuthDebugger.log("Main page: Starting Apple sign-in");
       const provider = new OAuthProvider("apple.com");
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
@@ -56,9 +79,33 @@ export default function Page() {
         body: JSON.stringify({ idToken }),
         credentials: "include",
       });
+      AuthDebugger.log("Main page: Apple sign-in successful, redirecting to complete");
       router.replace("/auth/complete");
-    } catch {
+    } catch (error) {
+      AuthDebugger.log("Main page: Apple sign-in error", { error: error?.toString() });
       // noop; user may cancel
+    }
+  };
+
+  const handleHubNavigation = () => {
+    AuthDebugger.log("Main page: User clicked 'Go to Hub' button");
+    router.push("/hub");
+  };
+
+  const handleProfileNavigation = () => {
+    AuthDebugger.log("Main page: User clicked 'Complete Profile' button");
+    router.push("/auth/finish");
+  };
+
+  const handleSignOut = async () => {
+    try {
+      AuthDebugger.log("Main page: User initiated sign out");
+      await logout();
+      setUser(null);
+      AuthDebugger.log("Main page: Sign out successful");
+    } catch (error) {
+      AuthDebugger.log("Main page: Sign out error", { error: error?.toString() });
+      console.error("Error signing out:", error);
     }
   };
 
@@ -85,26 +132,19 @@ export default function Page() {
           </p>
           <div className="space-y-4">
             <button
-              onClick={() => router.push("/hub")}
+              onClick={handleHubNavigation}
               className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center"
             >
               Go to Hub
             </button>
             <button
-              onClick={() => router.push("/auth/finish")}
+              onClick={handleProfileNavigation}
               className="w-full h-11 bg-white rounded-[3px] border border-black text-black text-base font-hamburg font-normal hover:bg-gray-50 transition-colors flex items-center justify-center"
             >
               Complete Profile
             </button>
             <button
-              onClick={async () => {
-                try {
-                  await logout();
-                  setUser(null);
-                } catch (error) {
-                  console.error("Error signing out:", error);
-                }
-              }}
+              onClick={handleSignOut}
               className="w-full h-11 bg-white rounded-[3px] border border-gray-300 text-gray-600 text-base font-hamburg font-normal hover:bg-gray-50 transition-colors flex items-center justify-center"
             >
               Sign Out
