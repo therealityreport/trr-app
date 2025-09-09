@@ -1,5 +1,27 @@
 import type { Metadata } from "next";
-import { Geist, Inter, Playfair_Display } from "next/font/google";
+import export defaexport default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <html lang="en">
+      <body className={`${geistSans.variable} ${inter.variable} ${playfair.variable} ${gloucesterOS.variable} ${hamburgSerial.variable} font-sans antialiased`}>
+        <ToastHost />
+        {children}
+      </body>
+    </html>
+  );
+}ayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <html lang="en">
+      <body className={`${geistSans.variable} ${inter.variable} ${playfair.variable} ${gloucesterOS.variable} ${hamburgSerial.variable} font-sans antialiased`}>
+        <ToastHost />
+        {children}
+      </body>
+    </html>
+  );
+}ayfair_Display } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 import ToastHost from "@/components/ToastHost";

@@ -17,32 +17,25 @@
   --font-body: var(--font-hamburg);
 }
 
-/* Dark scheme overrides */
-@media (prefers-color-scheme: dark) {
-  @theme {
-    --color-background: #0a0a0a;
-    --color-foreground: #ededed;
-  }
-}
-
 /* Base element styling */
 @layer base {
   html, body {
     min-height: 100%;
-    background-color: theme(--color-background);
-    color: theme(--color-foreground);
+    background-color: #ffffff;
+    color: #171717;
   }
 
   h1, h2, h3 {
-    @apply font-serif tracking-tight;
+    font-family: var(--font-serif);
+    letter-spacing: -0.025em;
   }
 
   p {
-    @apply leading-7;
+    line-height: 1.75rem;
   }
 
   a {
-    color: theme(--color-accent);
+    color: #0B57D0;
     text-underline-offset: 2px;
   }
 }
