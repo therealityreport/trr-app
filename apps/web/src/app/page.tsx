@@ -115,23 +115,23 @@ export default function Page() {
           </h2>
         </div>
 
-        {/* Email Label Container - 450 x 21 */}
-        <div className="w-[450px] h-[21px] left-[-27px] top-16 absolute">
-          <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
-            Email address
-          </label>
-        </div>
-
-        {/* Email Input Container - 448 x 44 */}
-        <div className="w-[448px] h-11 left-[-26px] top-[100px] absolute">
-          <input 
-            type="email"
-            name="email"
-            id="email"
-            required
-            className="w-full h-full bg-white rounded-[3px] border border-zinc-500 px-3 text-black text-base font-hamburg font-medium outline-none"
-            placeholder=""
-          />
+        {/* Email Field */}
+        <div className="w-[450px] left-[-27px] absolute" style={{ top: "60px" }}>
+          <div className="h-[21px] mb-2">
+            <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+              Email address
+            </label>
+          </div>
+          <div className="h-11 mb-1 relative">
+            <input 
+              type="email"
+              name="email"
+              id="email"
+              required
+              className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
+              placeholder="your.email@example.com"
+            />
+          </div>
         </div>
 
         {/* Continue Button Container - 450 x 44 */}
