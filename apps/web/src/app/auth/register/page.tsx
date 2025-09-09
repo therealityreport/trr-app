@@ -298,20 +298,20 @@ function RegisterContent() {
   const emailDisabled = false;
 
   return (
-    <div className="w-[1440px] h-[900px] relative bg-white mx-auto">
+    <div className="min-h-screen w-full relative bg-white">
       {/* Header → Banner */}
-      <div className="w-[1440px] h-20 left-0 top-[0.50px] absolute border-b border-black">
+      <div className="w-full h-20 border-b border-black flex items-center justify-center">
         <img 
-          className="w-80 h-[70.2px] left-[530px] top-6 absolute" 
+          className="w-80 h-[70.2px]" 
           src="/images/logos/FullName-Black.png" 
           alt="The Reality Report"
         />
       </div>
 
       {/* Main Form Container */}
-      <div className={`w-80 left-[495px] top-[152.50px] absolute bg-white transition-all duration-300 ease-in-out ${isTransitioning ? 'opacity-50 transform translate-y-2' : 'opacity-100 transform translate-y-0'}`}>
+      <div className={`w-full max-w-md mx-auto mt-16 px-4 transition-all duration-300 ease-in-out ${isTransitioning ? 'opacity-50 transform translate-y-2' : 'opacity-100 transform translate-y-0'}`}>
         {/* Title */}
-        <div className="w-[384px] h-10 left-[-16px] top-0 absolute text-center justify-center">
+        <div className="w-full text-center mb-6">
           <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
             {stage === "email" ? "Create an Account" : 
              stage === "details" ? "Create an Account" : 
@@ -321,23 +321,23 @@ function RegisterContent() {
 
         {/* Error Display */}
         {formError && (
-          <div className="w-[450px] left-[-27px] border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm top-16 absolute transition-all duration-300">
+          <div className="w-full border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm mb-4 transition-all duration-300">
             {formError}
           </div>
         )}
 
         {/* Welcome Back Message for Login Stage */}
         {stage === "login" && !formError && (
-          <div className="w-[450px] left-[-27px] border border-blue-300 bg-blue-50 text-blue-800 rounded p-3 text-sm top-16 absolute transition-all duration-300 animate-in slide-in-from-top-2">
+          <div className="w-full border border-blue-300 bg-blue-50 text-blue-800 rounded p-3 text-sm mb-4 transition-all duration-300 animate-in slide-in-from-top-2">
             Welcome back! Please enter your password to continue.
           </div>
         )}
 
-        <form onSubmit={handleEmailSignup} noValidate>
+        <form onSubmit={handleEmailSignup} noValidate className="space-y-4">
           {/* Email Field */}
           {(stage === "email" || stage === "login") && (
             <>
-              <div className="w-[450px] left-[-27px] absolute" style={{ top: formError ? "140px" : "60px" }}>
+              <div className="w-full">
                 <div className="h-[21px] mb-2">
                   <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
                     Email address

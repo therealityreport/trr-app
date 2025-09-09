@@ -55,21 +55,19 @@ function ForgotPasswordContent() {
   };
 
   return (
-    <div className="w-[1440px] h-[900px] relative bg-white mx-auto">
+    <div className="min-h-screen w-full relative bg-white">
       {/* Header */}
-      <div className="w-[1440px] h-20 left-0 top-[0.50px] absolute border-b border-black">
-        <div className="w-96 h-20 left-[524px] top-0 absolute flex items-center justify-center">
-          <button 
-            onClick={() => router.push("/")}
-            className="text-2xl font-medium font-['Gloucester_OS_MT_Std'] text-black hover:text-gray-600 transition-colors cursor-pointer"
-          >
-            The Reality Report
-          </button>
-        </div>
+      <div className="w-full h-20 border-b border-black flex items-center justify-center">
+        <button 
+          onClick={() => router.push("/")}
+          className="text-2xl font-medium font-['Gloucester_OS_MT_Std'] text-black hover:text-gray-600 transition-colors cursor-pointer"
+        >
+          The Reality Report
+        </button>
       </div>
 
       {/* Main Content */}
-      <div className="w-[546px] left-[447px] top-[152.50px] absolute bg-white">
+      <div className="w-full max-w-lg mx-auto mt-16 px-4">
         {/* Title */}
         <h2 className="w-full text-center text-black text-3xl font-medium font-['Gloucester_OS_MT_Std'] leading-10 mb-6">
           Check your email to reset your password

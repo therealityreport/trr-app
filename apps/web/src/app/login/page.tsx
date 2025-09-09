@@ -93,21 +93,21 @@ function LoginContent() {
   };
 
   return (
-    <div className="w-[1440px] h-[900px] relative bg-white mx-auto">
+    <div className="min-h-screen w-full relative bg-white">
       {/* Header → Banner */}
-      <div className="w-[1440px] h-20 left-0 top-[0.50px] absolute border-b border-black">
+      <div className="w-full h-20 border-b border-black flex items-center justify-center">
         <img 
-          className="w-80 h-[70.2px] left-[530px] top-6 absolute" 
+          className="w-80 h-[70.2px]" 
           src="/images/logos/FullName-Black.png" 
           alt="The Reality Report"
         />
       </div>
 
       {/* Main → Form Container */}
-      <div className="w-96 left-[495px] top-[152.50px] absolute bg-white">
+      <div className="w-full max-w-md mx-auto mt-16 px-4">
         
-        {/* Heading Container - 450 x 40 */}
-        <div className="w-[450px] h-10 left-[-27px] top-0 absolute flex items-center justify-center">
+        {/* Heading Container */}
+        <div className="w-full flex items-center justify-center mb-6">
           <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
             Log in to your account
           </h2>
@@ -115,21 +115,21 @@ function LoginContent() {
 
         {/* Welcome Message */}
         {welcomeMessage && (
-          <div className="w-[450px] left-[-27px] top-12 absolute border border-blue-300 bg-blue-50 text-blue-800 rounded p-3 text-sm">
+          <div className="w-full border border-blue-300 bg-blue-50 text-blue-800 rounded p-3 text-sm mb-4">
             {welcomeMessage}
           </div>
         )}
 
         {/* Error Display */}
         {formError && (
-          <div className="w-[450px] left-[-27px] absolute border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm" style={{ top: welcomeMessage ? "110px" : "60px" }}>
+          <div className="w-full border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm mb-4">
             {formError}
           </div>
         )}
 
-        <form onSubmit={handleEmailLogin} noValidate>
-          {/* Email Field Container - 450 x 65 */}
-          <div className="w-[450px] left-[-27px] absolute" style={{ top: welcomeMessage ? "140px" : (formError ? "140px" : "60px") }}>
+        <form onSubmit={handleEmailLogin} noValidate className="space-y-4">
+          {/* Email Field Container */}
+          <div className="w-full">
             <div className="h-[21px] mb-2">
               <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
                 Email address
@@ -160,8 +160,8 @@ function LoginContent() {
             {errors.email && <p className="text-sm text-red-600 font-hamburg">{errors.email}</p>}
           </div>
 
-          {/* Password Field Container - 450 x 65 */}
-          <div className="w-[450px] left-[-27px] absolute" style={{ top: welcomeMessage ? "225px" : (formError ? "225px" : "145px") }}>
+          {/* Password Field Container */}
+          <div className="w-full">
             <div className="h-[21px] mb-2">
               <label htmlFor="password" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
                 Password
@@ -184,29 +184,27 @@ function LoginContent() {
             {errors.password && <p className="text-sm text-red-600 font-hamburg">{errors.password}</p>}
           </div>
 
-          {/* Log In Button Container - 450 x 44 */}
+          {/* Log In Button Container */}
           <button 
             type="submit"
-            className="w-[450px] h-11 left-[-27px] absolute bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center disabled:opacity-60"
-            style={{ top: welcomeMessage ? "310px" : (formError ? "310px" : "230px") }}
+            className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center disabled:opacity-60"
             disabled={pending}
           >
             {pending ? "Logging in…" : "Log in"}
           </button>
 
-          {/* OR Separator Container - 450 x 21 */}
-          <div className="w-[450px] h-[21px] left-[-27px] absolute flex items-center" style={{ top: welcomeMessage ? "374px" : (formError ? "374px" : "294px") }}>
+          {/* OR Separator Container */}
+          <div className="w-full flex items-center my-4">
             <div className="flex-1 h-px bg-neutral-200"></div>
             <div className="px-4 text-black text-sm font-hamburg font-medium leading-[21px]">or</div>
             <div className="flex-1 h-px bg-neutral-200"></div>
           </div>
         </form>
 
-        {/* Google Button Container - 450 x 52 */}
+        {/* Google Button Container */}
         <button
           type="button"
-          className="w-[450px] h-[52px] left-[-27px] absolute bg-white rounded-[3px] border border-black hover:bg-gray-50 transition-colors flex items-center justify-center gap-3 disabled:opacity-60"
-          style={{ top: welcomeMessage ? "415px" : (formError ? "415px" : "335px") }}
+          className="w-full h-[52px] bg-white rounded-[3px] border border-black hover:bg-gray-50 transition-colors flex items-center justify-center gap-3 disabled:opacity-60 mb-4"
           onClick={async () => { 
             if (!pending) { 
               setPending(true); 
@@ -235,7 +233,7 @@ function LoginContent() {
         </button>
 
         {/* Forgot Password Link */}
-        <div className="w-[450px] left-[-27px] absolute text-center" style={{ top: welcomeMessage ? "487px" : (formError ? "487px" : "407px") }}>
+        <div className="w-full text-center mb-4">
           <button
             type="button"
             onClick={() => router.push(`/auth/forgot-password?email=${encodeURIComponent(email)}`)}
@@ -246,7 +244,7 @@ function LoginContent() {
         </div>
 
         {/* Link to register */}
-        <div className="w-[450px] left-[-27px] absolute text-center" style={{ top: welcomeMessage ? "513px" : (formError ? "513px" : "433px") }}>
+        <div className="w-full text-center">
           <p className="text-black text-sm font-hamburg font-normal leading-[21px]">
             Don&apos;t have an account?{" "}
             <button

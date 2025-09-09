@@ -74,11 +74,11 @@ export default function Page() {
   };
 
   return (
-    <div className="w-[1440px] h-[900px] relative bg-white mx-auto">
+    <div className="min-h-screen w-full relative bg-white">
       {/* Header → Banner */}
-      <div className="w-[1440px] h-20 left-0 top-[0.50px] absolute border-b border-black">
+      <div className="w-full h-20 border-b border-black flex items-center justify-center">
         <img 
-          className="w-80 h-[70.2px] left-[530px] top-6 absolute" 
+          className="w-80 h-[70.2px]" 
           src="/images/logos/FullName-Black.png" 
           alt="The Reality Report"
         />
@@ -106,17 +106,17 @@ export default function Page() {
             router.push(`/auth/register?email=${encodeURIComponent(email.trim())}`);
           }
         }
-      }} noValidate className="w-96 left-[495px] top-[152.50px] absolute bg-white">
+      }} noValidate className="w-full max-w-md mx-auto mt-16 px-4">
         
-        {/* Heading Container - 450 x 40 */}
-        <div className="w-[450px] h-10 left-[-27px] top-0 absolute flex items-center justify-center">
+        {/* Heading Container */}
+        <div className="w-full flex items-center justify-center mb-6">
           <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
             Log in or create an account
           </h2>
         </div>
 
         {/* Email Field */}
-        <div className="w-[450px] left-[-27px] absolute" style={{ top: "60px" }}>
+        <div className="w-full mb-4">
           <div className="h-[21px] mb-2">
             <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
               Email address
@@ -134,26 +134,26 @@ export default function Page() {
           </div>
         </div>
 
-        {/* Continue Button Container - 450 x 44 */}
+        {/* Continue Button Container */}
         <button 
           type="submit"
-          className="w-[450px] h-11 left-[-27px] top-[164px] absolute bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center"
+          className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center mb-4"
         >
           Continue
         </button>
 
-        {/* OR Separator Container - 450 x 21 */}
-        <div className="w-[450px] h-[21px] left-[-27px] top-[228px] absolute flex items-center">
+        {/* OR Separator Container */}
+        <div className="w-full flex items-center mb-4">
           <div className="flex-1 h-px bg-neutral-200"></div>
           <div className="px-4 text-black text-sm font-hamburg font-medium leading-[21px]">or</div>
           <div className="flex-1 h-px bg-neutral-200"></div>
         </div>
 
-        {/* Google Button Container - 450 x 52 */}
+        {/* Google Button Container */}
         <button 
           type="button"
           onClick={handleGoogle}
-          className="w-[450px] h-[52px] left-[-27px] top-[269px] absolute bg-white rounded-[3px] border border-black hover:bg-gray-50 transition-colors flex items-center justify-center gap-3"
+          className="w-full h-[52px] bg-white rounded-[3px] border border-black hover:bg-gray-50 transition-colors flex items-center justify-center gap-3 mb-6"
         >
           <svg width="19" height="19" viewBox="0 0 19 19" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path fillRule="evenodd" clipRule="evenodd" d="M17.77 9.64468C17.77 9.0065 17.7127 8.39286 17.6064 7.80377H9.13V11.2851H13.9736C13.765 12.4101 13.1309 13.3633 12.1777 14.0015V16.2597H15.0864C16.7882 14.6929 17.77 12.3856 17.77 9.64468Z" fill="#4285F4"/>
@@ -166,11 +166,11 @@ export default function Page() {
           </span>
         </button>
 
-        {/* Terms Text Container - 450 x 42 */}
-        <div className="w-[450px] h-[42px] left-[-27px] top-[341px] absolute flex items-center justify-center">
+        {/* Terms Text Container */}
+        <div className="w-full flex items-center justify-center">
           <p className="text-black text-sm font-hamburg font-normal leading-[21px] text-center">
             By continuing, you agree to the{" "}
-            <span className="underline">Terms of Sale</span>, <span className="underline">Terms of Service</span>, and<br/>
+            <span className="underline">Terms of Sale</span>, <span className="underline">Terms of Service</span>, and{" "}
             <span className="underline">Privacy Policy</span>.
           </p>
         </div>
