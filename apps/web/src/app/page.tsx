@@ -29,39 +29,12 @@ export default function Page() {
     const unsub = onUser(async (currentUser) => {
       setUser(currentUser);
       
-      if (currentUser) {
-        // Check if user has a complete profile before redirecting to hub
-        try {
-          const { getUserProfile } = await import("@/lib/db/users");
-          const profile = await getUserProfile(currentUser.uid);
-          const isComplete = profile && profile.username && Array.isArray(profile.shows) && profile.shows.length >= 3 && profile.birthday;
-          
-          if (isComplete) {
-            router.replace("/hub");
-          } else {
-            router.replace("/auth/finish");
-          }
-        } catch (error) {
-          console.error("Error checking profile:", error);
-          // If we can't check the profile, let them try to finish it
-          router.replace("/auth/finish");
-        }
-      }
+      // Don't automatically redirect - let users navigate manually to prevent glitching
+      // The hub page will handle its own authentication requirements
     });
 
     return unsub;
   }, [router]);
-
-  if (user) {
-    // Show loading state while redirecting
-    return (
-      <main className="w-[1440px] h-[900px] relative bg-white mx-auto">
-        <div className="w-full h-full flex items-center justify-center">
-          <p className="text-lg font-body">Redirecting to hub...</p>
-        </div>
-      </main>
-    );
-  }
 
   const handleGoogle = async () => {
     try {
@@ -100,8 +73,47 @@ export default function Page() {
         />
       </div>
 
-      {/* Main → Form */}
-      <form onSubmit={async (e) => {
+      {/* Main Content */}
+      {user ? (
+        // Authenticated user - show welcome message and navigation
+        <div className="w-full max-w-md mx-auto mt-16 px-4 text-center">
+          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 mb-6">
+            Welcome back!
+          </h2>
+          <p className="text-gray-600 font-hamburg mb-8">
+            You&apos;re signed in as {user.email}
+          </p>
+          <div className="space-y-4">
+            <button
+              onClick={() => router.push("/hub")}
+              className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center"
+            >
+              Go to Hub
+            </button>
+            <button
+              onClick={() => router.push("/auth/finish")}
+              className="w-full h-11 bg-white rounded-[3px] border border-black text-black text-base font-hamburg font-normal hover:bg-gray-50 transition-colors flex items-center justify-center"
+            >
+              Complete Profile
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  await logout();
+                  setUser(null);
+                } catch (error) {
+                  console.error("Error signing out:", error);
+                }
+              }}
+              className="w-full h-11 bg-white rounded-[3px] border border-gray-300 text-gray-600 text-base font-hamburg font-normal hover:bg-gray-50 transition-colors flex items-center justify-center"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      ) : (
+        // Unauthenticated user - show login/register form
+        <form onSubmit={async (e) => {
         e.preventDefault();
         const formData = new FormData(e.currentTarget);
         const email = formData.get('email') as string;
@@ -190,7 +202,8 @@ export default function Page() {
             <span className="underline">Privacy Policy</span>.
           </p>
         </div>
-      </form>
+        </form>
+      )}
     </div>
   );
 }
