@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth, signInWithGoogle } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, OAuthProvider, signInWithPopup, updateProfile } from "firebase/auth";
@@ -13,7 +13,7 @@ const ENABLE_APPLE = (process.env.NEXT_PUBLIC_ENABLE_APPLE ?? "false").toLowerCa
 
 type FieldErrors = Partial<Record<"email" | "password" | "birthday" | "name" | "confirm", string>>;
 
-export default function RegisterPage() {
+function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   type Stage = "email" | "details" | "login";
@@ -655,4 +655,12 @@ function getFriendlyError(err: unknown): string {
     if (typeof message === "string") return message;
   }
   return "Something went wrong. Please try again.";
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <RegisterContent />
+    </Suspense>
+  );
 }
