@@ -3,6 +3,7 @@ import { Geist, Inter, Playfair_Display } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 import ToastHost from "@/components/ToastHost";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import React from "react";
 
 const geistSans = Geist({
@@ -49,8 +50,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${inter.variable} ${playfair.variable} ${gloucesterOS.variable} ${hamburgSerial.variable} font-sans antialiased`}>
-        <ToastHost />
-        {children}
+        <ErrorBoundary>
+          <ToastHost />
+          {children}
+        </ErrorBoundary>
       </body>
     </html>
   );

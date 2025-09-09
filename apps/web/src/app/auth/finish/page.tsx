@@ -2,16 +2,17 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { getUserByUsername, getUserProfile, upsertUserProfile } from "@/lib/db/users";
 import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
 import { ALL_SHOWS } from "@/lib/data/shows";
+import ClientOnly from "@/components/ClientOnly";
 
 type FieldErrors = Partial<Record<"username" | "birthday" | "shows", string>>;
 
-export default function FinishProfilePage() {
+function FinishProfileContent() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -223,7 +224,15 @@ export default function FinishProfilePage() {
   };
 
   return (
-    <div className="min-h-screen w-full relative bg-white">
+    <ClientOnly fallback={
+      <div className="min-h-screen w-full flex items-center justify-center bg-white">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="font-hamburg text-sm text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <div className="min-h-screen w-full relative bg-white">
       {/* Header → Banner */}
       <div className="w-full h-20 border-b border-black flex items-center justify-center">
         <img 
@@ -379,6 +388,22 @@ export default function FinishProfilePage() {
         </form>
       </div>
     </div>
+    </ClientOnly>
+  );
+}
+
+export default function FinishProfilePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen w-full flex items-center justify-center bg-white">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="font-hamburg text-sm text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <FinishProfileContent />
+    </Suspense>
   );
 }
 

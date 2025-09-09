@@ -37,10 +37,14 @@ if (typeof window !== "undefined") {
   if (USE_EMULATORS) {
     try {
       connectFirestoreEmulator(db, "localhost", 8080);
-    } catch {}
+    } catch (err) {
+      console.log("Firestore emulator connection skipped:", (err as Error)?.message);
+    }
     try {
       connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
-    } catch {}
+    } catch (err) {
+      console.log("Auth emulator connection skipped:", (err as Error)?.message);
+    }
   }
 }
 
