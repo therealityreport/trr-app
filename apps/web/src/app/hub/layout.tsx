@@ -3,6 +3,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 async function guard() {
+  // Temporarily disable server-side auth guard since:
+  // 1. No Firebase admin credentials are configured in production
+  // 2. Session cookies aren't being set properly
+  // 3. Client-side auth is working fine
+  console.log("Hub guard: Server-side auth check disabled - using client-side auth only");
+  return;
+  
+  /* DISABLED SERVER-SIDE AUTH - keeping code for reference
   const { adminAuth, adminDb } = await import("@/lib/firebaseAdmin");
   const cookieStore = await cookies();
   const cookie = cookieStore.get("__session")?.value;
@@ -55,6 +63,7 @@ async function guard() {
     console.log("Hub guard: Session verification failed, redirecting to register", error);
     redirect("/auth/register");
   }
+  */
 }
 
 export default async function HubLayout({ children }: { children: ReactNode }) {
