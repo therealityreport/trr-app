@@ -6,6 +6,7 @@ import { useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { getUserProfile, upsertUserProfile } from "@/lib/db/users";
+import type { User } from "firebase/auth";
 
 function OAuthCallbackRedirectContent() {
   const router = useRouter();
@@ -32,7 +33,7 @@ function OAuthCallbackRedirectContent() {
       // Don't return here - let the auth state handler below run the profile check
       setTimeout(() => {
         // Manually trigger the auth state handler with current user
-        const handleUser = async (u: any) => {
+        const handleUser = async (u: User | null) => {
           console.log("Auth complete: Processing existing user", u ? { uid: u.uid, email: u.email } : "No user");
           
           if (!u) {

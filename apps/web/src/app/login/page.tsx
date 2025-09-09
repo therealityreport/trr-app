@@ -248,7 +248,7 @@ export default function LoginPage() {
         {/* Link to register */}
         <div className="w-[450px] left-[-27px] absolute text-center" style={{ top: welcomeMessage ? "513px" : (formError ? "513px" : "433px") }}>
           <p className="text-black text-sm font-hamburg font-normal leading-[21px]">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <button
               type="button"
               className="text-black underline hover:no-underline"

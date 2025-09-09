@@ -126,7 +126,7 @@ export default function ForgotPasswordPage() {
         {/* Resend Code Section */}
         <div className="w-full text-center">
           <p className="text-black text-sm font-normal font-['HamburgSerial'] leading-tight">
-            Didn't receive a code? Check your spam folder
+            Didn&apos;t receive a code? Check your spam folder
             <span className="block mt-2">
               or{" "}
               <button

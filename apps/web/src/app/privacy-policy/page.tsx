@@ -1,11 +1,13 @@
+import Link from "next/link";
+
 export default function PrivacyPolicyPage() {
   return (
     <div className="w-[1440px] h-[900px] relative bg-white mx-auto">
       <div className="w-[1440px] h-20 left-0 top-[0.50px] absolute border-b border-black">
         <div className="w-96 h-20 left-[524px] top-0 absolute flex items-center justify-center">
-          <a href="/" className="text-2xl font-medium font-['Gloucester_OS_MT_Std'] text-black hover:text-gray-600 transition-colors">
+          <Link href="/" className="text-2xl font-medium font-['Gloucester_OS_MT_Std'] text-black hover:text-gray-600 transition-colors">
             The Reality Report
-          </a>
+          </Link>
         </div>
       </div>
       
