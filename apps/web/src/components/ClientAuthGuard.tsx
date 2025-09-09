@@ -17,18 +17,27 @@ export default function ClientAuthGuard({ children, requireComplete = false }: C
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (user) => {
+      console.log("ClientAuthGuard: Auth state changed", { user: !!user, email: user?.email });
+      
       if (!user) {
-        // Redirect to main page for authentication
-        router.replace("/");
+        console.log("ClientAuthGuard: No user, redirecting to main page");
+        // Add a small delay to prevent immediate redirect loops
+        setTimeout(() => {
+          router.replace("/");
+        }, 100);
         return;
       }
 
       if (requireComplete) {
+        console.log("ClientAuthGuard: Checking profile completeness for", user.email);
         try {
           const profile = await getUserProfile(user.uid);
           const complete = !!profile && !!profile.username && Array.isArray(profile.shows) && profile.shows.length >= 3 && !!profile.birthday;
           
+          console.log("ClientAuthGuard: Profile check result", { complete, profile: !!profile });
+          
           if (!complete) {
+            console.log("ClientAuthGuard: Profile incomplete, redirecting to finish");
             router.replace("/auth/finish");
             return;
           }
@@ -39,6 +48,7 @@ export default function ClientAuthGuard({ children, requireComplete = false }: C
         }
       }
 
+      console.log("ClientAuthGuard: User authorized");
       setAuthorized(true);
       setLoading(false);
     });

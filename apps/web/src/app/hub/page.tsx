@@ -1,8 +1,12 @@
 // apps/web/src/app/hub/page.tsx
-import React from "react";
+"use client";
+
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { auth } from "@/lib/firebase";
+import { User } from "firebase/auth";
 import SignOutButton from "@/components/SignOutButton";
-import ClientAuthGuard from "@/components/ClientAuthGuard";
 
 type GameCard = {
   title: string;
@@ -126,31 +130,79 @@ function GameTile({ card }: { card: GameCard }) {
   );
 }
 
-export default async function Page() {
-  return (
-    <ClientAuthGuard requireComplete={true}>
-      <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
-        <div className="max-w-6xl mx-auto flex justify-end mb-4">
-          <SignOutButton />
-        </div>
-        <section className="mx-auto max-w-6xl">
-          <header className="mb-10 text-center">
-            <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">
-              Pick a game
-            </h1>
-            <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-              Daily puzzles and prototypes. More coming soon.
-            </p>
-          </header>
+export default function Page() {
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-          {/* Responsive 3/2/1 grid */}
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {CARDS.map((card) => (
-              <GameTile key={card.title} card={card} />
-            ))}
-          </div>
-        </section>
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged((currentUser) => {
+      console.log("Hub: Auth state changed", { user: !!currentUser, email: currentUser?.email });
+      setUser(currentUser);
+      setLoading(false);
+      
+      // Don't redirect here - let users stay on the page
+      // if (!currentUser) {
+      //   router.replace("/");
+      // }
+    });
+
+    return unsub;
+  }, [router]);
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-zinc-600 dark:text-zinc-400">Loading...</div>
+        </div>
       </main>
-    </ClientAuthGuard>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="font-serif text-2xl tracking-tight text-zinc-900 dark:text-zinc-100 mb-4">
+            Sign in required
+          </h1>
+          <p className="text-zinc-600 dark:text-zinc-400 mb-6">
+            You need to be signed in to access the hub.
+          </p>
+          <button
+            onClick={() => router.push("/")}
+            className="bg-neutral-900 text-white px-6 py-2 rounded font-hamburg hover:bg-neutral-800 transition-colors"
+          >
+            Go to Sign In
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
+      <div className="max-w-6xl mx-auto flex justify-end mb-4">
+        <SignOutButton />
+      </div>
+      <section className="mx-auto max-w-6xl">
+        <header className="mb-10 text-center">
+          <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">
+            Pick a game
+          </h1>
+          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+            Daily puzzles and prototypes. More coming soon.
+          </p>
+        </header>
+
+        {/* Responsive 3/2/1 grid */}
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {CARDS.map((card) => (
+            <GameTile key={card.title} card={card} />
+          ))}
+        </div>
+      </section>
+    </main>
   );
 }
