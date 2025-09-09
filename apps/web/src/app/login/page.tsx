@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, signInWithGoogle } from "@/lib/firebase";
@@ -13,7 +13,7 @@ interface FieldErrors {
 
 const ENABLE_APPLE = false;
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
@@ -287,4 +287,12 @@ function getFriendlyError(err: unknown): string {
     if (typeof message === "string") return message;
   }
   return "Something went wrong. Please try again.";
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <LoginContent />
+    </Suspense>
+  );
 }
