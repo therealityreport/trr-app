@@ -35,4 +35,80 @@
   .game-card-header {
     @apply relative grid place-items-center p-6;
   }
+
+  /* Realitease board tiles */
+  .realitease-board {
+    --realitease-tile-size: 58px;
+  }
+
+  .realitease-tile {
+    perspective: 900px;
+    width: var(--realitease-tile-size);
+    height: var(--realitease-tile-size);
+  }
+
+  .realitease-tile__inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    transition: transform 620ms cubic-bezier(0.42, 0.17, 0.3, 1.02);
+    transition-delay: var(--flip-delay, 0ms);
+  }
+
+  .realitease-tile__face {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-transform: uppercase;
+    border-radius: 0;
+    border-width: 1px;
+    border-style: solid;
+    backface-visibility: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  .realitease-tile__face--front {
+    transform: rotateX(0deg);
+  }
+
+  .realitease-tile__face--back {
+    transform: rotateX(180deg);
+  }
+
+  .realitease-tile--revealed .realitease-tile__inner {
+    transform: rotateX(180deg);
+  }
+
+  .realitease-tile--manual .realitease-tile__inner {
+    animation: realitease-tile-manual-flip 620ms cubic-bezier(0.42, 0.17, 0.3, 1.02);
+    animation-fill-mode: forwards;
+    transition: none;
+  }
+
+  .realitease-tile__value {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    padding-inline: 2px;
+    text-align: center;
+    white-space: pre-line;
+  }
+
+  @keyframes realitease-tile-manual-flip {
+    0% {
+      transform: rotateX(var(--flip-start, 0deg));
+    }
+    50% {
+      transform: rotateX(calc(var(--flip-start, 0deg) + 180deg));
+    }
+    100% {
+      transform: rotateX(var(--flip-start, 0deg));
+    }
+  }
 }

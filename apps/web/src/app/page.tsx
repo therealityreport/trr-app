@@ -4,6 +4,8 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import Image from "next/image";
 import { onUser, signInWithGoogle, logout, initAnalytics } from "@/lib/firebase";
 import { logEvent } from "firebase/analytics";
 import type { User } from "firebase/auth";
@@ -125,10 +127,13 @@ export default function Page() {
     <div className="min-h-screen w-full relative bg-white">
       {/* Header → Banner */}
       <div className="w-full h-20 border-b border-black flex items-center justify-center">
-        <img 
-          className="w-80 h-[70.2px]" 
-          src="/images/logos/FullName-Black.png" 
+        <Image
+          className="w-80 h-[70.2px]"
+          src="/images/logos/FullName-Black.png"
           alt="The Reality Report"
+          width={320}
+          height={70}
+          priority
         />
       </div>
 
@@ -250,8 +255,18 @@ export default function Page() {
         <div className="w-full flex items-center justify-center">
           <p className="text-black text-sm font-hamburg font-normal leading-[21px] text-center">
             By continuing, you agree to the{" "}
-            <span className="underline">Terms of Sale</span>, <span className="underline">Terms of Service</span>, and{" "}
-            <span className="underline">Privacy Policy</span>.
+            <Link href="/terms-of-sale" className="underline">
+              Terms of Sale
+            </Link>
+            {", "}
+            <Link href="/terms-of-service" className="underline">
+              Terms of Service
+            </Link>
+            {", and "}
+            <Link href="/privacy-policy" className="underline">
+              Privacy Policy
+            </Link>
+            .
           </p>
         </div>
         </form>

@@ -9,6 +9,7 @@ import { getUserByUsername, getUserProfile, upsertUserProfile } from "@/lib/db/u
 import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
 import { ALL_SHOWS } from "@/lib/data/shows";
 import ClientOnly from "@/components/ClientOnly";
+import Image from "next/image";
 
 type FieldErrors = Partial<Record<"username" | "birthday" | "shows", string>>;
 
@@ -78,11 +79,12 @@ function FinishProfileContent() {
 
   const selectedShows = useMemo(() => Object.keys(showSelections).filter((s) => showSelections[s]), [showSelections]);
   
-  // Calculate max date for birthday (18+ years ago)
+  // Calculate max date for birthday (enforce 13+ age requirement from validation)
   const maxDate = useMemo(() => {
     const today = new Date();
-    const eighteenYearsAgo = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
-    return eighteenYearsAgo.toISOString().split('T')[0];
+    const minimumAge = 13;
+    const cutoffDate = new Date(today.getFullYear() - minimumAge, today.getMonth(), today.getDate());
+    return cutoffDate.toISOString().split("T")[0];
   }, []);
   
   // Color palette for show pills
@@ -235,10 +237,13 @@ function FinishProfileContent() {
       <div className="min-h-screen bg-zinc-50 dark:bg-black">
         {/* Header */}
         <div className="w-full h-20 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-center px-4">
-          <img 
-            className="w-80 h-[70.2px] max-w-full" 
-            src="/images/logos/FullName-Black.png" 
+          <Image
+            className="w-80 h-[70.2px] max-w-full"
+            src="/images/logos/FullName-Black.png"
             alt="The Reality Report"
+            width={320}
+            height={70}
+            priority
           />
         </div>
 

@@ -35,6 +35,7 @@ const hamburgSerial = localFont({
   src: [
     { path: "../../public/fonts/hamburg-serial-regular.ttf", weight: "400" },
     { path: "../../public/fonts/HamburgSerial Medium.ttf", weight: "500" },
+    { path: "../../public/fonts/HamburgSerial Xbold.ttf", weight: "800" },
   ],
   variable: "--font-hamburg",
   display: "swap",

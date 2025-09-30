@@ -10,7 +10,10 @@
     "web:emu": "npm --prefix apps/web run dev:emu",
     "web:dev": "npm --prefix apps/web run dev",
     "web:build": "npm --prefix apps/web run build",
-    "web:start": "npm --prefix apps/web run start"
+    "web:start": "npm --prefix apps/web run start",
+    "wordle:dev": "npm --prefix apps/vue-wordle run dev",
+    "wordle:build": "npm --prefix apps/vue-wordle run build",
+    "wordle:preview": "npm --prefix apps/vue-wordle run preview"
   },
   "private": true,
   "workspaces": [],

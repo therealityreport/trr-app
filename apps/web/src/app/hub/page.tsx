@@ -16,7 +16,7 @@ type GameCard = {
 
 const CARDS: GameCard[] = [
   { title: "Realations", href: "/realations", tone: "bg-yellow-400", cta: "Play" },
-  { title: "Realitease", href: "/realitease", tone: "bg-neutral-200", cta: "Play" },
+  { title: "Realitease", href: "/realitease/cover", tone: "bg-neutral-200", cta: "Play" },
   {
     title: "Realtime",
     href: "/realtime",
