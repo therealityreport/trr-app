@@ -1980,6 +1980,10 @@ export class RealiteaseManager {
           ? imdbIdSource.filter((guest): guest is string => typeof guest === "string")
           : undefined;
 
+        if (!airDate && !episodeId && (!otherGuests || otherGuests.length === 0) && (!otherGuestsIMDbIds || otherGuestsIMDbIds.length === 0)) {
+          return null;
+        }
+
         const appearance: RealiteaseTalentRecord["wwhlAppearances"][number] = {};
         if (airDate) {
           appearance.airDate = airDate;
