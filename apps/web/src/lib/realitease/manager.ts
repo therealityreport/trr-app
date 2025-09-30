@@ -1980,12 +1980,20 @@ export class RealiteaseManager {
           ? imdbIdSource.filter((guest): guest is string => typeof guest === "string")
           : undefined;
 
-        return {
-          airDate: airDate ?? undefined,
-          episodeId: episodeId ?? undefined,
-          otherGuests,
-          otherGuestsIMDbIds,
-        };
+        const appearance: RealiteaseTalentRecord["wwhlAppearances"][number] = {};
+        if (airDate) {
+          appearance.airDate = airDate;
+        }
+        if (episodeId) {
+          appearance.episodeId = episodeId;
+        }
+        if (otherGuests && otherGuests.length > 0) {
+          appearance.otherGuests = otherGuests;
+        }
+        if (otherGuestsIMDbIds && otherGuestsIMDbIds.length > 0) {
+          appearance.otherGuestsIMDbIds = otherGuestsIMDbIds;
+        }
+        return appearance;
       })
       .filter((value): value is RealiteaseTalentRecord["wwhlAppearances"][number] => value !== null);
 
