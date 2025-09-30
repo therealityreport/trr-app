@@ -1,6 +1,6 @@
 // Server-only Firebase Admin initialization
 import "server-only";
-import { getApps, initializeApp, applicationDefault, cert } from "firebase-admin/app";
+import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 

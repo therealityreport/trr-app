@@ -369,7 +369,7 @@ export default function RealiteaseGamePage() {
   const [completionStatsError, setCompletionStatsError] = useState<string | null>(null);
   const [completionShareStatus, setCompletionShareStatus] = useState<ShareStatus>("idle");
   const [completionLoadedSignature, setCompletionLoadedSignature] = useState<string | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const helpMenuRef = useRef<HTMLDivElement | null>(null);
   const shareResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completionShowTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -527,7 +527,7 @@ export default function RealiteaseGamePage() {
     hasInitializedGuessCountRef.current = false;
     previousGuessCountRef.current = gameSnapshot?.guesses?.length ?? 0;
     completionAnimationNeededRef.current = false;
-  }, [gameSnapshot?.puzzleDate]);
+  }, [gameSnapshot?.puzzleDate, gameSnapshot?.guesses?.length]);
 
   useEffect(() => {
     if (!authLoading && !userId) {
@@ -1103,7 +1103,7 @@ interface TalentSearchProps {
   onDropdownToggle: (open: boolean) => void;
   onSelect: (talent: RealiteaseTalentRecord) => void;
   onSubmit: () => void;
-  inputRef: RefObject<HTMLInputElement>;
+  inputRef: RefObject<HTMLInputElement | null>;
 }
 
 function TalentSearch({
