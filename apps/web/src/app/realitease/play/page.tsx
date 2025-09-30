@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 
 import { AuthDebugger } from "@/lib/debug";
@@ -369,6 +369,7 @@ export default function RealiteaseGamePage() {
   const [completionStatsError, setCompletionStatsError] = useState<string | null>(null);
   const [completionShareStatus, setCompletionShareStatus] = useState<ShareStatus>("idle");
   const [completionLoadedSignature, setCompletionLoadedSignature] = useState<string | null>(null);
+  const [forceStatsRequested, setForceStatsRequested] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const helpMenuRef = useRef<HTMLDivElement | null>(null);
   const shareResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -377,12 +378,9 @@ export default function RealiteaseGamePage() {
   const previousGuessCountRef = useRef<number>(0);
   const hasInitializedGuessCountRef = useRef(false);
   const completionAnimationNeededRef = useRef(false);
-  const forcedStatsClearedRef = useRef(false);
 
   const puzzleDateKey = useMemo(() => getRealiteaseDateKey(), []);
   const userId = user?.uid ?? null;
-  const searchParams = useSearchParams();
-  const shouldForceStats = searchParams.get("show") === "stats";
 
   useEffect(() => {
     if (!isHelpMenuOpen) return;
@@ -456,6 +454,16 @@ export default function RealiteaseGamePage() {
     }
     completionAnimationNeededRef.current = false;
     setIsCompletionOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("show") === "stats") {
+      setForceStatsRequested(true);
+      url.searchParams.delete("show");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+    }
   }, []);
 
   const handleShareResults = useCallback(async () => {
@@ -595,11 +603,12 @@ export default function RealiteaseGamePage() {
   }, [gameSnapshot?.gameCompleted]);
 
   useEffect(() => {
-    if (!isCompletionOpen && !gameSnapshot?.gameCompleted) return;
+    if (!gameSnapshot) return;
     if (!userId) return;
     if (!manager) return;
+    if (!gameSnapshot.gameCompleted && !forceStatsRequested) return;
 
-    const dateKey = gameSnapshot?.puzzleDate ?? puzzleDateKey;
+    const dateKey = gameSnapshot.puzzleDate ?? puzzleDateKey;
     const solvedGuessNumber = gameSnapshot?.guessNumberSolved ?? null;
     const signature = `${dateKey}:${solvedGuessNumber ?? "X"}`;
 
@@ -638,14 +647,18 @@ export default function RealiteaseGamePage() {
   }, [
     completionLoadedSignature,
     completionStats,
-    gameSnapshot?.gameCompleted,
-    gameSnapshot?.guessNumberSolved,
-    gameSnapshot?.puzzleDate,
-    isCompletionOpen,
+    forceStatsRequested,
+    gameSnapshot,
     manager,
     puzzleDateKey,
     userId,
   ]);
+
+  useEffect(() => {
+    if (!forceStatsRequested) return;
+    handleOpenStatsModal();
+    setForceStatsRequested(false);
+  }, [forceStatsRequested, handleOpenStatsModal]);
 
   useEffect(() => {
     if (completionShowTimeoutRef.current) {
@@ -666,7 +679,7 @@ export default function RealiteaseGamePage() {
       completionSignatureRef.current = signature;
     }
 
-    const shouldDelay = isNewCompletion && completionAnimationNeededRef.current && !shouldForceStats;
+    const shouldDelay = isNewCompletion && completionAnimationNeededRef.current && !forceStatsRequested;
     const delay = shouldDelay ? COMPLETION_MODAL_DELAY_MS : 0;
 
     completionShowTimeoutRef.current = setTimeout(() => {
@@ -680,21 +693,7 @@ export default function RealiteaseGamePage() {
         completionShowTimeoutRef.current = null;
       }
     };
-  }, [gameSnapshot?.gameCompleted, gameSnapshot?.guessNumberSolved, gameSnapshot?.puzzleDate, puzzleDateKey, shouldForceStats]);
-
-  useEffect(() => {
-    if (!shouldForceStats) {
-      forcedStatsClearedRef.current = false;
-      return;
-    }
-
-    if (!gameSnapshot?.gameCompleted) return;
-    if (!isCompletionOpen) return;
-    if (forcedStatsClearedRef.current) return;
-
-    router.replace("/realitease/play", { scroll: false });
-    forcedStatsClearedRef.current = true;
-  }, [gameSnapshot?.gameCompleted, isCompletionOpen, router, shouldForceStats]);
+  }, [gameSnapshot?.gameCompleted, gameSnapshot?.guessNumberSolved, gameSnapshot?.puzzleDate, puzzleDateKey, forceStatsRequested]);
 
   useEffect(() => {
     if (!isCompletionOpen && completionShareStatus !== "idle") {
