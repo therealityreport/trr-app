@@ -1729,7 +1729,7 @@ export class RealiteaseManager {
       guessedInfo: cleanedInfo,
       submittedAt,
       win: isCorrect,
-      fields,
+      fields: fields.reduce((acc, field, index) => ({ ...acc, [index]: field }), {} as Record<string, unknown>),
     };
 
     return this.removeUndefinedDeep(payload);
