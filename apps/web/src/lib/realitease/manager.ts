@@ -1963,19 +1963,19 @@ export class RealiteaseManager {
     const appearances = appearancesSource
       .map((entry) => {
         if (!entry || typeof entry !== "object") return null;
-        const appearance = entry as Record<string, unknown>;
+        const rawAppearance = entry as Record<string, unknown>;
 
-        const airDate = this.extractStringField(appearance.airDate, appearance.date, appearance.AirDate);
+        const airDate = this.extractStringField(rawAppearance.airDate, rawAppearance.date, rawAppearance.AirDate);
         const episodeId = this.extractStringField(
-          appearance.episodeId,
-          appearance.episodeID,
-          appearance.EpisodeId,
-          appearance.id,
+          rawAppearance.episodeId,
+          rawAppearance.episodeID,
+          rawAppearance.EpisodeId,
+          rawAppearance.id,
         );
-        const otherGuests = Array.isArray(appearance.otherGuests)
-          ? appearance.otherGuests.filter((guest): guest is string => typeof guest === "string")
+        const otherGuests = Array.isArray(rawAppearance.otherGuests)
+          ? rawAppearance.otherGuests.filter((guest): guest is string => typeof guest === "string")
           : undefined;
-        const imdbIdSource = appearance.otherGuestsIMDbIds ?? appearance.otherGuestsImdbIds;
+        const imdbIdSource = rawAppearance.otherGuestsIMDbIds ?? rawAppearance.otherGuestsImdbIds;
         const otherGuestsIMDbIds = Array.isArray(imdbIdSource)
           ? imdbIdSource.filter((guest): guest is string => typeof guest === "string")
           : undefined;
