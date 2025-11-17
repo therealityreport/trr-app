@@ -9,8 +9,6 @@ import Image from "next/image";
 import { onUser, signInWithGoogle, logout, initAnalytics } from "@/lib/firebase";
 import { logEvent } from "firebase/analytics";
 import type { User } from "firebase/auth";
-import { OAuthProvider, signInWithPopup } from "firebase/auth";
-import { auth } from "@/lib/firebase";
 import { checkUserExists } from "@/lib/db/users";
 import { AuthDebugger, EnvUtils } from "@/lib/debug";
 
@@ -69,25 +67,26 @@ export default function Page() {
     }
   };
 
-  const handleApple = async () => {
-    try {
-      AuthDebugger.log("Main page: Starting Apple sign-in");
-      const provider = new OAuthProvider("apple.com");
-      const result = await signInWithPopup(auth, provider);
-      const idToken = await result.user.getIdToken();
-      await fetch("/api/session/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ idToken }),
-        credentials: "include",
-      });
-      AuthDebugger.log("Main page: Apple sign-in successful, redirecting to complete");
-      router.replace("/auth/complete");
-    } catch (error) {
-      AuthDebugger.log("Main page: Apple sign-in error", { error: error?.toString() });
-      // noop; user may cancel
-    }
-  };
+  // Removed unused handleApple function
+  // const handleApple = async () => {
+  //   try {
+  //     AuthDebugger.log("Main page: Starting Apple sign-in");
+  //     const provider = new OAuthProvider("apple.com");
+  //     const result = await signInWithPopup(auth, provider);
+  //     const idToken = await result.user.getIdToken();
+  //     await fetch("/api/session/login", {
+  //       method: "POST",
+  //       headers: { "content-type": "application/json" },
+  //       body: JSON.stringify({ idToken }),
+  //       credentials: "include",
+  //     });
+  //     AuthDebugger.log("Main page: Apple sign-in successful, redirecting to complete");
+  //     router.replace("/auth/complete");
+  //   } catch (error) {
+  //     AuthDebugger.log("Main page: Apple sign-in error", { error: error?.toString() });
+  //     // noop; user may cancel
+  //   }
+  // };
 
   const handleHubNavigation = () => {
     AuthDebugger.log("Main page: User clicked 'Go to Hub' button");

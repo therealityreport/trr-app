@@ -6,7 +6,7 @@ import type { RealiteaseGuess } from "@/lib/realitease/types";
 
 const TILE_SUCCESS_COLOR = "#60811F";
 const TILE_NEUTRAL_COLOR = "#5D5F63";
-const SHARE_COLUMNS = REALITEASE_BOARD_COLUMNS.filter((column) => column.key !== "guess");
+const DEFAULT_SHARE_COLUMNS = REALITEASE_BOARD_COLUMNS.filter((column) => column.key !== "guess");
 
 const VERDICT_EMOJI_MAP: Record<string, string> = {
   correct: "🟩",
@@ -31,6 +31,7 @@ export interface RealiteaseCompletedViewProps {
   onShare: () => void;
   shareStatus: ShareStatus;
   shareDisabled?: boolean;
+  hideGuessDistribution?: boolean;
 }
 
 export function buildShareText(
@@ -38,12 +39,13 @@ export function buildShareText(
   guesses: RealiteaseGuess[],
   maxGuesses: number,
   solvedGuessNumber: number | null,
+  columns: Array<{ key: string; label: string }> = DEFAULT_SHARE_COLUMNS,
 ): string {
   const header = `Realitease ${puzzleDate ?? ""}`.trim();
   const resultToken = `${solvedGuessNumber !== null ? solvedGuessNumber : "X"}/${maxGuesses}`;
   const grid = guesses
     .map((guess) => {
-      const verdicts = SHARE_COLUMNS.map((column) => {
+      const verdicts = columns.map((column) => {
         const field = guess.fields.find((entry) => entry.key === column.key);
         const verdictKey = field?.verdict ?? "unknown";
         return VERDICT_EMOJI_MAP[verdictKey] ?? VERDICT_EMOJI_MAP.unknown;
@@ -67,6 +69,7 @@ export function RealiteaseCompletedView({
   onShare,
   shareStatus,
   shareDisabled = false,
+  hideGuessDistribution = false,
 }: RealiteaseCompletedViewProps) {
   if (!open) return null;
 
@@ -125,23 +128,29 @@ export function RealiteaseCompletedView({
                 <StatBlock label="Max Streak" value={longestStreak} multiline />
               </div>
 
-              <div className="w-full text-left">
-                <p className="text-xs font-bold uppercase tracking-[0.28em] text-black">Guess Distribution</p>
-                <div className="mt-4 space-y-2">
-                  {distributionRows.map(({ guessNumber, count }) => {
-                    const isToday = todayGuessNumber === guessNumber && isWin;
-                    return (
-                      <GuessDistributionRow
-                        key={guessNumber}
-                        guessNumber={guessNumber}
-                        count={count}
-                        maxCount={maxDistributionCount}
-                        highlight={isToday}
-                      />
-                    );
-                  })}
+              {hideGuessDistribution ? (
+                <p className="w-full text-sm text-gray-600">
+                  Guess distribution updates after you finish today&apos;s puzzle.
+                </p>
+              ) : (
+                <div className="w-full text-left">
+                  <p className="text-xs font-bold uppercase tracking-[0.28em] text-black">Guess Distribution</p>
+                  <div className="mt-4 space-y-2">
+                    {distributionRows.map(({ guessNumber, count }) => {
+                      const isToday = todayGuessNumber === guessNumber && isWin;
+                      return (
+                        <GuessDistributionRow
+                          key={guessNumber}
+                          guessNumber={guessNumber}
+                          count={count}
+                          maxCount={maxDistributionCount}
+                          highlight={isToday}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </Fragment>
           )}
 

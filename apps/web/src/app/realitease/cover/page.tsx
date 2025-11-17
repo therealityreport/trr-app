@@ -9,25 +9,10 @@ import { formatRealiteaseDisplayDate, getRealiteaseDateKey } from "@/lib/realite
 import type { RealiteaseGameSnapshot } from "@/lib/realitease/types";
 import { User } from "firebase/auth";
 import "@/styles/realitease-fonts.css";
+import GameHeader from "@/components/GameHeader";
 
-// Realitease SVG icon using the actual design asset
 function RealiteaseIcon() {
-  return (
-    <div className="w-20 h-20 relative overflow-hidden">
-      <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M53.8852 27.2648H53.8723V27.2777H53.8852V27.2648Z" fill="#769F25"/>
-        <path d="M53.8723 29.2277V74.9952H70.4798C72.9722 74.9952 74.9997 72.9935 74.9997 70.527V52.021V29.3311L53.8723 29.2277Z" fill="#B05988"/>
-        <path d="M74.2635 9.32715V25.4439L53.8981 25.3535L53.9885 4.96219H69.8986C72.3007 4.96219 74.2635 6.92513 74.2635 9.32715Z" fill="white"/>
-        <path d="M51.1603 52.6409V74.9694H29.0385V52.5377L51.1603 52.6409Z" fill="#B05988"/>
-        <path d="M51.4701 27.7942L51.3539 50.9492L28.2249 50.82L28.3281 27.7039L51.4701 27.7942Z" fill="#ECC91C"/>
-        <path d="M50.114 4.96219L50.0237 25.3277L29.6323 25.2502V4.96219H50.114Z" fill="white"/>
-        <path d="M27.4112 52.4214V75.0855H9.56399C6.90369 75.0855 4.73413 72.916 4.73413 70.2557V52.4214H27.4112Z" fill="#B05988"/>
-        <path d="M25.7452 29.2277L25.6419 49.5932H5.21179V29.2277H25.7452Z" fill="white"/>
-        <path d="M25.7581 4.96219V25.3535H5.21179V9.32716C5.21179 6.92513 7.17473 4.96219 9.58966 4.96219H25.7581Z" fill="white"/>
-        <path d="M69.8511 1.29032H9.54237C4.99662 1.29032 1.29028 4.98374 1.29028 9.5295V69.8382C1.29028 74.384 4.99662 78.0903 9.54237 78.0903H69.8511C74.3969 78.0903 78.0903 74.384 78.0903 69.8382V9.5295C78.0903 4.99666 74.3969 1.29032 69.8511 1.29032ZM53.8247 27.4801H53.8376V27.493H53.8247V27.4801ZM5.17742 29.443H25.7108L25.6074 49.8085H5.17742V29.443ZM25.7108 74.229H9.54237C7.12744 74.229 5.1645 72.2661 5.1645 69.8511V53.6698H25.7108V74.229ZM25.7108 25.5688H5.17742V9.5295C5.17742 7.12748 7.14036 5.16454 9.55529 5.16454H25.7237V25.5688H25.7108ZM49.9505 74.229H29.585V53.5794L49.9505 53.6827V74.229ZM49.8472 49.7956L29.4818 49.6923L29.5721 29.3268L49.9505 29.4043L49.8472 49.7956ZM49.9764 25.543L29.585 25.4654V5.16454H50.0668L49.9764 25.543ZM74.2161 69.8511C74.2161 72.2661 72.2531 74.229 69.8511 74.229H53.8247V53.6698H74.2161V69.8511ZM74.2161 49.7956H53.7343L53.8247 29.4301L74.2161 29.5205V49.7956ZM74.2161 25.6592L53.8505 25.5688L53.941 5.17746H69.8511C72.2531 5.17746 74.2161 7.1404 74.2161 9.54241V25.6592Z" fill="black"/>
-      </svg>
-    </div>
-  );
+  return <img src="/icons/Realitease-Icon.svg" alt="Realitease icon" className="w-20 h-20" />;
 }
 
 export default function RealiteaseCover() {
@@ -41,12 +26,8 @@ export default function RealiteaseCover() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const puzzleDateKey = useMemo(() => getRealiteaseDateKey(), []);
   const displayDate = useMemo(() => formatRealiteaseDisplayDate(), []);
-  const puzzleNumber = useMemo(() => {
-    const msPerDay = 1000 * 60 * 60 * 24;
-    const start = new Date(2024, 0, 1).setHours(0, 0, 0, 0);
-    const today = new Date().setHours(0, 0, 0, 0);
-    return Math.max(0, Math.floor((today - start) / msPerDay));
-  }, []);
+  const [puzzleNumber, setPuzzleNumber] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const userId = user?.uid ?? null;
   const ctaLabel = useMemo(() => {
     switch (cta) {
@@ -127,6 +108,25 @@ export default function RealiteaseCover() {
   }, [manager, puzzleDateKey, resolveCta, userId]);
 
   useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const displayNumber = await manager.getPuzzleNumber(puzzleDateKey);
+        if (isMounted) {
+          setPuzzleNumber(displayNumber);
+        }
+      } catch (error) {
+        AuthDebugger.log("Realitease Cover: Unable to compute puzzle number", {
+          message: error instanceof Error ? error.message : error,
+        });
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [manager, puzzleDateKey]);
+
+  useEffect(() => {
     AuthDebugger.log("Realitease Cover: Component mounted");
     
     const unsubscribe = auth.onAuthStateChanged((authUser) => {
@@ -200,98 +200,83 @@ export default function RealiteaseCover() {
   }
 
   return (
-    <div className="min-h-screen bg-blue-300 flex flex-col justify-start items-start overflow-hidden">
-      <div className="w-full max-w-[1440px] bg-blue-300 inline-flex flex-col justify-start items-start overflow-hidden">
-        <div className="self-stretch px-4 sm:px-10 pt-8 sm:pt-12 flex flex-col justify-start items-center">
-          <div className="w-full max-w-[600px] h-[700px] sm:h-[850px] relative">
-            
-            {/* Back button */}
-            <button 
-              onClick={handleBack}
-              className="absolute top-4 left-4 text-black hover:text-gray-700 transition-colors z-10"
-              aria-label="Go back"
+    <div className="min-h-screen bg-[#94aed1]">
+      <GameHeader showStatsButton={false} showHelpMenu={false} onSettingsClick={() => setSettingsOpen(true)} />
+      <main className="px-4 py-8 sm:px-8 sm:py-12">
+      <div className="mx-auto flex w-full max-w-[600px] flex-col gap-12">
+        <button
+          onClick={handleBack}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-black/40 bg-black/10 text-black hover:bg-black/20"
+          aria-label="Go back"
+        >
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        <div className="flex flex-1 flex-col items-center justify-center gap-10 text-center">
+          <div className="size-20">
+            <RealiteaseIcon />
+          </div>
+          <div className="space-y-3 px-2">
+            <h1 className="text-4xl font-bold tracking-wide text-white sm:text-5xl" style={{ fontFamily: "var(--font-rude-slab)" }}>
+              Realitease
+            </h1>
+            <p className="text-3xl leading-snug text-white" style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}>
+              Get 8 chances to guess the Reality TV Star
+            </p>
+          </div>
+
+          <div className="w-full space-y-4 px-2">
+            <button
+              onClick={handlePrimaryCta}
+              disabled={isCtaDisabled}
+              className="mx-auto inline-flex w-full max-w-[240px] items-center justify-center rounded-full bg-black px-8 py-3 text-base font-semibold text-white shadow hover:bg-gray-900 disabled:cursor-not-allowed disabled:bg-gray-600"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
+              {ctaLabel}
             </button>
 
-            {/* Icon positioned exactly as specified */}
-            <div className="absolute w-[600px] h-20 left-[-0.85px] top-[212.52px] inline-flex flex-col justify-start items-start">
-              <div className="w-[600px] h-20 px-64 flex flex-col justify-center items-center overflow-hidden">
-                <div className="size-20 relative overflow-hidden">
-                  <RealiteaseIcon />
-                </div>
+            {errorMessage ? (
+              <p className="text-sm text-white/90">{errorMessage}</p>
+            ) : dailyClue ? (
+              <div className="mx-auto w-full max-w-[380px] rounded-2xl border border-white/20 bg-white/20 px-4 py-3 text-sm text-white shadow-sm backdrop-blur">
+                <p className="font-semibold uppercase tracking-wide text-white/90">Daily Clue</p>
+                <p className="mt-1 text-white">{dailyClue}</p>
               </div>
-            </div>
+            ) : null}
+          </div>
 
-            {/* Title with exact positioning and NYTKarnak_Condensed font */}
-            <div className="absolute pb-3 left-[198.15px] top-[314.52px] inline-flex flex-col justify-start items-start">
-              <div className="flex flex-col justify-start items-center">
-                <h1 className="text-center justify-center text-black text-5xl font-bold font-['NYTKarnak_Condensed'] leading-[52px] tracking-wide">
-                  Realitease
-                </h1>
-              </div>
-            </div>
-
-            {/* Subtitle with exact positioning and KarnakPro-Book font */}
-            <div className="max-w-96 pb-9 left-[112.15px] top-[378.52px] absolute inline-flex flex-col justify-start items-start">
-              <div className="h-20 max-w-96 min-w-96 px-[5.16px] flex flex-col justify-start items-center">
-                <h2 className="w-[623px] text-center justify-center text-black text-4xl font-normal font-['KarnakPro-Book'] leading-10">
-                  Get 8 chances to guess<br/>the Reality TV Star
-                </h2>
-              </div>
-            </div>
-
-            {/* Play Button with exact positioning and NYTFranklin font */}
-            <div className="w-[600px] pb-7 left-[0.15px] top-[483.52px] absolute inline-flex flex-col justify-start items-start">
-              <div className="self-stretch inline-flex justify-center items-center">
-                <div className="w-48 h-14 px-2.5 pb-2 inline-flex flex-col justify-start items-start">
-                  <button 
-                    onClick={handlePrimaryCta}
-                    disabled={isCtaDisabled}
-                    className="w-44 h-12 px-8 bg-black rounded-3xl flex flex-col justify-center items-center hover:bg-gray-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    <span className="text-center justify-center text-white text-base font-medium font-['NYTFranklin'] leading-7 tracking-wide">
-                      {ctaLabel}
-                    </span>
-                  </button>
-                  {errorMessage && (
-                    <p className="mt-3 w-full text-center text-sm text-red-700">
-                      {errorMessage}
-                    </p>
-                  )}
-                  {!errorMessage && dailyClue && (
-                    <div className="mt-4 w-full rounded-2xl bg-white/70 px-4 py-3 text-center text-sm text-gray-700 shadow-sm backdrop-blur">
-                      <p className="font-semibold uppercase tracking-wide text-gray-600">Daily Clue</p>
-                      <p className="mt-1 text-gray-800">{dailyClue}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Date and Info with exact positioning and specified fonts */}
-            <div className="left-[241.15px] top-[577px] absolute inline-flex flex-col justify-start items-start">
-              <div className="self-stretch flex flex-col justify-start items-center">
-                <div className="text-center justify-center text-black text-base font-bold font-['TN_Web_Use_Only'] leading-tight tracking-tight">
-                  {displayDate}
-                </div>
-              </div>
-              <div className="self-stretch flex flex-col justify-start items-center">
-                <div className="text-center justify-center text-black text-base font-normal font-['Helvetica_Neue'] leading-tight tracking-tight">
-                  No. {puzzleNumber.toString().padStart(4, "0")}
-                </div>
-              </div>
-              <div className="self-stretch flex flex-col justify-start items-center">
-                <div className="text-center justify-center text-black text-base font-normal font-['Helvetica_Neue'] leading-tight tracking-tight">
-                  Edited by TRR
-                </div>
-              </div>
-            </div>
+          <div className="space-y-1 text-sm font-semibold text-white">
+            <p className="font-['TN_Web_Use_Only'] uppercase tracking-[0.2em]">{displayDate}</p>
+            <p className="font-['Helvetica_Neue'] uppercase tracking-[0.3em]">No. {(puzzleNumber ?? "---").padStart(3, "0")}</p>
+            <p className="font-['Helvetica_Neue'] uppercase tracking-[0.2em]">Created by The Reality Reporter</p>
           </div>
         </div>
       </div>
+      </main>
+      {settingsOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/50" aria-hidden onClick={() => setSettingsOpen(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-start justify-between">
+              <h2 className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>Realitease Settings</h2>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="rounded-full p-2 hover:bg-black/5"
+                aria-label="Close settings"
+              >
+                <svg width="24" height="24" viewBox="0 0 31 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M24.0249 8.84795L22.2624 7.08545L15.2749 14.0729L8.28743 7.08545L6.52493 8.84795L13.5124 15.8354L6.52493 22.8229L8.28743 24.5854L15.2749 17.5979L22.2624 24.5854L24.0249 22.8229L17.0374 15.8354L24.0249 8.84795Z" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-lg" style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}>
+              More settings coming soon.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

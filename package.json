@@ -4,13 +4,17 @@
     "firebase-admin": "^13.5.0"
   },
   "scripts": {
+    "dev": "npm run web:dev",
+    "dev:stable": "npm run web:dev:stable",
     "emulators": "firebase emulators:start --import=.emulator-data --export-on-exit",
     "dev:local": "concurrently -k -n emu,web -c blue,green \"npm run emulators\" \"npm --prefix apps/web run dev:emu\"",
     "dev:local:3001": "concurrently -k -n emu,web -c blue,green \"npm run emulators\" \"PORT=3001 npm run web:emu\"",
     "web:emu": "npm --prefix apps/web run dev:emu",
     "web:dev": "npm --prefix apps/web run dev",
+    "web:dev:stable": "npm --prefix apps/web run dev:stable",
     "web:build": "npm --prefix apps/web run build",
     "web:start": "npm --prefix apps/web run start",
+    "web:clean": "npm --prefix apps/web run clean",
     "wordle:dev": "npm --prefix apps/vue-wordle run dev",
     "wordle:build": "npm --prefix apps/vue-wordle run build",
     "wordle:preview": "npm --prefix apps/vue-wordle run preview"

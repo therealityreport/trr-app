@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/firebase";
-import { getUserProfile, upsertUserProfile } from "@/lib/db/users";
+import { getUserProfile } from "@/lib/db/users";
 import type { User } from "firebase/auth";
 
 function OAuthCallbackRedirectContent() {

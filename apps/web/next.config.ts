@@ -6,6 +6,14 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname, // ensure Turbopack uses this app as root
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "lh3.googleusercontent.com",
+      },
+    ],
+  },
   async headers() {
     return [
       {

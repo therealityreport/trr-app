@@ -15,6 +15,7 @@
   --font-serif: var(--font-gloucester), var(--font-playfair), var(--font-figma-serif), Georgia, "Times New Roman", serif;
   --font-display: var(--font-gloucester);
   --font-body: var(--font-hamburg);
+  --font-games: var(--font-plymouth-serial), var(--font-hamburg), var(--font-inter), var(--font-geist-sans);
 }
 
 /* Base element styling */
@@ -22,7 +23,7 @@
   html, body {
     min-height: 100%;
     background-color: #ffffff;
-    color: #171717;
+    color: #000000;
   }
 
   h1, h2, h3 {

@@ -11,8 +11,6 @@ interface FieldErrors {
   password?: string;
 }
 
-const ENABLE_APPLE = false;
-
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();

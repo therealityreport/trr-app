@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { auth, signInWithGoogle } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, OAuthProvider, signInWithPopup, updateProfile } from "firebase/auth";
 import { upsertUserProfile, getUserProfile, checkUserExists } from "@/lib/db/users";
-import { validateEmail, validatePassword, validateBirthday } from "@/lib/validation/user";
+import { validateEmail, validatePassword } from "@/lib/validation/user";
 
 const ENABLE_APPLE = (process.env.NEXT_PUBLIC_ENABLE_APPLE ?? "false").toLowerCase() === "true";
 
@@ -23,7 +23,6 @@ function RegisterContent() {
   const [isExistingUser, setIsExistingUser] = useState(false);
   const [emailLocked, setEmailLocked] = useState(false);
   const [name, setName] = useState("");
-  const [birthday, setBirthday] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
 
@@ -45,10 +44,8 @@ function RegisterContent() {
         if (savedStage === "details") setStage("details");
         const sEmail = sessionStorage.getItem("reg_email");
         const sName = sessionStorage.getItem("reg_name");
-        const sBirthday = sessionStorage.getItem("reg_birthday");
         if (sEmail) setEmail(sEmail);
         if (sName) setName(sName);
-        if (sBirthday) setBirthday(sBirthday);
       } catch {}
     }
   }, [searchParams]);
@@ -73,26 +70,6 @@ function RegisterContent() {
     }, 150);
   };
 
-  // Reset to original first page
-  const resetToEmailStage = () => {
-    setEmailLocked(false);
-    setIsExistingUser(false);
-    setEmail(""); // Clear the email completely
-    setName(""); // Clear name
-    setBirthday(""); // Clear birthday
-    setPassword(""); // Clear password
-    setConfirm(""); // Clear confirm password
-    setErrors({});
-    setFormError(null);
-    // Clear session storage
-    try {
-      sessionStorage.removeItem("reg_stage");
-      sessionStorage.removeItem("reg_email");
-      sessionStorage.removeItem("reg_name");
-      sessionStorage.removeItem("reg_birthday");
-    } catch {}
-    transitionToStage("email");
-  };
 
   // Redirect signed-in users with complete profiles away from register
   useEffect(() => {
@@ -117,32 +94,6 @@ function RegisterContent() {
     return unsub;
   }, [router, pending]);
 
-  const goDetails = (e: React.FormEvent) => {
-    e.preventDefault();
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      setErrors({ email: emailErr });
-      return;
-    }
-    
-    if (!emailLocked) {
-      setIsTransitioning(true);
-      setTimeout(async () => {
-        await checkIfUserExists(email);
-        setEmailLocked(true);
-        setIsTransitioning(false);
-      }, 150);
-    } else {
-      // If email is locked, this shouldn't happen, but handle gracefully
-      transitionToStage(isExistingUser ? "login" : "details");
-    }
-    
-    setErrors({});
-    try {
-      sessionStorage.setItem("reg_stage", "details");
-      sessionStorage.setItem("reg_email", email);
-    } catch {}
-  };
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,8 +245,6 @@ function RegisterContent() {
       setPending(false);
     }
   };
-
-  const emailDisabled = false;
 
   return (
     <div className="min-h-screen w-full relative bg-white">

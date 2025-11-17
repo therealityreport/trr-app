@@ -80,6 +80,8 @@ export class RealiteaseManager {
   private static talentCache: RealiteaseTalentRecord[] | null = null;
   private static talentCachePromise: Promise<RealiteaseTalentRecord[]> | null = null;
   private static talentCacheMap: Map<string, RealiteaseTalentRecord> | null = null;
+  private static puzzleIndexMap: Map<string, number> | null = null;
+  private static puzzleIndexPromise: Promise<Map<string, number>> | null = null;
 
   private constructor(private readonly firestore: Firestore) {}
 
@@ -205,6 +207,11 @@ export class RealiteaseManager {
 
     RealiteaseManager.talentCachePromise = fetchPromise;
     return fetchPromise;
+  }
+
+  async getPuzzleNumber(puzzleDate: string): Promise<string> {
+    const index = await this.getPuzzleIndex(puzzleDate);
+    return String(index).padStart(3, "0");
   }
 
   private async getAnswerKey(puzzleDate: string): Promise<RealiteaseAnswerKeyRecord | null> {
@@ -424,8 +431,13 @@ export class RealiteaseManager {
     });
   }
 
-  async getUserStatsSummary(uid: string): Promise<RealiteaseStatsSummary> {
+  async getUserStatsSummary(
+    uid: string,
+    options: { excludePuzzleDate?: string } = {},
+  ): Promise<RealiteaseStatsSummary> {
     if (!uid) throw new Error("RealiteaseManager.getUserStatsSummary requires a user id");
+
+    const { excludePuzzleDate } = options;
 
     const statsRef = collection(this.firestore, USER_ANALYTICS_COLLECTION, uid, USER_STATS_SUBCOLLECTION);
     const snapshot = await getDocs(statsRef);
@@ -469,6 +481,9 @@ export class RealiteaseManager {
     let lastWinDate: Date | null = null;
 
     entries.forEach((entry) => {
+      if (excludePuzzleDate && entry.puzzleDate === excludePuzzleDate) {
+        return;
+      }
       const attemptCount = entry.guesses.length;
       const attempted = attemptCount > 0 || entry.gameCompleted || entry.guessNumberSolved !== null;
       if (!attempted) {
@@ -540,6 +555,54 @@ export class RealiteaseManager {
 
   private getGlobalAnalyticsDocRef(date: string) {
     return doc(this.firestore, GLOBAL_ANALYTICS_COLLECTION, date);
+  }
+
+  private async getPuzzleIndex(puzzleDate: string): Promise<number> {
+    const map = await this.getPuzzleIndexMap();
+    if (map.has(puzzleDate)) {
+      return map.get(puzzleDate)!;
+    }
+    const values = Array.from(map.values());
+    return values.length ? Math.max(...values) + 1 : 1;
+  }
+
+  private async getPuzzleIndexMap(): Promise<Map<string, number>> {
+    if (RealiteaseManager.puzzleIndexMap) {
+      return RealiteaseManager.puzzleIndexMap;
+    }
+
+    if (RealiteaseManager.puzzleIndexPromise) {
+      return RealiteaseManager.puzzleIndexPromise;
+    }
+
+    const promise = (async () => {
+      const snapshot = await getDocs(collection(this.firestore, ANSWERKEY_COLLECTION));
+      const entries = snapshot.docs.map((docSnap) => {
+        const raw = docSnap.data() ?? {};
+        const asRecord = raw as Record<string, unknown>;
+        const explicit = this.extractStringField(asRecord.puzzleDate);
+        const normalized = explicit ?? docSnap.id;
+        return { id: docSnap.id, key: normalized };
+      });
+
+      entries.sort((a, b) => a.key.localeCompare(b.key));
+
+      const map = new Map<string, number>();
+      entries.forEach((entry, index) => {
+        const position = index + 1;
+        map.set(entry.id, position);
+        if (!map.has(entry.key)) {
+          map.set(entry.key, position);
+        }
+      });
+
+      RealiteaseManager.puzzleIndexMap = map;
+      RealiteaseManager.puzzleIndexPromise = null;
+      return map;
+    })();
+
+    RealiteaseManager.puzzleIndexPromise = promise;
+    return promise;
   }
 
   private async ensureUserAnalyticsDoc(uid: string) {

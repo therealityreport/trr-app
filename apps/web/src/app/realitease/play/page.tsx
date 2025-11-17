@@ -19,16 +19,21 @@ import {
 } from "@/lib/realitease/types";
 import { getRealiteaseDateKey } from "@/lib/realitease/utils";
 import RealiteaseCompletedView, { buildShareText, type ShareStatus } from "./completed-view";
+import GameHeader from "@/components/GameHeader";
+import { getUserPreferences, updateUserPreferences } from "@/lib/preferences";
 
-const BOARD_ROWS = 8;
+const BOARD_ROWS = 8; // maximum guesses
+const BOARD_MIN_ROWS = 7; // initial visible rows
 const TILE_FLIP_DURATION_MS = 620;
 const BOARD_REVEAL_STAGGER_MS = 120;
 const COMPLETION_MODAL_BUFFER_MS = 180;
 const COMPLETION_MODAL_DELAY_MS =
   TILE_FLIP_DURATION_MS + BOARD_REVEAL_STAGGER_MS * (REALITEASE_BOARD_COLUMNS.length - 1) + COMPLETION_MODAL_BUFFER_MS;
-const BOARD_TILE_MIN_SIZE_PX = 44;
-const BOARD_TILE_MAX_SIZE_PX = 75;
+const BOARD_TILE_MIN_SIZE_PX = 55; // fixed tile size (width/height)
+const BOARD_TILE_MAX_SIZE_PX = 55; // fixed tile size (width/height)
 const BOARD_TILE_GAP_PX = 5;
+const BOARD_ROW_GAP_PX = 5; // vertical spacing between board rows (matches space-y-[5px])
+const BOARD_HEADER_MARGIN_BOTTOM_PX = 10; // matches mb-[10px]
 const KEYBOARD_ROWS: string[][] = [
   ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
   ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
@@ -361,17 +366,22 @@ export default function RealiteaseGamePage() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState(false);
   const [isSubmittingGuess, setIsSubmittingGuess] = useState(false);
-  const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const [isCompletionOpen, setIsCompletionOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [completionStats, setCompletionStats] = useState<RealiteaseStatsSummary | null>(null);
   const [completionStatsLoading, setCompletionStatsLoading] = useState(false);
   const [completionStatsError, setCompletionStatsError] = useState<string | null>(null);
   const [completionShareStatus, setCompletionShareStatus] = useState<ShareStatus>("idle");
   const [completionLoadedSignature, setCompletionLoadedSignature] = useState<string | null>(null);
   const [forceStatsRequested, setForceStatsRequested] = useState(false);
+  const [isReportProblemOpen, setIsReportProblemOpen] = useState(false);
+  const [reportCategory, setReportCategory] = useState("technical");
+  const [reportDescription, setReportDescription] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportSubmitted, setReportSubmitted] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const helpMenuRef = useRef<HTMLDivElement | null>(null);
   const shareResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completionShowTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completionSignatureRef = useRef<string | null>(null);
@@ -382,32 +392,50 @@ export default function RealiteaseGamePage() {
   const puzzleDateKey = useMemo(() => getRealiteaseDateKey(), []);
   const userId = user?.uid ?? null;
 
+  // Column preferences (must be declared before any JSX that uses them)
+  const [ageOrZodiac, setAgeOrZodiac] = useState<"age" | "zodiac">(
+    () =>
+      (typeof window !== "undefined"
+        ? (localStorage.getItem("realitease:ageOrZodiac") as "age" | "zodiac")
+        : null) || "age",
+  );
+  const [serviceMode, setServiceMode] = useState<"networks" | "streamers">(
+    () =>
+      (typeof window !== "undefined"
+        ? (localStorage.getItem("realitease:serviceMode") as "networks" | "streamers")
+        : null) || "networks",
+  );
+
+  // Persist locally (non‑blocking)
   useEffect(() => {
-    if (!isHelpMenuOpen) return;
-    if (typeof document === "undefined") return;
+    try {
+      localStorage.setItem("realitease:ageOrZodiac", ageOrZodiac);
+    } catch {}
+  }, [ageOrZodiac]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("realitease:serviceMode", serviceMode);
+    } catch {}
+  }, [serviceMode]);
 
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (!helpMenuRef.current || (target && helpMenuRef.current.contains(target))) {
-        return;
-      }
-      setIsHelpMenuOpen(false);
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsHelpMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isHelpMenuOpen]);
+  // Compute board columns from current preferences
+  const activeColumns = useMemo(
+    () => [
+      { key: "guess" as RealiteaseBoardColumnKey, label: "NAME" },
+      { key: "gender" as RealiteaseBoardColumnKey, label: "GENDER" },
+      {
+        key: (ageOrZodiac === "age" ? "age" : "zodiac") as RealiteaseBoardColumnKey,
+        label: ageOrZodiac === "age" ? "AGE" : "ZODIAC",
+      },
+      {
+        key: (serviceMode === "networks" ? "network" : "streamers") as RealiteaseBoardColumnKey,
+        label: serviceMode === "networks" ? "NETWORKS" : "STREAMERS",
+      },
+      { key: "shows" as RealiteaseBoardColumnKey, label: "SHOWS" },
+      { key: "wwhl" as RealiteaseBoardColumnKey, label: "WWHL" },
+    ],
+    [ageOrZodiac, serviceMode],
+  );
 
   useEffect(() => {
     if (!isHowToPlayOpen) return;
@@ -428,11 +456,17 @@ export default function RealiteaseGamePage() {
 
   const handleOpenHowToPlay = useCallback(() => {
     setIsHowToPlayOpen(true);
-    setIsHelpMenuOpen(false);
+  }, []);
+
+  const handleOpenReportProblem = useCallback(() => {
+    setReportCategory("technical");
+    setReportDescription("");
+    setReportError(null);
+    setReportSubmitted(false);
+    setIsReportProblemOpen(true);
   }, []);
 
   const handleFeedback = useCallback(() => {
-    setIsHelpMenuOpen(false);
     if (typeof window === "undefined") return;
 
     const target = REALITEASE_FEEDBACK_TARGET;
@@ -447,7 +481,6 @@ export default function RealiteaseGamePage() {
   }, []);
 
   const handleOpenStatsModal = useCallback(() => {
-    setIsHelpMenuOpen(false);
     if (completionShowTimeoutRef.current) {
       clearTimeout(completionShowTimeoutRef.current);
       completionShowTimeoutRef.current = null;
@@ -455,6 +488,34 @@ export default function RealiteaseGamePage() {
     completionAnimationNeededRef.current = false;
     setIsCompletionOpen(true);
   }, []);
+
+  const handleSubmitReportProblem = useCallback(() => {
+    const trimmedDescription = reportDescription.trim();
+    if (!trimmedDescription) {
+      setReportError("Please let us know what went wrong.");
+      return;
+    }
+
+    setReportSubmitting(true);
+    setReportError(null);
+
+    try {
+      AuthDebugger.log("Realitease Game: Report problem", {
+        category: reportCategory,
+        description: trimmedDescription,
+        userId,
+      });
+      setReportSubmitted(true);
+      setTimeout(() => {
+        setIsReportProblemOpen(false);
+        setReportSubmitting(false);
+      }, 1200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to send report.";
+      setReportError(message);
+      setReportSubmitting(false);
+    }
+  }, [reportCategory, reportDescription, userId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -466,6 +527,18 @@ export default function RealiteaseGamePage() {
     }
   }, []);
 
+  // Load user preferences
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      try {
+        const prefs = await getUserPreferences(userId);
+        if (prefs?.realitease?.ageOrZodiac) setAgeOrZodiac(prefs.realitease.ageOrZodiac);
+        if (prefs?.realitease?.serviceMode) setServiceMode(prefs.realitease.serviceMode);
+      } catch {}
+    })();
+  }, [userId]);
+
   const handleShareResults = useCallback(async () => {
     if (!gameSnapshot) return;
     if (typeof navigator === "undefined") return;
@@ -475,6 +548,7 @@ export default function RealiteaseGamePage() {
       gameSnapshot.guesses ?? [],
       BOARD_ROWS,
       gameSnapshot.guessNumberSolved ?? null,
+      activeColumns.filter((c) => c.key !== "guess"),
     );
 
     try {
@@ -498,7 +572,7 @@ export default function RealiteaseGamePage() {
         shareResetTimeoutRef.current = null;
       }, 2500);
     }
-  }, [gameSnapshot, puzzleDateKey]);
+  }, [gameSnapshot, puzzleDateKey, activeColumns]);
 
   useEffect(() => {
     AuthDebugger.log("Realitease Game: Component mounted");
@@ -535,7 +609,8 @@ export default function RealiteaseGamePage() {
     hasInitializedGuessCountRef.current = false;
     previousGuessCountRef.current = gameSnapshot?.guesses?.length ?? 0;
     completionAnimationNeededRef.current = false;
-  }, [gameSnapshot?.puzzleDate, gameSnapshot?.guesses?.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameSnapshot?.puzzleDate]);
 
   useEffect(() => {
     if (!authLoading && !userId) {
@@ -623,8 +698,10 @@ export default function RealiteaseGamePage() {
       setCompletionStats(null);
     }
 
+    const statsOptions = !gameSnapshot.gameCompleted ? { excludePuzzleDate: dateKey } : undefined;
+
     manager
-      .getUserStatsSummary(userId)
+      .getUserStatsSummary(userId, statsOptions)
       .then((summary) => {
         if (isCancelled) return;
         setCompletionStats(summary);
@@ -822,6 +899,7 @@ export default function RealiteaseGamePage() {
   const maxGuessesReached = guessesCount >= BOARD_ROWS;
   const todaySolvedGuessNumber = gameSnapshot?.guessNumberSolved ?? null;
   const didWinToday = todaySolvedGuessNumber !== null;
+  const isViewingHistoricalStats = Boolean(gameSnapshot && !gameSnapshot.gameCompleted);
 
   const handleSubmitGuess = useCallback(async () => {
     if (!userId || !manager) return;
@@ -969,79 +1047,16 @@ export default function RealiteaseGamePage() {
   return (
     <div className="min-h-screen bg-white text-black">
       <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col">
-        <header className="flex h-16 w-full items-center justify-between border-b-2 border-zinc-400 px-3 pr-6">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => router.push("/hub")}
-              className="rounded-full p-2 transition hover:bg-zinc-100"
-              aria-label="More games"
-            >
-              <svg width="32" height="33" viewBox="0 0 32 33" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M7.93156 22.3358C7.61245 22.3358 7.34316 22.226 7.12367 22.0066C6.90418 21.7871 6.79443 21.5178 6.79443 21.1987C6.79443 20.8796 6.90418 20.6103 7.12367 20.3909C7.34316 20.1714 7.61245 20.0616 7.93156 20.0616H24.0573C24.3764 20.0616 24.6457 20.1714 24.8652 20.3909C25.0847 20.6103 25.1944 20.8796 25.1944 21.1987C25.1944 21.5178 25.0847 21.7871 24.8652 22.0066C24.6457 22.226 24.3764 22.3358 24.0573 22.3358H7.93156ZM7.93156 17.1822C7.61245 17.1822 7.34316 17.0725 7.12367 16.8529C6.90418 16.6335 6.79443 16.3642 6.79443 16.0451C6.79443 15.726 6.90418 15.4567 7.12367 15.2372C7.34316 15.0178 7.61245 14.908 7.93156 14.908H24.0573C24.3764 14.908 24.6457 15.0178 24.8652 15.2372C25.0847 15.4567 25.1944 15.726 25.1944 16.0451C25.1944 16.3642 25.0847 16.6335 24.8652 16.8529C24.6457 17.0725 24.3764 17.1822 24.0573 17.1822H7.93156ZM7.93156 12.0286C7.61245 12.0286 7.34316 11.9189 7.12367 11.6994C6.90418 11.4799 6.79443 11.2106 6.79443 10.8915C6.79443 10.5724 6.90418 10.3031 7.12367 10.0836C7.34316 9.86414 7.61245 9.75439 7.93156 9.75439H24.0573C24.3764 9.75439 24.6457 9.86414 24.8652 10.0836C25.0847 10.3031 25.1944 10.5724 25.1944 10.8915C25.1944 11.2106 25.0847 11.4799 24.8652 11.6994C24.6457 11.9189 24.3764 12.0286 24.0573 12.0286H7.93156Z" fill="currentColor" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleOpenStatsModal}
-              className="rounded-full p-2 transition hover:bg-zinc-100"
-              aria-label="View statistics"
-            >
-              <svg width="29" height="24" viewBox="0 0 29 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M20.0623 10.662V-0.00195312H9.39836V7.99601H1.40039V23.9919H28.0603V10.662H20.0623ZM12.0644 2.66404H17.3963V21.3259H12.0644V2.66404ZM4.06638 10.662H9.39836V21.3259H4.06638V10.662ZM25.3943 21.3259H20.0623V13.328H25.3943V21.3259Z" fill="currentColor" />
-              </svg>
-            </button>
-            <div className="relative" ref={helpMenuRef}>
-              <button
-                type="button"
-                onClick={() => setIsHelpMenuOpen((prev) => !prev)}
-                className="rounded-full p-2 transition hover:bg-zinc-100"
-                aria-label="Help"
-                aria-haspopup="menu"
-                aria-expanded={isHelpMenuOpen}
-              >
-                <svg width="33" height="32" viewBox="0 0 33 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M15.6955 23.9923H18.3613V21.3265H15.6955V23.9923ZM17.0284 2.66565C9.67068 2.66565 3.69922 8.63711 3.69922 15.9948C3.69922 23.3525 9.67068 29.324 17.0284 29.324C24.3861 29.324 30.3576 23.3525 30.3576 15.9948C30.3576 8.63711 24.3861 2.66565 17.0284 2.66565ZM17.0284 26.6582C11.1502 26.6582 6.36506 21.873 6.36506 15.9948C6.36506 10.1167 11.1502 5.33148 17.0284 5.33148C22.9065 5.33148 27.6917 10.1167 27.6917 15.9948C27.6917 21.873 22.9065 26.6582 17.0284 26.6582ZM17.0284 7.99731C14.0827 7.99731 11.6967 10.3833 11.6967 13.329H14.3626C14.3626 11.8628 15.5622 10.6632 17.0284 10.6632C18.4946 10.6632 19.6942 11.8628 19.6942 13.329C19.6942 15.9948 15.6955 15.6616 15.6955 19.9936H18.3613C18.3613 16.9945 22.3601 16.6613 22.3601 13.329C22.3601 10.3833 19.9741 7.99731 17.0284 7.99731Z" fill="currentColor" />
-                </svg>
-              </button>
-              {isHelpMenuOpen && (
-                <div
-                  role="menu"
-                  className="absolute right-0 z-30 mt-2 w-48 overflow-hidden rounded-lg border border-zinc-200 bg-white py-2 shadow-xl"
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={handleOpenHowToPlay}
-                    className="flex w-full items-center justify-start px-4 py-2 text-left text-sm font-medium text-gray-800 transition hover:bg-black/5"
-                  >
-                    How to Play
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={handleFeedback}
-                    className="flex w-full items-center justify-start px-4 py-2 text-left text-sm font-medium text-gray-800 transition hover:bg-black/5"
-                  >
-                    Feedback
-                  </button>
-                </div>
-              )}
-            </div>
-            <button
-              className="rounded-full p-2 transition hover:bg-zinc-100"
-              aria-label="Settings"
-            >
-              <svg width="33" height="32" viewBox="0 0 33 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M27.5292 17.3316C27.5806 16.9032 27.6148 16.4576 27.6148 15.9949C27.6148 15.5321 27.5806 15.0865 27.512 14.6581L30.4083 12.3959C30.6654 12.1902 30.734 11.8133 30.5797 11.5219L27.8377 6.77467C27.6662 6.4662 27.3063 6.36337 26.9978 6.4662L23.5874 7.83723C22.8676 7.28881 22.1136 6.84323 21.2738 6.50047L20.7597 2.86723C20.7083 2.52448 20.4169 2.28455 20.0742 2.28455H14.59C14.2473 2.28455 13.9731 2.52448 13.9216 2.86723L13.4075 6.50047C12.5677 6.84323 11.7966 7.30596 11.0939 7.83723L7.68346 6.4662C7.37498 6.34623 7.01508 6.4662 6.8437 6.77467L4.10164 11.5219C3.93026 11.8304 3.99881 12.1902 4.27302 12.3959L7.16932 14.6581C7.10077 15.0865 7.04936 15.5493 7.04936 15.9949C7.04936 16.4404 7.08363 16.9032 7.15219 17.3316L4.25587 19.5938C3.99881 19.7995 3.93026 20.1766 4.0845 20.4679L6.82656 25.2151C6.99795 25.5236 7.35783 25.6263 7.66632 25.5236L11.0768 24.1525C11.7966 24.7009 12.5507 25.1465 13.3904 25.4893L13.9045 29.1225C13.9731 29.4653 14.2473 29.7052 14.59 29.7052H20.0742C20.4169 29.7052 20.7083 29.4653 20.7426 29.1225L21.2566 25.4893C22.0965 25.1465 22.8676 24.6837 23.5703 24.1525L26.9807 25.5236C27.2892 25.6435 27.6491 25.5236 27.8205 25.2151L30.5625 20.4679C30.734 20.1594 30.6654 19.7995 30.3912 19.5938L27.5292 17.3316ZM17.3321 21.1363C14.5043 21.1363 12.1908 18.8226 12.1908 15.9949C12.1908 13.1671 14.5043 10.8535 17.3321 10.8535C20.1599 10.8535 22.4734 13.1671 22.4734 15.9949C22.4734 18.8226 20.1599 21.1363 17.3321 21.1363Z" fill="currentColor" />
-              </svg>
-            </button>
-          </div>
-        </header>
+        <GameHeader
+          onStatsClick={handleOpenStatsModal}
+          onHowToPlay={handleOpenHowToPlay}
+          onFeedback={handleFeedback}
+          onReportProblem={handleOpenReportProblem}
+          onSettingsClick={() => setSettingsOpen(true)}
+        />
 
         <main className="flex flex-1 justify-center px-4 pb-12 pt-10">
-          <div className="flex w-full max-w-[500px] flex-col items-center gap-8">
+          <div className="flex w-full max-w-[480px] flex-col items-center gap-8">
             <TalentSearch
               query={talentQuery}
               onQueryChange={handleQueryChange}
@@ -1058,17 +1073,29 @@ export default function RealiteaseGamePage() {
             />
 
             <div className="w-full">
-              <RealiteaseBoard guesses={orderedGuesses} />
+              <RealiteaseBoard
+                guesses={orderedGuesses}
+                solvedGuessNumber={gameSnapshot?.guessNumberSolved ?? null}
+                columns={activeColumns}
+              />
             </div>
 
-            <RealiteaseKeyboard
-              disabled={gameSnapshot?.gameCompleted || isSubmittingGuess || maxGuessesReached}
-              onKey={handleKeyboardInput}
-              onBackspace={handleKeyboardBackspace}
-              onEnter={handleSubmitGuess}
-            />
+            {/* Inline keyboard (non-overlay) */}
+            <div id="realitease-keyboard" className="w-full flex justify-center">
+              <div className="w-full max-w-[480px] px-0 py-2">
+                <RealiteaseKeyboard
+                  disabled={gameSnapshot?.gameCompleted || isSubmittingGuess || maxGuessesReached}
+                  onKey={handleKeyboardInput}
+                  onBackspace={handleKeyboardBackspace}
+                  onEnter={handleSubmitGuess}
+                />
+              </div>
+            </div>
           </div>
         </main>
+
+        {/* Safe-area spacer for iOS bottom inset when needed */}
+        <div className="pb-[env(safe-area-inset-bottom)]" aria-hidden />
 
         <RealiteaseCompletedView
           open={isCompletionOpen}
@@ -1082,7 +1109,67 @@ export default function RealiteaseGamePage() {
           onShare={handleShareResults}
           shareStatus={completionShareStatus}
           shareDisabled={!gameSnapshot || completionStatsLoading}
+          hideGuessDistribution={isViewingHistoricalStats}
         />
+
+        <ReportProblemModal
+          open={isReportProblemOpen}
+          onClose={() => {
+            if (reportSubmitting) return;
+            setIsReportProblemOpen(false);
+          }}
+          onSubmit={handleSubmitReportProblem}
+          submitting={reportSubmitting}
+          category={reportCategory}
+          onCategoryChange={setReportCategory}
+          description={reportDescription}
+          onDescriptionChange={setReportDescription}
+          error={reportError}
+          submitted={reportSubmitted}
+          gameTitle="Realitease"
+        />
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/50" aria-hidden onClick={() => setSettingsOpen(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-start justify-between">
+              <h2 className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>Realitease Settings</h2>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="rounded-full p-2 hover:bg-black/5"
+                aria-label="Close settings"
+              >
+                <svg width="24" height="24" viewBox="0 0 31 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M24.0249 8.84795L22.2624 7.08545L15.2749 14.0729L8.28743 7.08545L6.52493 8.84795L13.5124 15.8354L6.52493 22.8229L8.28743 24.5854L15.2749 17.5979L22.2624 24.5854L24.0249 22.8229L17.0374 15.8354L24.0249 8.84795Z" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-6">
+              <div>
+                <p className="mb-2 text-sm font-semibold text-gray-800" style={{ fontFamily: "var(--font-plymouth-serial)" }}>Column preferences</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border border-zinc-300 p-3">
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-600">AGE vs ZODIAC</label>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={async () => { setAgeOrZodiac("age"); if (userId) { try { await updateUserPreferences(userId, { realitease: { ageOrZodiac: "age" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${ageOrZodiac === "age" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>AGE</button>
+                      <button type="button" onClick={async () => { setAgeOrZodiac("zodiac"); if (userId) { try { await updateUserPreferences(userId, { realitease: { ageOrZodiac: "zodiac" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${ageOrZodiac === "zodiac" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>ZODIAC</button>
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-zinc-300 p-3">
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-600">NETWORKS vs STREAMERS</label>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={async () => { setServiceMode("networks"); if (userId) { try { await updateUserPreferences(userId, { realitease: { serviceMode: "networks" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${serviceMode === "networks" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>NETWORKS</button>
+                      <button type="button" onClick={async () => { setServiceMode("streamers"); if (userId) { try { await updateUserPreferences(userId, { realitease: { serviceMode: "streamers" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${serviceMode === "streamers" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>STREAMERS</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
         {isHowToPlayOpen && <HowToPlayModal onClose={() => setIsHowToPlayOpen(false)} />}
       </div>
@@ -1144,7 +1231,8 @@ function TalentSearch({
           }}
           ref={inputRef}
           placeholder="Start typing a reality star’s name..."
-          className="w-full rounded-[2px] border border-white px-4 py-2 text-sm font-medium text-gray-800 focus:border-black focus:outline-none"
+          className="w-full rounded-[2px] border border-white px-4 py-2 text-sm font-extrabold tracking-[0.01em] text-gray-800 focus:border-black focus:outline-none"
+          style={{ fontFamily: "var(--font-plymouth-serial)" }}
           aria-label="Search roster"
         />
       </div>
@@ -1166,7 +1254,7 @@ function TalentSearch({
               {searchError && <div className="px-4 py-3 text-sm text-red-600">{searchError}</div>}
               {hasResults ? (
                 <ul className="divide-y divide-zinc-100">
-                  {matches.map(({ talent, matchedAlternative }) => (
+                  {matches.map(({ talent }) => (
                     <li key={talent.id}>
                       <button
                         type="button"
@@ -1177,10 +1265,8 @@ function TalentSearch({
                         }}
                         className="flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition hover:bg-black/5"
                       >
-                        <span className="text-sm font-semibold text-gray-900">{talent.name}</span>
-                        {matchedAlternative && (
-                          <span className="text-xs text-gray-500">Matches alternative: {matchedAlternative}</span>
-                        )}
+                        <span className="text-sm font-bold text-gray-900 tracking-[0.01em]" style={{ fontFamily: "var(--font-plymouth-serial)" }}>{talent.name}</span>
+                        {/* Hide the "matches alternative" label but still use the alternative for matching */}
                       </button>
                     </li>
                   ))}
@@ -1198,11 +1284,142 @@ function TalentSearch({
   );
 }
 
-function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
+function ReportProblemModal({
+  open,
+  onClose,
+  onSubmit,
+  submitting,
+  category,
+  onCategoryChange,
+  description,
+  onDescriptionChange,
+  error,
+  submitted,
+  gameTitle,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  category: string;
+  onCategoryChange: (next: string) => void;
+  description: string;
+  onDescriptionChange: (next: string) => void;
+  error: string | null;
+  submitted: boolean;
+  gameTitle: string;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-4 py-10">
+      <div className="w-full max-w-lg rounded-lg bg-white px-6 pb-8 pt-6 shadow-[0px_4px_23px_rgba(0,0,0,0.2)]">
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <h2 className="font-['NYTKarnak_Condensed'] text-2xl font-bold leading-none text-black">Report a Problem</h2>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-black/70">{gameTitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 text-black transition hover:bg-black/5"
+            aria-label="Close report a problem"
+            disabled={submitting}
+          >
+            <svg width="18" height="18" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M16.2364 6.05781L15.0614 4.88281L10.4031 9.54115L5.74475 4.88281L4.56975 6.05781L9.22808 10.7161L4.56975 15.3745L5.74475 16.5495L10.4031 11.8911L15.0614 16.5495L16.2364 15.3745L11.5781 10.7161L16.2364 6.05781Z" fill="currentColor" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.24em] text-gray-700">
+              What kind of issue are you seeing?
+            </label>
+            <div className="relative">
+              <select
+                value={category}
+                onChange={(event) => onCategoryChange(event.target.value)}
+                className="w-full appearance-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
+              >
+                <option value="technical">Technical Issue</option>
+                <option value="incorrect-info">Incorrect Info</option>
+                <option value="accessibility">Accessibility</option>
+                <option value="content">Content Concern</option>
+                <option value="other">Something Else</option>
+              </select>
+              <svg
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path d="M2.34315 4.34326L6 8.00011L9.65685 4.34326" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.24em] text-gray-700">
+              Tell us more
+            </label>
+            <textarea
+              value={description}
+              onChange={(event) => onDescriptionChange(event.target.value)}
+              rows={5}
+              placeholder="What happened?"
+              className="w-full resize-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {submitted && !error && !submitting && (
+            <p className="text-sm text-green-600">Thanks! We’ll take a look.</p>
+          )}
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-gray-800 transition hover:bg-zinc-100"
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={submitting}
+            className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting ? "Sending…" : "Submit"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RealiteaseBoard({
+  guesses,
+  solvedGuessNumber,
+  columns,
+}: {
+  guesses: RealiteaseGuess[];
+  solvedGuessNumber: number | null;
+  columns: Array<{ key: RealiteaseBoardColumnKey; label: string }>;
+}) {
   const rows = useMemo(() => {
-    const grid: Array<RealiteaseGuess | null> = Array.from({ length: BOARD_ROWS }, () => null);
+    const rowCount = Math.max(BOARD_MIN_ROWS, Math.min(BOARD_ROWS, (guesses?.length ?? 0) + 1));
+    const grid: Array<RealiteaseGuess | null> = Array.from({ length: rowCount }, () => null);
     guesses.slice(0, BOARD_ROWS).forEach((guess, index) => {
-      grid[index] = guess;
+      if (index < grid.length) {
+        grid[index] = guess;
+      }
     });
     return grid;
   }, [guesses]);
@@ -1211,7 +1428,7 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
   const [manualFlipCounters, setManualFlipCounters] = useState<Record<string, number>>({});
   const [revealedCells, setRevealedCells] = useState<Record<string, boolean>>({});
   const [cellDelays, setCellDelays] = useState<Record<string, number>>({});
-  const [tileSize, setTileSize] = useState<number>(58);
+  const [tileSize, setTileSize] = useState<number>(52);
   const revealedCellsRef = useRef<Record<string, boolean>>({});
   const cellDelaysRef = useRef<Record<string, number>>({});
   const initialGuessNumbersRef = useRef<Set<number>>(new Set());
@@ -1230,13 +1447,30 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
 
     const computeSize = () => {
       if (!element) return;
+      // Width-constrained tile size
       const parentWidth = element.parentElement?.clientWidth ?? element.clientWidth;
-      const availableWidth = Math.max(parentWidth, BOARD_TILE_MIN_SIZE_PX * REALITEASE_BOARD_COLUMNS.length);
-      const available = availableWidth - BOARD_TILE_GAP_PX * (REALITEASE_BOARD_COLUMNS.length - 1);
-      const computedSize = Math.max(
+      const availableWidth = Math.max(parentWidth, BOARD_TILE_MIN_SIZE_PX * columns.length);
+      const available = availableWidth - BOARD_TILE_GAP_PX * (columns.length - 1);
+      const widthConstrained = Math.max(
         BOARD_TILE_MIN_SIZE_PX,
-        Math.min(BOARD_TILE_MAX_SIZE_PX, available / REALITEASE_BOARD_COLUMNS.length || BOARD_TILE_MIN_SIZE_PX),
+        Math.min(BOARD_TILE_MAX_SIZE_PX, available / columns.length || BOARD_TILE_MIN_SIZE_PX),
       );
+
+      // Height-constrained tile size: ensure the entire board + keyboard is visible.
+      const viewportH = window.innerHeight || document.documentElement.clientHeight;
+      const boardTop = element.getBoundingClientRect().top;
+      const keyboardEl = document.getElementById("realitease-keyboard");
+      const keyboardH = keyboardEl ? keyboardEl.getBoundingClientRect().height : 200; // fallback
+      const headerEl = element.querySelector('[data-board-header]') as HTMLElement | null;
+      const headerH = headerEl?.offsetHeight ?? 24;
+      const verticalGaps = (rows.length - 1) * BOARD_ROW_GAP_PX + BOARD_HEADER_MARGIN_BOTTOM_PX;
+      const availableHeightForTiles = Math.max(0, viewportH - boardTop - keyboardH - verticalGaps - headerH - 24);
+      const heightConstrained = Math.max(
+        BOARD_TILE_MIN_SIZE_PX,
+        Math.min(BOARD_TILE_MAX_SIZE_PX, Math.floor(availableHeightForTiles / rows.length) || BOARD_TILE_MIN_SIZE_PX),
+      );
+
+      const computedSize = Math.min(widthConstrained, heightConstrained);
       setTileSize((prev) => {
         const next = Number.isFinite(computedSize) ? computedSize : prev;
         return Math.round(next) === Math.round(prev) ? prev : next;
@@ -1249,12 +1483,14 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
     observer?.observe(element);
 
     window.addEventListener("resize", computeSize);
+    window.addEventListener("scroll", computeSize, { passive: true });
 
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", computeSize);
+      window.removeEventListener("scroll", computeSize);
     };
-  }, []);
+  }, [rows.length, columns.length]);
 
   useEffect(() => {
     setVariantIndices({});
@@ -1278,7 +1514,7 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
   useEffect(() => {
     const validIds = new Set<string>();
     rows.forEach((_, rowIndex) => {
-      REALITEASE_BOARD_COLUMNS.forEach(({ key }) => {
+      columns.forEach(({ key }) => {
         validIds.add(getCellId(rowIndex, key));
       });
     });
@@ -1306,7 +1542,7 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
       revealedCellsRef.current = filtered;
       return filtered;
     });
-  }, [rows]);
+  }, [rows, columns]);
 
   useEffect(() => {
     const sortedGuesses = [...guesses]
@@ -1430,6 +1666,8 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
     [],
   );
 
+  // (moved column preference state above to ensure it's defined before JSX uses it)
+
   const boardStyle = useMemo(() => {
     return {
       "--realitease-tile-size": `${tileSize}px`,
@@ -1438,20 +1676,17 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
 
   const gridTemplateStyle = useMemo(() => {
     return {
-      gridTemplateColumns: `repeat(${REALITEASE_BOARD_COLUMNS.length}, var(--realitease-tile-size))`,
+      gridTemplateColumns: `repeat(${columns.length}, var(--realitease-tile-size))`,
     } as CSSProperties;
-  }, []);
+  }, [columns.length]);
 
   const tileSizeForText = Math.max(BOARD_TILE_MIN_SIZE_PX, Math.min(tileSize, BOARD_TILE_MAX_SIZE_PX));
 
   return (
     <div className="w-full">
-      <div ref={boardRef} className="space-y-[5px] realitease-board" style={boardStyle}>
-        <div
-          className="grid gap-[5px] mb-[10px] text-[10px] sm:text-[11px]"
-          style={gridTemplateStyle}
-        >
-          {REALITEASE_BOARD_COLUMNS.map((column) => (
+      <div ref={boardRef} className="space-y-[5px] realitease-board mx-auto w-min" style={boardStyle}>
+        <div data-board-header className="grid justify-center gap-[5px] mb-[10px] text-[10px] sm:text-[11px]" style={gridTemplateStyle}>
+          {columns.map((column) => (
             <div
               key={column.key}
               className="flex items-center justify-center text-center font-['HamburgSerial'] font-extrabold uppercase tracking-[0.2px] text-black"
@@ -1461,13 +1696,14 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
           ))}
         </div>
         <div className="space-y-[5px]">
-          {rows.map((guess, rowIndex) => (
-            <div
-              key={`row-${rowIndex}`}
-              className="grid gap-[5px]"
-              style={gridTemplateStyle}
-            >
-              {REALITEASE_BOARD_COLUMNS.map(({ key, label }) => {
+          {rows.map((guess, rowIndex) => {
+            const isWinningRow = Boolean(
+              solvedGuessNumber !== null && guess && guess.guessNumber === solvedGuessNumber,
+            );
+
+            return (
+              <div key={`row-${rowIndex}`} className="grid justify-center gap-[5px]" style={gridTemplateStyle}>
+              {columns.map(({ key, label }) => {
                 const field = guess?.fields.find((item) => item.key === key);
                 const { sanitizedVariants, sanitizedValue, isNoneInCommon } = resolveFieldDisplay(field);
                 const cellId = getCellId(rowIndex, key);
@@ -1514,11 +1750,13 @@ function RealiteaseBoard({ guesses }: { guesses: RealiteaseGuess[] }) {
                     manualFlipCount={manualFlipCounters[cellId] ?? 0}
                     tileSize={tileSizeForText}
                     isNoneInCommon={isNoneInCommon}
+                    isWinningRow={isWinningRow}
                   />
                 );
               })}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1537,10 +1775,10 @@ function RealiteaseKeyboard({
   disabled?: boolean;
 }) {
   return (
-    <div className="w-full max-w-[680px]">
-      <div className="flex flex-col gap-[5px]">
+    <div className="w-full max-w-[480px]">
+      <div className="flex flex-col gap-2">
         {KEYBOARD_ROWS.map((row, rowIndex) => (
-          <div key={`keyboard-row-${rowIndex}`} className="flex justify-center gap-[5px]">
+          <div key={`keyboard-row-${rowIndex}`} className="flex justify-center gap-1">
             {row.map((keyValue) => {
               const handlePress = () => {
                 if (disabled) return;
@@ -1576,15 +1814,29 @@ function KeyboardKey({
   disabled?: boolean;
 }) {
   const isEnter = label === "enter";
-  const display = label === "backspace" ? "⌫" : label.toUpperCase();
+  const isBackspace = label === "backspace";
+  const display = isBackspace ? (
+    <svg width="21" height="20" viewBox="0 0 21 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <path d="M19.1732 2.5H6.67318C6.09818 2.5 5.64818 2.79167 5.34818 3.23333L0.839844 10L5.34818 16.7583C5.64818 17.2 6.09818 17.5 6.67318 17.5H19.1732C20.0898 17.5 20.8398 16.75 20.8398 15.8333V4.16667C20.8398 3.25 20.0898 2.5 19.1732 2.5ZM19.1732 15.8333H6.73151L2.83984 10L6.72318 4.16667H19.1732V15.8333ZM9.51484 14.1667L12.5065 11.175L15.4982 14.1667L16.6732 12.9917L13.6815 10L16.6732 7.00833L15.4982 5.83333L12.5065 8.825L9.51484 5.83333L8.33984 7.00833L11.3315 10L8.33984 12.9917L9.51484 14.1667Z" fill="black"/>
+    </svg>
+  ) : (
+    label.toUpperCase()
+  );
 
-  const baseClasses =
-    "flex h-[58px] w-[58px] items-center justify-center rounded-sm bg-gray-300 font-bold uppercase text-black transition font-['TN_Web_Use_Only']";
-  const textClasses = isEnter ? "text-xs leading-3 tracking-[0.35em]" : "text-lg";
-  const stateClasses = disabled ? "cursor-not-allowed opacity-50" : "hover:bg-gray-200";
+  const sizeClasses = isEnter || isBackspace ? "h-12 w-14" : "h-12 w-10";
+  const baseClasses = `flex ${sizeClasses} items-center justify-center rounded-sm bg-[#94aed1] uppercase text-black transition`;
+  const textClasses = isEnter ? "text-xs leading-3" : "text-lg";
+  const stateClasses = disabled ? "cursor-not-allowed opacity-50" : "hover:brightness-95 active:brightness-90";
 
   return (
-    <button type="button" onClick={onPress} disabled={disabled} className={`${baseClasses} ${textClasses} ${stateClasses}`} tabIndex={-1}>
+    <button
+      type="button"
+      onClick={onPress}
+      disabled={disabled}
+      className={`${baseClasses} ${textClasses} ${stateClasses}`}
+      style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
+      tabIndex={-1}
+    >
       {display}
     </button>
   );
@@ -1607,6 +1859,7 @@ function BoardCell({
   manualFlipCount,
   tileSize,
   isNoneInCommon,
+  isWinningRow,
 }: {
   frontValue: string;
   backValue: string;
@@ -1624,6 +1877,7 @@ function BoardCell({
   manualFlipCount: number;
   tileSize: number;
   isNoneInCommon: boolean;
+  isWinningRow: boolean;
 }) {
   const trimmedFrontValue = frontValue?.toString().trim() ?? "";
   const trimmedBackValue = backValue?.toString().trim() ?? "";
@@ -1658,11 +1912,14 @@ function BoardCell({
     backVerdict === "incorrect" &&
     (isNoneInCommon || trimmedBackValue.length === 0);
   const blankIncorrectClasses = "bg-[#5D5F63] text-transparent border-[#5D5F63]";
-  const backBaseClasses = isGuessColumn
-    ? "bg-black text-white border-black"
-    : shouldUseBlankIncorrectStyle
-      ? blankIncorrectClasses
-      : getVerdictClasses(backVerdict, Boolean(trimmedBackValue), columnKey, backShouldUseAgeStyle);
+  const winningClasses = "bg-[#004b80] text-white border-[#004b80]";
+  const backBaseClasses = isWinningRow
+    ? winningClasses
+    : isGuessColumn
+      ? "bg-black text-white border-black"
+      : shouldUseBlankIncorrectStyle
+        ? blankIncorrectClasses
+        : getVerdictClasses(backVerdict, Boolean(trimmedBackValue), columnKey, backShouldUseAgeStyle);
   const backClasses = `${fontClasses} ${backBaseClasses}`;
   const tileClasses = `realitease-tile relative flex select-none items-center justify-center ${interactiveClasses} ${
     isRevealed ? "realitease-tile--revealed" : ""
@@ -1787,11 +2044,16 @@ function getCellTextStyle(
   const MAX_FONT_PX = treatAsAge ? 40 : 26;
   const MIN_FONT_PX = treatAsAge ? 18 : 8;
   const LINE_HEIGHT = treatAsAge ? 0.9 : 1.08;
-  const INNER_PADDING = 4; // px on each side
+  const INNER_PADDING = 6; // px on each side (increased for better spacing)
   const effectiveSize = Math.max(BOARD_TILE_MIN_SIZE_PX, Math.min(tileSize, BOARD_TILE_MAX_SIZE_PX));
   const CHAR_WIDTH_FACTOR = 0.58; // approx uppercase width
   const SPACE_WIDTH_FACTOR = 0.32;
-  const LETTER_SPACING_PX = 0.2;
+  const LETTER_SPACING_EM = 0.01; // 1% letter spacing
+
+  const horizontalPadding = isGuessColumn ? INNER_PADDING + 4 : INNER_PADDING;
+  const verticalPadding = isGuessColumn ? INNER_PADDING + 4 : INNER_PADDING;
+  const innerWidthBase = Math.max(1, effectiveSize - horizontalPadding * 2);
+  const innerHeightBase = Math.max(1, effectiveSize - verticalPadding * 2);
 
   const words = value
     .split(/\s+/)
@@ -1801,7 +2063,7 @@ function getCellTextStyle(
     words.push(value);
   }
 
-  const computeLetterSpacingPx = () => LETTER_SPACING_PX;
+  const computeLetterSpacingPx = () => fontPx * LETTER_SPACING_EM;
 
   const measureWordWidth = (word: string, fontPx: number, lsPx: number) => {
     return word.length * CHAR_WIDTH_FACTOR * fontPx + Math.max(word.length - 1, 0) * lsPx;
@@ -1846,12 +2108,10 @@ function getCellTextStyle(
   };
 
   const fitsAllSizes = (fontPx: number): boolean => {
-    const innerWidth = Math.max(1, effectiveSize - INNER_PADDING * 2);
-    const innerHeight = Math.max(1, effectiveSize - INNER_PADDING * 2);
-    const lines = calculateLines(fontPx, innerWidth);
+    const lines = calculateLines(fontPx, innerWidthBase);
     if (!Number.isFinite(lines)) return false;
     const requiredHeight = lines * fontPx * LINE_HEIGHT;
-    return requiredHeight <= innerHeight + 0.1;
+    return requiredHeight <= innerHeightBase + 0.1;
   };
 
   let fontPx = MAX_FONT_PX;
@@ -1862,17 +2122,17 @@ function getCellTextStyle(
     fontPx = MIN_FONT_PX;
   }
 
-  const letterSpacingPx = computeLetterSpacingPx();
-
   return {
     fontSize: `${(fontPx / 16).toFixed(4)}rem`,
     lineHeight: LINE_HEIGHT,
-    letterSpacing: `${letterSpacingPx}px`,
+    letterSpacing: `${LETTER_SPACING_EM}em`,
     textTransform: "uppercase",
     wordBreak: "normal",
     overflowWrap: "normal",
     whiteSpace: isGuessColumn ? "pre-line" : "normal",
     overflow: "hidden",
     textAlign: "center",
+    paddingInline: `${horizontalPadding}px`,
+    paddingBlock: `${verticalPadding}px`,
   };
 }

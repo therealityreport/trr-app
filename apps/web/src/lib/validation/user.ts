@@ -1,5 +1,22 @@
 import { Timestamp, FieldValue } from "firebase/firestore";
 
+export type SurveyXResponses = {
+  view_live_tv_household: string; // Yes / No
+  view_platforms_subscriptions: string[]; // Multi-select platforms
+  primaryPlatform: string; // Primary platform for watching
+  watchFrequency: string; // How often they watch
+  watchMode: string; // Live / next-day / binge / mix
+  view_reality_cowatch: string; // Who they watch with
+  view_live_chats_social: string; // Yes / Sometimes / No
+  view_devices_reality: string[]; // Multi-select devices
+};
+
+export type SurveyXState = {
+  completed: boolean;
+  completedAt?: Timestamp | FieldValue;
+  responses?: SurveyXResponses;
+};
+
 // Types
 export type UserProfile = {
   uid: string;
@@ -8,9 +25,14 @@ export type UserProfile = {
   username: string; // lowercase, 3-20, [a-z0-9_]
   birthday: string; // ISO date YYYY-MM-DD
   shows: string[];
+  gender?: string; // optional gender
+  livesInUS?: boolean; // optional US residency
+  state?: string; // optional US state (if livesInUS is true)
+  country?: string; // optional country (if livesInUS is false)
   provider: "password" | "apple" | string;
   createdAt: Timestamp | FieldValue;
   updatedAt: Timestamp | FieldValue;
+  surveyX?: SurveyXState;
 };
 
 // Validation helpers return `null` when valid, or an error message string

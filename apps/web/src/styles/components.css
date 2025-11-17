@@ -9,6 +9,10 @@
     font-family: var(--font-hamburg);
   }
 
+  .font-rude-slab {
+    font-family: var(--font-rude-slab);
+  }
+
   /* Button variants */
   .btn-primary {
     @apply px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 transition-colors;
@@ -69,6 +73,11 @@
     border-style: solid;
     backface-visibility: hidden;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Remove tile drop shadow specifically for Bravodle */
+  .bravodle .realitease-tile__face {
+    box-shadow: none;
   }
 
   .realitease-tile__face--front {

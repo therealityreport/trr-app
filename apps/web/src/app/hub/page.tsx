@@ -1,84 +1,60 @@
-"use client";
-
+// apps/web/src/app/hub/page.tsx
+import React from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { useEffect } from "react";
-import { AuthDebugger } from "@/lib/debug";
-import SignOutButton from "@/components/SignOutButton";
+import ClientAuthGuard from "@/components/ClientAuthGuard";
 
 type GameCard = {
   title: string;
-  href: string;
+  href: string; // keep as plain string in your data
   blurb?: string;
   tone: string;
   cta?: string;
   badge?: string;
+  icon: string;
+  archiveHref?: string;
 };
 
 const CARDS: GameCard[] = [
-  { title: "Realations", href: "/realations", tone: "bg-yellow-400", cta: "Play" },
-  { title: "Realitease", href: "/realitease/cover", tone: "bg-neutral-200", cta: "Play" },
   {
-    title: "Realtime",
-    href: "/realtime",
-    tone: "bg-pink-300",
+    title: "Realitease",
+    href: "/realitease/cover",
+    archiveHref: "/realitease/archive",
+    tone: "bg-neutral-200",
     cta: "Play",
-    badge: "New",
-    blurb: "Place every domino into the right spot.",
+    icon: "/icons/Realitease-Icon.svg",
   },
   {
-    title: "Strands",
-    href: "/strands",
-    tone: "bg-slate-300",
+    title: "Bravodle",
+    href: "/bravodle/cover",
+    tone: "bg-fuchsia-200",
     cta: "Play",
-    blurb: "Find hidden words and uncover the day's theme.",
-  },
-  { title: "Connections", href: "/connections", tone: "bg-indigo-300", cta: "Play" },
-  {
-    title: "Letter Boxed",
-    href: "/letter-boxed",
-    tone: "bg-red-400",
-    cta: "Play",
-    blurb: "Create words using letters around the square.",
-  },
-  {
-    title: "Tiles",
-    href: "/tiles",
-    tone: "bg-lime-300",
-    cta: "Play",
-    blurb: "Match tiles to keep your chain going.",
-  },
-  {
-    title: "Sudoku",
-    href: "/sudoku",
-    tone: "bg-amber-500",
-    cta: "Play",
-    blurb: "Try this numbers game—minus the math.",
+    blurb: "Guess the Bravo-lebrity in six tries.",
+    icon: "/icons/Bravodle-Icon.svg",
   },
 ];
 
-function CardIcon() {
-  return (
-    <svg viewBox="0 0 64 64" aria-hidden className="size-16 text-black/90">
-      <rect x="8" y="8" width="48" height="48" rx="8" className="fill-black" />
-      <circle cx="24" cy="24" r="4" className="fill-white" />
-      <circle cx="40" cy="40" r="4" className="fill-white" />
-    </svg>
-  );
-}
-
 function GameTile({ card }: { card: GameCard }) {
-  const baseButtonClasses = "inline-flex items-center rounded-full border border-stone-300 px-5 py-2 text-sm font-semibold text-zinc-800";
+  const baseButtonClasses =
+    "inline-flex items-center rounded-full border border-stone-300 px-5 py-2 text-sm font-semibold text-zinc-800";
   const disabledButtonClasses = "cursor-not-allowed bg-zinc-100 text-zinc-400";
-  const secondaryLabel = (t: string) => (t === "Realations" ? "Past Puzzles" : "Archive");
+  const secondaryLabel = () => "Archive";
 
   return (
-    <div className="group overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="group overflow-hidden rounded-3xl bg-white border-2 border-zinc-300 transition hover:-translate-y-0.5 hover:border-zinc-400">
       {/* Header */}
       <div className={`${card.tone} relative grid place-items-center p-6`}>
-        <CardIcon />
-        <h3 className="mt-6 text-center font-sans text-2xl font-bold text-zinc-900">
-          {card.title}
-        </h3>
+        <div className="flex flex-col items-center gap-4">
+          <span className="rounded-2xl bg-white/90 p-4 shadow-inner">
+            <Image src={card.icon} alt={`${card.title} icon`} width={64} height={64} />
+          </span>
+          <h3
+            className="text-center text-2xl font-bold text-zinc-900"
+            style={{ fontFamily: "var(--font-rude-slab)", fontWeight: 900 }}
+          >
+            {card.title}
+          </h3>
+        </div>
         {card.badge && (
           <span className="absolute right-3 top-3 rounded-md bg-neutral-700 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
             {card.badge}
@@ -88,35 +64,25 @@ function GameTile({ card }: { card: GameCard }) {
 
       {/* Body */}
       <div className="space-y-4 p-5">
-        {card.blurb && (
-          <p className="text-center text-sm text-neutral-500 leading-tight">{card.blurb}</p>
-        )}
+        {card.blurb && <p className="text-center text-sm text-neutral-500 leading-tight">{card.blurb}</p>}
         <div className="flex justify-center gap-3">
-          {card.title === "Realitease" ? (
+          {["Realitease", "Bravodle"].includes(card.title) ? (
             <>
-              <Link
-                href={{ pathname: card.href }}
-                className={baseButtonClasses + " hover:bg-zinc-50"}
-              >
+              <Link href={{ pathname: card.href }} className={baseButtonClasses + " hover:bg-zinc-50"}>
                 {card.cta ?? "Play"}
               </Link>
-              {["Realations", "Realitease", "Connections"].includes(card.title) && (
-                <Link
-                  href={{ pathname: `${card.href}/archive` }}
-                  className={baseButtonClasses + " hover:bg-zinc-50"}
-                >
-                  {secondaryLabel(card.title)}
+              {card.archiveHref && (
+                <Link href={{ pathname: card.archiveHref }} className={baseButtonClasses + " hover:bg-zinc-50"}>
+                  {secondaryLabel()}
                 </Link>
               )}
             </>
           ) : (
             <>
-              <span className={baseButtonClasses + " " + disabledButtonClasses}>
-                {card.cta ?? "Play"}
-              </span>
-              {["Realations", "Realitease", "Connections"].includes(card.title) && (
+              <span className={baseButtonClasses + " " + disabledButtonClasses}>{card.cta ?? "Play"}</span>
+              {card.archiveHref && (
                 <button disabled className={baseButtonClasses + " " + disabledButtonClasses}>
-                  {secondaryLabel(card.title)}
+                  {secondaryLabel()}
                 </button>
               )}
             </>
@@ -127,36 +93,29 @@ function GameTile({ card }: { card: GameCard }) {
   );
 }
 
-export default function HubPage() {
-  useEffect(() => {
-    AuthDebugger.log("Hub page: Component mounted and rendered");
-    return () => {
-      AuthDebugger.log("Hub page: Component unmounting");
-    };
-  }, []);
-
+export default async function Page() {
   return (
-    <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black">
-      <div className="max-w-6xl mx-auto flex justify-end mb-4">
-        <SignOutButton />
-      </div>
-      <section className="mx-auto max-w-6xl">
-        <header className="mb-10 text-center">
-          <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">
-            Pick a game
-          </h1>
-          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-            Daily puzzles and prototypes. More coming soon.
-          </p>
-        </header>
+    <ClientAuthGuard requireComplete={true}>
+      <main
+        className="min-h-screen bg-white px-6 py-16 text-black"
+        style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
+      >
+        <section className="mx-auto max-w-6xl">
+          <header className="mb-10 text-center">
+            <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">Pick a game</h1>
+            <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+              Daily puzzles and prototypes. Surveys now live on the Surveys tab. More coming soon.
+            </p>
+          </header>
 
-        {/* Responsive 3/2/1 grid */}
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {CARDS.map((card) => (
-            <GameTile key={card.title} card={card} />
-          ))}
-        </div>
-      </section>
-    </main>
+          {/* Responsive 3/2/1 grid */}
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {CARDS.map((card) => (
+              <GameTile key={card.title} card={card} />
+            ))}
+          </div>
+        </section>
+      </main>
+    </ClientAuthGuard>
   );
 }

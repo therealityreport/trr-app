@@ -4,7 +4,9 @@ export type RealiteaseBoardColumnKey =
   | "guess"
   | "gender"
   | "age"
+  | "zodiac"
   | "network"
+  | "streamers"
   | "shows"
   | "wwhl";
 
@@ -39,6 +41,7 @@ export interface RealiteaseGuessDerived {
   age?: number;
   zodiac?: string;
   networks: string[];
+  streamers?: string[];
   shows: RealiteaseTalentShow[];
   showCount?: number;
   wwhlEpisodes: RealiteaseWwhlAppearance[];
@@ -128,6 +131,7 @@ export const REALITEASE_DEFAULT_USER_ANALYTICS: RealiteaseAggregateStats = {
 export interface RealiteaseTalentShow {
   showName?: string;
   network?: string;
+  streamer?: string;
   imdbSeriesId?: string;
   tmdbId?: string;
   seasons: number[];

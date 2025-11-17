@@ -13,7 +13,6 @@ function ForgotPasswordContent() {
   const [verificationCode, setVerificationCode] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [codeSent, setCodeSent] = useState(!!email);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,7 +30,7 @@ function ForgotPasswordContent() {
       } else {
         setError("Please enter a valid 6-digit code");
       }
-    } catch (err) {
+    } catch {
       setError("Invalid verification code. Please try again.");
     } finally {
       setPending(false);
@@ -46,8 +45,7 @@ function ForgotPasswordContent() {
     
     try {
       await sendPasswordResetEmail(auth, email);
-      setCodeSent(true);
-    } catch (err) {
+    } catch {
       setError("Failed to send verification code. Please try again.");
     } finally {
       setPending(false);

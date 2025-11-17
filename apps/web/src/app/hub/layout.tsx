@@ -1,6 +1,5 @@
 import { ReactNode } from "react";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import HubShell from "./HubShell";
 
 async function guard() {
   // Temporarily disable server-side auth guard since:
@@ -68,5 +67,5 @@ async function guard() {
 
 export default async function HubLayout({ children }: { children: ReactNode }) {
   await guard();
-  return children;
+  return <HubShell>{children}</HubShell>;
 }

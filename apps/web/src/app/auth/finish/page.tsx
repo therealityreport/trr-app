@@ -5,13 +5,15 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
-import { getUserByUsername, getUserProfile, upsertUserProfile } from "@/lib/db/users";
+import { getUserByUsername } from "@/lib/db/users";
 import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
 import { ALL_SHOWS } from "@/lib/data/shows";
+import { COUNTRIES } from "@/lib/data/countries";
+import { US_STATES, GENDER_OPTIONS } from "@/lib/data/states";
 import ClientOnly from "@/components/ClientOnly";
 import Image from "next/image";
 
-type FieldErrors = Partial<Record<"username" | "birthday" | "shows", string>>;
+type FieldErrors = Partial<Record<"username" | "birthday" | "shows" | "gender" | "country" | "state", string>>;
 
 function FinishProfileContent() {
   const router = useRouter();
@@ -22,6 +24,9 @@ function FinishProfileContent() {
   const [birthday, setBirthday] = useState("");
   const [requireBirthday, setRequireBirthday] = useState(true);
   const [showSelections, setShowSelections] = useState<Record<string, boolean>>({});
+  const [gender, setGender] = useState("");
+  const [country, setCountry] = useState("");
+  const [state, setState] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
 
   // Load user and prefill hints
@@ -125,6 +130,9 @@ function FinishProfileContent() {
     }
     const showsErr = validateShowsMin(selectedShows, 3);
     if (showsErr) next.shows = showsErr;
+    if (!gender) next.gender = "Gender is required.";
+    if (!country) next.country = "Country is required.";
+    if (country === "United States" && !state) next.state = "State is required.";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -171,6 +179,10 @@ function FinishProfileContent() {
         username: username.trim(),
         birthday: requireBirthday ? birthday.trim() : birthday.trim(),
         shows: parseShows(selectedShows),
+        gender: gender.trim(),
+        livesInUS: country.trim() === "United States",
+        state: country.trim() === "United States" ? state.trim() : undefined,
+        country: country.trim() !== "United States" ? country.trim() : undefined,
         provider,
       };
       
@@ -198,6 +210,10 @@ function FinishProfileContent() {
           username: username.trim(),
           birthday: requireBirthday ? birthday.trim() : birthday.trim(),
           shows: parseShows(selectedShows),
+          gender: gender.trim(),
+          livesInUS: country.trim() === "United States",
+          state: country.trim() === "United States" ? state.trim() : undefined,
+          country: country.trim() !== "United States" ? country.trim() : undefined,
           provider,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -309,6 +325,90 @@ function FinishProfileContent() {
               </div>
             )}
 
+            {/* Gender Field */}
+            <div className="space-y-2">
+              <label htmlFor="gender" className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
+                Gender
+              </label>
+              <select
+                id="gender"
+                name="gender"
+                className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+                disabled={pending}
+                required
+              >
+                <option value="">Select gender</option>
+                {GENDER_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              {errors.gender && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.gender}</p>}
+            </div>
+
+            {/* Country Field */}
+            <div className="space-y-2">
+              <label htmlFor="country" className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
+                Country
+              </label>
+              <input
+                id="country"
+                name="country"
+                type="text"
+                list="countries-list"
+                autoComplete="off"
+                className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
+                value={country}
+                onChange={(e) => {
+                  setCountry(e.target.value);
+                  // Clear state if not US
+                  if (e.target.value !== "United States") {
+                    setState("");
+                  }
+                }}
+                disabled={pending}
+                placeholder="Type to search..."
+                required
+              />
+              <datalist id="countries-list">
+                {COUNTRIES.map((countryName) => (
+                  <option key={countryName} value={countryName} />
+                ))}
+              </datalist>
+              {errors.country && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.country}</p>}
+            </div>
+
+            {/* State Field - Only show if United States is selected */}
+            {country === "United States" && (
+              <div className="space-y-2">
+                <label htmlFor="state" className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
+                  State
+                </label>
+                <input
+                  id="state"
+                  name="state"
+                  type="text"
+                  list="states-list"
+                  autoComplete="off"
+                  className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
+                  value={state}
+                  onChange={(e) => setState(e.target.value)}
+                  disabled={pending}
+                  placeholder="Type to search..."
+                  required
+                />
+                <datalist id="states-list">
+                  {US_STATES.map((stateName) => (
+                    <option key={stateName} value={stateName} />
+                  ))}
+                </datalist>
+                {errors.state && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.state}</p>}
+              </div>
+            )}
+
             {/* Shows Selection */}
             <div className="space-y-2">
               <div className="flex justify-between items-center">
@@ -362,7 +462,7 @@ function FinishProfileContent() {
             <button
               type="submit"
               className="w-full h-11 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded font-hamburg font-bold hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors duration-200 disabled:opacity-60"
-              disabled={pending || selectedShows.length < 3}
+              disabled={pending || selectedShows.length < 3 || !gender || !country || (country === "United States" && !state)}
             >
               {pending ? "Saving…" : "Continue"}
             </button>
