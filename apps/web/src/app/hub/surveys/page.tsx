@@ -607,6 +607,7 @@ export default function SurveysPage() {
     return SURVEY_CARDS.map((survey) => {
       const isSurveyX = survey.id === "survey-x";
       const locked = !isSurveyX && !surveyXCompleted;
+      const href = survey.href;
       const actionLabel = isSurveyX
         ? surveyXCompleted
           ? "Update responses"
@@ -619,6 +620,13 @@ export default function SurveysPage() {
         : locked
           ? survey.noteLocked ?? "Unlocks after Survey X."
           : survey.noteUnlocked ?? "We’ll email you when this week’s poll opens.";
+      const onAction = isSurveyX
+        ? () => setModalOpen(true)
+        : locked
+          ? undefined
+          : href
+            ? () => router.push(href)
+            : () => handleSurveySelect(survey.title);
 
       return (
         <SurveyCard
@@ -628,15 +636,7 @@ export default function SurveysPage() {
           frequency={survey.frequency}
           locked={locked}
           actionLabel={actionLabel}
-          onAction={
-            isSurveyX
-              ? () => setModalOpen(true)
-              : locked
-                ? undefined
-                : survey.href
-                  ? () => router.push(survey.href)
-                  : () => handleSurveySelect(survey.title)
-          }
+          onAction={onAction}
           completed={isSurveyX && surveyXCompleted}
           secondaryNote={secondaryNote}
         />
