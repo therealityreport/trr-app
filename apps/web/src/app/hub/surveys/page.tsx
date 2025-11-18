@@ -9,7 +9,18 @@ import { AuthDebugger } from "@/lib/debug";
 import { getSurveyXState, saveSurveyXResponses } from "@/lib/db/surveys";
 import type { SurveyXResponses } from "@/lib/validation/user";
 
-const SURVEY_CARDS = [
+type SurveyCardConfig = {
+  id: string;
+  title: string;
+  description: string;
+  frequency: string;
+  href?: string;
+  actionLabel?: string;
+  noteUnlocked?: string;
+  noteLocked?: string;
+};
+
+const SURVEY_CARDS: SurveyCardConfig[] = [
   {
     id: "survey-x",
     title: "Survey X",
