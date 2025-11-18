@@ -1,5 +1,6 @@
-import { auth, db } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import type { User } from "firebase/auth";
 import type { SurveyXResponses, SurveyXState } from "@/lib/validation/user";
 
 export async function getSurveyXState(uid: string): Promise<SurveyXState | null> {
@@ -18,7 +19,8 @@ export async function getSurveyXState(uid: string): Promise<SurveyXState | null>
   };
 }
 
-export async function saveSurveyXResponses(uid: string, responses: SurveyXResponses): Promise<void> {
+export async function saveSurveyXResponses(user: User, responses: SurveyXResponses): Promise<void> {
+  const uid = user.uid;
   const ref = doc(db, "users", uid);
   const existing = await getDoc(ref);
   const existingData = existing.exists() ? (existing.data() as { username?: string | null }) : null;
@@ -36,15 +38,11 @@ export async function saveSurveyXResponses(uid: string, responses: SurveyXRespon
     { merge: true },
   );
 
-  await syncSurveyXResponses(responses, username);
-  await syncGlobalProfileSurvey(responses, username);
+  await syncSurveyXResponses(user, responses, username);
+  await syncGlobalProfileSurvey(user, responses, username);
 }
 
-async function syncSurveyXResponses(responses: SurveyXResponses, username: string | null): Promise<void> {
-  const user = auth.currentUser;
-  if (!user) {
-    throw new Error("User is not authenticated");
-  }
+async function syncSurveyXResponses(user: User, responses: SurveyXResponses, username: string | null): Promise<void> {
   const idToken = await user.getIdToken();
   const payload = {
     view_live_tv_household: responses.view_live_tv_household ?? null,
@@ -71,11 +69,7 @@ async function syncSurveyXResponses(responses: SurveyXResponses, username: strin
   }
 }
 
-async function syncGlobalProfileSurvey(responses: SurveyXResponses, username: string | null): Promise<void> {
-  const user = auth.currentUser;
-  if (!user) {
-    throw new Error("User is not authenticated");
-  }
+async function syncGlobalProfileSurvey(user: User, responses: SurveyXResponses, username: string | null): Promise<void> {
   const idToken = await user.getIdToken();
   const payload = {
     responses,

@@ -238,12 +238,12 @@ function createInitialResponses(responses?: SurveyXResponses | null): SurveyXRes
 interface SurveyXModalProps {
   open: boolean;
   onClose: () => void;
-  uid: string;
+  user: User;
   initialResponses: SurveyXResponses | null;
   onComplete: (responses: SurveyXResponses) => void;
 }
 
-function SurveyXModal({ open, onClose, uid, initialResponses, onComplete }: SurveyXModalProps) {
+function SurveyXModal({ open, onClose, user, initialResponses, onComplete }: SurveyXModalProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const [form, setForm] = useState<SurveyXResponses>(() => createInitialResponses(initialResponses));
   const [error, setError] = useState<string | null>(null);
@@ -364,12 +364,13 @@ function SurveyXModal({ open, onClose, uid, initialResponses, onComplete }: Surv
 
     try {
       setSubmitting(true);
-      await saveSurveyXResponses(uid, form);
-      AuthDebugger.log("Survey X: responses saved", { uid });
+      await saveSurveyXResponses(user, form);
+      AuthDebugger.log("Survey X: responses saved", { uid: user.uid });
       onComplete(form);
     } catch (err) {
       console.error("Failed to save Survey X responses", err);
-      setError("We couldn't save your answers. Please try again.");
+      const message = err instanceof Error ? err.message : null;
+      setError(message ?? "We couldn't save your answers. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -672,7 +673,7 @@ export default function SurveysPage() {
         <SurveyXModal
           open={modalOpen}
           onClose={() => setModalOpen(false)}
-          uid={user.uid}
+          user={user}
           initialResponses={surveyXResponses}
           onComplete={handleSurveyXSuccess}
         />
