@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Route } from "next";
 import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged } from "firebase/auth";
@@ -14,7 +15,7 @@ type SurveyCardConfig = {
   title: string;
   description: string;
   frequency: string;
-  href?: string;
+  href?: Route;
   actionLabel?: string;
   noteUnlocked?: string;
   noteLocked?: string;
