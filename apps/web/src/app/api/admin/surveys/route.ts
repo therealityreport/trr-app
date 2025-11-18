@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { listAdminSurveys } from "@/lib/server/surveys/admin-service";
+import { listSurveys } from "@/lib/server/surveys/fetch";
 
 export async function GET(request: NextRequest) {
   try {
     await requireAdmin(request);
-    const surveys = listAdminSurveys();
-    return NextResponse.json({ surveys });
+    const items = await listSurveys();
+    return NextResponse.json({ items });
   } catch (error) {
     console.error("[api] Failed to list surveys", error);
     const message = error instanceof Error ? error.message : "failed";

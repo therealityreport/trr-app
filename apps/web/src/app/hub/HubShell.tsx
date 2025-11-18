@@ -8,11 +8,13 @@ import { logout } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
 import { useEffect, useRef, useState } from "react";
 import type { User } from "firebase/auth";
+import { isClientAdmin } from "@/lib/admin/client-access";
 
 export default function HubShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { openMenu, isOpen: isSideMenuOpen } = useSideMenu();
   const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsMenuRef = useRef<HTMLDivElement | null>(null);
   const settingsToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -21,6 +23,7 @@ export default function HubShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((currentUser) => {
       setUser(currentUser);
+      setIsAdmin(Boolean(currentUser && isClientAdmin(currentUser)));
     });
     return () => unsubscribe();
   }, []);
@@ -120,6 +123,19 @@ export default function HubShell({ children }: { children: ReactNode }) {
                       role="menu"
                       className="absolute right-0 z-30 mt-2 w-48 overflow-hidden rounded-lg border border-zinc-200 bg-white py-2 shadow-xl"
                     >
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setIsSettingsOpen(false);
+                            router.push("/admin");
+                          }}
+                          className="flex w-full items-center justify-start px-4 py-2 text-left text-sm font-medium text-gray-800 transition hover:bg-black/5"
+                        >
+                          Admin Dashboard
+                        </button>
+                      )}
                       <button
                         type="button"
                         role="menuitem"

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
-import { getSurveyDefinition } from "@/lib/server/surveys/definitions";
+import { getQuestionColumns, getSurveyDefinition } from "@/lib/server/surveys/definitions";
 import { upsertSurveyResponse } from "@/lib/server/surveys/repository";
 
 interface ShowSurveyPayload {
@@ -51,8 +51,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
-    const needsSeasonId = definition.questionColumns.some((column) => column.column === "season_id");
-    const needsEpisodeId = definition.questionColumns.some((column) => column.column === "episode_id");
+    const surveyQuestionColumns = getQuestionColumns(definition);
+    const needsSeasonId = surveyQuestionColumns.some((column) => column.name === "season_id");
+    const needsEpisodeId = surveyQuestionColumns.some((column) => column.name === "episode_id");
     if (needsSeasonId && !payload.seasonId) {
       return NextResponse.json({ error: "seasonId is required" }, { status: 400 });
     }

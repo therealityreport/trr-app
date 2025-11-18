@@ -2,38 +2,39 @@
 
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
-import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import ClientOnly from "@/components/ClientOnly";
+import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
-interface SurveyFieldDefinition {
-  column: string;
+interface SurveyColumnDefinition {
+  name: string;
   label: string;
   type: string;
   multiValue?: boolean;
+  isMeta?: boolean;
 }
 
 interface SurveyMetadata {
   key: string;
-  name: string;
+  title: string;
   description?: string;
   tableName: string;
   previewColumns: string[];
-  columns: SurveyFieldDefinition[];
+  columns: SurveyColumnDefinition[];
   allowShowFilters?: boolean;
   allowEpisodeFilters?: boolean;
 }
 
 interface SurveyListResponse {
-  surveys: SurveyMetadata[];
+  items: SurveyMetadata[];
 }
 
 interface SurveyRowsResponse {
-  items: Record<string, unknown>[];
+  rows: Record<string, unknown>[];
   total: number;
-  page: number;
-  pageSize: number;
-  columns: SurveyFieldDefinition[];
+  limit: number;
+  offset: number;
+  columns: SurveyColumnDefinition[];
 }
 
 interface SurveyDetailResponse {
@@ -48,22 +49,11 @@ interface FilterState {
   episodeNumber?: string;
 }
 
-const BASE_COLUMNS = ["id", "created_at", "app_user_id", "source", "show_id", "season_number", "episode_number"] as const;
-
-const parseAdminEmails = (): string[] => {
-  const raw = process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "";
-  return raw
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
-};
-
-const ADMIN_EMAILS = parseAdminEmails();
+const BASE_COLUMNS = ["id", "created_at", "app_user_id", "app_username", "source"] as const;
 
 export default function AdminSurveyResponsesPage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const { user, checking, hasAccess } = useAdminGuard();
   const [surveys, setSurveys] = useState<SurveyMetadata[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>({});
@@ -77,21 +67,6 @@ export default function AdminSurveyResponsesPage() {
   const [exporting, setExporting] = useState(false);
   const [metadataLoading, setMetadataLoading] = useState(true);
   const [metadataError, setMetadataError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (next) => {
-      setUser(next);
-      setAuthChecked(true);
-      if (!next) {
-        router.replace("/");
-        return;
-      }
-      if (ADMIN_EMAILS.length > 0 && (!next.email || !ADMIN_EMAILS.includes(next.email.toLowerCase()))) {
-        router.replace("/hub");
-      }
-    });
-    return () => unsub();
-  }, [router]);
 
   const withAuthFetch = useCallback(async (url: string, init?: RequestInit, skipJsonHeader = false) => {
     const current = auth.currentUser;
@@ -111,19 +86,19 @@ export default function AdminSurveyResponsesPage() {
   }, []);
 
   useEffect(() => {
-    if (!authChecked || !user) return;
+    if (checking || !user || !hasAccess) return;
     const loadMetadata = async () => {
       setMetadataLoading(true);
       setMetadataError(null);
       try {
         const res = await withAuthFetch("/api/admin/surveys", { method: "GET" });
         const data = (await res.json()) as SurveyListResponse;
-        setSurveys(data.surveys);
+        setSurveys(data.items);
         setSelectedKey((current) => {
-          if (current && data.surveys.some((survey) => survey.key === current)) {
+          if (current && data.items.some((survey) => survey.key === current)) {
             return current;
           }
-          return data.surveys[0]?.key ?? null;
+          return data.items[0]?.key ?? null;
         });
       } catch (error) {
         console.error(error);
@@ -133,13 +108,13 @@ export default function AdminSurveyResponsesPage() {
       }
     };
     void loadMetadata();
-  }, [authChecked, user, withAuthFetch]);
+  }, [checking, hasAccess, user, withAuthFetch]);
 
   const activeSurvey = useMemo(() => surveys.find((survey) => survey.key === selectedKey) ?? null, [surveys, selectedKey]);
 
   const visibleColumns = useMemo(() => {
     if (!tableData || !activeSurvey) return [] as string[];
-    const available = new Set(tableData.columns.map((column) => column.column));
+    const available = new Set(tableData.columns.map((column) => column.name));
     const ordering = [...BASE_COLUMNS, ...activeSurvey.previewColumns];
     const unique: string[] = [];
     for (const column of ordering) {
@@ -148,7 +123,7 @@ export default function AdminSurveyResponsesPage() {
       }
     }
     const fallback = tableData.columns
-      .map((column) => column.column)
+      .map((column) => column.name)
       .filter((column) => !unique.includes(column));
     return [...unique, ...fallback];
   }, [tableData, activeSurvey]);
@@ -158,9 +133,10 @@ export default function AdminSurveyResponsesPage() {
     setTableLoading(true);
     setTableError(null);
     try {
+      const offset = (page - 1) * pageSize;
       const params = new URLSearchParams();
-      params.set("page", String(page));
-      params.set("pageSize", String(pageSize));
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
       if (filters.from) params.set("from", filters.from);
       if (filters.to) params.set("to", filters.to);
       if (filters.showId) params.set("showId", filters.showId);
@@ -178,9 +154,9 @@ export default function AdminSurveyResponsesPage() {
   }, [filters.episodeNumber, filters.from, filters.seasonNumber, filters.showId, filters.to, page, pageSize, selectedKey, withAuthFetch]);
 
   useEffect(() => {
-    if (!selectedKey) return;
+    if (!selectedKey || !hasAccess) return;
     void loadResponses();
-  }, [selectedKey, filters, page, pageSize, loadResponses]);
+  }, [selectedKey, filters, page, pageSize, hasAccess, loadResponses]);
 
   const handleSurveyChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setSelectedKey(event.target.value);
@@ -293,7 +269,7 @@ export default function AdminSurveyResponsesPage() {
         </tr>
       );
     }
-    if (!tableData || tableData.items.length === 0) {
+    if (!tableData || tableData.rows.length === 0) {
       return (
         <tr>
           <td colSpan={visibleColumns.length} className="py-6 text-center text-sm text-zinc-500">
@@ -302,7 +278,7 @@ export default function AdminSurveyResponsesPage() {
         </tr>
       );
     }
-    return tableData.items.map((row) => (
+    return tableData.rows.map((row) => (
       <tr
         key={row.id as string}
         className="cursor-pointer border-b border-zinc-100 transition hover:bg-zinc-50"
@@ -317,7 +293,7 @@ export default function AdminSurveyResponsesPage() {
     ));
   };
 
-  if (!authChecked || metadataLoading) {
+  if (checking || metadataLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
         <div className="text-sm text-zinc-600">Preparing admin tools…</div>
@@ -325,7 +301,7 @@ export default function AdminSurveyResponsesPage() {
     );
   }
 
-  if (!user) {
+  if (!user || !hasAccess) {
     return null;
   }
 
@@ -347,6 +323,13 @@ export default function AdminSurveyResponsesPage() {
               <p className="text-sm text-zinc-500">View, filter, and export survey submissions</p>
             </div>
             <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => router.push("/admin")}
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+              >
+                Back to Admin Dashboard
+              </button>
               <button
                 type="button"
                 onClick={() => router.push("/hub")}
@@ -377,7 +360,7 @@ export default function AdminSurveyResponsesPage() {
               >
                 {surveys.map((survey) => (
                   <option key={survey.key} value={survey.key}>
-                    {survey.name}
+                    {survey.title}
                   </option>
                 ))}
               </select>
@@ -450,7 +433,7 @@ export default function AdminSurveyResponsesPage() {
                   <tr>
                     {visibleColumns.map((column) => (
                       <th key={column} className="bg-zinc-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">
-                        {tableData?.columns.find((col) => col.column === column)?.label ?? column}
+                        {tableData?.columns.find((col) => col.name === column)?.label ?? column}
                       </th>
                     ))}
                   </tr>
@@ -461,8 +444,7 @@ export default function AdminSurveyResponsesPage() {
             {tableData && tableData.total > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
                 <div>
-                  Showing {(tableData.page - 1) * tableData.pageSize + 1}–
-                  {Math.min(tableData.page * tableData.pageSize, tableData.total)} of {tableData.total} responses
+                  Showing {tableData.offset + 1}–{Math.min(tableData.offset + tableData.limit, tableData.total)} of {tableData.total} responses
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -476,7 +458,7 @@ export default function AdminSurveyResponsesPage() {
                   <span className="text-xs text-zinc-500">Page {page}</span>
                   <button
                     type="button"
-                    disabled={!tableData || page * pageSize >= tableData.total || tableLoading}
+                    disabled={!tableData || tableData.offset + tableData.limit >= tableData.total || tableLoading}
                     onClick={() => setPage((prev) => prev + 1)}
                     className="rounded-full border border-zinc-200 px-3 py-1 text-sm text-zinc-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -505,10 +487,10 @@ export default function AdminSurveyResponsesPage() {
               )}
               <div className="mt-6 space-y-4">
                 {tableData?.columns.map((column) => (
-                  <div key={column.column} className="rounded-lg border border-zinc-100 bg-zinc-50 px-4 py-3">
+                  <div key={column.name} className="rounded-lg border border-zinc-100 bg-zinc-50 px-4 py-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">{column.label}</p>
                     <p className="mt-1 break-all text-sm text-zinc-800">
-                      {formatValue(column.column, detailRow[column.column]) || <span className="text-zinc-400">—</span>}
+                      {formatValue(column.name, detailRow[column.name]) || <span className="text-zinc-400">—</span>}
                     </p>
                   </div>
                 ))}

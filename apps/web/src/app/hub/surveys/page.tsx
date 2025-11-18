@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -21,6 +22,15 @@ const SURVEY_CARDS = [
     title: "Weekly Show Pulse",
     description: "Vote on storylines and rate new episodes across Bravo, Netflix, Peacock, and more.",
     frequency: "Weekly",
+  },
+  {
+    id: "rhop-s10",
+    title: "RHOP S10 Cast Rankings",
+    description: "Drag the Season 10 cast into your current power ranking each week.",
+    frequency: "Weekly",
+    href: "/surveys/rhop-s10",
+    actionLabel: "Rank now",
+    noteUnlocked: "Cast order updates every Monday afternoon.",
   },
   {
     id: "finale-forecast",
@@ -516,6 +526,7 @@ function SurveyXModal({ open, onClose, uid, initialResponses, onComplete }: Surv
 }
 
 export default function SurveysPage() {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(auth.currentUser ?? null);
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState<BannerState>(null);
@@ -590,12 +601,12 @@ export default function SurveysPage() {
           : "Start survey"
         : locked
           ? "Locked"
-          : "Preview poll";
+          : survey.actionLabel ?? "Preview poll";
       const secondaryNote = isSurveyX
         ? "We only ask these questions once."
-        : surveyXCompleted
-          ? "We’ll email you when this week’s poll opens."
-          : "Unlocks after Survey X.";
+        : locked
+          ? survey.noteLocked ?? "Unlocks after Survey X."
+          : survey.noteUnlocked ?? "We’ll email you when this week’s poll opens.";
 
       return (
         <SurveyCard
@@ -610,14 +621,16 @@ export default function SurveysPage() {
               ? () => setModalOpen(true)
               : locked
                 ? undefined
-                : () => handleSurveySelect(survey.title)
+                : survey.href
+                  ? () => router.push(survey.href)
+                  : () => handleSurveySelect(survey.title)
           }
           completed={isSurveyX && surveyXCompleted}
           secondaryNote={secondaryNote}
         />
       );
     });
-  }, [surveyXCompleted]);
+  }, [router, surveyXCompleted]);
 
   return (
     <section className="space-y-8">

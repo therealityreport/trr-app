@@ -3,10 +3,15 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
+import dotenv from "dotenv";
+import { readFileSync } from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const migrationsDir = path.join(__dirname, "../db/migrations");
+
+// Load environment variables from .env.local
+dotenv.config({ path: path.join(__dirname, "../.env.local") });
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -14,7 +19,28 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const pool = new Pool({ connectionString });
+// Configure SSL if enabled
+let ssl = undefined;
+if (process.env.DATABASE_SSL === "true") {
+  const inlineCa = process.env.DATABASE_SSL_CA;
+  const caPath = process.env.DATABASE_SSL_CA_PATH;
+
+  if (inlineCa) {
+    console.log("[migrations] Using inline SSL CA certificate");
+    ssl = { rejectUnauthorized: true, ca: inlineCa };
+  } else if (caPath) {
+    const resolved = path.resolve(path.join(__dirname, ".."), caPath);
+    console.log(`[migrations] Loading SSL CA from file: ${resolved}`);
+    const ca = readFileSync(resolved, "utf8");
+    console.log(`[migrations] Successfully loaded SSL CA (${ca.length} bytes)`);
+    ssl = { rejectUnauthorized: true, ca };
+  } else {
+    console.log("[migrations] DATABASE_SSL=true but no CA provided, using default SSL");
+    ssl = { rejectUnauthorized: true };
+  }
+}
+
+const pool = new Pool({ connectionString, ssl });
 
 async function ensureMigrationsTable() {
   await pool.query(`

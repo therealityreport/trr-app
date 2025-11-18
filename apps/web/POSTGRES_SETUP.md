@@ -174,12 +174,12 @@ All endpoints require authentication via Firebase ID token in `Authorization: Be
 
 **GET** `/api/admin/surveys`
 - Lists all available surveys
-- Returns: `{ surveys: SurveyMetadata[] }`
+- Returns: `{ items: SurveyMetadata[] }`
 
-**GET** `/api/admin/surveys/:surveyKey/responses?page=1&pageSize=25&from=2025-01-01&to=2025-12-31`
+**GET** `/api/admin/surveys/:surveyKey/responses?limit=25&offset=0&from=2025-01-01&to=2025-12-31`
 - Fetches paginated survey responses with filters
-- Query params: `page`, `pageSize`, `from`, `to`, `showId`, `seasonNumber`, `episodeNumber`
-- Returns: `{ items: [], total: number, page: number, pageSize: number, columns: [] }`
+- Query params: `limit`, `offset`, `from`, `to`, `showId`, `seasonNumber`, `episodeNumber`
+- Returns: `{ rows: [], total: number, limit: number, offset: number, columns: [] }`
 
 **GET** `/api/admin/surveys/:surveyKey/responses/:id`
 - Fetches a single response by ID
@@ -237,15 +237,15 @@ In `apps/web/src/lib/server/surveys/definitions.ts`:
 ```typescript
 {
   key: "rhonj_s15",
-  name: "RHONJ S15 Episode Survey",
+  title: "RHONJ S15 Episode Survey",
   description: "Season 15 episode feedback",
   tableName: "survey_rhonj_s15_responses",
   showId: "tt1119958",
   seasonNumber: 15,
-  questionColumns: [
-    { column: "favorite_cast_member", label: "Favorite Cast Member", type: "text" },
-    { column: "drama_rating", label: "Drama Rating", type: "number" },
-  ],
+  columns: withCommonColumns([
+    { name: "favorite_cast_member", label: "Favorite Cast Member", type: "text" },
+    { name: "drama_rating", label: "Drama Rating", type: "int" },
+  ]),
   previewColumns: ["favorite_cast_member", "drama_rating"],
   allowShowFilters: true,
   allowEpisodeFilters: true,
@@ -378,6 +378,8 @@ npm run db:migrate && npm run build
 - **Never commit `.env.local`** to version control (already in `.gitignore`)
 - **Never commit the Firebase service account JSON** to the repo
 - Use server-side `ADMIN_EMAIL_ALLOWLIST` (not `NEXT_PUBLIC_ADMIN_EMAILS`)
+- Prefer server-side `ADMIN_DISPLAYNAME_ALLOWLIST` (client values are public)
+- If your provider uses a self-signed certificate, install their CA and reference it with `DATABASE_SSL_CA` or `DATABASE_SSL_CA_FILE` (fallback is `DATABASE_SSL_REJECT_UNAUTHORIZED=false`, but only if you trust the network)
 - Enable SSL for PostgreSQL connections (`?sslmode=require`)
 - Use strong passwords for database users
 - Rotate service account keys periodically

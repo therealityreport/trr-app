@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { auth } from "@/lib/firebase";
-import type { User } from "firebase/auth";
 import ClientOnly from "@/components/ClientOnly";
+import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const FONT_FAMILIES = [
   {
@@ -208,35 +206,20 @@ function FontPreview({ family }: { family: typeof FONT_FAMILIES[0] }) {
 
 export default function AdminFontsPage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, checking, hasAccess } = useAdminGuard();
 
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-
-      // Redirect if not authenticated
-      if (!currentUser) {
-        router.replace("/");
-      }
-    });
-
-    return () => unsubscribe();
-  }, [router]);
-
-  if (loading) {
+  if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
         <div className="text-center">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent"></div>
-          <p className="text-sm text-gray-600">Loading...</p>
+          <p className="text-sm text-gray-600">Checking admin access…</p>
         </div>
       </div>
     );
   }
 
-  if (!user) {
+  if (!user || !hasAccess) {
     return null;
   }
 
@@ -253,13 +236,22 @@ export default function AdminFontsPage() {
                   All available fonts loaded in the application
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => router.push("/hub")}
-                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50"
-              >
-                Back to Hub
-              </button>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => router.push("/admin")}
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50"
+                >
+                  Back to Admin Dashboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push("/hub")}
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50"
+                >
+                  Back to Hub
+                </button>
+              </div>
             </div>
           </div>
         </header>

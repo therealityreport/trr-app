@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { fetchSurveyResponseById } from "@/lib/server/surveys/admin-service";
+import { fetchSurveyResponseById } from "@/lib/server/surveys/fetch";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { surveyKey: string; responseId: string } },
+  { params }: { params: Promise<{ surveyKey: string; responseId: string }> },
 ) {
   try {
     await requireAdmin(request);
-    const row = await fetchSurveyResponseById(params.surveyKey, params.responseId);
+    const { surveyKey, responseId } = await params;
+    const row = await fetchSurveyResponseById(surveyKey, responseId);
     if (!row) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { exportSurveyResponses, type SurveyAdminFilters } from "@/lib/server/surveys/admin-service";
+import { exportSurveyResponses, type SurveyFilters } from "@/lib/server/surveys/fetch";
 
 const parseNumber = (value: string | null): number | undefined => {
   if (!value) return undefined;
@@ -10,12 +10,13 @@ const parseNumber = (value: string | null): number | undefined => {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { surveyKey: string } },
+  { params }: { params: Promise<{ surveyKey: string }> },
 ) {
   try {
     await requireAdmin(request);
+    const { surveyKey } = await params;
     const search = request.nextUrl.searchParams;
-    const filters: SurveyAdminFilters = {
+    const filters: SurveyFilters = {
       from: search.get("from") ?? undefined,
       to: search.get("to") ?? undefined,
       showId: search.get("showId") ?? undefined,
@@ -23,7 +24,7 @@ export async function GET(
       episodeNumber: parseNumber(search.get("episodeNumber")) ?? undefined,
     };
 
-    const { filename, csv } = await exportSurveyResponses(params.surveyKey, filters);
+    const { filename, csv } = await exportSurveyResponses(surveyKey, filters);
     return new NextResponse(csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",

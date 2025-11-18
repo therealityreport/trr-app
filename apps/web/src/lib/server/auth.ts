@@ -3,6 +3,8 @@ import { Buffer } from "node:buffer";
 import type { NextRequest } from "next/server";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { adminAuth } from "@/lib/firebaseAdmin";
+import { DEFAULT_ADMIN_DISPLAY_NAMES, DEFAULT_ADMIN_UIDS } from "@/lib/admin/constants";
+import { normalizeDisplayName, normalizeDisplayNameKey } from "@/lib/admin/display-names";
 
 export interface AuthenticatedUser {
   uid: string;
@@ -140,10 +142,30 @@ function parseAllowlist(raw: string | undefined, lowercase = true): Set<string> 
 
 const emailAllowlist = parseAllowlist(process.env.ADMIN_EMAIL_ALLOWLIST, true);
 const fallbackEmailAllowlist = parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_EMAILS, true);
-const uidAllowlist = parseAllowlist(process.env.ADMIN_UID_ALLOWLIST, false);
+const envUidAllowlist = parseAllowlist(process.env.ADMIN_UID_ALLOWLIST, false);
+const displayNameAllowlist = parseAllowlist(process.env.ADMIN_DISPLAYNAME_ALLOWLIST, false);
+const fallbackDisplayNames = parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_DISPLAY_NAMES, false);
+
+const uidAllowlist = new Set<string>([...envUidAllowlist, ...DEFAULT_ADMIN_UIDS]);
 
 const allowedEmails = new Set<string>([...emailAllowlist, ...fallbackEmailAllowlist]);
-const allowAllAdmins = allowedEmails.size === 0 && uidAllowlist.size === 0;
+const allowedDisplayNames = new Set<string>(
+  [
+    ...DEFAULT_ADMIN_DISPLAY_NAMES,
+    ...displayNameAllowlist,
+    ...fallbackDisplayNames,
+  ]
+    .map((value) => normalizeDisplayName(value))
+    .filter((value): value is string => Boolean(value)),
+);
+const allowedDisplayNameKeys = new Set<string>(
+  Array.from(allowedDisplayNames)
+    .map((value) => normalizeDisplayNameKey(value))
+    .filter((value): value is string => Boolean(value)),
+);
+
+const allowAllAdmins =
+  allowedEmails.size === 0 && uidAllowlist.size === 0 && allowedDisplayNames.size === 0 && allowedDisplayNameKeys.size === 0;
 
 export async function requireAdmin(request: NextRequest): Promise<AuthenticatedUser> {
   const user = await requireUser(request);
@@ -152,7 +174,19 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
     return user;
   }
   const email = user.email?.toLowerCase();
-  const isAllowed = (email && allowedEmails.has(email)) || uidAllowlist.has(user.uid);
+  const displayName =
+    typeof user.token.name === "string"
+      ? user.token.name
+      : typeof (user.token as { displayName?: string }).displayName === "string"
+        ? (user.token as { displayName?: string }).displayName
+        : undefined;
+  const normalizedDisplayName = normalizeDisplayName(displayName);
+  const normalizedDisplayNameKey = normalizeDisplayNameKey(normalizedDisplayName);
+  const isAllowed =
+    (email && allowedEmails.has(email)) ||
+    uidAllowlist.has(user.uid) ||
+    (normalizedDisplayName ? allowedDisplayNames.has(normalizedDisplayName) : false) ||
+    (normalizedDisplayNameKey ? allowedDisplayNameKeys.has(normalizedDisplayNameKey) : false);
   if (!isAllowed) {
     throw new Error("forbidden");
   }

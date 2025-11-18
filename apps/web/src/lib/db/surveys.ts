@@ -20,6 +20,9 @@ export async function getSurveyXState(uid: string): Promise<SurveyXState | null>
 
 export async function saveSurveyXResponses(uid: string, responses: SurveyXResponses): Promise<void> {
   const ref = doc(db, "users", uid);
+  const existing = await getDoc(ref);
+  const existingData = existing.exists() ? (existing.data() as { username?: string | null }) : null;
+  const username = typeof existingData?.username === "string" ? existingData.username : null;
   await setDoc(
     ref,
     {
@@ -33,10 +36,42 @@ export async function saveSurveyXResponses(uid: string, responses: SurveyXRespon
     { merge: true },
   );
 
-  await syncGlobalProfileSurvey(responses);
+  await syncSurveyXResponses(responses, username);
+  await syncGlobalProfileSurvey(responses, username);
 }
 
-async function syncGlobalProfileSurvey(responses: SurveyXResponses): Promise<void> {
+async function syncSurveyXResponses(responses: SurveyXResponses, username: string | null): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("User is not authenticated");
+  }
+  const idToken = await user.getIdToken();
+  const payload = {
+    view_live_tv_household: responses.view_live_tv_household ?? null,
+    view_platforms_subscriptions: responses.view_platforms_subscriptions ?? [],
+    primaryPlatform: responses.primaryPlatform ?? null,
+    watchFrequency: responses.watchFrequency ?? null,
+    watchMode: responses.watchMode ?? null,
+    view_reality_cowatch: responses.view_reality_cowatch ?? null,
+    view_live_chats_social: responses.view_live_chats_social ?? null,
+    view_devices_reality: responses.view_devices_reality ?? [],
+    username,
+  };
+  const res = await fetch("/api/surveys/x", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to persist Survey X responses: ${res.status} ${text}`);
+  }
+}
+
+async function syncGlobalProfileSurvey(responses: SurveyXResponses, username: string | null): Promise<void> {
   const user = auth.currentUser;
   if (!user) {
     throw new Error("User is not authenticated");
@@ -45,6 +80,7 @@ async function syncGlobalProfileSurvey(responses: SurveyXResponses): Promise<voi
   const payload = {
     responses,
     profileEmail: user.email ?? null,
+    username,
   };
   const res = await fetch("/api/surveys/global-profile", {
     method: "POST",

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { fetchSurveyResponses, type SurveyAdminFilters } from "@/lib/server/surveys/admin-service";
+import { fetchSurveyResponses, type SurveyFilters } from "@/lib/server/surveys/fetch";
 
 const parseNumber = (value: string | null): number | undefined => {
   if (!value) return undefined;
@@ -10,22 +10,28 @@ const parseNumber = (value: string | null): number | undefined => {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { surveyKey: string } },
+  { params }: { params: Promise<{ surveyKey: string }> },
 ) {
   try {
     await requireAdmin(request);
+    const { surveyKey } = await params;
     const search = request.nextUrl.searchParams;
-    const filters: SurveyAdminFilters = {
+    const filters: SurveyFilters = {
       from: search.get("from") ?? undefined,
       to: search.get("to") ?? undefined,
       showId: search.get("showId") ?? undefined,
       seasonNumber: parseNumber(search.get("seasonNumber")) ?? undefined,
       episodeNumber: parseNumber(search.get("episodeNumber")) ?? undefined,
     };
-    const page = parseNumber(search.get("page")) ?? 1;
-    const pageSize = parseNumber(search.get("pageSize")) ?? 25;
+    const limit = parseNumber(search.get("limit")) ?? 50;
+    const offset = parseNumber(search.get("offset")) ?? 0;
 
-    const result = await fetchSurveyResponses(params.surveyKey, filters, page, pageSize);
+    const result = await fetchSurveyResponses({
+      surveyKey,
+      limit,
+      offset,
+      ...filters,
+    });
     return NextResponse.json(result);
   } catch (error) {
     console.error("[api] Failed to fetch survey responses", error);

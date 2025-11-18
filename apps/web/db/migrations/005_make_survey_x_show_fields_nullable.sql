@@ -1,0 +1,8 @@
+BEGIN;
+
+ALTER TABLE IF EXISTS survey_x_responses
+  ALTER COLUMN show_id DROP NOT NULL,
+  ALTER COLUMN season_number DROP NOT NULL,
+  ALTER COLUMN episode_number DROP NOT NULL;
+
+COMMIT;
