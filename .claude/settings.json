@@ -1,0 +1,6 @@
+{
+  "hooks": {
+    "bashCommandFilter": ".claude/hooks/risky-bash-blocker.sh",
+    "onStop": ".claude/hooks/stop-hook.sh"
+  }
+}
