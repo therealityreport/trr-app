@@ -1,0 +1,100 @@
+# Worktrunk Configuration for TRR APP
+# https://worktrunk.dev
+
+[worktree]
+# Default location for worktrees
+# You can customize this with: wt config create
+path = "~/.claude-worktrees/TRR-APP"
+
+[hooks]
+# Post-create hook - runs after creating a new worktree
+# Sets up environment and provides helpful guidance
+post-create = """
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "🎉 Worktree Created Successfully!"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+
+  # Copy environment file if it exists
+  if [ -f "$WT_REPO_PATH/apps/web/.env.local" ]; then
+    echo "📋 Copying .env.local to new worktree..."
+    cp "$WT_REPO_PATH/apps/web/.env.local" "$WT_WORKTREE_PATH/apps/web/.env.local"
+    echo "✅ Environment configured"
+  else
+    echo "⚠️  No .env.local found in main worktree"
+    echo ""
+    echo "To set up environment variables:"
+    echo "  1. Copy template: cp apps/web/.env.example apps/web/.env.local"
+    echo "  2. Fill in values (see SETUP.md for guidance)"
+  fi
+
+  echo ""
+  echo "📍 Location: $WT_WORKTREE_PATH"
+  echo "🌿 Branch: $(git -C "$WT_WORKTREE_PATH" branch --show-current)"
+  echo ""
+  echo "Next steps:"
+  echo "  1. Implement your feature"
+  echo "  2. Validate: make validate"
+  echo "  3. Commit your changes"
+  echo "  4. Create PR: /pr or gh pr create"
+  echo ""
+  echo "Workflow: Implement → Validate → Commit → PR"
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+"""
+
+# Pre-merge hook - runs before merging branch
+# Ensures code quality before allowing merge
+pre-merge = """
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "🔍 Running Pre-Merge Validation"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+
+  # Navigate to web app directory
+  cd "$WT_WORKTREE_PATH/apps/web" || exit 1
+
+  # Run lint
+  echo "📝 Linting..."
+  npm run lint || {
+    echo "❌ Lint failed - fix errors before merging"
+    exit 1
+  }
+  echo "✅ Lint passed"
+  echo ""
+
+  # Run typecheck
+  echo "🔍 Type checking..."
+  npx tsc --noEmit || {
+    echo "❌ Type check failed - fix errors before merging"
+    exit 1
+  }
+  echo "✅ Type check passed"
+  echo ""
+
+  # Run tests
+  echo "🧪 Running tests..."
+  npm run test || {
+    echo "❌ Tests failed - fix tests before merging"
+    exit 1
+  }
+  echo "✅ Tests passed"
+  echo ""
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "✅ All validation checks passed!"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+"""
+
+[behavior]
+# Automatically delete branch after successful merge
+# Keeps repository clean and prevents stale branches
+delete-merged-branch = true
+
+# Fetch before creating worktree
+# Ensures you're working with latest changes
+fetch-before-create = true
