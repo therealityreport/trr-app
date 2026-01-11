@@ -6,22 +6,6 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const FONT_FAMILIES = [
   {
-    name: "Sans (Hamburg + Inter + Geist)",
-    cssVar: "--font-sans",
-    usage: "font-sans (Default body font)",
-    weights: [200, 300, 400, 500, 600, 700, 800, 900],
-    type: "Font Stack",
-    description: "Includes Hamburg Serial, Inter, and Geist Sans",
-  },
-  {
-    name: "Serif (Gloucester + Playfair)",
-    cssVar: "--font-serif",
-    usage: "font-serif (Used for h1, h2, h3)",
-    weights: [400, 500, 600, 700, 800, 900],
-    type: "Font Stack",
-    description: "Includes Gloucester OS, Playfair Display, and fallbacks",
-  },
-  {
     name: "Hamburg Serial",
     cssVar: "--font-hamburg",
     usage: 'style={{ fontFamily: "var(--font-hamburg)" }}',
@@ -78,30 +62,6 @@ const FONT_FAMILIES = [
     ],
   },
   {
-    name: "Geist Sans",
-    cssVar: "--font-geist-sans",
-    usage: 'style={{ fontFamily: "var(--font-geist-sans)" }}',
-    weights: [100, 200, 300, 400, 500, 600, 700, 800, 900],
-    type: "Google Font",
-    description: "Part of the default sans stack",
-  },
-  {
-    name: "Inter",
-    cssVar: "--font-inter",
-    usage: 'style={{ fontFamily: "var(--font-inter)" }}',
-    weights: [100, 200, 300, 400, 500, 600, 700, 800, 900],
-    type: "Google Font",
-    description: "Part of the default sans stack",
-  },
-  {
-    name: "Playfair Display",
-    cssVar: "--font-playfair",
-    usage: 'style={{ fontFamily: "var(--font-playfair)" }}',
-    weights: [400, 500, 600, 700, 800, 900],
-    type: "Google Font",
-    description: "Part of the default serif stack",
-  },
-  {
     name: "Gloucester Goodall",
     cssVar: "--font-goodall",
     usage: 'style={{ fontFamily: "var(--font-goodall)" }}',
@@ -150,9 +110,6 @@ function FontPreview({ family }: { family: typeof FONT_FAMILIES[0] }) {
         <div>
           <h3 className="text-lg font-bold text-zinc-900">{family.name}</h3>
           <p className="text-sm text-zinc-500">{family.type}</p>
-          {family.description && (
-            <p className="mt-1 text-xs text-zinc-400">{family.description}</p>
-          )}
         </div>
         <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
           {family.weights.length} weight{family.weights.length > 1 ? "s" : ""}
@@ -309,8 +266,27 @@ export default function AdminFontsPage() {
             </div>
           </section>
 
+          {/* Default Font Assignments */}
+          <section className="mt-12 rounded-lg border border-zinc-200 bg-white p-6">
+            <h3 className="mb-3 font-bold text-zinc-900">Default Font Assignments (globals.css)</h3>
+            <div className="space-y-2">
+              <div className="rounded bg-zinc-50 p-3">
+                <code className="text-xs text-zinc-900">body</code>
+                <p className="mt-1 text-xs text-zinc-500">Plymouth Serial Extra Bold (800)</p>
+              </div>
+              <div className="rounded bg-zinc-50 p-3">
+                <code className="text-xs text-zinc-900">h1, h2, h3</code>
+                <p className="mt-1 text-xs text-zinc-500">Rude Slab Condensed Extra Bold (800)</p>
+              </div>
+              <div className="rounded bg-zinc-50 p-3">
+                <code className="text-xs text-zinc-900">h4, h5, h6</code>
+                <p className="mt-1 text-xs text-zinc-500">Gloucester OS MT Std (1% letter-spacing)</p>
+              </div>
+            </div>
+          </section>
+
           {/* Usage Instructions */}
-          <section className="mt-12 rounded-lg border border-blue-200 bg-blue-50 p-6">
+          <section className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-6">
             <h3 className="mb-3 font-bold text-blue-900">Usage Instructions</h3>
             <div className="space-y-3 text-sm text-blue-800">
               <p>
@@ -318,61 +294,54 @@ export default function AdminFontsPage() {
               </p>
 
               <div className="space-y-2">
-                <p className="font-semibold">Option 1: Use font stacks (Recommended)</p>
+                <p className="font-semibold">Option 1: Use utility classes</p>
                 <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">className=&quot;font-sans&quot;</code>
-                  <p className="mt-1 text-xs">Uses Hamburg + Inter + Geist Sans</p>
+                  <code className="text-xs">className=&quot;font-plymouth&quot;</code>
+                  <p className="mt-1 text-xs">Plymouth Serial</p>
                 </div>
                 <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">className=&quot;font-serif&quot;</code>
-                  <p className="mt-1 text-xs">Uses Gloucester + Playfair Display</p>
+                  <code className="text-xs">className=&quot;font-hamburg&quot;</code>
+                  <p className="mt-1 text-xs">Hamburg Serial</p>
+                </div>
+                <div className="rounded bg-blue-100 p-3">
+                  <code className="text-xs">className=&quot;font-gloucester&quot;</code>
+                  <p className="mt-1 text-xs">Gloucester OS MT Std</p>
+                </div>
+                <div className="rounded bg-blue-100 p-3">
+                  <code className="text-xs">className=&quot;font-goodall&quot;</code>
+                  <p className="mt-1 text-xs">Gloucester Goodall</p>
+                </div>
+                <div className="rounded bg-blue-100 p-3">
+                  <code className="text-xs">className=&quot;font-rude-slab&quot;</code>
+                  <p className="mt-1 text-xs">Rude Slab Condensed</p>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <p className="font-semibold">Option 2: Use specific fonts with CSS variables</p>
+                <p className="font-semibold">Option 2: Use CSS variables in style</p>
                 <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">style={`{{ fontFamily: &quot;var(--font-hamburg)&quot; }}`}</code>
-                  <p className="mt-1 text-xs">Uses only Hamburg Serial</p>
+                  <code className="text-xs">style={`{{ fontFamily: "var(--font-plymouth-serial)" }}`}</code>
+                </div>
+                <div className="rounded bg-blue-100 p-3">
+                  <code className="text-xs">style={`{{ fontFamily: "var(--font-hamburg)" }}`}</code>
+                </div>
+                <div className="rounded bg-blue-100 p-3">
+                  <code className="text-xs">style={`{{ fontFamily: "var(--font-gloucester)" }}`}</code>
+                </div>
+                <div className="rounded bg-blue-100 p-3">
+                  <code className="text-xs">style={`{{ fontFamily: "var(--font-goodall)" }}`}</code>
+                </div>
+                <div className="rounded bg-blue-100 p-3">
+                  <code className="text-xs">style={`{{ fontFamily: "var(--font-rude-slab)" }}`}</code>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <p className="font-semibold">Option 3: Combine with font weights</p>
                 <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">className=&quot;font-sans font-bold&quot;</code>
-                  <p className="mt-1 text-xs">Uses sans stack with bold weight (700)</p>
+                  <code className="text-xs">className=&quot;font-plymouth font-bold&quot;</code>
+                  <p className="mt-1 text-xs">Plymouth Serial Bold (700)</p>
                 </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Theme Configuration */}
-          <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-6">
-            <h3 className="mb-3 font-bold text-zinc-900">Tailwind v4 Theme Configuration</h3>
-            <p className="mb-3 text-sm text-zinc-600">
-              Fonts are configured in globals.css using the @theme directive:
-            </p>
-            <div className="space-y-2">
-              <div className="rounded bg-zinc-50 p-3">
-                <code className="text-xs text-zinc-900">
-                  --font-sans: var(--font-hamburg), var(--font-inter), var(--font-geist-sans)
-                </code>
-              </div>
-              <div className="rounded bg-zinc-50 p-3">
-                <code className="text-xs text-zinc-900">
-                  --font-serif: var(--font-gloucester), var(--font-playfair), ...
-                </code>
-              </div>
-              <div className="rounded bg-zinc-50 p-3">
-                <code className="text-xs text-zinc-900">
-                  --font-body: var(--font-hamburg)
-                </code>
-              </div>
-              <div className="rounded bg-zinc-50 p-3">
-                <code className="text-xs text-zinc-900">
-                  --font-games: var(--font-plymouth-serial), ...
-                </code>
               </div>
             </div>
           </section>

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geist, Inter, Playfair_Display } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 import "./side-menu.css";
@@ -7,24 +6,6 @@ import ToastHost from "@/components/ToastHost";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import DebugPanel from "@/components/DebugPanel";
 import SideMenuProvider from "@/components/SideMenuProvider";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const playfair = Playfair_Display({
-  variable: "--font-playfair",
-  subsets: ["latin"],
-  display: "swap",
-});
 
 const gloucesterOS = localFont({
   src: "../../public/fonts/monotype/gloucester-os/Gloucester OS MT Std Regular.otf",
@@ -108,7 +89,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${inter.variable} ${playfair.variable} ${gloucesterOS.variable} ${hamburgSerial.variable} ${plymouthSerial.variable} ${rudeSlabCondensed.variable} ${gloucesterGoodall.variable} font-sans antialiased`}>
+      <body className={`${gloucesterOS.variable} ${hamburgSerial.variable} ${plymouthSerial.variable} ${rudeSlabCondensed.variable} ${gloucesterGoodall.variable} antialiased`}>
         <SideMenuProvider>
           <ErrorBoundary>
             <ToastHost />

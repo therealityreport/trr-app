@@ -1284,13 +1284,14 @@ export class RealiteaseManager {
     const normalized = birthday.trim();
     if (!normalized) return null;
 
-    const birthDate = new Date(normalized);
+    const birthDate = this.parsePuzzleDate(normalized) ?? new Date(normalized);
     if (Number.isNaN(birthDate.getTime())) return null;
 
     let compareDate: Date;
     if (referenceDate) {
-      const ref = new Date(referenceDate);
-      compareDate = Number.isNaN(ref.getTime()) ? new Date() : ref;
+      const trimmedReference = referenceDate.trim();
+      const parsedReference = this.parsePuzzleDate(trimmedReference) ?? new Date(trimmedReference);
+      compareDate = Number.isNaN(parsedReference.getTime()) ? new Date() : parsedReference;
     } else {
       compareDate = new Date();
     }

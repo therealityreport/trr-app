@@ -58,7 +58,7 @@ function ForgotPasswordContent() {
       <div className="w-full h-20 border-b border-black flex items-center justify-center">
         <button 
           onClick={() => router.push("/")}
-          className="text-2xl font-medium font-['Gloucester_OS_MT_Std'] text-black hover:text-gray-600 transition-colors cursor-pointer"
+          className="text-2xl font-medium font-gloucester text-black hover:text-gray-600 transition-colors cursor-pointer"
         >
           The Reality Report
         </button>
@@ -67,12 +67,12 @@ function ForgotPasswordContent() {
       {/* Main Content */}
       <div className="w-full max-w-lg mx-auto mt-16 px-4">
         {/* Title */}
-        <h2 className="w-full text-center text-black text-3xl font-medium font-['Gloucester_OS_MT_Std'] leading-10 mb-6">
+        <h2 className="w-full text-center text-black text-3xl font-medium font-gloucester leading-10 mb-6">
           Check your email to reset your password
         </h2>
 
         {/* Subtitle */}
-        <h3 className="w-full text-center text-black text-lg font-normal font-['HamburgSerial'] leading-6 mb-8">
+        <h3 className="w-full text-center text-black text-lg font-normal font-hamburg leading-6 mb-8">
           Enter the code we sent to <span className="font-medium">{email}</span> to update your login.
           <br />
           This code expires in 10 minutes.
@@ -87,7 +87,7 @@ function ForgotPasswordContent() {
         <form onSubmit={handleSubmit} noValidate>
           {/* Verification Code Field */}
           <div className="w-full mb-6">
-            <label htmlFor="verification-code" className="block text-black text-sm font-normal font-['HamburgSerial'] leading-tight mb-3">
+            <label htmlFor="verification-code" className="block text-black text-sm font-normal font-hamburg leading-tight mb-3">
               Verification code
             </label>
             <div className="w-full h-11 rounded-[3px] border border-black">
@@ -111,7 +111,7 @@ function ForgotPasswordContent() {
           <div className="w-full h-11 mb-6 bg-neutral-900 rounded-[3px] border border-black">
             <button
               type="submit"
-              className="w-full h-full bg-transparent text-center justify-center text-white text-base font-normal font-['HamburgSerial'] leading-9 disabled:opacity-60"
+              className="w-full h-full bg-transparent text-center justify-center text-white text-base font-normal font-hamburg leading-9 disabled:opacity-60"
               disabled={pending || verificationCode.length !== 6}
             >
               {pending ? "Verifying…" : "Submit"}
@@ -121,7 +121,7 @@ function ForgotPasswordContent() {
 
         {/* Resend Code Section */}
         <div className="w-full text-center">
-          <p className="text-black text-sm font-normal font-['HamburgSerial'] leading-tight">
+          <p className="text-black text-sm font-normal font-hamburg leading-tight">
             Didn&apos;t receive a code? Check your spam folder
             <span className="block mt-2">
               or{" "}

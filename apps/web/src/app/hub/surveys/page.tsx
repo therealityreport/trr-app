@@ -45,6 +45,15 @@ const SURVEY_CARDS: SurveyCardConfig[] = [
     noteUnlocked: "Cast order updates every Monday afternoon.",
   },
   {
+    id: "rhoslc-s6",
+    title: "RHOSLC S6 Cast Rankings",
+    description: "Rank the Salt Lake City Season 6 cast from best to worst each week.",
+    frequency: "Weekly",
+    href: "/surveys/rhoslc-s6",
+    actionLabel: "Rank now",
+    noteUnlocked: "Cast order updates every Monday afternoon.",
+  },
+  {
     id: "finale-forecast",
     title: "Finale Forecast Polls",
     description: "Rapid-fire predictions before season finales and reunion tapings.",

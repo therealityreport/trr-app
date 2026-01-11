@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 
 import { AuthDebugger } from "@/lib/debug";
 import { auth } from "@/lib/firebase";
+import { useDialogA11y } from "@/lib/a11y/dialog";
 import { useBravodleManager } from "@/lib/bravodle/manager";
 import {
   BRAVODLE_BOARD_COLUMNS,
@@ -21,6 +22,7 @@ import { getBravodleDateKey } from "@/lib/bravodle/utils";
 import BravodleCompletedView, { buildShareText, type ShareStatus } from "./completed-view";
 import GameHeader from "@/components/GameHeader";
 import { getUserPreferences, updateUserPreferences } from "@/lib/preferences";
+import "@/styles/realitease-fonts.css";
 
 const BOARD_ROWS = 8; // maximum guesses
 const BOARD_MIN_ROWS = 7; // initial visible rows
@@ -50,6 +52,12 @@ function filterRecord<T>(source: Record<string, T>, validKeys: Set<string>): Rec
     }
   }
   return next;
+}
+
+function isShareAbortError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  return typeof error === "object" && "name" in error && (error as { name?: unknown }).name === "AbortError";
 }
 
 const NONE_IN_COMMON_PATTERN = /^none\s+in\s+common$/i;
@@ -127,10 +135,10 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "gender":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">
+            <p className="font-hamburg">
               Gender tiles flip green only when your guess matches the answer exactly.
             </p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = same gender.
               </li>
@@ -144,10 +152,10 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "age":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">
+            <p className="font-hamburg">
               The age tile compares current ages (or age on the air date when available).
             </p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = exact match.
               </li>
@@ -164,10 +172,10 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "shows":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">
+            <p className="font-hamburg">
               Shows tiles are all about Bravo overlap.
             </p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = same Bravo show and same season.
               </li>
@@ -187,10 +195,10 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "episodes":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">
+            <p className="font-hamburg">
               Episodes compare each person’s total Bravo episode count.
             </p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = exact match.
               </li>
@@ -209,8 +217,8 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "wwhl":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">Watch What Happens Live can be a secret weapon.</p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <p className="font-hamburg">Watch What Happens Live can be a secret weapon.</p>
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = same total number of appearances.
               </li>
@@ -349,8 +357,40 @@ export default function BravodleGamePage() {
   const hasInitializedGuessCountRef = useRef(false);
   const completionAnimationNeededRef = useRef(false);
 
-  const puzzleDateKey = useMemo(() => getBravodleDateKey(), []);
+  const [puzzleDateKey, setPuzzleDateKey] = useState(() => getBravodleDateKey());
   const userId = user?.uid ?? null;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timeoutMs = Math.max(0, nextMidnight.getTime() - now.getTime() + 1000);
+    const timeoutId = window.setTimeout(() => {
+      setPuzzleDateKey(getBravodleDateKey());
+    }, timeoutMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [puzzleDateKey]);
+
+  useEffect(() => {
+    if (shareResetTimeoutRef.current) {
+      clearTimeout(shareResetTimeoutRef.current);
+      shareResetTimeoutRef.current = null;
+    }
+    if (completionShowTimeoutRef.current) {
+      clearTimeout(completionShowTimeoutRef.current);
+      completionShowTimeoutRef.current = null;
+    }
+    completionSignatureRef.current = null;
+    setCompletionLoadedSignature(null);
+    setCompletionShareStatus("idle");
+    setIsCompletionOpen(false);
+    setIsHowToPlayOpen(false);
+    setSettingsOpen(false);
+    setIsReportProblemOpen(false);
+    setReportSubmitting(false);
+    setReportSubmitted(false);
+    setReportError(null);
+  }, [puzzleDateKey]);
 
   // Compute board columns from current preference (AGE vs ZODIAC)
   const activeColumns = useMemo(
@@ -434,9 +474,9 @@ export default function BravodleGamePage() {
         userId,
       });
       setReportSubmitted(true);
+      setReportSubmitting(false);
       setTimeout(() => {
         setIsReportProblemOpen(false);
-        setReportSubmitting(false);
       }, 1200);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to send report.";
@@ -1058,6 +1098,7 @@ export default function BravodleGamePage() {
               gameSnapshot.guesses ?? [],
               BOARD_ROWS,
               gameSnapshot.guessNumberSolved ?? null,
+              activeColumns.filter((c) => c.key !== "guess"),
             );
             try {
               if (navigator.share) {
@@ -1069,8 +1110,12 @@ export default function BravodleGamePage() {
               }
               setCompletionShareStatus("success");
             } catch (error) {
-              console.error("Bravodle share failed", error);
-              setCompletionShareStatus("error");
+              if (isShareAbortError(error)) {
+                setCompletionShareStatus("idle");
+              } else {
+                console.error("Bravodle share failed", error);
+                setCompletionShareStatus("error");
+              }
             } finally {
               if (shareResetTimeoutRef.current) {
                 clearTimeout(shareResetTimeoutRef.current);
@@ -1103,35 +1148,13 @@ export default function BravodleGamePage() {
           gameTitle="Bravodle"
         />
 
-        {settingsOpen && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
-            <div className="absolute inset-0 bg-black/50" aria-hidden onClick={() => setSettingsOpen(false)} />
-            <div className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-              <div className="mb-4 flex items-start justify-between">
-                <h2 className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>Bravodle Settings</h2>
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen(false)}
-                  className="rounded-full p-2 hover:bg-black/5"
-                  aria-label="Close settings"
-                >
-                  <svg width="24" height="24" viewBox="0 0 31 31" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M24.0249 8.84795L22.2624 7.08545L15.2749 14.0729L8.28743 7.08545L6.52493 8.84795L13.5124 15.8354L6.52493 22.8229L8.28743 24.5854L15.2749 17.5979L22.2624 24.5854L24.0249 22.8229L17.0374 15.8354L24.0249 8.84795Z" fill="currentColor" />
-                  </svg>
-                </button>
-              </div>
-              <div className="space-y-6">
-                <div className="rounded-md border border-zinc-300 p-3">
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-600">AGE vs ZODIAC</label>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={async () => { setAgeOrZodiac("age"); if (user?.uid) { try { await updateUserPreferences(user.uid, { bravodle: { ageOrZodiac: "age" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${ageOrZodiac === "age" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>AGE</button>
-                    <button type="button" onClick={async () => { setAgeOrZodiac("zodiac"); if (user?.uid) { try { await updateUserPreferences(user.uid, { bravodle: { ageOrZodiac: "zodiac" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${ageOrZodiac === "zodiac" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>ZODIAC</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <BravodleSettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          userId={user?.uid ?? null}
+          ageOrZodiac={ageOrZodiac}
+          onAgeOrZodiacChange={setAgeOrZodiac}
+        />
 
         {isHowToPlayOpen && <HowToPlayModal onClose={() => setIsHowToPlayOpen(false)} />}
       </div>
@@ -1179,17 +1202,36 @@ function ReportProblemModal({
   submitted: boolean;
   gameTitle: string;
 }) {
+  const headingId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { dialogRef, handleKeyDown } = useDialogA11y<HTMLDivElement>({
+    open,
+    onClose,
+    initialFocusRef: closeButtonRef,
+  });
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-4 py-10">
-      <div className="w-full max-w-lg rounded-lg bg-white px-6 pb-8 pt-6 shadow-[0px_4px_23px_rgba(0,0,0,0.2)]">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="w-full max-w-lg rounded-lg bg-white px-6 pb-8 pt-6 shadow-[0px_4px_23px_rgba(0,0,0,0.2)]"
+      >
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <h2 className="font-['NYTKarnak_Condensed'] text-2xl font-bold leading-none text-black">Report a Problem</h2>
+            <h2 id={headingId} className="font-['NYTKarnak_Condensed'] text-2xl font-bold leading-none text-black">
+              Report a Problem
+            </h2>
             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-black/70">{gameTitle}</p>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="rounded-full p-2 text-black transition hover:bg-black/5"
@@ -1291,9 +1333,24 @@ function TalentSearch({
   const trimmedQuery = query.trim();
   const showDropdown = dropdownOpen && (trimmedQuery.length >= 3 || Boolean(searchError));
   const hasResults = matches.length > 0;
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   return (
-    <div className="relative w-full max-w-[384px]">
+    <div
+      ref={containerRef}
+      className="relative w-full max-w-[384px]"
+      onBlur={(event) => {
+        const next = event.relatedTarget as HTMLElement | null;
+        if (next && containerRef.current?.contains(next)) return;
+        onDropdownToggle(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          onDropdownToggle(false);
+          inputRef.current?.focus();
+        }
+      }}
+    >
       <div className="rounded-[3px] border border-zinc-500">
         <input
           id="bravodle-talent-search"
@@ -1301,7 +1358,6 @@ function TalentSearch({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           onFocus={() => onDropdownToggle(true)}
-          onBlur={() => onDropdownToggle(false)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -1366,6 +1422,103 @@ function TalentSearch({
   );
 }
 
+function BravodleSettingsModal({
+  open,
+  onClose,
+  userId,
+  ageOrZodiac,
+  onAgeOrZodiacChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  userId: string | null;
+  ageOrZodiac: "age" | "zodiac";
+  onAgeOrZodiacChange: (next: "age" | "zodiac") => void;
+}) {
+  const headingId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { dialogRef, handleKeyDown } = useDialogA11y<HTMLDivElement>({
+    open,
+    onClose,
+    initialFocusRef: closeButtonRef,
+  });
+
+  const handleAgeOrZodiac = useCallback(
+    async (next: "age" | "zodiac") => {
+      onAgeOrZodiacChange(next);
+      if (!userId) return;
+      try {
+        await updateUserPreferences(userId, { bravodle: { ageOrZodiac: next } });
+      } catch (error) {
+        console.warn("Pref save failed", error);
+      }
+    },
+    [onAgeOrZodiacChange, userId],
+  );
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/50" aria-hidden onClick={onClose} />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl"
+      >
+        <div className="mb-4 flex items-start justify-between">
+          <h2 id={headingId} className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>
+            Bravodle Settings
+          </h2>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 hover:bg-black/5"
+            aria-label="Close settings"
+          >
+            <svg width="24" height="24" viewBox="0 0 31 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M24.0249 8.84795L22.2624 7.08545L15.2749 14.0729L8.28743 7.08545L6.52493 8.84795L13.5124 15.8354L6.52493 22.8229L8.28743 24.5854L15.2749 17.5979L22.2624 24.5854L24.0249 22.8229L17.0374 15.8354L24.0249 8.84795Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+        </div>
+        <div className="space-y-6">
+          <div className="rounded-md border border-zinc-300 p-3">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-600">AGE vs ZODIAC</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleAgeOrZodiac("age")}
+                className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${
+                  ageOrZodiac === "age" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"
+                }`}
+              >
+                AGE
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAgeOrZodiac("zodiac")}
+                className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${
+                  ageOrZodiac === "zodiac" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"
+                }`}
+              >
+                ZODIAC
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BravodleBoard({
   guesses,
   solvedGuessNumber,
@@ -1411,11 +1564,11 @@ function BravodleBoard({
       if (!element) return;
       // Width-constrained tile size
       const parentWidth = element.parentElement?.clientWidth ?? element.clientWidth;
-      const availableWidth = Math.max(parentWidth, BOARD_TILE_MIN_SIZE_PX * BRAVODLE_BOARD_COLUMNS.length);
-      const available = availableWidth - BOARD_TILE_GAP_PX * (BRAVODLE_BOARD_COLUMNS.length - 1);
+      const availableWidth = Math.max(parentWidth, BOARD_TILE_MIN_SIZE_PX * columns.length);
+      const available = availableWidth - BOARD_TILE_GAP_PX * (columns.length - 1);
       const widthConstrained = Math.max(
         BOARD_TILE_MIN_SIZE_PX,
-        Math.min(BOARD_TILE_MAX_SIZE_PX, available / BRAVODLE_BOARD_COLUMNS.length || BOARD_TILE_MIN_SIZE_PX),
+        Math.min(BOARD_TILE_MAX_SIZE_PX, available / columns.length || BOARD_TILE_MIN_SIZE_PX),
       );
 
       // Height-constrained tile size
@@ -1476,7 +1629,7 @@ function BravodleBoard({
   useEffect(() => {
     const validIds = new Set<string>();
     rows.forEach((_, rowIndex) => {
-      BRAVODLE_BOARD_COLUMNS.forEach(({ key }) => {
+      columns.forEach(({ key }) => {
         validIds.add(getCellId(rowIndex, key));
       });
     });
@@ -1504,7 +1657,7 @@ function BravodleBoard({
       revealedCellsRef.current = filtered;
       return filtered;
     });
-  }, [rows]);
+  }, [rows, columns]);
 
   useEffect(() => {
     const sortedGuesses = [...guesses]
@@ -1530,7 +1683,7 @@ function BravodleBoard({
       const rowIndex = rowIndexMap.get(guess.guessNumber);
       if (rowIndex == null) return;
 
-      BRAVODLE_BOARD_COLUMNS.forEach(({ key }) => {
+      columns.forEach(({ key }) => {
         const field = guess.fields.find((item) => item.key === key);
         if (!field) return;
         const { sanitizedVariants, sanitizedValue } = resolveFieldDisplay(field);
@@ -1613,7 +1766,7 @@ function BravodleBoard({
       timeouts.forEach((timeout) => clearTimeout(timeout));
       revealTimeoutsRef.current = revealTimeoutsRef.current.filter((timeout) => !timeouts.includes(timeout));
     };
-  }, [guesses, rows]);
+  }, [guesses, rows, columns]);
 
   const handleCycle = useCallback(
     (cellKey: string, variantLength: number) => {
@@ -1651,7 +1804,7 @@ function BravodleBoard({
           {columns.map((column) => (
             <div
               key={column.key}
-              className="flex items-center justify-center text-center font-['HamburgSerial'] font-extrabold uppercase tracking-[0.2px] text-black"
+              className="flex items-center justify-center text-center font-hamburg font-extrabold uppercase tracking-[0.2px] text-black"
             >
               {column.label}
             </div>
@@ -1795,9 +1948,9 @@ function KeyboardKey({
       type="button"
       onClick={onPress}
       disabled={disabled}
+      aria-label={isBackspace ? "Backspace" : isEnter ? "Enter" : label.toUpperCase()}
       className={`${baseClasses} ${textClasses} ${stateClasses}`}
       style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
-      tabIndex={-1}
     >
       {display}
     </button>
@@ -1850,7 +2003,7 @@ function BoardCell({
   const [manualFlipActive, setManualFlipActive] = useState(false);
   const frontShouldUseAgeStyle = columnKey === "age" || frontIsNumericWwhl;
   const backShouldUseAgeStyle = columnKey === "age" || backIsNumericWwhl;
-  const fontClasses = "font-['HamburgSerial'] font-extrabold";
+  const fontClasses = "font-hamburg font-extrabold";
   const interactiveClasses = hasVariants ? "cursor-pointer" : "cursor-default";
   const frontValueForDisplay = isGuessColumn ? frontFaceValue.replace(/\s+/g, "\n") : frontFaceValue;
   const backValueForDisplay = isGuessColumn ? trimmedBackValue.replace(/\s+/g, "\n") : trimmedBackValue;
@@ -1975,8 +2128,10 @@ function getVerdictClasses(
         return "bg-[#644073] text-white border-[#644073]";
       }
       return "bg-[#28578A] text-white border-[#28578A]";
+    case "info":
+      return "bg-white text-gray-900 border-[#D3D6DA]";
     default:
-      return treatAsAge ? "bg-white text-white border-[#D3D6DA]" : "bg-white text-gray-900 border-[#D3D6DA]";
+      return "bg-white text-gray-900 border-[#D3D6DA]";
   }
 }
 

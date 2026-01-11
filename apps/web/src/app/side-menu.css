@@ -71,7 +71,7 @@
 }
 
 .side-menu__brand-text {
-  font-family: var(--font-plymouth-serial, var(--font-hamburg)), var(--font-inter);
+  font-family: var(--font-plymouth-serial), var(--font-hamburg), system-ui, sans-serif;
   font-size: 1.25rem;
   font-weight: 00; /* Use Bold, not Black */
   text-transform: uppercase;
@@ -82,7 +82,7 @@
 .side-menu__expand-all {
   background: transparent;
   border: none;
-  font-family: var(--font-plymouth-serial, var(--font-hamburg)), var(--font-inter);
+  font-family: var(--font-plymouth-serial), var(--font-hamburg), system-ui, sans-serif;
   font-size: 0.75rem;
   font-weight: 700; /* Bold */
   text-transform: uppercase;
@@ -108,7 +108,7 @@
 }
 
 .side-menu__section-heading {
-  font-family: var(--font-plymouth-serial, var(--font-hamburg)), var(--font-inter);
+  font-family: var(--font-plymouth-serial), var(--font-hamburg), system-ui, sans-serif;
   font-size: 0.75rem;
   font-weight: 700; /* Bold */
   text-transform: uppercase;
@@ -124,7 +124,7 @@
   padding: 0.625rem 0;
   text-decoration: none;
   color: #111111;
-  font-family: var(--font-plymouth-serial, var(--font-hamburg)), var(--font-inter);
+  font-family: var(--font-plymouth-serial), var(--font-hamburg), system-ui, sans-serif;
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -205,7 +205,7 @@
 }
 
 .side-menu__game-description {
-  font-family: var(--font-hamburg, var(--font-inter));
+  font-family: var(--font-hamburg), system-ui, sans-serif;
   font-size: 0.875rem;
   color: #3f3f3f;
   margin-bottom: 0.5rem;
@@ -218,7 +218,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  font-family: var(--font-hamburg, var(--font-inter));
+  font-family: var(--font-hamburg), system-ui, sans-serif;
   font-size: 0.875rem;
 }
 
@@ -235,7 +235,7 @@
 .side-menu__view-all {
   display: inline-block;
   margin-top: 0.75rem;
-  font-family: var(--font-plymouth-serial, var(--font-hamburg)), var(--font-inter);
+  font-family: var(--font-plymouth-serial), var(--font-hamburg), system-ui, sans-serif;
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -257,7 +257,7 @@
   background: #ffffff;
   border: 1px solid rgba(0, 0, 0, 0.4);
   border-radius: 4px;
-  font-family: var(--font-plymouth-serial, var(--font-hamburg)), var(--font-inter);
+  font-family: var(--font-plymouth-serial), var(--font-hamburg), system-ui, sans-serif;
   font-size: 0.75rem;
   font-weight: 700; /* Bold */
   letter-spacing: 0.01em;

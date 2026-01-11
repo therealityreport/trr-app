@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useId, useRef } from "react";
+import { useDialogA11y } from "@/lib/a11y/dialog";
 import { REALITEASE_BOARD_COLUMNS, type RealiteaseStatsSummary } from "@/lib/realitease/types";
 import type { RealiteaseGuess } from "@/lib/realitease/types";
 
@@ -15,9 +16,17 @@ const VERDICT_EMOJI_MAP: Record<string, string> = {
   multi: "🟪",
   unknown: "⬜",
   guess: "⬜",
+  info: "⬜",
 };
 
 export type ShareStatus = "idle" | "success" | "error";
+
+function resolveShareEmoji(verdictKey: string, columnKey: string): string {
+  if (verdictKey === "multi") {
+    return columnKey === "wwhl" ? "🟦" : "🟪";
+  }
+  return VERDICT_EMOJI_MAP[verdictKey] ?? VERDICT_EMOJI_MAP.unknown;
+}
 
 export interface RealiteaseCompletedViewProps {
   open: boolean;
@@ -48,7 +57,7 @@ export function buildShareText(
       const verdicts = columns.map((column) => {
         const field = guess.fields.find((entry) => entry.key === column.key);
         const verdictKey = field?.verdict ?? "unknown";
-        return VERDICT_EMOJI_MAP[verdictKey] ?? VERDICT_EMOJI_MAP.unknown;
+        return resolveShareEmoji(verdictKey, column.key);
       }).join("");
       return verdicts;
     })
@@ -71,6 +80,14 @@ export function RealiteaseCompletedView({
   shareDisabled = false,
   hideGuessDistribution = false,
 }: RealiteaseCompletedViewProps) {
+  const headingId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { dialogRef, handleKeyDown } = useDialogA11y<HTMLDivElement>({
+    open,
+    onClose,
+    initialFocusRef: closeButtonRef,
+  });
+
   if (!open) return null;
 
   const played = stats?.played ?? 0;
@@ -87,13 +104,22 @@ export function RealiteaseCompletedView({
 
   const maxDistributionCount = Math.max(...distributionRows.map((row) => row.count), 1);
 
-  const headingText = isWin ? "Congratulations!" : "Nice try!";
+  const headingText = isWin ? "Congratulations!" : hideGuessDistribution ? "Keep going!" : "Nice try!";
   const badgeColor = isWin ? TILE_SUCCESS_COLOR : TILE_NEUTRAL_COLOR;
 
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/70 px-4 py-10">
-      <div className="relative w-full max-w-[520px] rounded-lg bg-white px-8 pt-10 pb-12 shadow-[0px_4px_23px_rgba(0,0,0,0.2)] outline outline-1 outline-offset-[-1px] outline-gray-200">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative w-full max-w-[520px] rounded-lg bg-white px-8 pt-10 pb-12 shadow-[0px_4px_23px_rgba(0,0,0,0.2)] outline outline-1 outline-offset-[-1px] outline-gray-200"
+      >
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onClose}
           className="absolute right-6 top-6 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-black transition hover:opacity-80"
@@ -111,7 +137,9 @@ export function RealiteaseCompletedView({
           />
 
           <div className="space-y-1">
-            <h2 className="font-['NYTKarnak_Condensed'] text-3xl font-bold leading-none text-black">{headingText}</h2>
+            <h2 id={headingId} className="font-['NYTKarnak_Condensed'] text-3xl font-bold leading-none text-black">
+              {headingText}
+            </h2>
             <p className="text-xs font-bold uppercase tracking-[0.28em] text-black">Statistics</p>
           </div>
 
@@ -215,23 +243,26 @@ function GuessDistributionRow({
   maxCount: number;
   highlight: boolean;
 }) {
-  const baseWidth = maxCount > 0 ? Math.max((count / maxCount) * 100, 10) : 10;
+  const percent = maxCount > 0 ? (count / maxCount) * 100 : 0;
+  const barWidth = count > 0 ? Math.max(percent, 10) : 0;
   const backgroundColor = highlight ? TILE_SUCCESS_COLOR : TILE_NEUTRAL_COLOR;
 
   return (
     <div className="flex items-center gap-3">
       <span className="w-3 text-right text-xs font-bold uppercase tracking-[0.2em] text-black">{guessNumber}</span>
-      <div className="flex-1">
-        <div
-          className="relative flex h-5 items-center justify-end rounded-sm px-2 text-xs font-bold text-white"
-          style={{
-            width: `${baseWidth}%`,
-            maxWidth: "100%",
-            backgroundColor,
-          }}
-        >
-          <span>{count}</span>
+      <div className="flex flex-1 items-center gap-2">
+        <div className="flex-1">
+          <div
+            className="h-5 rounded-sm"
+            style={{
+              width: `${barWidth}%`,
+              maxWidth: "100%",
+              backgroundColor,
+            }}
+            aria-hidden
+          />
         </div>
+        <span className="w-8 text-right text-xs font-bold text-black">{count}</span>
       </div>
     </div>
   );

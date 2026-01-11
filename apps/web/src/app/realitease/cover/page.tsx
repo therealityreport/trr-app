@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AuthDebugger } from "@/lib/debug";
 import { auth } from "@/lib/firebase";
+import { useDialogA11y } from "@/lib/a11y/dialog";
 import { useRealiteaseManager } from "@/lib/realitease/manager";
 import { formatRealiteaseDisplayDate, getRealiteaseDateKey } from "@/lib/realitease/utils";
 import type { RealiteaseGameSnapshot } from "@/lib/realitease/types";
@@ -24,8 +25,8 @@ export default function RealiteaseCover() {
   const [cta, setCta] = useState<"loading" | "start" | "continue" | "stats">("loading");
   const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const puzzleDateKey = useMemo(() => getRealiteaseDateKey(), []);
-  const displayDate = useMemo(() => formatRealiteaseDisplayDate(), []);
+  const [puzzleDateKey, setPuzzleDateKey] = useState(() => getRealiteaseDateKey());
+  const [displayDate, setDisplayDate] = useState(() => formatRealiteaseDisplayDate());
   const [puzzleNumber, setPuzzleNumber] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const userId = user?.uid ?? null;
@@ -52,6 +53,18 @@ export default function RealiteaseCover() {
       (metadata as Record<string, unknown>)["daily_clue"];
     return typeof metadataClueRaw === "string" && metadataClueRaw.trim().length > 0 ? metadataClueRaw.trim() : null;
   }, [gameSnapshot?.answerKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timeoutMs = Math.max(0, nextMidnight.getTime() - now.getTime() + 1000);
+    const timeoutId = window.setTimeout(() => {
+      setPuzzleDateKey(getRealiteaseDateKey());
+      setDisplayDate(formatRealiteaseDisplayDate());
+    }, timeoutMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [puzzleDateKey]);
 
   const resolveCta = useCallback((snapshot: RealiteaseGameSnapshot | null): "start" | "continue" | "stats" => {
     if (!snapshot) return "start";
@@ -254,29 +267,69 @@ export default function RealiteaseCover() {
         </div>
       </div>
       </main>
-      {settingsOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/50" aria-hidden onClick={() => setSettingsOpen(false)} />
-          <div className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-start justify-between">
-              <h2 className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>Realitease Settings</h2>
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                className="rounded-full p-2 hover:bg-black/5"
-                aria-label="Close settings"
-              >
-                <svg width="24" height="24" viewBox="0 0 31 31" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M24.0249 8.84795L22.2624 7.08545L15.2749 14.0729L8.28743 7.08545L6.52493 8.84795L13.5124 15.8354L6.52493 22.8229L8.28743 24.5854L15.2749 17.5979L22.2624 24.5854L24.0249 22.8229L17.0374 15.8354L24.0249 8.84795Z" fill="currentColor" />
-                </svg>
-              </button>
-            </div>
-            <p className="text-lg" style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}>
-              More settings coming soon.
-            </p>
-          </div>
+      <CoverSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="Realitease Settings"
+      />
+    </div>
+  );
+}
+
+function CoverSettingsModal({
+  open,
+  onClose,
+  title,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+}) {
+  const headingId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { dialogRef, handleKeyDown } = useDialogA11y<HTMLDivElement>({
+    open,
+    onClose,
+    initialFocusRef: closeButtonRef,
+  });
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/50" aria-hidden onClick={onClose} />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl"
+      >
+        <div className="mb-4 flex items-start justify-between">
+          <h2 id={headingId} className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>
+            {title}
+          </h2>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 hover:bg-black/5"
+            aria-label="Close settings"
+          >
+            <svg width="24" height="24" viewBox="0 0 31 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M24.0249 8.84795L22.2624 7.08545L15.2749 14.0729L8.28743 7.08545L6.52493 8.84795L13.5124 15.8354L6.52493 22.8229L8.28743 24.5854L15.2749 17.5979L22.2624 24.5854L24.0249 22.8229L17.0374 15.8354L24.0249 8.84795Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
         </div>
-      )}
+        <p className="text-lg" style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}>
+          More settings coming soon.
+        </p>
+      </div>
     </div>
   );
 }

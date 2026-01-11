@@ -45,6 +45,97 @@ export interface ShowAssets {
 
 export const shows: ShowAssets[] = [
   {
+    key: "rhoslc",
+    title: "The Real Housewives of Salt Lake City",
+    shortTitle: "RHOSLC",
+    network: "Bravo",
+    status: "Season 6 airing",
+    logline: "Salt Lake's finest navigate religion, relationships, and scandalous revelations.",
+    palette: {
+      primary: "#1E3A5F",
+      accent: "#87CEEB",
+      dark: "#0A1628",
+      light: "#E8F4FC",
+    },
+    icon: "/images/logos/fullname-black.svg",
+    wordmark: "/images/logos/fullname-black.svg",
+    seasons: [
+      {
+        id: "season-6",
+        label: "Season 6",
+        year: "2025",
+        description: "New cast members shake up Salt Lake as loyalties are tested.",
+        colors: {
+          primary: "#1E3A5F",
+          accent: "#87CEEB",
+          neutral: "#E8F4FC",
+        },
+        showIcon: "/images/logos/fullname-black.svg",
+        wordmark: "/images/logos/fullname-black.svg",
+        cast: [
+          {
+            name: "Lisa Barlow",
+            image: "/images/shows/rhoslc/season-6/LIsa.png",
+            role: "OG Wife",
+            instagram: "@lisabarlow14",
+            status: "main",
+          },
+          {
+            name: "Whitney Rose",
+            image: "/images/shows/rhoslc/season-6/Whitney.png",
+            role: "OG Wife",
+            instagram: "@whitneywildrose",
+            status: "main",
+          },
+          {
+            name: "Meredith Marks",
+            image: "/images/shows/rhoslc/season-6/Meredith.png",
+            role: "OG Wife",
+            instagram: "@mikimarks",
+            status: "main",
+          },
+          {
+            name: "Heather Gay",
+            image: "/images/shows/rhoslc/season-6/Heather.png",
+            role: "OG Wife",
+            instagram: "@helovestheworld",
+            status: "main",
+          },
+          {
+            name: "Angie Katsanevas",
+            image: "/images/shows/rhoslc/season-6/angie.png",
+            role: "Main Wife",
+            instagram: "@angiekatsanevas",
+            status: "main",
+          },
+          {
+            name: "Mary Cosby",
+            image: "/images/shows/rhoslc/season-6/mary.png",
+            role: "Returning Wife",
+            status: "main",
+          },
+          {
+            name: "Bronwyn Newport",
+            image: "/images/shows/rhoslc/season-6/Bronwyn.png",
+            role: "New Wife",
+            status: "new",
+          },
+          {
+            name: "Britani Bateman",
+            image: "/images/shows/rhoslc/season-6/Britani.png",
+            role: "New Wife",
+            status: "new",
+          },
+        ],
+        notes: [
+          "Use deep blue (#1E3A5F) as hero background.",
+          "Accent gradients: linear-gradient(135deg, #1E3A5F 0%, #87CEEB 100%).",
+          "Cast icon dimensions: 1600x1600 PNG, transparent background.",
+        ],
+      },
+    ],
+  },
+  {
     key: "rhop",
     title: "The Real Housewives of Potomac",
     shortTitle: "RHOP",

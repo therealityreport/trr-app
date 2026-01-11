@@ -85,6 +85,10 @@ class SurveyManager {
       uid,
       ...ids,
       ranking: draft.ranking,
+      episodeRating: draft.episodeRating ?? null,
+      seasonRating: draft.seasonRating ?? null,
+      castVerdicts: draft.castVerdicts ?? [],
+      exWifeVerdicts: draft.exWifeVerdicts ?? [],
       completionPct: draft.completionPct,
       completed: draft.completed,
       updatedAt: serverTimestamp(),
@@ -92,7 +96,8 @@ class SurveyManager {
     } satisfies Partial<SurveyResponse>;
 
     await setDoc(responseRef, payload, { merge: true });
-    await this.syncResponseToPostgres(ids, uid, draft, options);
+    // PostgreSQL sync disabled temporarily - uncomment when database is ready
+    // await this.syncResponseToPostgres(ids, uid, draft, options);
   }
 
   resolveCta(response: SurveyResponse | null): SurveyCtaState {

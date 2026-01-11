@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 
 import { AuthDebugger } from "@/lib/debug";
 import { auth } from "@/lib/firebase";
+import { useDialogA11y } from "@/lib/a11y/dialog";
 import { useRealiteaseManager } from "@/lib/realitease/manager";
 import {
   REALITEASE_BOARD_COLUMNS,
@@ -21,6 +22,7 @@ import { getRealiteaseDateKey } from "@/lib/realitease/utils";
 import RealiteaseCompletedView, { buildShareText, type ShareStatus } from "./completed-view";
 import GameHeader from "@/components/GameHeader";
 import { getUserPreferences, updateUserPreferences } from "@/lib/preferences";
+import "@/styles/realitease-fonts.css";
 
 const BOARD_ROWS = 8; // maximum guesses
 const BOARD_MIN_ROWS = 7; // initial visible rows
@@ -50,6 +52,12 @@ function filterRecord<T>(source: Record<string, T>, validKeys: Set<string>): Rec
     }
   }
   return next;
+}
+
+function isShareAbortError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  return typeof error === "object" && "name" in error && (error as { name?: unknown }).name === "AbortError";
 }
 
 const NONE_IN_COMMON_PATTERN = /^none\s+in\s+common$/i;
@@ -135,10 +143,10 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "gender":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">
+            <p className="font-hamburg">
               Gender tiles flip green only when your guess matches the answer exactly.
             </p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = same gender.
               </li>
@@ -152,10 +160,10 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "age":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">
+            <p className="font-hamburg">
               The age tile compares current ages (or age on the air date when available).
             </p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = exact match.
               </li>
@@ -172,10 +180,10 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "networks":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">
+            <p className="font-hamburg">
               Networks highlight when both personalities aired on the same network during overlapping seasons.
             </p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = shared network with shared seasons/episodes.
               </li>
@@ -194,14 +202,14 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "shows":
         return (
           <div className="space-y-5 text-sm text-black">
-            <p className="font-['HamburgSerial'] text-base font-bold uppercase leading-tight">
+            <p className="font-hamburg text-base font-bold uppercase leading-tight">
               Shows reveal where your guess and the answer co-starred.
             </p>
 
             <div className="space-y-4">
               <div className="flex items-start gap-3">
                 {renderTile("RHOA", "bg-slate-500")}
-                <div className="font-['HamburgSerial'] text-[15px] leading-tight">
+                <div className="font-hamburg text-[15px] leading-tight">
                   <p className="font-bold uppercase">GUESS: SHEREÉ WHITFIELD</p>
                   <p className="font-bold uppercase">MULTIPLE CO-STARRED SHOWS</p>
                   <p className="mt-1">
@@ -215,7 +223,7 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
 
               <div className="flex items-start gap-3">
                 {renderTile("RHUGT", "bg-[#60811F]")}
-                <div className="font-['HamburgSerial'] text-[15px] leading-tight">
+                <div className="font-hamburg text-[15px] leading-tight">
                   <p className="font-bold uppercase">GUESS: VICKI GUNVALSON</p>
                   <p className="font-bold uppercase">ONE CO-STARRED SHOW; 1+ SEASON</p>
                   <p className="mt-1">
@@ -226,7 +234,7 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
 
               <div className="flex items-start gap-3">
                 {renderTile("DWTS", "bg-[#E6B903]")}
-                <div className="font-['HamburgSerial'] text-[15px] leading-tight">
+                <div className="font-hamburg text-[15px] leading-tight">
                   <p className="font-bold uppercase">GUESS: DYLAN EFRON</p>
                   <p className="font-bold uppercase">SAME SHOW, DIFFERENT SEASONS</p>
                   <p className="mt-1">
@@ -239,7 +247,7 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
 
               <div className="flex items-start gap-3">
                 {renderTile("—", "bg-[#5D5F63]")}
-                <div className="font-['HamburgSerial'] text-[15px] leading-tight">
+                <div className="font-hamburg text-[15px] leading-tight">
                   <p className="font-bold uppercase">GUESS: KIM RICHARDS</p>
                   <p className="font-bold uppercase">NO SHARED SHOWS (OR SEASONS)</p>
                 </div>
@@ -254,8 +262,8 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
       case "wwhl":
         return (
           <div className="space-y-3 text-sm leading-relaxed text-black">
-            <p className="font-['HamburgSerial']">Watch What Happens Live can be a secret weapon.</p>
-            <ul className="list-disc space-y-1 pl-4 font-['HamburgSerial']">
+            <p className="font-hamburg">Watch What Happens Live can be a secret weapon.</p>
+            <ul className="list-disc space-y-1 pl-4 font-hamburg">
               <li>
                 <span className="font-semibold">Green</span> = same total number of appearances.
               </li>
@@ -389,8 +397,40 @@ export default function RealiteaseGamePage() {
   const hasInitializedGuessCountRef = useRef(false);
   const completionAnimationNeededRef = useRef(false);
 
-  const puzzleDateKey = useMemo(() => getRealiteaseDateKey(), []);
+  const [puzzleDateKey, setPuzzleDateKey] = useState(() => getRealiteaseDateKey());
   const userId = user?.uid ?? null;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timeoutMs = Math.max(0, nextMidnight.getTime() - now.getTime() + 1000);
+    const timeoutId = window.setTimeout(() => {
+      setPuzzleDateKey(getRealiteaseDateKey());
+    }, timeoutMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [puzzleDateKey]);
+
+  useEffect(() => {
+    if (shareResetTimeoutRef.current) {
+      clearTimeout(shareResetTimeoutRef.current);
+      shareResetTimeoutRef.current = null;
+    }
+    if (completionShowTimeoutRef.current) {
+      clearTimeout(completionShowTimeoutRef.current);
+      completionShowTimeoutRef.current = null;
+    }
+    completionSignatureRef.current = null;
+    setCompletionLoadedSignature(null);
+    setCompletionShareStatus("idle");
+    setIsCompletionOpen(false);
+    setIsHowToPlayOpen(false);
+    setSettingsOpen(false);
+    setIsReportProblemOpen(false);
+    setReportSubmitting(false);
+    setReportSubmitted(false);
+    setReportError(null);
+  }, [puzzleDateKey]);
 
   // Column preferences (must be declared before any JSX that uses them)
   const [ageOrZodiac, setAgeOrZodiac] = useState<"age" | "zodiac">(
@@ -506,9 +546,9 @@ export default function RealiteaseGamePage() {
         userId,
       });
       setReportSubmitted(true);
+      setReportSubmitting(false);
       setTimeout(() => {
         setIsReportProblemOpen(false);
-        setReportSubmitting(false);
       }, 1200);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to send report.";
@@ -561,8 +601,12 @@ export default function RealiteaseGamePage() {
       }
       setCompletionShareStatus("success");
     } catch (error) {
-      console.error("Realitease share failed", error);
-      setCompletionShareStatus("error");
+      if (isShareAbortError(error)) {
+        setCompletionShareStatus("idle");
+      } else {
+        console.error("Realitease share failed", error);
+        setCompletionShareStatus("error");
+      }
     } finally {
       if (shareResetTimeoutRef.current) {
         clearTimeout(shareResetTimeoutRef.current);
@@ -1129,47 +1173,15 @@ export default function RealiteaseGamePage() {
           gameTitle="Realitease"
         />
 
-      {settingsOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/50" aria-hidden onClick={() => setSettingsOpen(false)} />
-          <div className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-start justify-between">
-              <h2 className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>Realitease Settings</h2>
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                className="rounded-full p-2 hover:bg-black/5"
-                aria-label="Close settings"
-              >
-                <svg width="24" height="24" viewBox="0 0 31 31" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M24.0249 8.84795L22.2624 7.08545L15.2749 14.0729L8.28743 7.08545L6.52493 8.84795L13.5124 15.8354L6.52493 22.8229L8.28743 24.5854L15.2749 17.5979L22.2624 24.5854L24.0249 22.8229L17.0374 15.8354L24.0249 8.84795Z" fill="currentColor" />
-                </svg>
-              </button>
-            </div>
-            <div className="space-y-6">
-              <div>
-                <p className="mb-2 text-sm font-semibold text-gray-800" style={{ fontFamily: "var(--font-plymouth-serial)" }}>Column preferences</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-md border border-zinc-300 p-3">
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-600">AGE vs ZODIAC</label>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={async () => { setAgeOrZodiac("age"); if (userId) { try { await updateUserPreferences(userId, { realitease: { ageOrZodiac: "age" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${ageOrZodiac === "age" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>AGE</button>
-                      <button type="button" onClick={async () => { setAgeOrZodiac("zodiac"); if (userId) { try { await updateUserPreferences(userId, { realitease: { ageOrZodiac: "zodiac" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${ageOrZodiac === "zodiac" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>ZODIAC</button>
-                    </div>
-                  </div>
-                  <div className="rounded-md border border-zinc-300 p-3">
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-600">NETWORKS vs STREAMERS</label>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={async () => { setServiceMode("networks"); if (userId) { try { await updateUserPreferences(userId, { realitease: { serviceMode: "networks" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${serviceMode === "networks" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>NETWORKS</button>
-                      <button type="button" onClick={async () => { setServiceMode("streamers"); if (userId) { try { await updateUserPreferences(userId, { realitease: { serviceMode: "streamers" } }); } catch (e) { console.warn("Pref save failed", e); } } }} className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${serviceMode === "streamers" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"}`}>STREAMERS</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        <RealiteaseSettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          userId={userId}
+          ageOrZodiac={ageOrZodiac}
+          onAgeOrZodiacChange={setAgeOrZodiac}
+          serviceMode={serviceMode}
+          onServiceModeChange={setServiceMode}
+        />
 
         {isHowToPlayOpen && <HowToPlayModal onClose={() => setIsHowToPlayOpen(false)} />}
       </div>
@@ -1209,9 +1221,24 @@ function TalentSearch({
   const trimmedQuery = query.trim();
   const showDropdown = dropdownOpen && (trimmedQuery.length >= 3 || Boolean(searchError));
   const hasResults = matches.length > 0;
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   return (
-    <div className="relative w-full max-w-[384px]">
+    <div
+      ref={containerRef}
+      className="relative w-full max-w-[384px]"
+      onBlur={(event) => {
+        const next = event.relatedTarget as HTMLElement | null;
+        if (next && containerRef.current?.contains(next)) return;
+        onDropdownToggle(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          onDropdownToggle(false);
+          inputRef.current?.focus();
+        }
+      }}
+    >
       <div className="rounded-[3px] border border-zinc-500">
         <input
           id="realitease-talent-search"
@@ -1219,7 +1246,6 @@ function TalentSearch({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           onFocus={() => onDropdownToggle(true)}
-          onBlur={() => onDropdownToggle(false)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -1279,7 +1305,158 @@ function TalentSearch({
             </>
           )}
         </div>
-      )}
+  )}
+    </div>
+  );
+}
+
+function RealiteaseSettingsModal({
+  open,
+  onClose,
+  userId,
+  ageOrZodiac,
+  onAgeOrZodiacChange,
+  serviceMode,
+  onServiceModeChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  userId: string | null;
+  ageOrZodiac: "age" | "zodiac";
+  onAgeOrZodiacChange: (next: "age" | "zodiac") => void;
+  serviceMode: "networks" | "streamers";
+  onServiceModeChange: (next: "networks" | "streamers") => void;
+}) {
+  const headingId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { dialogRef, handleKeyDown } = useDialogA11y<HTMLDivElement>({
+    open,
+    onClose,
+    initialFocusRef: closeButtonRef,
+  });
+
+  const handleAgeOrZodiac = useCallback(
+    async (next: "age" | "zodiac") => {
+      onAgeOrZodiacChange(next);
+      if (!userId) return;
+      try {
+        await updateUserPreferences(userId, { realitease: { ageOrZodiac: next } });
+      } catch (error) {
+        console.warn("Pref save failed", error);
+      }
+    },
+    [onAgeOrZodiacChange, userId],
+  );
+
+  const handleServiceMode = useCallback(
+    async (next: "networks" | "streamers") => {
+      onServiceModeChange(next);
+      if (!userId) return;
+      try {
+        await updateUserPreferences(userId, { realitease: { serviceMode: next } });
+      } catch (error) {
+        console.warn("Pref save failed", error);
+      }
+    },
+    [onServiceModeChange, userId],
+  );
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/50" aria-hidden onClick={onClose} />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl"
+      >
+        <div className="mb-4 flex items-start justify-between">
+          <h2 id={headingId} className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>
+            Realitease Settings
+          </h2>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 hover:bg-black/5"
+            aria-label="Close settings"
+          >
+            <svg width="24" height="24" viewBox="0 0 31 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M24.0249 8.84795L22.2624 7.08545L15.2749 14.0729L8.28743 7.08545L6.52493 8.84795L13.5124 15.8354L6.52493 22.8229L8.28743 24.5854L15.2749 17.5979L22.2624 24.5854L24.0249 22.8229L17.0374 15.8354L24.0249 8.84795Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+        </div>
+        <div className="space-y-6">
+          <div>
+            <p
+              className="mb-2 text-sm font-semibold text-gray-800"
+              style={{ fontFamily: "var(--font-plymouth-serial)" }}
+            >
+              Column preferences
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-md border border-zinc-300 p-3">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-600">
+                  AGE vs ZODIAC
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAgeOrZodiac("age")}
+                    className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${
+                      ageOrZodiac === "age" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"
+                    }`}
+                  >
+                    AGE
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAgeOrZodiac("zodiac")}
+                    className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${
+                      ageOrZodiac === "zodiac" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"
+                    }`}
+                  >
+                    ZODIAC
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-md border border-zinc-300 p-3">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-600">
+                  NETWORKS vs STREAMERS
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleServiceMode("networks")}
+                    className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${
+                      serviceMode === "networks" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"
+                    }`}
+                  >
+                    NETWORKS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleServiceMode("streamers")}
+                    className={`flex-1 rounded-sm px-3 py-1 text-sm font-semibold ${
+                      serviceMode === "streamers" ? "bg-black text-white" : "bg-zinc-100 text-gray-800"
+                    }`}
+                  >
+                    STREAMERS
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1309,17 +1486,36 @@ function ReportProblemModal({
   submitted: boolean;
   gameTitle: string;
 }) {
+  const headingId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { dialogRef, handleKeyDown } = useDialogA11y<HTMLDivElement>({
+    open,
+    onClose,
+    initialFocusRef: closeButtonRef,
+  });
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-4 py-10">
-      <div className="w-full max-w-lg rounded-lg bg-white px-6 pb-8 pt-6 shadow-[0px_4px_23px_rgba(0,0,0,0.2)]">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="w-full max-w-lg rounded-lg bg-white px-6 pb-8 pt-6 shadow-[0px_4px_23px_rgba(0,0,0,0.2)]"
+      >
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <h2 className="font-['NYTKarnak_Condensed'] text-2xl font-bold leading-none text-black">Report a Problem</h2>
+            <h2 id={headingId} className="font-['NYTKarnak_Condensed'] text-2xl font-bold leading-none text-black">
+              Report a Problem
+            </h2>
             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-black/70">{gameTitle}</p>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="rounded-full p-2 text-black transition hover:bg-black/5"
@@ -1689,7 +1885,7 @@ function RealiteaseBoard({
           {columns.map((column) => (
             <div
               key={column.key}
-              className="flex items-center justify-center text-center font-['HamburgSerial'] font-extrabold uppercase tracking-[0.2px] text-black"
+              className="flex items-center justify-center text-center font-hamburg font-extrabold uppercase tracking-[0.2px] text-black"
             >
               {column.label}
             </div>
@@ -1833,9 +2029,9 @@ function KeyboardKey({
       type="button"
       onClick={onPress}
       disabled={disabled}
+      aria-label={isBackspace ? "Backspace" : isEnter ? "Enter" : label.toUpperCase()}
       className={`${baseClasses} ${textClasses} ${stateClasses}`}
       style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
-      tabIndex={-1}
     >
       {display}
     </button>
@@ -1888,7 +2084,7 @@ function BoardCell({
   const [manualFlipActive, setManualFlipActive] = useState(false);
   const frontShouldUseAgeStyle = columnKey === "age" || frontIsNumericWwhl;
   const backShouldUseAgeStyle = columnKey === "age" || backIsNumericWwhl;
-  const fontClasses = "font-['HamburgSerial'] font-extrabold";
+  const fontClasses = "font-hamburg font-extrabold";
   const interactiveClasses = hasVariants ? "cursor-pointer" : "cursor-default";
   const frontValueForDisplay = isGuessColumn ? frontFaceValue.replace(/\s+/g, "\n") : frontFaceValue;
   const backValueForDisplay = isGuessColumn ? trimmedBackValue.replace(/\s+/g, "\n") : trimmedBackValue;
@@ -2009,12 +2205,14 @@ function getVerdictClasses(
     case "incorrect":
       return "bg-[#5D5F63] text-white border-[#5D5F63]";
     case "multi":
-      if (columnKey === "network" || columnKey === "shows") {
+      if (columnKey === "network" || columnKey === "streamers" || columnKey === "shows") {
         return "bg-[#644073] text-white border-[#644073]";
       }
       return "bg-[#28578A] text-white border-[#28578A]";
+    case "info":
+      return "bg-white text-gray-900 border-[#D3D6DA]";
     default:
-      return treatAsAge ? "bg-white text-white border-[#D3D6DA]" : "bg-white text-gray-900 border-[#D3D6DA]";
+      return "bg-white text-gray-900 border-[#D3D6DA]";
   }
 }
 

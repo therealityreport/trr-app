@@ -6,16 +6,21 @@ import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { AuthDebugger } from "@/lib/debug";
 import FlashbackRanker from "@/components/flashback-ranker";
+import SeasonRating from "@/components/season-rating";
+import CastVerdict from "@/components/cast-verdict";
 import { useSurveyManager } from "@/lib/surveys/manager";
 import {
   RHOP_EPISODE_ID,
   RHOP_SEASON_ID,
   RHOP_SHOW_ID,
   RHOP_SURVEY_ID,
+  getSurveyTheme,
 } from "@/lib/surveys/config";
-import type { SurveyEpisodeMeta, SurveyRankingItem, SurveyResponse } from "@/lib/surveys/types";
+import type { SurveyEpisodeMeta, SurveyRankingItem, SurveyResponse, CastVerdict as CastVerdictType, CastVerdictChoice } from "@/lib/surveys/types";
 import { shows } from "@/lib/admin/shows/data";
 import "@/styles/realitease-fonts.css";
+
+type SurveyStep = "ranking" | "season-rating" | "cast-verdict";
 
 const IDENTIFIERS = {
   showId: RHOP_SHOW_ID,
@@ -33,14 +38,20 @@ const CAST_MEMBERS: SurveyRankingItem[] = (rhopSeason?.cast ?? []).map((member) 
   img: member.image,
 }));
 
+const surveyTheme = getSurveyTheme(RHOP_SURVEY_ID);
+
 export default function RHOPS10PlayPage() {
   const router = useRouter();
   const manager = useSurveyManager();
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [episodeMeta, setEpisodeMeta] = useState<SurveyEpisodeMeta | null>(null);
-  const [response, setResponse] = useState<SurveyResponse | null>(null);
-  const [rankingIds, setRankingIds] = useState<string[]>([]);
+  const [, setResponse] = useState<SurveyResponse | null>(null);
+  const [ranking, setRanking] = useState<SurveyRankingItem[]>([]);
+  const [seasonRating, setSeasonRating] = useState<number | null>(null);
+  const [castVerdicts, setCastVerdicts] = useState<Map<string, CastVerdictChoice>>(new Map());
+  const [currentStep, setCurrentStep] = useState<SurveyStep>("ranking");
+  const [currentVerdictIndex, setCurrentVerdictIndex] = useState(0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -79,14 +90,21 @@ export default function RHOPS10PlayPage() {
 
       if (!userId) {
         setResponse(null);
-        setRankingIds([]);
+        setRanking([]);
         return;
       }
 
       unsubscribeResponse = manager.subscribeToResponse(IDENTIFIERS, userId, (next) => {
         setResponse(next);
-        const ids = next?.ranking?.map((item) => item.id) ?? [];
-        setRankingIds(ids);
+        setRanking(next?.ranking ?? []);
+        setSeasonRating(next?.seasonRating ?? null);
+        if (next?.castVerdicts) {
+          const verdictMap = new Map<string, CastVerdictChoice>();
+          for (const v of next.castVerdicts) {
+            verdictMap.set(v.castId, v.verdict);
+          }
+          setCastVerdicts(verdictMap);
+        }
       });
     };
 
@@ -98,20 +116,45 @@ export default function RHOPS10PlayPage() {
     };
   }, [manager, userId]);
 
-  const handleRankingChange = useCallback(
-    async (nextRanking: SurveyRankingItem[]) => {
+  const calculateCompletionPct = useCallback((
+    rankingItems: SurveyRankingItem[],
+    rating: number | null,
+    verdicts: Map<string, CastVerdictChoice>,
+  ) => {
+    const rankingComplete = rankingItems.length === CAST_MEMBERS.length;
+    const ratingComplete = rating !== null;
+
+    let pct = 0;
+    if (rankingComplete) pct += 40;
+    if (ratingComplete) pct += 20;
+    pct += Math.round((verdicts.size / CAST_MEMBERS.length) * 40);
+    return pct;
+  }, []);
+
+  const saveCurrentState = useCallback(
+    async (options?: { completed?: boolean }) => {
       if (!userId) return;
-      setRankingIds(nextRanking.map((item) => item.id));
       setSaveState("saving");
       try {
-        const completed = nextRanking.length === CAST_MEMBERS.length ? response?.completed ?? false : false;
+        const verdictArray: CastVerdictType[] = Array.from(castVerdicts.entries()).map(([castId, verdict]) => ({
+          castId,
+          verdict,
+        }));
+        const completionPct = calculateCompletionPct(ranking, seasonRating, castVerdicts);
+        const isComplete = options?.completed ?? (
+          ranking.length === CAST_MEMBERS.length &&
+          seasonRating !== null &&
+          castVerdicts.size === CAST_MEMBERS.length
+        );
         await manager.saveResponse(
           IDENTIFIERS,
           userId,
           {
-            ranking: nextRanking,
-            completionPct: Math.round((nextRanking.length / (CAST_MEMBERS.length || 1)) * 100),
-            completed,
+            ranking,
+            seasonRating,
+            castVerdicts: verdictArray,
+            completionPct,
+            completed: isComplete,
           },
           { surveyKey: RHOP_SURVEY_ID },
         );
@@ -121,37 +164,88 @@ export default function RHOPS10PlayPage() {
         setSaveState("error");
       }
     },
-    [manager, response?.completed, userId],
+    [manager, userId, ranking, seasonRating, castVerdicts, calculateCompletionPct],
   );
 
-  const handleSubmit = useCallback(async () => {
-    if (!userId) {
-      router.push("/auth/register");
-      return;
+  const handleRankingChange = useCallback(
+    async (nextRanking: SurveyRankingItem[]) => {
+      if (!userId) return;
+      setRanking(nextRanking);
+      setSaveState("saving");
+      try {
+        const verdictArray: CastVerdictType[] = Array.from(castVerdicts.entries()).map(([castId, verdict]) => ({
+          castId,
+          verdict,
+        }));
+        const completionPct = calculateCompletionPct(nextRanking, seasonRating, castVerdicts);
+        await manager.saveResponse(
+          IDENTIFIERS,
+          userId,
+          {
+            ranking: nextRanking,
+            seasonRating,
+            castVerdicts: verdictArray,
+            completionPct,
+            completed: false,
+          },
+          { surveyKey: RHOP_SURVEY_ID },
+        );
+        setSaveState("saved");
+      } catch (error) {
+        console.error("Failed to save survey response", error);
+        setSaveState("error");
+      }
+    },
+    [manager, userId, seasonRating, castVerdicts, calculateCompletionPct],
+  );
+
+  const handleSeasonRatingChange = useCallback((value: number) => {
+    setSeasonRating(value);
+  }, []);
+
+  const handleVerdictChange = useCallback((castId: string, verdict: CastVerdictChoice) => {
+    setCastVerdicts((prev) => {
+      const next = new Map(prev);
+      next.set(castId, verdict);
+      return next;
+    });
+  }, []);
+
+  const handleNextStep = useCallback(async () => {
+    if (currentStep === "ranking") {
+      if (ranking.length !== CAST_MEMBERS.length) return;
+      await saveCurrentState();
+      setCurrentStep("season-rating");
+    } else if (currentStep === "season-rating") {
+      if (seasonRating === null) return;
+      await saveCurrentState();
+      setCurrentStep("cast-verdict");
+      setCurrentVerdictIndex(0);
+    } else if (currentStep === "cast-verdict") {
+      const currentMember = CAST_MEMBERS[currentVerdictIndex];
+      if (!currentMember || !castVerdicts.has(currentMember.id)) return;
+
+      if (currentVerdictIndex < CAST_MEMBERS.length - 1) {
+        setCurrentVerdictIndex((prev) => prev + 1);
+        await saveCurrentState();
+      } else {
+        await saveCurrentState({ completed: true });
+        router.push("/surveys/rhop-s10/results");
+      }
     }
-    if (rankingIds.length !== CAST_MEMBERS.length) return;
-    setSaveState("saving");
-    try {
-      const ranking = rankingIds
-        .map((id) => CAST_MEMBERS.find((item) => item.id === id))
-        .filter(Boolean) as SurveyRankingItem[];
-      await manager.saveResponse(
-        IDENTIFIERS,
-        userId,
-        {
-          ranking,
-          completionPct: 100,
-          completed: true,
-        },
-        { surveyKey: RHOP_SURVEY_ID },
-      );
-      setSaveState("saved");
-      router.push("/surveys/rhop-s10/results");
-    } catch (error) {
-      console.error("Failed to submit survey", error);
-      setSaveState("error");
+  }, [currentStep, ranking, seasonRating, castVerdicts, currentVerdictIndex, saveCurrentState, router]);
+
+  const handlePrevStep = useCallback(() => {
+    if (currentStep === "season-rating") {
+      setCurrentStep("ranking");
+    } else if (currentStep === "cast-verdict") {
+      if (currentVerdictIndex > 0) {
+        setCurrentVerdictIndex((prev) => prev - 1);
+      } else {
+        setCurrentStep("season-rating");
+      }
     }
-  }, [manager, rankingIds, router, userId]);
+  }, [currentStep, currentVerdictIndex]);
 
   const handleBack = () => {
     router.push("/surveys/rhop-s10");
@@ -166,22 +260,35 @@ export default function RHOPS10PlayPage() {
 
   if (authLoading || !userId) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#5C0F4F]/10">
-        <p className="text-sm font-semibold text-[#5C0F4F]">Loading survey…</p>
+      <div
+        className="flex min-h-screen items-center justify-center"
+        style={{ backgroundColor: surveyTheme.pageBg }}
+      >
+        <p className="text-sm font-semibold" style={{ color: surveyTheme.pageText }}>
+          Loading survey…
+        </p>
       </div>
     );
   }
 
   if (errorMessage) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#5C0F4F]/5 px-4">
+      <div
+        className="flex min-h-screen items-center justify-center px-4"
+        style={{ backgroundColor: surveyTheme.pageBg }}
+      >
         <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow">
-          <h1 className="text-3xl font-bold uppercase tracking-wide text-[#5C0F4F]">Something went wrong</h1>
-          <p className="mt-4 text-sm text-[#5C0F4F]/70">{errorMessage}</p>
+          <h1 className="text-3xl font-bold uppercase tracking-wide" style={{ color: surveyTheme.pageText }}>
+            Something went wrong
+          </h1>
+          <p className="mt-4 text-sm" style={{ color: surveyTheme.instructionColor }}>
+            {errorMessage}
+          </p>
           <button
             type="button"
             onClick={handleBack}
-            className="mt-6 inline-flex items-center rounded-full bg-[#5C0F4F] px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#4b0a3f]"
+            className="mt-6 inline-flex items-center rounded-full px-5 py-2 text-sm font-semibold shadow-sm transition"
+            style={{ backgroundColor: surveyTheme.submitBg, color: surveyTheme.submitText }}
           >
             Back to Cover
           </button>
@@ -192,24 +299,31 @@ export default function RHOPS10PlayPage() {
 
   if (isClosed) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#5C0F4F]/5 px-4">
+      <div
+        className="flex min-h-screen items-center justify-center px-4"
+        style={{ backgroundColor: surveyTheme.pageBg }}
+      >
         <div className="w-full max-w-lg rounded-3xl bg-white p-10 text-center shadow-xl">
-          <h1 className="text-4xl font-bold uppercase tracking-wide text-[#5C0F4F]">Survey Closed</h1>
-          <p className="mt-4 text-sm text-[#5C0F4F]/70">
-            This week’s RHOP ranking is closed. Come back next week to reset the board.
+          <h1 className="text-4xl font-bold uppercase tracking-wide" style={{ color: surveyTheme.pageText }}>
+            Survey Closed
+          </h1>
+          <p className="mt-4 text-sm" style={{ color: surveyTheme.instructionColor }}>
+            This week&apos;s RHOP ranking is closed. Come back next week to reset the board.
           </p>
           <div className="mt-6 flex justify-center gap-3">
             <button
               type="button"
               onClick={() => router.push("/surveys/rhop-s10/results")}
-              className="rounded-full bg-[#5C0F4F] px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#4b0a3f]"
+              className="rounded-full px-5 py-2 text-sm font-semibold shadow-sm transition"
+              style={{ backgroundColor: surveyTheme.submitBg, color: surveyTheme.submitText }}
             >
               See Results
             </button>
             <button
               type="button"
               onClick={handleBack}
-              className="rounded-full border border-[#5C0F4F]/30 px-5 py-2 text-sm font-semibold text-[#5C0F4F] hover:bg-[#5C0F4F]/5"
+              className="rounded-full border px-5 py-2 text-sm font-semibold"
+              style={{ borderColor: surveyTheme.resetBorder, color: surveyTheme.resetText }}
             >
               Back to Cover
             </button>
@@ -219,78 +333,151 @@ export default function RHOPS10PlayPage() {
     );
   }
 
+  const overallProgress = calculateCompletionPct(ranking, seasonRating, castVerdicts);
+  const currentCastMember = CAST_MEMBERS[currentVerdictIndex];
+
+  const getStepTitle = () => {
+    if (currentStep === "ranking") return "Q1. Rank the Cast of RHOP 10.";
+    if (currentStep === "season-rating") return "Q2. Rate This Season";
+    return "Q3. Cast Verdicts";
+  };
+
+  const getStepInstruction = () => {
+    if (currentStep === "ranking") return "Drag-and-Drop the Cast Members to their Rank.";
+    if (currentStep === "season-rating") return "How would you rate Season 10 so far?";
+    return `${currentVerdictIndex + 1} of ${CAST_MEMBERS.length}`;
+  };
+
+  const canProceed = () => {
+    if (currentStep === "ranking") return ranking.length === CAST_MEMBERS.length;
+    if (currentStep === "season-rating") return seasonRating !== null;
+    if (currentStep === "cast-verdict" && currentCastMember) {
+      return castVerdicts.has(currentCastMember.id);
+    }
+    return false;
+  };
+
+  const isFirstStep = currentStep === "ranking";
+  const isLastStep = currentStep === "cast-verdict" && currentVerdictIndex === CAST_MEMBERS.length - 1;
+
   return (
-    <main className="min-h-screen bg-[#FDF5FB] px-4 py-8">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-        <header className="flex flex-col items-center gap-4 text-center">
+    <main className="min-h-screen px-4 py-8" style={{ backgroundColor: surveyTheme.pageBg }}>
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <header className="flex flex-col gap-4">
           <button
             type="button"
-            onClick={handleBack}
-            className="text-xs font-semibold uppercase tracking-[0.4em] text-[#5C0F4F]"
+            onClick={isFirstStep ? handleBack : handlePrevStep}
+            className="self-start text-xs font-semibold uppercase tracking-[0.4em] transition"
+            style={{ color: surveyTheme.resetText }}
           >
-            RHOP · Season 10
+            ← {isFirstStep ? "Back" : "Previous"}
           </button>
-          <div className="w-full text-left">
+          <div className="flex items-center justify-between gap-4">
+            <div className="text-sm font-semibold" style={{ color: surveyTheme.progressText }}>
+              {overallProgress}%
+            </div>
+            <div
+              className="h-2 flex-1 max-w-[600px] overflow-hidden rounded-full"
+              style={{ backgroundColor: surveyTheme.progressBg }}
+            >
+              <div
+                className="h-full transition-[width]"
+                style={{ backgroundColor: surveyTheme.progressFill, width: `${overallProgress}%` }}
+              />
+            </div>
+            <div className="text-sm font-semibold" style={{ color: surveyTheme.progressText }}>
+              100%
+            </div>
+          </div>
+          <div className="w-full">
             <h1
-              className="text-[#1B0017]"
               style={{
-                fontFamily: "var(--font-rude-slab)",
+                fontFamily: surveyTheme.questionFont,
                 fontWeight: 800,
-                fontSize: "48.828px",
-                letterSpacing: "0.488px",
-                textTransform: "none",
+                fontSize: "clamp(28px, 5vw, 44px)",
+                letterSpacing: "0.5px",
+                lineHeight: 1.1,
+                color: surveyTheme.questionColor,
               }}
             >
-              Q1. Rank the Cast of RHOP 10.
+              {getStepTitle()}
             </h1>
             <p
-              className="text-[#1B0017]"
               style={{
-                fontFamily: "var(--font-plymouth-serial)",
-                fontSize: "22px",
-                fontWeight: 700,
-                letterSpacing: "1.1px",
-                textTransform: "uppercase",
-                marginTop: "0.4rem",
+                fontFamily: surveyTheme.instructionFont,
+                fontSize: "clamp(14px, 2.5vw, 20px)",
+                fontWeight: 400,
+                letterSpacing: "1px",
+                marginTop: "0.75rem",
+                color: surveyTheme.instructionColor,
               }}
             >
-              Tap a number or drag a portrait
+              {getStepInstruction()}
             </p>
           </div>
         </header>
 
-        <div className="space-y-4">
-          <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-end">
+        {currentStep === "ranking" && (
+          <FlashbackRanker
+            items={CAST_MEMBERS}
+            initialRanking={ranking}
+            onChange={handleRankingChange}
+            variant="grid"
+            surveyTheme={surveyTheme}
+          />
+        )}
+
+        {currentStep === "season-rating" && (
+          <SeasonRating
+            value={seasonRating}
+            onChange={handleSeasonRatingChange}
+            surveyTheme={surveyTheme}
+            seasonLabel="Season 10"
+          />
+        )}
+
+        {currentStep === "cast-verdict" && currentCastMember && (
+          <CastVerdict
+            castMember={currentCastMember}
+            value={castVerdicts.get(currentCastMember.id) ?? null}
+            onChange={(verdict) => handleVerdictChange(currentCastMember.id, verdict)}
+            surveyTheme={surveyTheme}
+          />
+        )}
+
+        <div className="flex flex-col items-center gap-4 text-center">
+          <button
+            type="button"
+            onClick={handleNextStep}
+            disabled={!canProceed() || saveState === "saving"}
+            className="inline-flex items-center rounded-full px-6 py-3 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ backgroundColor: surveyTheme.submitBg, color: surveyTheme.submitText }}
+          >
+            {saveState === "saving" ? "Saving…" : isLastStep ? "Submit Survey" : "Next"}
+          </button>
+          {saveState === "error" && (
+            <p className="text-sm" style={{ color: surveyTheme.errorColor }}>
+              Could not save. Please try again.
+            </p>
+          )}
+          {saveState === "saved" && currentStep === "ranking" && (
+            <p className="text-sm" style={{ color: surveyTheme.successColor }}>
+              Progress saved!
+            </p>
+          )}
+          {currentStep === "ranking" && (
             <button
               type="button"
               onClick={() => {
                 void handleRankingChange([]);
               }}
-              disabled={rankingIds.length === 0 || saveState === "saving"}
-              className="inline-flex items-center rounded-full border border-[#5C0F4F]/30 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-[#5C0F4F] transition hover:bg-[#5C0F4F]/5 disabled:cursor-not-allowed disabled:border-[#5C0F4F]/10 disabled:text-[#5C0F4F]/40"
+              disabled={ranking.length === 0 || saveState === "saving"}
+              className="inline-flex items-center rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] transition disabled:cursor-not-allowed disabled:opacity-40"
+              style={{ borderColor: surveyTheme.resetBorder, color: surveyTheme.resetText }}
             >
               Reset selections
             </button>
-          </div>
-          <FlashbackRanker
-            items={CAST_MEMBERS}
-            initialRankingIds={rankingIds}
-            onChange={handleRankingChange}
-            variant="grid"
-          />
-        </div>
-
-        <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:justify-center">
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={rankingIds.length !== CAST_MEMBERS.length || saveState === "saving"}
-            className="inline-flex items-center rounded-full bg-[#5C0F4F] px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-[#4b0a3f] disabled:cursor-not-allowed disabled:bg-[#5C0F4F]/40"
-          >
-            {saveState === "saving" ? "Saving…" : "Submit Rankings"}
-          </button>
-          {saveState === "error" && <p className="text-sm text-red-600">Couldn’t save. Please try again.</p>}
-          {saveState === "saved" && <p className="text-sm text-emerald-600">Saved! Catch the fan ranking soon.</p>}
+          )}
         </div>
       </div>
     </main>

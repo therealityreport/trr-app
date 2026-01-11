@@ -6,6 +6,13 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const ADMIN_TOOLS = [
   {
+    key: "survey-editor",
+    title: "Survey Editor",
+    description: "Create and configure surveys with themes, cast members, episodes, and air schedules.",
+    href: "/admin/surveys" as const,
+    badge: "Config",
+  },
+  {
     key: "survey-responses",
     title: "Survey Responses",
     description: "Browse, filter, and export every survey captured in the TRR Postgres database.",
