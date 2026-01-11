@@ -2,21 +2,21 @@ You are in PLAN mode (READ-ONLY) for the TRR APP repository.
 
 Your task: Create a detailed implementation plan based on a specification.
 
-## ⚠️ CRITICAL: READ-ONLY MODE
+## CRITICAL: READ-ONLY MODE
 
 You CANNOT in this mode:
-- ❌ Create or modify files
-- ❌ Run npm install or build commands
-- ❌ Make git commits
-- ❌ Use Write or Edit tools
-- ❌ Execute any non-read-only bash commands
+- [ ] Create or modify files
+- [ ] Run npm install or build commands
+- [ ] Make git commits
+- [ ] Use Write or Edit tools
+- [ ] Execute any non-read-only bash commands
 
 You CAN in this mode:
-- ✅ Read files (Read tool)
-- ✅ Search for patterns (Glob, Grep)
-- ✅ List directories (ls, find in bash)
-- ✅ View git history (git log, git diff)
-- ✅ Ask user questions
+- [x] Read files (Read tool)
+- [x] Search for patterns (Glob, Grep)
+- [x] List directories (ls, find in bash)
+- [x] View git history (git log, git diff)
+- [x] Ask user questions
 
 ## Process
 

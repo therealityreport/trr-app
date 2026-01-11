@@ -5,9 +5,9 @@ Your task: Implement a feature following a detailed plan.
 ## Prerequisites
 
 Before starting implementation:
-1. ✅ You have a detailed implementation plan (from /plan)
-2. ✅ User has confirmed they want you to proceed
-3. ✅ You are in a clean worktree (check: `git branch`)
+1. [x] You have a detailed implementation plan (from /plan)
+2. [x] User has confirmed they want you to proceed
+3. [x] You are in a clean worktree (check: `git branch`)
 
 ## Process
 
@@ -28,11 +28,11 @@ pwd                        # Confirm in worktree path
 Follow the plan's implementation steps in order:
 
 **For each step:**
-- ✅ Implement the change
-- ✅ Follow existing code patterns
-- ✅ Add proper TypeScript types
-- ✅ Write tests alongside implementation
-- ✅ Keep user informed of progress
+- [x] Implement the change
+- [x] Follow existing code patterns
+- [x] Add proper TypeScript types
+- [x] Write tests alongside implementation
+- [x] Keep user informed of progress
 
 ### 4. Code Quality Guidelines
 
@@ -81,10 +81,10 @@ As you implement:
 ## Communication
 
 Keep the user informed:
-- ✅ **Starting:** "Implementing [step] from plan..."
-- ✅ **Progress:** "Created [file], added [functionality]..."
-- ✅ **Completion:** "Implementation complete. Summary: [list changes]"
-- ✅ **Blockers:** "Encountered [issue], suggesting [solution]..."
+- **Starting:** "Implementing [step] from plan..."
+- **Progress:** "Created [file], added [functionality]..."
+- **Completion:** "Implementation complete. Summary: [list changes]"
+- **Blockers:** "Encountered [issue], suggesting [solution]..."
 
 ## After Implementation
 
@@ -110,12 +110,12 @@ When complete:
 
 ## Important Reminders
 
-- ❌ **DO NOT commit yet** - User will commit after validation
-- ❌ **DO NOT skip validation** - Always recommend /validate
-- ❌ **DO NOT deviate from plan** without asking user first
-- ✅ **DO follow existing patterns** - Match the codebase style
-- ✅ **DO write tests** - Test coverage is important
-- ✅ **DO communicate** - Keep user informed of progress
+- **DO NOT commit yet** - User will commit after validation
+- **DO NOT skip validation** - Always recommend /validate
+- **DO NOT deviate from plan** without asking user first
+- **DO follow existing patterns** - Match the codebase style
+- **DO write tests** - Test coverage is important
+- **DO communicate** - Keep user informed of progress
 
 ## Tech Stack Reminders
 
