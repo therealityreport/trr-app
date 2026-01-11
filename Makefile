@@ -55,6 +55,22 @@ dev-local:
 # Build
 build:
 	@echo ">  Building for production..."
+	@# Check for required DATABASE_URL
+	@if [ -z "$$DATABASE_URL" ] && ! grep -q "^DATABASE_URL=" apps/web/.env.local 2>/dev/null; then \
+		echo ""; \
+		echo "ERROR: DATABASE_URL is required for Next.js build"; \
+		echo ""; \
+		echo "Next.js build requires DATABASE_URL to collect page data."; \
+		echo ""; \
+		echo "To fix this:"; \
+		echo "  1. Copy template: cp apps/web/.env.example apps/web/.env.local"; \
+		echo "  2. Set DATABASE_URL in apps/web/.env.local"; \
+		echo "  3. Or export DATABASE_URL environment variable"; \
+		echo ""; \
+		echo "See SETUP.md for detailed database setup instructions."; \
+		echo ""; \
+		exit 1; \
+	fi
 	npm run web:build
 	@echo "OK: Build complete"
 

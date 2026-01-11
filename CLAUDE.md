@@ -169,6 +169,8 @@ See [SETUP.md](SETUP.md) for detailed local development setup.
 - **Database setup:** See [POSTGRES_SETUP.md](apps/web/POSTGRES_SETUP.md)
 - **Deployment:** See [DEPLOY.md](apps/web/DEPLOY.md)
 
+**IMPORTANT:** DATABASE_URL is required for production builds (`make build`). The validation target (`make validate`) does NOT require DATABASE_URL as it only runs lint + typecheck + test (no build). See SETUP.md for database configuration details
+
 ## Development Guidelines
 
 ### File Locations

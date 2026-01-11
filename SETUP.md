@@ -80,6 +80,11 @@ NEXT_PUBLIC_FIREBASE_APP_ID="your-app-id"
 DATABASE_URL="postgresql://user:password@host:port/database?sslmode=require"
 ```
 
+**IMPORTANT:** DATABASE_URL is required for `npm run build` (production builds). Next.js build process collects page data which requires database access. This means:
+- Local builds require DATABASE_URL in `.env.local`
+- CI/CD builds require DATABASE_URL as a secret environment variable
+- Development server (`npm run dev`) works without DATABASE_URL but some pages may error
+
 **Firebase Admin SDK** (Required for API):
 ```env
 FIREBASE_SERVICE_ACCOUNT='{"type":"service_account","project_id":"...","private_key_id":"...","private_key":"...","client_email":"...","client_id":"...","auth_uri":"...","token_uri":"...","auth_provider_x509_cert_url":"...","client_x509_cert_url":"..."}'
@@ -108,6 +113,7 @@ See [apps/web/POSTGRES_SETUP.md](apps/web/POSTGRES_SETUP.md) for detailed instru
 2. **Add DATABASE_URL**
    - Add connection string to `apps/web/.env.local`
    - Format: `postgresql://user:password@host:port/database?sslmode=require`
+   - **For Supabase users:** Use your Supabase Postgres connection string as `DATABASE_URL` (found in Database Settings > Connection String > URI). Do NOT create a separate `SUPABASE_DB_URL` variable
 
 3. **Run Migrations**
    ```bash
