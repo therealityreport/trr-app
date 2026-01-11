@@ -10,6 +10,7 @@ Build
 - Node: 22.x (recommended)
 
 Environment Variables (Preview + Production)
+- `DATABASE_URL` (PostgreSQL connection string - REQUIRED for build)
 - `NEXT_PUBLIC_FIREBASE_API_KEY`
 - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
 - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
