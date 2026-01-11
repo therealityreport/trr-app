@@ -22,33 +22,33 @@ A comprehensive guide to the "Vibe Coding" workflow for AI-assisted development 
 
 ```
 One Directory = One Context
-├── Switch branches with git checkout
-├── Risk mixing uncommitted changes
-├── Stash/unstash overhead
-└── One feature at a time
+--- Switch branches with git checkout
+--- Risk mixing uncommitted changes
+--- Stash/unstash overhead
+--- One feature at a time
 ```
 
 **Problems:**
-- ❌ Forget to stash → lose changes
-- ❌ Switch mid-feature → context loss
-- ❌ Cannot work on multiple features
-- ❌ IDE/build state confusion
+- [ ] Forget to stash -> lose changes
+- [ ] Switch mid-feature -> context loss
+- [ ] Cannot work on multiple features
+- [ ] IDE/build state confusion
 
 #### Worktree Workflow
 
 ```
 Multiple Directories = Multiple Contexts
-├── Each feature has own directory
-├── No switching, just cd
-├── No stashing needed
-└── Parallel development
+--- Each feature has own directory
+--- No switching, just cd
+--- No stashing needed
+--- Parallel development
 ```
 
 **Benefits:**
-- ✅ Each feature fully isolated
-- ✅ Switch instantly (cd command)
-- ✅ No uncommitted changes conflicts
-- ✅ Work on multiple features in parallel
+- [x] Each feature fully isolated
+- [x] Switch instantly (cd command)
+- [x] No uncommitted changes conflicts
+- [x] Work on multiple features in parallel
 
 ### The Analogy
 
@@ -65,81 +65,81 @@ Multiple Directories = Multiple Contexts
 ## The Vibe Coding Loop
 
 ```
-┌─────────────────────────────────────────────┐
-│ 1. PLAN                                     │
-│    Define what to build                     │
-│    - Write spec (/spec)                     │
-│    - Create plan (/plan)                    │
-│    - Identify files to change               │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│ 2. ISOLATE                                  │
-│    Create dedicated workspace               │
-│    - wt switch --create <feature>           │
-│    - Clean environment                      │
-│    - Copy .env.local                        │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│ 3. IMPLEMENT                                │
-│    Make changes                             │
-│    - Follow plan (/impl)                    │
-│    - Write tests                            │
-│    - Iterate until complete                 │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│ 4. VALIDATE                                 │
-│    Run quality checks                       │
-│    - Lint (ESLint)                          │
-│    - Typecheck (TypeScript)                 │
-│    - Test (Vitest)                          │
-│    - Fix issues until green                 │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│ 5. COMMIT                                   │
-│    Save changes to git                      │
-│    - Review: git status, git diff           │
-│    - Atomic commits                         │
-│    - Descriptive messages                   │
-│    - Co-authored by Claude                  │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│ 6. PUSH                                     │
-│    Share with remote                        │
-│    - git push -u origin <branch>            │
-│    - Backup work                            │
-│    - Enable collaboration                   │
-│    - Trigger CI/CD                          │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│ 7. PR (Pull Request)                        │
-│    Request code review                      │
-│    - Descriptive title & body (/pr)         │
-│    - Link to issues                         │
-│    - Include test evidence                  │
-│    - Tag reviewers                          │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│ 8. MERGE                                    │
-│    Integrate approved changes               │
-│    - After approval                         │
-│    - CI passing                             │
-│    - Conflicts resolved                     │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│ 9. CLEANUP                                  │
-│    Remove worktree                          │
-│    - wt remove                              │
-│    - Auto-deletes merged branch             │
-│    - Return to main worktree                │
-└─────────────────────────────────────────────┘
+----------------------------------------------+
+  1. PLAN                                      
+     Define what to build                      
+     - Write spec (/spec)                      
+     - Create plan (/plan)                     
+     - Identify files to change                
+----------------------------------------------+
+                    
+-------------------v--------------------------+
+  2. ISOLATE                                   
+     Create dedicated workspace                
+     - wt switch --create <feature>            
+     - Clean environment                       
+     - Copy .env.local                         
+----------------------------------------------+
+                    
+-------------------v--------------------------+
+  3. IMPLEMENT                                 
+     Make changes                              
+     - Follow plan (/impl)                     
+     - Write tests                             
+     - Iterate until complete                  
+----------------------------------------------+
+                    
+-------------------v--------------------------+
+  4. VALIDATE                                  
+     Run quality checks                        
+     - Lint (ESLint)                           
+     - Typecheck (TypeScript)                  
+     - Test (Vitest)                           
+     - Fix issues until green                  
+----------------------------------------------+
+                    
+-------------------v--------------------------+
+  5. COMMIT                                    
+     Save changes to git                       
+     - Review: git status, git diff            
+     - Atomic commits                          
+     - Descriptive messages                    
+     - Co-authored by Claude                   
+----------------------------------------------+
+                    
+-------------------v--------------------------+
+  6. PUSH                                      
+     Share with remote                         
+     - git push -u origin <branch>             
+     - Backup work                             
+     - Enable collaboration                    
+     - Trigger CI/CD                           
+----------------------------------------------+
+                    
+-------------------v--------------------------+
+  7. PR (Pull Request)                         
+     Request code review                       
+     - Descriptive title & body (/pr)          
+     - Link to issues                          
+     - Include test evidence                   
+     - Tag reviewers                           
+----------------------------------------------+
+                    
+-------------------v--------------------------+
+  8. MERGE                                     
+     Integrate approved changes                
+     - After approval                          
+     - CI passing                              
+     - Conflicts resolved                      
+----------------------------------------------+
+                    
+-------------------v--------------------------+
+  9. CLEANUP                                   
+     Remove worktree                           
+     - wt remove                               
+     - Auto-deletes merged branch              
+     - Return to main worktree                 
+----------------------------------------------+
 ```
 
 ## Commit vs Push: Understanding the Difference
@@ -193,8 +193,8 @@ git push -u origin feature-button-variants
 
 > **Commit often, push when ready to share.**
 
-- ✅ Commit: 10+ times per feature
-- ✅ Push: 1-3 times per feature
+- [x] Commit: 10+ times per feature
+- [x] Push: 1-3 times per feature
 
 ## Parallel Feature Development
 
@@ -202,24 +202,24 @@ Worktrees enable true parallel development:
 
 ```
 Main Worktree: ~/Projects/TRR-APP
-├── Branch: main
-├── Status: Clean
-└── Purpose: Stable base for new worktrees
+--- Branch: main
+--- Status: Clean
+--- Purpose: Stable base for new worktrees
 
 Worktree 1: ~/.claude-worktrees/TRR-APP/feature-auth
-├── Branch: feature-auth
-├── Status: Working on OAuth integration
-└── Purpose: Add authentication
+--- Branch: feature-auth
+--- Status: Working on OAuth integration
+--- Purpose: Add authentication
 
 Worktree 2: ~/.claude-worktrees/TRR-APP/feature-dashboard
-├── Branch: feature-dashboard
-├── Status: Designing UI components
-└── Purpose: Build user dashboard
+--- Branch: feature-dashboard
+--- Status: Designing UI components
+--- Purpose: Build user dashboard
 
 Worktree 3: ~/.claude-worktrees/TRR-APP/fix-api-timeout
-├── Branch: fix-api-timeout
-├── Status: Testing timeout fix
-└── Purpose: Fix critical bug
+--- Branch: fix-api-timeout
+--- Status: Testing timeout fix
+--- Purpose: Fix critical bug
 ```
 
 ### Workflow Example
@@ -252,27 +252,27 @@ cd ~/.claude-worktrees/TRR-APP/feature-dashboard  # Or: wt switch feature-dashbo
 
 ### Benefits
 
-- ✅ **Instant context switching** - Just `cd` or `wt switch`
-- ✅ **No stashing** - Every worktree keeps its state
-- ✅ **Parallel builds** - Each can have dev server running
-- ✅ **Independent validation** - Test each feature separately
-- ✅ **Early conflict detection** - Merge conflicts found before PR
+- [x] **Instant context switching** - Just `cd` or `wt switch`
+- [x] **No stashing** - Every worktree keeps its state
+- [x] **Parallel builds** - Each can have dev server running
+- [x] **Independent validation** - Test each feature separately
+- [x] **Early conflict detection** - Merge conflicts found before PR
 
 ## Best Practices
 
 ### Do's
 
-✅ **Create worktree for every feature**
+[x] **Create worktree for every feature**
 ```bash
 wt switch --create feature-name
 ```
 
-✅ **Validate before every commit**
+[x] **Validate before every commit**
 ```bash
 make validate  # lint + typecheck + test
 ```
 
-✅ **Write descriptive commit messages**
+[x] **Write descriptive commit messages**
 ```bash
 git commit -m "feat: add user authentication
 
@@ -283,44 +283,44 @@ git commit -m "feat: add user authentication
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 ```
 
-✅ **Push regularly**
+[x] **Push regularly**
 ```bash
 git push  # At least once per session
 ```
 
-✅ **Delete worktrees after merge**
+[x] **Delete worktrees after merge**
 ```bash
 wt remove  # After PR merged
 ```
 
-✅ **Keep commits atomic**
+[x] **Keep commits atomic**
 - One logical change per commit
 - Easy to review
 - Easy to revert if needed
 
 ### Don'ts
 
-❌ **Don't work directly on main**
+[ ] **Don't work directly on main**
 - Always use feature branches
 - Main should only receive merges
 
-❌ **Don't skip validation**
+[ ] **Don't skip validation**
 - Broken code should never be committed
 - Fix issues before committing
 
-❌ **Don't commit without testing**
+[ ] **Don't commit without testing**
 - Run `make validate` first
 - Ensure tests pass
 
-❌ **Don't leave stale worktrees**
+[ ] **Don't leave stale worktrees**
 - Remove after feature merged
 - Clean up regularly
 
-❌ **Don't force push**
+[ ] **Don't force push**
 - Unless absolutely necessary
 - Never force push to main
 
-❌ **Don't commit secrets**
+[ ] **Don't commit secrets**
 - Never commit .env files
 - Never commit API keys or passwords
 
@@ -340,7 +340,7 @@ The TRR APP provides slash commands to guide the workflow:
 ### Command Flow
 
 ```
-Idea → /spec → /plan → /wt-new → /impl → /validate → commit → /pr → merge
+Idea -> /spec -> /plan -> /wt-new -> /impl -> /validate -> commit -> /pr -> merge
 ```
 
 ## Real-World Examples
@@ -567,4 +567,4 @@ The Vibe Coding workflow provides:
 
 ---
 
-**Ready to vibe?** Start with `/wt-new` and build something amazing! 🚀
+**Ready to vibe?** Start with `/wt-new` and build something amazing! !

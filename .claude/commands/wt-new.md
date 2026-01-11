@@ -79,12 +79,12 @@ If `.env.local` exists in main worktree:
 cp /Users/thomashulihan/Projects/TRR-APP/apps/web/.env.local \
    apps/web/.env.local
 
-echo "✅ Environment configured (.env.local copied)"
+echo "[x] Environment configured (.env.local copied)"
 ```
 
 If `.env.local` doesn't exist:
 ```
-⚠️  No .env.local found in main worktree.
+WARNING:  No .env.local found in main worktree.
 
 If you need environment variables:
 1. Copy from .env.example: cp apps/web/.env.example apps/web/.env.local
@@ -127,7 +127,7 @@ Maintenance, dependencies, tooling:
 
 Tell user:
 ```
-✅ Worktree created successfully!
+[x] Worktree created successfully!
 
 Branch: [branch-name]
 Location: [worktree-path]
@@ -245,16 +245,16 @@ git worktree prune
 ## Best Practices
 
 ### Do's
-✅ **One worktree per feature** - Keep work isolated
-✅ **Remove after merge** - Clean up completed features
-✅ **Use descriptive names** - Easy to identify purpose
-✅ **Copy .env.local** - Ensure environment configured
+[x] **One worktree per feature** - Keep work isolated
+[x] **Remove after merge** - Clean up completed features
+[x] **Use descriptive names** - Easy to identify purpose
+[x] **Copy .env.local** - Ensure environment configured
 
 ### Don'ts
-❌ **Don't nest worktrees** - Keep them at same level
-❌ **Don't share .env.local** - Each worktree should have own
-❌ **Don't accumulate worktrees** - Remove when done
-❌ **Don't forget to push** - Worktrees are local
+[ ] **Don't nest worktrees** - Keep them at same level
+[ ] **Don't share .env.local** - Each worktree should have own
+[ ] **Don't accumulate worktrees** - Remove when done
+[ ] **Don't forget to push** - Worktrees are local
 
 ## Workflow Example
 

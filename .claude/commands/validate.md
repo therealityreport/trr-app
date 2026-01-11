@@ -35,23 +35,23 @@ npm run test          # Must pass
 
 ### 3. Interpret Results
 
-#### ✅ All Checks Pass
+#### [x] All Checks Pass
 ```
-🔍 Running ESLint...
-✓ Linting complete
+> Running ESLint...
+OK Linting complete
 
-🔍 Type checking...
-✓ TypeScript check complete
+> Type checking...
+OK TypeScript check complete
 
-🧪 Running tests...
-✓ Tests passed
+> Running tests...
+OK Tests passed
 
-✅ All validation checks passed!
+[x] All validation checks passed!
 ```
 
 **Action:** Tell user validation passed, ready to commit.
 
-#### ❌ Failures Detected
+#### [ ] Failures Detected
 
 **Lint Failures:**
 ```
@@ -67,7 +67,7 @@ src/app/page.tsx:42:5 - error TS2322: Type 'string' is not assignable to type 'n
 **Test Failures:**
 ```
 FAIL tests/component.test.ts
-  ✗ renders correctly
+  FAIL renders correctly
     Expected: "Hello"
     Received: "Goodbye"
 ```
@@ -121,9 +121,9 @@ Repeat until all checks pass.
 ## Success Criteria
 
 **You may only proceed to commit if:**
-- ✅ Lint: No errors or warnings
-- ✅ Typecheck: No type errors
-- ✅ Tests: All tests passing
+- [x] Lint: No errors or warnings
+- [x] Typecheck: No type errors
+- [x] Tests: All tests passing
 
 ## Critical Rules
 
@@ -145,32 +145,32 @@ Repeat until all checks pass.
 
 ### Lint: console.log in code
 ```typescript
-// ❌ Remove console.log
+// [ ] Remove console.log
 console.log("debug info")
 
-// ✅ Use proper logging (or remove)
+// [x] Use proper logging (or remove)
 // If debugging: Remove before commit
 ```
 
 ### Lint: Unused variables
 ```typescript
-// ❌ Unused variable
+// [ ] Unused variable
 const unused = getValue()
 
-// ✅ Use it or remove it
+// [x] Use it or remove it
 const value = getValue()
 doSomething(value)
 
-// ✅ Or prefix with _ if intentionally unused
+// [x] Or prefix with _ if intentionally unused
 const _unused = getValue()
 ```
 
 ### Typecheck: Type mismatch
 ```typescript
-// ❌ Type error
+// [ ] Type error
 const count: number = "5"
 
-// ✅ Fix type
+// [x] Fix type
 const count: number = 5
 // Or
 const count: string = "5"
@@ -178,62 +178,62 @@ const count: string = "5"
 
 ### Tests: Failed assertion
 ```typescript
-// ❌ Test expects wrong value
+// [ ] Test expects wrong value
 expect(result).toBe("old value")
 
-// ✅ Update test or fix implementation
+// [x] Update test or fix implementation
 expect(result).toBe("new value")
 ```
 
 ## Validation Workflow
 
 ```
-┌─────────────────────────┐
-│   Run make validate     │
-└──────────┬──────────────┘
-           │
-           ▼
-    ┌──────────────┐
-    │ All Pass?    │
-    └──┬────────┬──┘
-       │        │
+---------------------------
+    Run make validate      
+---------------------------
+            
+           v
+    ----------------
+      All Pass?     
+    ----------------
+                 
       YES       NO
-       │        │
-       │        ▼
-       │   ┌────────────────┐
-       │   │ Show Errors    │
-       │   └────────┬───────┘
-       │            │
-       │            ▼
-       │   ┌────────────────┐
-       │   │ Suggest Fixes  │
-       │   └────────┬───────┘
-       │            │
-       │            ▼
-       │   ┌────────────────┐
-       │   │  Apply Fixes   │
-       │   └────────┬───────┘
-       │            │
-       │            ▼
-       │   ┌────────────────┐
-       │   │   Re-run       │
-       │   │   Validation   │
-       │   └────────┬───────┘
-       │            │
-       │            │
-       └────────────┴────────┐
-                             ▼
-                    ┌────────────────┐
-                    │ ✅ All Pass!   │
-                    │ Ready to commit│
-                    └────────────────┘
+                 
+                v
+           ------------------
+             Show Errors     
+           ------------------
+                     
+                    v
+           ------------------
+             Suggest Fixes   
+           ------------------
+                     
+                    v
+           ------------------
+              Apply Fixes    
+           ------------------
+                     
+                    v
+           ------------------
+               Re-run        
+               Validation    
+           ------------------
+                     
+                     
+       -----------------------
+                             v
+                    ------------------
+                      [x] All Pass!    
+                      Ready to commit 
+                    ------------------
 ```
 
 ## After Validation Passes
 
 Tell user:
 ```
-✅ All validation checks passed!
+[x] All validation checks passed!
 
 Summary:
 - Lint: No issues

@@ -5,9 +5,9 @@ Your task: Create a well-formatted, informative pull request.
 ## Prerequisites
 
 Before creating a PR:
-1. ✅ Changes are committed to a feature branch
-2. ✅ Validation has passed (lint + typecheck + test)
-3. ✅ Branch is ready to push to remote
+1. [x] Changes are committed to a feature branch
+2. [x] Validation has passed (lint + typecheck + test)
+3. [x] Branch is ready to push to remote
 
 If any prerequisite missing, stop and complete it first.
 
@@ -123,7 +123,7 @@ Related to #[issue number]
 
 ---
 
-🤖 Generated with Claude Code
+AI: Generated with Claude Code
 ```
 
 ### 4. Push Branch (if needed)
@@ -149,7 +149,7 @@ EOF
 
 **Manual Alternative:**
 1. Go to GitHub repository
-2. Click "Pull requests" → "New pull request"
+2. Click "Pull requests" -> "New pull request"
 3. Select base: `main`, compare: `[feature-branch]`
 4. Fill in title and description
 5. Click "Create pull request"
@@ -176,26 +176,26 @@ Follow conventional commits format:
 - `perf:` Performance improvements
 
 **Examples:**
-- ✅ `feat: add user authentication with OAuth`
-- ✅ `fix: resolve memory leak in survey component`
-- ✅ `docs: update SETUP.md with Firebase instructions`
-- ❌ `updated stuff`
-- ❌ `fixes`
+- [x] `feat: add user authentication with OAuth`
+- [x] `fix: resolve memory leak in survey component`
+- [x] `docs: update SETUP.md with Firebase instructions`
+- [ ] `updated stuff`
+- [ ] `fixes`
 
 ## PR Description Best Practices
 
 ### Do's
-✅ **Be specific** - Explain what changed and why
-✅ **Include context** - Link to issues, specs, or discussions
-✅ **Show evidence** - Include test results, screenshots
-✅ **List breaking changes** - Call out any compatibility issues
-✅ **Mention follow-ups** - Note what's not included
+[x] **Be specific** - Explain what changed and why
+[x] **Include context** - Link to issues, specs, or discussions
+[x] **Show evidence** - Include test results, screenshots
+[x] **List breaking changes** - Call out any compatibility issues
+[x] **Mention follow-ups** - Note what's not included
 
 ### Don'ts
-❌ **Don't be vague** - "Fixed some stuff"
-❌ **Don't skip testing** - Always include test results
-❌ **Don't hide complexity** - Call out complex changes
-❌ **Don't ignore failures** - Address all validation issues first
+[ ] **Don't be vague** - "Fixed some stuff"
+[ ] **Don't skip testing** - Always include test results
+[ ] **Don't hide complexity** - Call out complex changes
+[ ] **Don't ignore failures** - Address all validation issues first
 
 ## Special Cases
 
@@ -214,7 +214,7 @@ Key files to review:
 
 ### Breaking Changes PR
 ```
-## ⚠️ Breaking Changes
+## WARNING: Breaking Changes
 
 This PR includes breaking changes:
 
@@ -255,11 +255,11 @@ ALTER TABLE users DROP COLUMN role_id;
 
 ### Tell User
 ```
-✅ Pull request created successfully!
+[x] Pull request created successfully!
 
 PR: [URL]
 Title: [title]
-Branch: [feature-branch] → main
+Branch: [feature-branch] -> main
 
 Next steps:
 1. Request reviews from team members
@@ -308,11 +308,11 @@ git push -u origin $(git branch --show-current)
 ## Remember
 
 A great PR:
-- ✅ Tells a clear story
-- ✅ Provides context
-- ✅ Includes evidence (tests, screenshots)
-- ✅ Makes reviewers' job easy
-- ✅ Documents breaking changes
-- ✅ Links to related issues
+- [x] Tells a clear story
+- [x] Provides context
+- [x] Includes evidence (tests, screenshots)
+- [x] Makes reviewers' job easy
+- [x] Documents breaking changes
+- [x] Links to related issues
 
 **"Your PR description is documentation for the future."**

@@ -124,29 +124,29 @@ npm --prefix apps/web run db:migrate
 
 ```
 TRR-APP/
-├── apps/
-│   ├── web/                    # Main Next.js application
-│   │   ├── src/
-│   │   │   ├── app/           # App Router pages & routes
-│   │   │   ├── components/    # Shared React components
-│   │   │   ├── lib/           # Utilities & business logic
-│   │   │   └── styles/        # Global styles
-│   │   ├── db/
-│   │   │   └── migrations/    # PostgreSQL migrations
-│   │   ├── public/            # Static assets
-│   │   ├── scripts/           # Maintenance scripts
-│   │   └── tests/             # Test files
-│   └── vue-wordle/            # Legacy Vue Wordle app
-├── .claude/
-│   ├── commands/              # Slash commands (/spec, /plan, etc.)
-│   ├── hooks/                 # Workflow hooks
-│   └── settings.local.json    # Claude Code settings
-├── .config/
-│   └── wt.toml               # Worktrunk configuration
-├── docs/                      # Documentation
-├── CLAUDE.md                  # This file
-├── SETUP.md                   # Local setup guide
-└── Makefile                   # Common dev tasks
+  apps/
+    web/                      # Main Next.js application
+      src/
+        app/                  # App Router pages & routes
+        components/           # Shared React components
+        lib/                  # Utilities & business logic
+        styles/               # Global styles
+      db/
+        migrations/           # PostgreSQL migrations
+      public/                 # Static assets
+      scripts/                # Maintenance scripts
+      tests/                  # Test files
+    vue-wordle/               # Legacy Vue Wordle app
+  .claude/
+    commands/                 # Slash commands (/spec, /plan, etc.)
+    hooks/                    # Workflow hooks
+    settings.local.json       # Claude Code settings
+  .config/
+    wt.toml                   # Worktrunk configuration
+  docs/                       # Documentation
+  CLAUDE.md                   # This file
+  SETUP.md                    # Local setup guide
+  Makefile                    # Common dev tasks
 ```
 
 ## Slash Commands
@@ -299,20 +299,20 @@ npm run build
 ## Best Practices
 
 ### Do's
-✅ Use worktrees for every feature
-✅ Validate before every commit
-✅ Follow existing patterns in the codebase
-✅ Write tests alongside implementation
-✅ Keep commits focused and atomic
-✅ Use conventional commit messages
+- Use worktrees for every feature
+- Validate before every commit
+- Follow existing patterns in the codebase
+- Write tests alongside implementation
+- Keep commits focused and atomic
+- Use conventional commit messages
 
 ### Don'ts
-❌ Work directly on main branch
-❌ Skip validation steps
-❌ Commit without testing
-❌ Force push without good reason
-❌ Leave console.log in code
-❌ Commit secrets or credentials
+- Work directly on main branch
+- Skip validation steps
+- Commit without testing
+- Force push without good reason
+- Leave console.log in code
+- Commit secrets or credentials
 
 ## Remember
 

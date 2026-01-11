@@ -5,9 +5,9 @@
 
 # Default target - show help
 help:
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "----------------------------------------------"
 	@echo "TRR APP Development Commands"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "----------------------------------------------"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make install       Install all dependencies"
@@ -30,65 +30,65 @@ help:
 	@echo "Database:"
 	@echo "  make migrate       Run database migrations"
 	@echo ""
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "----------------------------------------------"
 
 # Installation
 install:
-	@echo "📦 Installing dependencies..."
+	@echo "> Installing dependencies..."
 	npm install
 	npm --prefix apps/web install
-	@echo "✅ Dependencies installed"
+	@echo "OK: Dependencies installed"
 
 # Development servers
 dev:
-	@echo "🚀 Starting development server (Turbopack)..."
+	@echo "> Starting development server (Turbopack)..."
 	npm run dev
 
 dev-stable:
-	@echo "🚀 Starting development server (stable, no Turbopack)..."
+	@echo "> Starting development server (stable, no Turbopack)..."
 	npm run dev:stable
 
 dev-local:
-	@echo "🚀 Starting development server with Firebase emulators..."
+	@echo "> Starting development server with Firebase emulators..."
 	npm run dev:local
 
 # Build
 build:
-	@echo "🏗️  Building for production..."
+	@echo ">  Building for production..."
 	npm run web:build
-	@echo "✅ Build complete"
+	@echo "OK: Build complete"
 
 clean:
-	@echo "🧹 Cleaning build artifacts..."
+	@echo "> Cleaning build artifacts..."
 	npm run web:clean
 	rm -rf apps/web/.next
 	rm -rf apps/web/coverage
-	@echo "✅ Clean complete"
+	@echo "OK: Clean complete"
 
 # Validation
 lint:
-	@echo "🔍 Running ESLint..."
+	@echo "> Running ESLint..."
 	@cd apps/web && npm run lint
-	@echo "✅ Linting complete"
+	@echo "OK: Linting complete"
 
 test:
-	@echo "🧪 Running tests..."
+	@echo "> Running tests..."
 	@cd apps/web && npm run test
-	@echo "✅ Tests complete"
+	@echo "OK: Tests complete"
 
 typecheck:
-	@echo "🔍 Type checking..."
+	@echo "> Type checking..."
 	@cd apps/web && npx tsc --noEmit
-	@echo "✅ Type checking complete"
+	@echo "OK: Type checking complete"
 
 # Combined validation - runs all checks
 validate: lint typecheck test
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "✅ All validation checks passed!"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "----------------------------------------------"
+	@echo "OK: All validation checks passed!"
+	@echo "----------------------------------------------"
 
 # Database
 migrate:
-	@echo "🗄️  Running database migrations..."
+	@echo ">  Running database migrations..."
 	npm --prefix apps/web run db:migrate
-	@echo "✅ Migrations complete"
+	@echo "OK: Migrations complete"

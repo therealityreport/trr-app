@@ -11,18 +11,18 @@ path = "~/.claude-worktrees/TRR-APP"
 # Sets up environment and provides helpful guidance
 post-create = """
   echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "🎉 Worktree Created Successfully!"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "----------------------------------------------"
+  echo "! Worktree Created Successfully!"
+  echo "----------------------------------------------"
   echo ""
 
   # Copy environment file if it exists
   if [ -f "$WT_REPO_PATH/apps/web/.env.local" ]; then
-    echo "📋 Copying .env.local to new worktree..."
+    echo "> Copying .env.local to new worktree..."
     cp "$WT_REPO_PATH/apps/web/.env.local" "$WT_WORKTREE_PATH/apps/web/.env.local"
-    echo "✅ Environment configured"
+    echo "OK: Environment configured"
   else
-    echo "⚠️  No .env.local found in main worktree"
+    echo "WARNING:  No .env.local found in main worktree"
     echo ""
     echo "To set up environment variables:"
     echo "  1. Copy template: cp apps/web/.env.example apps/web/.env.local"
@@ -30,8 +30,8 @@ post-create = """
   fi
 
   echo ""
-  echo "📍 Location: $WT_WORKTREE_PATH"
-  echo "🌿 Branch: $(git -C "$WT_WORKTREE_PATH" branch --show-current)"
+  echo "> Location: $WT_WORKTREE_PATH"
+  echo "> Branch: $(git -C "$WT_WORKTREE_PATH" branch --show-current)"
   echo ""
   echo "Next steps:"
   echo "  1. Implement your feature"
@@ -39,9 +39,9 @@ post-create = """
   echo "  3. Commit your changes"
   echo "  4. Create PR: /pr or gh pr create"
   echo ""
-  echo "Workflow: Implement → Validate → Commit → PR"
+  echo "Workflow: Implement -> Validate -> Commit -> PR"
   echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "----------------------------------------------"
   echo ""
 """
 
@@ -49,44 +49,44 @@ post-create = """
 # Ensures code quality before allowing merge
 pre-merge = """
   echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "🔍 Running Pre-Merge Validation"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "----------------------------------------------"
+  echo "> Running Pre-Merge Validation"
+  echo "----------------------------------------------"
   echo ""
 
   # Navigate to web app directory
   cd "$WT_WORKTREE_PATH/apps/web" || exit 1
 
   # Run lint
-  echo "📝 Linting..."
+  echo "> Linting..."
   npm run lint || {
-    echo "❌ Lint failed - fix errors before merging"
+    echo "ERROR: Lint failed - fix errors before merging"
     exit 1
   }
-  echo "✅ Lint passed"
+  echo "OK: Lint passed"
   echo ""
 
   # Run typecheck
-  echo "🔍 Type checking..."
+  echo "> Type checking..."
   npx tsc --noEmit || {
-    echo "❌ Type check failed - fix errors before merging"
+    echo "ERROR: Type check failed - fix errors before merging"
     exit 1
   }
-  echo "✅ Type check passed"
+  echo "OK: Type check passed"
   echo ""
 
   # Run tests
-  echo "🧪 Running tests..."
+  echo "> Running tests..."
   npm run test || {
-    echo "❌ Tests failed - fix tests before merging"
+    echo "ERROR: Tests failed - fix tests before merging"
     exit 1
   }
-  echo "✅ Tests passed"
+  echo "OK: Tests passed"
   echo ""
 
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "✅ All validation checks passed!"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "----------------------------------------------"
+  echo "OK: All validation checks passed!"
+  echo "----------------------------------------------"
   echo ""
 """
 

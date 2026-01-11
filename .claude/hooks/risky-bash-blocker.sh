@@ -73,9 +73,9 @@ RISKY_PATTERNS=(
 # Check command against each risky pattern
 for pattern in "${RISKY_PATTERNS[@]}"; do
   if echo "$COMMAND" | grep -qE "$pattern"; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-    echo "🚨 BLOCKED: Risky command detected" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    echo "----------------------------------------------" >&2
+    echo "ALERT: BLOCKED: Risky command detected" >&2
+    echo "----------------------------------------------" >&2
     echo "" >&2
     echo "Pattern matched: $pattern" >&2
     echo "Command: $COMMAND" >&2
@@ -84,7 +84,7 @@ for pattern in "${RISKY_PATTERNS[@]}"; do
     echo "If you need to run this command, ask the user for" >&2
     echo "explicit approval before proceeding." >&2
     echo "" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    echo "----------------------------------------------" >&2
     exit $EXIT_BLOCKED
   fi
 done

@@ -121,13 +121,13 @@ See [apps/web/POSTGRES_SETUP.md](apps/web/POSTGRES_SETUP.md) for detailed instru
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Select project: `trr-web-25d2e`
-3. Go to **Project Settings** → **General**
-4. Scroll to **Your apps** → **Web app**
+3. Go to **Project Settings** > **General**
+4. Scroll to **Your apps** > **Web app**
 5. Copy configuration values to `.env.local`
 
 #### Download Service Account Key
 
-1. In Firebase Console, go to **Project Settings** → **Service Accounts**
+1. In Firebase Console, go to **Project Settings** > **Service Accounts**
 2. Click **Generate New Private Key**
 3. Save the JSON file securely
 4. **Minify to single line** (remove all newlines)
@@ -148,7 +148,7 @@ See [apps/web/POSTGRES_SETUP.md](apps/web/POSTGRES_SETUP.md) for detailed instru
 
 #### Enable Auth Providers
 
-1. In Firebase Console, go to **Authentication** → **Sign-in method**
+1. In Firebase Console, go to **Authentication** > **Sign-in method**
 2. Enable:
    - Email/Password
    - Google (optional)
@@ -223,23 +223,23 @@ make help            # Show all commands
 
 ```
 TRR-APP/
-├── apps/
-│   └── web/                 # Main Next.js application
-│       ├── src/
-│       │   ├── app/         # App Router pages (Next.js 13+)
-│       │   ├── components/  # Shared React components
-│       │   ├── lib/         # Utilities & business logic
-│       │   └── styles/      # Global styles
-│       ├── db/
-│       │   └── migrations/  # PostgreSQL migrations
-│       ├── public/          # Static assets (images, fonts)
-│       ├── scripts/         # Maintenance scripts
-│       ├── tests/           # Test files (Vitest)
-│       └── .env.local       # Environment variables (not committed)
-├── .claude/                 # Claude Code configuration
-├── .config/                 # Project configuration
-├── docs/                    # Documentation
-└── Makefile                 # Development commands
+  apps/
+    web/                      # Main Next.js application
+      src/
+        app/                  # App Router pages (Next.js 13+)
+        components/           # Shared React components
+        lib/                  # Utilities & business logic
+        styles/               # Global styles
+      db/
+        migrations/           # PostgreSQL migrations
+      public/                 # Static assets (images, fonts)
+      scripts/                # Maintenance scripts
+      tests/                  # Test files (Vitest)
+      .env.local              # Environment variables (not committed)
+  .claude/                    # Claude Code configuration
+  .config/                    # Project configuration
+  docs/                       # Documentation
+  Makefile                    # Development commands
 ```
 
 ## Verification
@@ -259,10 +259,10 @@ make validate
 
 Should output:
 ```
-✅ Linting complete
-✅ Type checking complete
-✅ Tests complete
-✅ All validation checks passed!
+[x] Linting complete
+[x] Type checking complete
+[x] Tests complete
+[x] All validation checks passed!
 ```
 
 ### 3. Start Dev Server
@@ -445,4 +445,4 @@ make migrate         # Run migrations
 make help            # Show all commands
 ```
 
-Ready to build! 🚀
+Ready to build! !
