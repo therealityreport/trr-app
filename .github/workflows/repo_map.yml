@@ -12,6 +12,8 @@ on:
       - '**/*.jsx'
       - 'scripts/generate_repo_mermaid.py'
       - 'requirements.txt'
+      - 'Makefile'
+      - 'ruff.toml'
       - 'docs/Repository/**'
       - '.github/workflows/repo_map.yml'
       - 'apps/web/db/migrations/**'
