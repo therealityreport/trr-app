@@ -41,6 +41,8 @@ The [Repository Map workflow](../../.github/workflows/repo_map.yml) runs weekly 
 2. Generates code diagrams using Tree-sitter
 3. Opens a PR with any changes
 
+**Setup:** See [WORKFLOW_SETUP.md](WORKFLOW_SETUP.md) for required GitHub secrets configuration.
+
 ## Generated vs Hand-Authored
 
 | Type | Location | Updated By |
