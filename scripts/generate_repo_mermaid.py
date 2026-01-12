@@ -32,17 +32,15 @@ EXCLUDE_DIRS = {
     ".eggs",
     "build",
     "dist",
-    # Legacy scripts (archived, excluded from repo-map)
-    "archives",
-    "1-ShowInfo",
-    "2-CastInfo",
-    "3-RealiteaseInfo",
-    "4-WWHLInfo",
-    "5-FinalList",
-    "BravoTalent",
-    "RealiteaseInfo",
+    # Next.js / Vercel build artifacts
+    ".next",
+    ".turbo",
+    ".vercel",
+    "coverage",
+    # Generated repo-map outputs (don't map the mapper)
+    "docs/Repository/generated",
 }
-INTERNAL_PACKAGES = {"trr_backend", "scripts", "api"}
+INTERNAL_PACKAGES = {"apps/web", "apps/vue-wordle", "scripts"}
 
 
 def get_parser() -> Parser:

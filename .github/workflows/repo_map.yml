@@ -6,12 +6,15 @@ on:
     - cron: '0 0 * * 0'  # Weekly on Sunday at midnight UTC
   pull_request:
     paths:
-      - '**/*.py'
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.js'
+      - '**/*.jsx'
       - 'scripts/generate_repo_mermaid.py'
       - 'requirements.txt'
       - 'docs/Repository/**'
       - '.github/workflows/repo_map.yml'
-      - 'supabase/migrations/**'
+      - 'apps/web/db/migrations/**'
 
 concurrency:
   group: repo-map
@@ -39,7 +42,7 @@ jobs:
         with:
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          exclude_patterns: '.git|.venv|__pycache__|node_modules|*.pyc|.cache|logs|debug_html|*.egg-info|.env|keys|venv|site-packages|dist-packages|.eggs|build|dist'
+          exclude_patterns: '.git|.venv|__pycache__|node_modules|.cache|logs|.env|keys|venv|.next|.turbo|.vercel|coverage|dist|build|docs/Repository/generated'
           depth: 5
           create_pr: false
 

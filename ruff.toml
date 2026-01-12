@@ -1,18 +1,18 @@
-# Ruff configuration for TRR-Backend
+# Ruff configuration for TRR APP (Python repo-map generator only)
 # https://docs.astral.sh/ruff/configuration/
 
-# Exclude archive and legacy paths from linting
+# Exclude build artifacts and generated docs from linting
 exclude = [
-    "scripts/archives/**",
-    "scripts/1-ShowInfo/**",
-    "scripts/2-CastInfo/**",
-    "scripts/3-RealiteaseInfo/**",
-    "scripts/4-WWHLInfo/**",
-    "scripts/5-FinalList/**",
     ".venv",
     "venv",
     "__pycache__",
     ".git",
+    "node_modules",
+    ".next",
+    ".turbo",
+    ".vercel",
+    "coverage",
+    "docs/Repository/generated",
 ]
 
 # Target Python 3.11+
