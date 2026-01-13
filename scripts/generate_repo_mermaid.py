@@ -85,15 +85,75 @@ def extract_imports(parser: Parser, source: bytes) -> list[str]:
     return imports
 
 
+# Module-level cache for internal package prefixes (initialized in main())
+_INTERNAL_PREFIXES: set[str] = set()
+
+
+def set_internal_prefixes(prefixes: set[str]) -> None:
+    """Set internal package prefixes for import matching."""
+    global _INTERNAL_PREFIXES
+    _INTERNAL_PREFIXES = prefixes
+
+
 def is_internal(module: str) -> bool:
-    """Check if module is internal to this repo."""
-    root = module.split(".")[0]
-    return root in INTERNAL_PACKAGES
+    """Check if module is internal using prefix matching.
+
+    Handles relative imports by stripping leading dots.
+    Returns True if module matches any internal prefix exactly or as a sub-module.
+    """
+    # Strip leading dots for relative imports (e.g., "from .foo import bar")
+    module = module.lstrip('.')
+
+    # Check prefix match
+    for prefix in _INTERNAL_PREFIXES:
+        if module == prefix or module.startswith(prefix + '.'):
+            return True
+
+    return False
 
 
 def should_exclude(path: Path) -> bool:
     """Check if path should be excluded from processing."""
     return any(part in EXCLUDE_DIRS for part in path.parts)
+
+
+def normalize_internal_prefixes(internal_packages: set[str]) -> set[str]:
+    r"""Convert path-like package names to dotted module prefixes.
+
+    Rules:
+    - Convert path separators (/, \) to dots
+    - Build all valid prefix levels
+    - Stop at first invalid Python identifier
+
+    Examples:
+        "apps/web" → {"apps", "apps.web"}
+        "apps/vue-wordle" → {"apps"}  # stops at "vue-wordle" (invalid identifier)
+        "scripts" → {"scripts"}
+
+    Returns:
+        Set of all valid module prefixes for matching
+    """
+    prefixes = set()
+
+    for package in internal_packages:
+        # Normalize: convert separators, strip whitespace
+        normalized = package.replace('/', '.').replace('\\', '.').strip('. ')
+
+        # Split and validate segments
+        segments = normalized.split('.')
+
+        # Build cumulative prefixes from valid identifiers only
+        current_prefix = []
+        for segment in segments:
+            if segment and segment.isidentifier():
+                current_prefix.append(segment)
+                # Add this prefix level
+                prefixes.add('.'.join(current_prefix))
+            else:
+                # Stop at first invalid segment
+                break
+
+    return prefixes
 
 
 def resolve_scan_roots(repo_root: Path, candidates: list[str]) -> list[Path]:
@@ -195,6 +255,7 @@ def generate_mermaid_flowchart(
     scan_roots: list[Path],
     file_count: int,
     repo_root: Path,
+    internal_prefixes: set[str],
 ) -> str:
     """Generate Mermaid flowchart from dependency graph with scan metadata.
 
@@ -204,6 +265,7 @@ def generate_mermaid_flowchart(
         scan_roots: Directories that were scanned
         file_count: Number of Python files found
         repo_root: Repository root for computing relative paths
+        internal_prefixes: Set of internal package prefixes used for matching
     """
     # Format scan roots as relative paths
     root_names = []
@@ -216,13 +278,26 @@ def generate_mermaid_flowchart(
 
     # Build header with scan metadata
     roots_str = ", ".join(root_names)
+    prefixes_str = ", ".join(sorted(internal_prefixes))
     lines = [
         f"# {title}",
         "",
         f"**Scanned:** {roots_str}  ",
-        f"**Python files found:** {file_count}",
+        f"**Python files found:** {file_count}  ",
+        f"**Internal prefixes:** {prefixes_str}",
         "",
     ]
+
+    # Handle zero-file case explicitly
+    if file_count == 0:
+        lines.extend([
+            "```mermaid",
+            "flowchart TB",
+            '    note["No Python files found - graph not generated"]',
+            "```",
+            "",
+        ])
+        return "\n".join(lines)
 
     # If no graph, explain why
     if not graph:
@@ -514,6 +589,10 @@ def main() -> int:
 
     parser = get_parser()
 
+    # Normalize internal package prefixes and set globally
+    internal_prefixes = normalize_internal_prefixes(INTERNAL_PACKAGES)
+    set_internal_prefixes(internal_prefixes)
+
     # Resolve scan roots from existing directories
     # TRR APP structure: apps/, scripts/, and possibly src/
     scan_root_candidates = ["apps", "scripts", "src", "trr_backend"]
@@ -535,6 +614,7 @@ def main() -> int:
         scan_roots,
         py_file_count,
         root,
+        internal_prefixes,
     )
     (generated_dir / "CODE_IMPORT_GRAPH.md").write_text(import_md)
 
