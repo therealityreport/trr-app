@@ -96,38 +96,74 @@ def should_exclude(path: Path) -> bool:
     return any(part in EXCLUDE_DIRS for part in path.parts)
 
 
-def build_import_graph(root: Path, parser: Parser) -> dict[str, set[str]]:
-    """Build module dependency graph from all Python files."""
+def resolve_scan_roots(repo_root: Path, candidates: list[str]) -> list[Path]:
+    """Resolve candidate directory names to existing paths.
+
+    Args:
+        repo_root: Repository root directory
+        candidates: List of directory names to try (e.g., ["apps", "scripts"])
+
+    Returns:
+        List of existing directories. Falls back to [repo_root] if none exist.
+    """
+    roots = []
+    for candidate in candidates:
+        path = repo_root / candidate
+        if path.exists() and path.is_dir():
+            roots.append(path)
+
+    # Fallback to repo root if no candidates exist
+    return roots if roots else [repo_root]
+
+
+def build_import_graph(scan_roots: list[Path], repo_root: Path, parser: Parser) -> dict[str, set[str]]:
+    """Build module dependency graph from all Python files in scan roots.
+
+    Args:
+        scan_roots: List of directories to scan for Python files
+        repo_root: Repository root for computing relative module names
+        parser: Tree-sitter parser instance
+
+    Returns:
+        Dictionary mapping module names to their internal dependencies
+    """
     graph: dict[str, set[str]] = {}
+    seen_files: set[Path] = set()
 
-    for py_file in root.rglob("*.py"):
-        if should_exclude(py_file):
-            continue
+    for root in scan_roots:
+        for py_file in root.rglob("*.py"):
+            if should_exclude(py_file):
+                continue
 
-        # Compute module name from path
-        try:
-            rel = py_file.relative_to(root.parent)
-        except ValueError:
-            continue
+            # De-duplicate files that might appear in multiple roots
+            if py_file in seen_files:
+                continue
+            seen_files.add(py_file)
 
-        if py_file.name == "__init__.py":
-            module_name = ".".join(rel.parent.parts)
-        else:
-            module_name = ".".join(rel.with_suffix("").parts)
+            # Compute module name from path
+            try:
+                rel = py_file.relative_to(repo_root)
+            except ValueError:
+                continue
 
-        if not module_name:
-            continue
+            if py_file.name == "__init__.py":
+                module_name = ".".join(rel.parent.parts)
+            else:
+                module_name = ".".join(rel.with_suffix("").parts)
 
-        try:
-            source = py_file.read_bytes()
-        except OSError:
-            continue
+            if not module_name:
+                continue
 
-        imports = extract_imports(parser, source)
-        internal_imports = {m for m in imports if is_internal(m)}
+            try:
+                source = py_file.read_bytes()
+            except OSError:
+                continue
 
-        if internal_imports:
-            graph[module_name] = internal_imports
+            imports = extract_imports(parser, source)
+            internal_imports = {m for m in imports if is_internal(m)}
+
+            if internal_imports:
+                graph[module_name] = internal_imports
 
     return graph
 
@@ -153,9 +189,53 @@ def build_package_graph(module_graph: dict[str, set[str]], depth: int = 2) -> di
     return pkg_graph
 
 
-def generate_mermaid_flowchart(graph: dict[str, set[str]], title: str) -> str:
-    """Generate Mermaid flowchart from dependency graph."""
-    lines = [f"# {title}", "", "```mermaid", "flowchart TB"]
+def generate_mermaid_flowchart(
+    graph: dict[str, set[str]],
+    title: str,
+    scan_roots: list[Path],
+    file_count: int,
+    repo_root: Path,
+) -> str:
+    """Generate Mermaid flowchart from dependency graph with scan metadata.
+
+    Args:
+        graph: Module dependency graph
+        title: Chart title
+        scan_roots: Directories that were scanned
+        file_count: Number of Python files found
+        repo_root: Repository root for computing relative paths
+    """
+    # Format scan roots as relative paths
+    root_names = []
+    for root in scan_roots:
+        try:
+            rel = root.relative_to(repo_root)
+            root_names.append(str(rel) if str(rel) != "." else "(repo root)")
+        except ValueError:
+            root_names.append(str(root))
+
+    # Build header with scan metadata
+    roots_str = ", ".join(root_names)
+    lines = [
+        f"# {title}",
+        "",
+        f"**Scanned:** {roots_str}  ",
+        f"**Python files found:** {file_count}",
+        "",
+    ]
+
+    # If no graph, explain why
+    if not graph:
+        lines.extend([
+            "```mermaid",
+            "flowchart TB",
+            "    note[\"No internal dependencies found\"]",
+            "```",
+            "",
+        ])
+        return "\n".join(lines)
+
+    lines.extend(["```mermaid", "flowchart TB"])
 
     # Create stable node IDs from sorted module list
     all_modules = set(graph.keys())
@@ -434,12 +514,36 @@ def main() -> int:
 
     parser = get_parser()
 
-    # Generate Tree-sitter diagrams (existing)
-    module_graph = build_import_graph(root / "trr_backend", parser)
+    # Resolve scan roots from existing directories
+    # TRR APP structure: apps/, scripts/, and possibly src/
+    scan_root_candidates = ["apps", "scripts", "src", "trr_backend"]
+    scan_roots = resolve_scan_roots(root, scan_root_candidates)
+
+    # Count Python files across all scan roots
+    py_file_count = 0
+    for scan_root in scan_roots:
+        for py_file in scan_root.rglob("*.py"):
+            if not should_exclude(py_file):
+                py_file_count += 1
+
+    # Generate import graph
+    module_graph = build_import_graph(scan_roots, root, parser)
     pkg_graph = build_package_graph(module_graph, depth=2)
-    import_md = generate_mermaid_flowchart(pkg_graph, "trr_backend Internal Import Graph")
+    import_md = generate_mermaid_flowchart(
+        pkg_graph,
+        "Internal Import Graph",
+        scan_roots,
+        py_file_count,
+        root,
+    )
     (generated_dir / "CODE_IMPORT_GRAPH.md").write_text(import_md)
-    print(f"Wrote {generated_dir / 'CODE_IMPORT_GRAPH.md'} ({len(pkg_graph)} packages)")
+
+    # Format scan roots for display
+    root_names = [str(r.relative_to(root)) for r in scan_roots]
+    print(
+        f"Wrote {generated_dir / 'CODE_IMPORT_GRAPH.md'} "
+        f"({py_file_count} files, {len(pkg_graph)} packages, roots: {', '.join(root_names)})"
+    )
 
     scripts_flow = generate_scripts_flow(root / "scripts", parser)
     (generated_dir / "SCRIPTS_FLOW.md").write_text(scripts_flow)
