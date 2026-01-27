@@ -38,9 +38,9 @@ trr-app/
 - **React**: v19.1 with App Router
 - **Styling**: Tailwind CSS 4
 - **Language**: TypeScript (strict mode)
-- **Auth**: Firebase Authentication (Google, Email/Password)
-- **Database**: Firebase Firestore + PostgreSQL
-- **Testing**: Vitest with jsdom environment
+- **Auth**: Firebase Authentication (Google, Email/Password) → migrating to Supabase Auth
+- **Database**: Supabase (PostgreSQL) + Firebase Firestore (legacy)
+- **Testing**: Vitest (unit) + Playwright (E2E)
 - **Linting**: ESLint with next/core-web-vitals
 
 ### Vue Wordle (`apps/vue-wordle`)
@@ -111,6 +111,7 @@ make repo-map-check
 
 ## Testing Conventions
 
+### Unit Tests (Vitest)
 - Tests are located in `apps/web/tests/`
 - Test files follow the pattern `*.test.ts` or `*.test.tsx`
 - Use Vitest with jsdom environment
@@ -127,6 +128,17 @@ describe("featureName", () => {
   });
 });
 ```
+
+### E2E Tests (Playwright)
+- Use Playwright MCP for browser automation
+- Test critical user flows: auth, surveys, games
+- Capture screenshots for visual verification
+
+Key flows to test:
+- Login flow (`/login` → `/auth/finish` → `/profile`)
+- Survey submission (`/surveys/*`)
+- Game interactions (`/bravodle`, `/realitease/*`)
+- Admin dashboard (`/admin/*`)
 
 ## Code Conventions
 
@@ -174,14 +186,17 @@ FIREBASE_SERVICE_ACCOUNT (JSON for server-side)
 
 ## Database
 
-### PostgreSQL
+### Supabase (PostgreSQL)
+- **Preferred method**: Use Supabase MCP for database operations
 - Migrations in `apps/web/db/migrations/`
 - Run migrations: `npm run db:migrate` (from apps/web)
 - Migration naming: `NNN_description.sql`
+- Supabase provides: Auth, Database, Storage, Edge Functions, Realtime
 
-### Firestore
+### Firestore (Legacy)
 - Rules in `firestore.rules`
 - Currently permissive for development (will be tightened)
+- Being phased out in favor of Supabase
 
 ## CI/CD Workflows
 
@@ -268,3 +283,214 @@ npm run web:emu
 - Check `apps/web/src/lib/firebase.ts` for auth flow
 - Session management in `/api/session/` routes
 - Auth guards in `src/components/ClientAuthGuard.tsx`
+
+## MCP Servers (AI Assistant Tools)
+
+This project uses Model Context Protocol (MCP) servers to extend AI assistant capabilities. Configure these in your Claude Code settings or MCP client.
+
+### Supabase MCP
+Database operations and management for PostgreSQL.
+
+**Capabilities:**
+- Execute SQL queries against the database
+- Manage database schema and migrations
+- Query and modify data in tables
+- Access Supabase Auth, Storage, and Edge Functions
+
+**Configuration:**
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": ["-y", "@supabase/mcp-server-supabase@latest", "--access-token", "<SUPABASE_ACCESS_TOKEN>"]
+    }
+  }
+}
+```
+
+**Common Operations:**
+- `list_tables` - View all database tables
+- `execute_sql` - Run SQL queries
+- `get_table_schema` - Inspect table structure
+- `apply_migration` - Apply database migrations
+
+### Playwright MCP
+Browser automation for E2E testing and web interactions.
+
+**Capabilities:**
+- Navigate web pages and interact with elements
+- Take screenshots and capture page state
+- Fill forms and click buttons
+- Run E2E test scenarios
+- Debug visual issues
+
+**Configuration:**
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-playwright"]
+    }
+  }
+}
+```
+
+**Common Operations:**
+- `navigate` - Go to a URL
+- `screenshot` - Capture current page
+- `click` - Click an element
+- `fill` - Enter text into inputs
+- `evaluate` - Run JavaScript in page context
+
+**Usage for This Project:**
+- Test auth flows at `/login` and `/auth/finish`
+- Verify survey functionality at `/surveys/*`
+- Test game interactions at `/bravodle` and `/realitease/*`
+
+### Chrome DevTools MCP
+Browser debugging and inspection via Chrome DevTools Protocol.
+
+**Capabilities:**
+- Inspect DOM and CSS
+- Monitor network requests
+- Debug JavaScript execution
+- Profile performance
+- Access console logs
+
+**Configuration:**
+```json
+{
+  "mcpServers": {
+    "chromedev": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-chromedev"]
+    }
+  }
+}
+```
+
+**Common Operations:**
+- `get_dom` - Inspect page DOM structure
+- `get_console_logs` - View console output
+- `get_network_requests` - Monitor API calls
+- `evaluate_script` - Run JavaScript for debugging
+
+### GitHub MCP
+GitHub repository operations for issues and PRs.
+
+**Capabilities:**
+- Create and manage issues
+- Create and review pull requests
+- Search code and commits
+- Manage releases and labels
+
+**Configuration:**
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "<YOUR_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+### Context7 MCP
+Up-to-date documentation lookup for frameworks and libraries.
+
+**Capabilities:**
+- Fetch latest documentation for Next.js, React, Tailwind, etc.
+- Search library APIs and examples
+- Get framework-specific best practices
+
+**Configuration:**
+```json
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@context7/mcp-server"]
+    }
+  }
+}
+```
+
+**Useful for This Project:**
+- Next.js 15 App Router documentation
+- React 19 features and hooks
+- Tailwind CSS 4 utilities
+- Firebase SDK reference
+- Vitest testing patterns
+
+### Memory MCP
+Persistent knowledge graph for project context.
+
+**Capabilities:**
+- Store and retrieve project-specific knowledge
+- Track decisions and architectural patterns
+- Maintain context across sessions
+
+**Configuration:**
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    }
+  }
+}
+```
+
+### Combined MCP Configuration
+
+Full configuration for all recommended MCPs:
+
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": ["-y", "@supabase/mcp-server-supabase@latest", "--access-token", "<SUPABASE_ACCESS_TOKEN>"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-playwright"]
+    },
+    "chromedev": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-chromedev"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "<YOUR_TOKEN>"
+      }
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@context7/mcp-server"]
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    }
+  }
+}
+```
+
+### MCP Usage Guidelines for AI Assistants
+
+1. **Supabase**: Use for all database operations instead of raw SQL files when possible
+2. **Playwright**: Prefer for E2E testing over manual browser verification
+3. **Chrome DevTools**: Use when debugging rendering, network, or JavaScript issues
+4. **GitHub**: Use for creating PRs and managing issues programmatically
+5. **Context7**: Query when unsure about framework APIs or best practices
+6. **Memory**: Store important project decisions and patterns for future reference
