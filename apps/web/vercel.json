@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/episode-progression",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/create-survey-runs",
+      "schedule": "0 0 * * 0"
+    }
+  ]
+}
