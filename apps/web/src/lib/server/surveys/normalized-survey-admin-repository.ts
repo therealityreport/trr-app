@@ -2,14 +2,12 @@ import "server-only";
 
 import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
 import type {
-  AnswerInput,
   NormalizedSurvey,
   QuestionOption,
   SurveyAnswer,
   SurveyQuestion,
   SurveyResponse,
   SurveyRun,
-  SurveyWithQuestions,
 } from "@/lib/surveys/normalized-types";
 
 // ============================================================================

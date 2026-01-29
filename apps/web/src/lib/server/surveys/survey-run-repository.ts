@@ -63,7 +63,7 @@ export async function getSurveyWithQuestions(
 
   // Get options for all questions
   const questionIds = questions.map((q) => q.id);
-  let optionsByQuestion: Map<string, QuestionOption[]> = new Map();
+  const optionsByQuestion: Map<string, QuestionOption[]> = new Map();
 
   if (questionIds.length > 0) {
     const optionsResult = await query<QuestionOption>(
