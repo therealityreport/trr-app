@@ -49,7 +49,36 @@ interface CoverPhoto {
   photo_url: string;
 }
 
-type TabId = "overview" | "gallery" | "credits";
+interface TrrCastFandom {
+  id: string;
+  person_id: string;
+  source: string;
+  source_url: string;
+  page_title: string | null;
+  scraped_at: string;
+  full_name: string | null;
+  birthdate: string | null;
+  birthdate_display: string | null;
+  gender: string | null;
+  resides_in: string | null;
+  hair_color: string | null;
+  eye_color: string | null;
+  height_display: string | null;
+  weight_display: string | null;
+  romances: string[] | null;
+  family: Record<string, unknown> | null;
+  friends: Record<string, unknown> | null;
+  enemies: Record<string, unknown> | null;
+  installment: string | null;
+  installment_url: string | null;
+  main_seasons_display: string | null;
+  summary: string | null;
+  taglines: Record<string, unknown> | null;
+  reunion_seating: Record<string, unknown> | null;
+  trivia: Record<string, unknown> | null;
+}
+
+type TabId = "overview" | "gallery" | "credits" | "fandom";
 
 // Photo with error handling
 function GalleryPhoto({
@@ -122,6 +151,7 @@ export default function PersonProfilePage() {
   const [person, setPerson] = useState<TrrPerson | null>(null);
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
   const [credits, setCredits] = useState<TrrPersonCredit[]>([]);
+  const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -202,6 +232,22 @@ export default function PersonProfilePage() {
     }
   }, [personId, getAuthHeaders]);
 
+  // Fetch fandom data
+  const fetchFandomData = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/people/${personId}/fandom`,
+        { headers }
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      setFandomData(data.fandomData ?? []);
+    } catch (err) {
+      console.error("Failed to fetch fandom data:", err);
+    }
+  }, [personId, getAuthHeaders]);
+
   // Set cover photo
   const handleSetCover = async (photo: TrrPersonPhoto) => {
     if (!photo.hosted_url) return;
@@ -237,12 +283,12 @@ export default function PersonProfilePage() {
     const loadData = async () => {
       setLoading(true);
       await fetchPerson();
-      await Promise.all([fetchPhotos(), fetchCredits(), fetchCoverPhoto()]);
+      await Promise.all([fetchPhotos(), fetchCredits(), fetchCoverPhoto(), fetchFandomData()]);
       setLoading(false);
     };
 
     loadData();
-  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto]);
+  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, fetchFandomData]);
 
   // Open lightbox
   const openLightbox = (src: string, alt: string) => {
@@ -386,6 +432,7 @@ export default function PersonProfilePage() {
                   { id: "overview", label: "Overview" },
                   { id: "gallery", label: `Gallery (${photos.length})` },
                   { id: "credits", label: `Credits (${credits.length})` },
+                  { id: "fandom", label: fandomData.length > 0 ? `Fandom (${fandomData.length})` : "Fandom" },
                 ] as const
               ).map((tab) => (
                 <button
@@ -496,6 +543,40 @@ export default function PersonProfilePage() {
                   <p className="text-sm text-zinc-500">No credits available.</p>
                 )}
               </div>
+
+              {/* Fandom Preview */}
+              {fandomData.length > 0 && (
+                <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-lg font-bold text-zinc-900">Fandom Info</h3>
+                    <button
+                      onClick={() => setActiveTab("fandom")}
+                      className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
+                    >
+                      View all →
+                    </button>
+                  </div>
+                  {fandomData[0]?.summary && (
+                    <p className="text-sm text-zinc-600 mb-4 line-clamp-3">
+                      {fandomData[0].summary}
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {fandomData[0]?.resides_in && (
+                      <div>
+                        <span className="text-zinc-500">Lives in:</span>{" "}
+                        <span className="text-zinc-900">{fandomData[0].resides_in}</span>
+                      </div>
+                    )}
+                    {fandomData[0]?.birthdate_display && (
+                      <div>
+                        <span className="text-zinc-500">Birthday:</span>{" "}
+                        <span className="text-zinc-900">{fandomData[0].birthdate_display}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -590,6 +671,117 @@ export default function PersonProfilePage() {
               )}
             </div>
           )}
+
+          {/* Fandom Tab */}
+          {activeTab === "fandom" && (
+            <div className="space-y-6">
+              {fandomData.length === 0 ? (
+                <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm text-zinc-500">
+                    No Fandom/Wikia data available for this person.
+                  </p>
+                </div>
+              ) : (
+                fandomData.map((fandom) => (
+                  <div key={fandom.id} className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                    {/* Source header with link */}
+                    <div className="mb-6 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                          {fandom.source}
+                        </p>
+                        <h3 className="text-xl font-bold text-zinc-900">
+                          {fandom.page_title || fandom.full_name || "Fandom Profile"}
+                        </h3>
+                      </div>
+                      {fandom.source_url && (
+                        <a
+                          href={fandom.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+                        >
+                          View on Fandom →
+                        </a>
+                      )}
+                    </div>
+
+                    {/* Summary */}
+                    {fandom.summary && (
+                      <div className="mb-6">
+                        <h4 className="text-sm font-semibold text-zinc-700 mb-2">Summary</h4>
+                        <p className="text-sm text-zinc-600 leading-relaxed">{fandom.summary}</p>
+                      </div>
+                    )}
+
+                    {/* Biographical Info Grid */}
+                    <div className="grid gap-6 lg:grid-cols-2">
+                      {/* Personal Details */}
+                      <FandomSection title="Personal Details">
+                        <FandomField label="Full Name" value={fandom.full_name} />
+                        <FandomField label="Birthday" value={fandom.birthdate_display} />
+                        <FandomField label="Gender" value={fandom.gender} />
+                        <FandomField label="Resides In" value={fandom.resides_in} />
+                        <FandomField label="Hair Color" value={fandom.hair_color} />
+                        <FandomField label="Eye Color" value={fandom.eye_color} />
+                        <FandomField label="Height" value={fandom.height_display} />
+                        <FandomField label="Weight" value={fandom.weight_display} />
+                      </FandomSection>
+
+                      {/* Show Info */}
+                      <FandomSection title="Show Information">
+                        <FandomField label="Installment" value={fandom.installment} />
+                        <FandomField label="Seasons" value={fandom.main_seasons_display} />
+                      </FandomSection>
+                    </div>
+
+                    {/* Relationships */}
+                    {(fandom.romances?.length || fandom.family || fandom.friends || fandom.enemies) && (
+                      <div className="mt-6">
+                        <h4 className="text-sm font-semibold text-zinc-700 mb-3">Relationships</h4>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          {fandom.romances && fandom.romances.length > 0 && (
+                            <FandomList title="Romances" items={fandom.romances} />
+                          )}
+                          {fandom.family && Object.keys(fandom.family).length > 0 && (
+                            <FandomJsonList title="Family" data={fandom.family} />
+                          )}
+                          {fandom.friends && Object.keys(fandom.friends).length > 0 && (
+                            <FandomJsonList title="Friends" data={fandom.friends} />
+                          )}
+                          {fandom.enemies && Object.keys(fandom.enemies).length > 0 && (
+                            <FandomJsonList title="Enemies" data={fandom.enemies} />
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Taglines */}
+                    {fandom.taglines && Object.keys(fandom.taglines).length > 0 && (
+                      <FandomTaglines taglines={fandom.taglines} />
+                    )}
+
+                    {/* Trivia */}
+                    {fandom.trivia && (Array.isArray(fandom.trivia) ? fandom.trivia.length > 0 : Object.keys(fandom.trivia).length > 0) && (
+                      <FandomTrivia trivia={fandom.trivia} />
+                    )}
+
+                    {/* Reunion Seating */}
+                    {fandom.reunion_seating && Object.keys(fandom.reunion_seating).length > 0 && (
+                      <FandomReunionSeating seating={fandom.reunion_seating} />
+                    )}
+
+                    {/* Scraped timestamp */}
+                    <div className="mt-6 pt-4 border-t border-zinc-100">
+                      <p className="text-xs text-zinc-400">
+                        Last updated: {new Date(fandom.scraped_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </main>
 
         {/* Lightbox */}
@@ -606,5 +798,111 @@ export default function PersonProfilePage() {
         )}
       </div>
     </ClientOnly>
+  );
+}
+
+// Fandom Helper Components
+function FandomSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg bg-zinc-50 p-4">
+      <h4 className="text-sm font-semibold text-zinc-700 mb-3">{title}</h4>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function FandomField({ label, value }: { label: string; value: string | null | undefined }) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-2 text-sm">
+      <span className="text-zinc-500 w-28 flex-shrink-0">{label}:</span>
+      <span className="text-zinc-900">{value}</span>
+    </div>
+  );
+}
+
+function FandomList({ title, items }: { title: string; items: string[] }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 p-3">
+      <p className="text-xs font-semibold text-zinc-500 mb-2">{title}</p>
+      <ul className="space-y-1">
+        {items.map((item, i) => (
+          <li key={i} className="text-sm text-zinc-700">• {item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FandomJsonList({ title, data }: { title: string; data: Record<string, unknown> }) {
+  const entries = Object.entries(data);
+  if (entries.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 p-3">
+      <p className="text-xs font-semibold text-zinc-500 mb-2">{title}</p>
+      <ul className="space-y-1">
+        {entries.map(([key, value], i) => (
+          <li key={i} className="text-sm text-zinc-700">
+            <span className="font-medium">{key}:</span> {String(value)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FandomTaglines({ taglines }: { taglines: Record<string, unknown> }) {
+  const entries = Object.entries(taglines);
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-6">
+      <h4 className="text-sm font-semibold text-zinc-700 mb-3">Taglines</h4>
+      <div className="space-y-2">
+        {entries.map(([season, tagline], i) => (
+          <div key={i} className="flex gap-3 p-3 rounded-lg bg-amber-50 border border-amber-100">
+            <span className="text-xs font-semibold text-amber-700 bg-amber-200 px-2 py-0.5 rounded h-fit">
+              {season}
+            </span>
+            <p className="text-sm text-amber-900 italic">&ldquo;{String(tagline)}&rdquo;</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FandomTrivia({ trivia }: { trivia: Record<string, unknown> | unknown[] }) {
+  const items = Array.isArray(trivia) ? trivia : Object.values(trivia);
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-6">
+      <h4 className="text-sm font-semibold text-zinc-700 mb-3">Trivia</h4>
+      <ul className="space-y-2">
+        {items.map((item, i) => (
+          <li key={i} className="text-sm text-zinc-600 pl-4 border-l-2 border-zinc-200">
+            {String(item)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FandomReunionSeating({ seating }: { seating: Record<string, unknown> }) {
+  const entries = Object.entries(seating);
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-6">
+      <h4 className="text-sm font-semibold text-zinc-700 mb-3">Reunion Seating</h4>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {entries.map(([reunion, position], i) => (
+          <div key={i} className="flex justify-between p-2 rounded bg-zinc-50 text-sm">
+            <span className="text-zinc-600">{reunion}</span>
+            <span className="font-medium text-zinc-900">{String(position)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
