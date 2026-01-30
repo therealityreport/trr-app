@@ -251,6 +251,18 @@ function MetadataPanel({ metadata, isExpanded }: MetadataPanelProps) {
  * Supports metadata panel, navigation between images, and keyboard controls.
  * Closes on backdrop click, Escape key, or close button.
  */
+// Check if element is an input-like element (don't hijack typing)
+function isInputElement(element: EventTarget | null): boolean {
+  if (!element || !(element instanceof HTMLElement)) return false;
+  const tagName = element.tagName.toLowerCase();
+  return (
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select" ||
+    element.isContentEditable
+  );
+}
+
 export function ImageLightbox({
   src,
   alt,
@@ -265,7 +277,9 @@ export function ImageLightbox({
   triggerRef,
 }: ImageLightboxProps) {
   const [showMetadata, setShowMetadata] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const lastButtonRef = useRef<HTMLButtonElement>(null);
   const previousTrigger = useRef<HTMLElement | null>(null);
 
   // Store trigger element when opening
@@ -275,7 +289,7 @@ export function ImageLightbox({
     }
   }, [isOpen, triggerRef]);
 
-  // Focus management
+  // Focus management - focus first element on open, restore on close
   useEffect(() => {
     if (isOpen) {
       closeButtonRef.current?.focus();
@@ -285,11 +299,49 @@ export function ImageLightbox({
     }
   }, [isOpen]);
 
-  // Keyboard handling
+  // Focus trap - cycle Tab within modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleTabKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !modalRef.current) return;
+
+      const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      const focusableArray = Array.from(focusableElements);
+      if (focusableArray.length === 0) return;
+
+      const firstElement = focusableArray[0];
+      const lastElement = focusableArray[focusableArray.length - 1];
+
+      if (e.shiftKey) {
+        // Shift+Tab: if on first, go to last
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        }
+      } else {
+        // Tab: if on last, go to first
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleTabKey);
+    return () => document.removeEventListener("keydown", handleTabKey);
+  }, [isOpen]);
+
+  // Keyboard shortcuts (guarded against input elements)
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't hijack typing in input elements
+      if (isInputElement(e.target)) return;
+
       switch (e.key) {
         case "Escape":
           onClose();
@@ -318,13 +370,27 @@ export function ImageLightbox({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, hasPrevious, hasNext, onPrevious, onNext, onClose, metadata]);
 
-  // Body scroll lock
+  // Body scroll lock (iOS-safe: also locks touch scrolling)
   useEffect(() => {
     if (isOpen) {
       const originalOverflow = document.body.style.overflow;
+      const originalPosition = document.body.style.position;
+      const originalTop = document.body.style.top;
+      const originalWidth = document.body.style.width;
+      const scrollY = window.scrollY;
+
+      // Lock body scroll (works on iOS Safari)
       document.body.style.overflow = "hidden";
+      document.body.style.position = "fixed";
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = "100%";
+
       return () => {
         document.body.style.overflow = originalOverflow;
+        document.body.style.position = originalPosition;
+        document.body.style.top = originalTop;
+        document.body.style.width = originalWidth;
+        window.scrollTo(0, scrollY);
       };
     }
   }, [isOpen]);
@@ -333,6 +399,7 @@ export function ImageLightbox({
 
   return (
     <div
+      ref={modalRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"

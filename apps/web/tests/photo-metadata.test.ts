@@ -71,4 +71,127 @@ describe("mapPhotoToMetadata", () => {
     expect(result.people).toEqual([]);
     expect(result.sourceBadgeColor).toBe("#6b7280");
   });
+
+  it("normalizes source case for badge colors", () => {
+    // Test different casings all map to the same color
+    const imdbVariants = ["imdb", "IMDB", "ImDb", "IMDb"];
+    const tmdbVariants = ["tmdb", "TMDB", "TmDb", "TMDb"];
+
+    for (const source of imdbVariants) {
+      const result = mapPhotoToMetadata({
+        id: "1",
+        person_id: "p1",
+        source,
+        url: null,
+        hosted_url: null,
+        caption: null,
+        width: null,
+        height: null,
+        context_type: null,
+        season: null,
+        people_names: null,
+        title_names: null,
+        metadata: null,
+        fetched_at: null,
+      });
+      expect(result.sourceBadgeColor).toBe("#f5c518"); // IMDb gold
+      expect(result.source).toBe(source); // Original source preserved
+    }
+
+    for (const source of tmdbVariants) {
+      const result = mapPhotoToMetadata({
+        id: "1",
+        person_id: "p1",
+        source,
+        url: null,
+        hosted_url: null,
+        caption: null,
+        width: null,
+        height: null,
+        context_type: null,
+        season: null,
+        people_names: null,
+        title_names: null,
+        metadata: null,
+        fetched_at: null,
+      });
+      expect(result.sourceBadgeColor).toBe("#01d277"); // TMDb teal
+    }
+  });
+
+  it("handles all nullable fields without throwing", () => {
+    // Minimal photo object - all optional fields null
+    const minimalPhoto = {
+      id: "1",
+      person_id: "p1",
+      source: "other",
+      url: null,
+      hosted_url: null,
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    };
+
+    // Should not throw
+    const result = mapPhotoToMetadata(minimalPhoto);
+
+    // All nullable outputs should be clean (null or empty array)
+    expect(result.caption).toBeNull();
+    expect(result.dimensions).toBeNull();
+    expect(result.season).toBeNull();
+    expect(result.contextType).toBeNull();
+    expect(result.fetchedAt).toBeNull();
+    expect(result.people).toEqual([]);
+    expect(result.titles).toEqual([]);
+
+    // Required outputs should still work
+    expect(result.source).toBe("other");
+    expect(result.sourceBadgeColor).toBe("#6b7280"); // Gray fallback
+  });
+
+  it("handles partial dimensions (only width or height)", () => {
+    // Only width provided
+    const widthOnly = mapPhotoToMetadata({
+      id: "1",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: null,
+      caption: null,
+      width: 800,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+    expect(widthOnly.dimensions).toBeNull();
+
+    // Only height provided
+    const heightOnly = mapPhotoToMetadata({
+      id: "1",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: null,
+      caption: null,
+      width: null,
+      height: 600,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+    expect(heightOnly.dimensions).toBeNull();
+  });
 });
