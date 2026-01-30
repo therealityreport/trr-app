@@ -597,6 +597,11 @@ export interface TrrPersonPhoto {
   height: number | null;
   context_type: string | null;
   season: number | null;
+  // Metadata fields
+  people_names: string[] | null;
+  title_names: string[] | null;
+  metadata: Record<string, unknown> | null;
+  fetched_at: string | null;
 }
 
 export interface TrrPersonCredit {
@@ -622,7 +627,7 @@ export async function getPhotosByPersonId(
 
   const { data, error } = await supabase
     .from("cast_photos")
-    .select("id, person_id, source, url, hosted_url, caption, width, height, context_type, season, gallery_index")
+    .select("id, person_id, source, url, hosted_url, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at")
     .eq("person_id", personId)
     .not("hosted_url", "is", null)
     .order("source", { ascending: true })
