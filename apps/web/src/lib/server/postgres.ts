@@ -125,7 +125,7 @@ export interface AuthContext {
  *   const user = await requireUser(request);
  *   const isAdmin = await checkIsAdmin(user); // server-side check
  *   return withAuthTransaction({ firebaseUid: user.uid, isAdmin }, async (client) => {
- *     return client.query('SELECT * FROM surveys.responses');
+ *     return client.query('SELECT * FROM firebase_surveys.responses');
  *   });
  */
 export async function withAuthTransaction<T>(

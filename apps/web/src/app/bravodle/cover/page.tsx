@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AuthDebugger } from "@/lib/debug";
@@ -12,7 +13,15 @@ import "@/styles/realitease-fonts.css";
 import GameHeader from "@/components/GameHeader";
 
 function BravodleIcon() {
-  return <img src="/icons/Bravodle-Icon.svg" alt="Bravodle icon" className="h-20 w-20" />;
+  return (
+    <Image
+      src="/icons/Bravodle-Icon.svg"
+      alt="Bravodle icon"
+      width={80}
+      height={80}
+      className="h-20 w-20"
+    />
+  );
 }
 
 export default function BravodleCover() {

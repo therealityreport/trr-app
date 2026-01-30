@@ -6,8 +6,15 @@ import {
   listSurveys,
   type CreateSurveyInput,
 } from "@/lib/server/surveys/normalized-survey-admin-repository";
+import { createLink } from "@/lib/server/surveys/survey-trr-links-repository";
 
 export const dynamic = "force-dynamic";
+
+interface CreateSurveyWithLinkInput extends CreateSurveyInput {
+  trrShowId?: string;
+  trrSeasonId?: string;
+  seasonNumber?: number;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -30,7 +37,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireAdmin(request);
-    const body = (await request.json()) as CreateSurveyInput;
+    const body = (await request.json()) as CreateSurveyWithLinkInput;
 
     if (!body.slug || !body.title) {
       return NextResponse.json(
@@ -39,11 +46,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const survey = await createSurvey(
-      { firebaseUid: user.uid, isAdmin: true },
-      body,
-    );
-    return NextResponse.json({ survey }, { status: 201 });
+    const authContext = { firebaseUid: user.uid, isAdmin: true };
+
+    // Extract TRR link fields before creating survey
+    const { trrShowId, trrSeasonId, seasonNumber, ...surveyInput } = body;
+
+    // Create the survey
+    const survey = await createSurvey(authContext, surveyInput);
+
+    // If TRR show ID provided, create the link
+    let trrLink = null;
+    if (trrShowId) {
+      try {
+        trrLink = await createLink(authContext, {
+          survey_id: survey.id,
+          trr_show_id: trrShowId,
+          trr_season_id: trrSeasonId ?? null,
+          season_number: seasonNumber ?? null,
+        });
+      } catch (linkError) {
+        console.error("[api] Failed to create TRR link for survey", linkError);
+        // Don't fail the whole request - survey was created successfully
+      }
+    }
+
+    return NextResponse.json({ survey, trrLink }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
     if (message === "unauthorized") {

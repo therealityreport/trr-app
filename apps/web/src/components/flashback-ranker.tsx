@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import {
   DndContext,
   DragOverlay,
@@ -491,6 +492,7 @@ function Token({
   const base =
     "rounded-full overflow-hidden ring-2 ring-transparent transition shadow-sm bg-white select-none touch-none";
   const state = dragging || isDragging ? "ring-blue-600 scale-[1.05]" : "hover:ring-gray-300";
+  const imageSize = Math.max(1, Math.round(size));
 
   const fallback = (
     <div className="flex h-full w-full items-center justify-center bg-rose-200 text-xs font-bold uppercase text-rose-700">
@@ -499,7 +501,15 @@ function Token({
   );
 
   const image = item.img ? (
-    <img src={item.img} alt={item.label} className="h-full w-full object-cover" draggable={false} />
+    <Image
+      src={item.img}
+      alt={item.label}
+      width={imageSize}
+      height={imageSize}
+      className="h-full w-full object-cover"
+      unoptimized
+      draggable={false}
+    />
   ) : (
     fallback
   );
@@ -674,7 +684,14 @@ function SelectionPicker({
               >
                 <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-[#FDF5FB]">
                   {item.img ? (
-                    <img src={item.img} alt={item.label} className="h-full w-full object-cover" />
+                    <Image
+                      src={item.img}
+                      alt={item.label}
+                      width={48}
+                      height={48}
+                      className="h-full w-full object-cover"
+                      unoptimized
+                    />
                   ) : (
                     <span className="text-sm font-semibold text-[#5C0F4F]">{item.label.slice(0, 2)}</span>
                   )}

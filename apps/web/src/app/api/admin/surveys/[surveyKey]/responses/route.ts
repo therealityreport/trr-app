@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { fetchSurveyResponses, type SurveyFilters } from "@/lib/server/surveys/fetch";
 
+export const dynamic = "force-dynamic";
 const parseNumber = (value: string | null): number | undefined => {
   if (!value) return undefined;
   const parsed = Number(value);

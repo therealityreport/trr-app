@@ -83,7 +83,7 @@ This creates the PostgreSQL tables for survey responses:
 
 ```bash
 cd apps/web
-DATABASE_URL='your-connection-string' npm run db:migrate
+DATABASE_URL='your-connection-string' pnpm run db:migrate
 ```
 
 **Expected output:**
@@ -101,7 +101,7 @@ DATABASE_URL='your-connection-string' npm run db:migrate
 ### Step 3: Restart Development Server
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 ### Step 4: Test Survey Submission
@@ -293,7 +293,7 @@ export async function POST(request: NextRequest) {
 ### 4. Run Migration
 
 ```bash
-DATABASE_URL='your-connection-string' npm run db:migrate
+DATABASE_URL='your-connection-string' pnpm run db:migrate
 ```
 
 The new survey will automatically appear in the admin UI dropdown!
@@ -343,7 +343,7 @@ The new survey will automatically appear in the admin UI dropdown!
 **Fix:** This is normal. If you need to re-run migrations:
 1. Connect to your PostgreSQL database
 2. Run: `DELETE FROM __migrations WHERE name = 'xxx.sql';`
-3. Re-run: `npm run db:migrate`
+3. Re-run: `pnpm run db:migrate`
 
 ---
 
@@ -363,14 +363,14 @@ ADMIN_EMAIL_ALLOWLIST=admin@example.com
 
 **Option 1: Manual (one-time)**
 ```bash
-DATABASE_URL='production-url' npm run db:migrate
+DATABASE_URL='production-url' pnpm run db:migrate
 ```
 
 **Option 2: Automatic (on deploy)**
 
 Add to your CI/CD pipeline or hosting provider's build command:
 ```bash
-npm run db:migrate && npm run build
+pnpm run db:migrate && pnpm run build
 ```
 
 ### Security Considerations

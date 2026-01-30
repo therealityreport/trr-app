@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { getUserByUsername } from "@/lib/db/users";
 import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
-import { ALL_SHOWS } from "@/lib/data/shows";
+import { ALL_SHOWS, type Show, getShowAbbreviation } from "@/lib/data/shows";
 import { COUNTRIES } from "@/lib/data/countries";
 import { US_STATES, GENDER_OPTIONS } from "@/lib/data/states";
 import ClientOnly from "@/components/ClientOnly";
@@ -28,6 +28,26 @@ function FinishProfileContent() {
   const [country, setCountry] = useState("");
   const [state, setState] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [showsFromApi, setShowsFromApi] = useState<Show[]>([]);
+  const [showsLoading, setShowsLoading] = useState(true);
+
+  // Fetch shows with alternative names from API
+  useEffect(() => {
+    const fetchShows = async () => {
+      try {
+        const response = await fetch("/api/shows/list");
+        if (response.ok) {
+          const data = await response.json();
+          setShowsFromApi(data.shows ?? []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch shows:", error);
+      } finally {
+        setShowsLoading(false);
+      }
+    };
+    fetchShows();
+  }, []);
 
   // Load user and prefill hints
   useEffect(() => {
@@ -112,6 +132,20 @@ function FinishProfileContent() {
     try { sessionStorage.setItem("finish_shows", JSON.stringify([])); } catch {}
     return {};
   });
+
+  // Get display name with abbreviation for a show
+  const getDisplayName = (showName: string): string => {
+    const apiShow = showsFromApi.find(
+      (s) => s.name === showName || s.name === `The ${showName}`
+    );
+    if (apiShow) {
+      const abbrev = getShowAbbreviation(apiShow);
+      if (abbrev) {
+        return `${abbrev} - ${showName}`;
+      }
+    }
+    return showName;
+  };
 
   const checkUsernameUnique = async (u: string): Promise<string | null> => {
     const baseErr = validateUsername(u);
@@ -429,30 +463,37 @@ function FinishProfileContent() {
               
               {/* Scrollable Show Pills Container */}
               <div className="w-full h-64 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 bg-white dark:bg-zinc-900">
-                <div className="flex flex-wrap gap-2">
-                  {ALL_SHOWS.map((name, index) => {
-                    const active = !!showSelections[name];
-                    const colorHex = showColors[index % showColors.length];
-                    
-                    return (
-                      <button
-                        key={name}
-                        type="button"
-                        onClick={() => toggleShow(name)}
-                        disabled={pending}
-                        className="px-3 py-1 h-8 rounded-full text-sm font-normal font-hamburg leading-tight border whitespace-nowrap disabled:opacity-60 transition-colors duration-200 flex-shrink-0"
-                        style={{
-                          backgroundColor: active ? colorHex : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#f3f4f6'),
-                          color: active ? 'white' : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#000000'),
-                          borderColor: active ? colorHex : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#4b5563' : '#d1d5db')
-                        }}
-                        aria-pressed={active}
-                      >
-                        {name}
-                      </button>
-                    );
-                  })}
-                </div>
+                {showsLoading ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="w-6 h-6 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {ALL_SHOWS.map((name, index) => {
+                      const active = !!showSelections[name];
+                      const colorHex = showColors[index % showColors.length];
+                      const displayName = getDisplayName(name);
+
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => toggleShow(name)}
+                          disabled={pending}
+                          className="px-3 py-1 h-8 rounded-full text-sm font-normal font-hamburg leading-tight border whitespace-nowrap disabled:opacity-60 transition-colors duration-200 flex-shrink-0"
+                          style={{
+                            backgroundColor: active ? colorHex : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#f3f4f6'),
+                            color: active ? 'white' : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#000000'),
+                            borderColor: active ? colorHex : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#4b5563' : '#d1d5db')
+                          }}
+                          aria-pressed={active}
+                        >
+                          {displayName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               
               {errors.shows && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.shows}</p>}

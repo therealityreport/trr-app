@@ -14,6 +14,7 @@ import type {
   SurveyRun,
   SurveyWithQuestions,
 } from "@/lib/surveys/normalized-types";
+import { t } from "./survey-schema";
 
 /**
  * Get the currently active run for a survey by slug.
@@ -25,8 +26,8 @@ export async function getActiveRunForSurvey(
   const now = new Date().toISOString();
   const result = await query<SurveyRun>(
     `SELECT sr.*
-     FROM surveys.survey_runs sr
-     INNER JOIN surveys.surveys s ON s.id = sr.survey_id
+     FROM ${t("survey_runs")} sr
+     INNER JOIN ${t("surveys")} s ON s.id = sr.survey_id
      WHERE s.slug = $1
        AND sr.is_active = true
        AND sr.starts_at <= $2
@@ -46,7 +47,7 @@ export async function getSurveyWithQuestions(
 ): Promise<SurveyWithQuestions | null> {
   // Get survey
   const surveyResult = await query<NormalizedSurvey>(
-    `SELECT * FROM surveys.surveys WHERE slug = $1`,
+    `SELECT * FROM ${t("surveys")} WHERE slug = $1`,
     [surveySlug],
   );
   const survey = surveyResult.rows[0];
@@ -54,7 +55,7 @@ export async function getSurveyWithQuestions(
 
   // Get questions
   const questionsResult = await query<SurveyQuestion>(
-    `SELECT * FROM surveys.questions
+    `SELECT * FROM ${t("questions")}
      WHERE survey_id = $1
      ORDER BY display_order`,
     [survey.id],
@@ -67,7 +68,7 @@ export async function getSurveyWithQuestions(
 
   if (questionIds.length > 0) {
     const optionsResult = await query<QuestionOption>(
-      `SELECT * FROM surveys.options
+      `SELECT * FROM ${t("options")}
        WHERE question_id = ANY($1)
        ORDER BY display_order`,
       [questionIds],
@@ -103,7 +104,7 @@ export async function getUserSubmissionCount(
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query<{ count: string }>(
       `SELECT COUNT(*)::text as count
-       FROM surveys.responses
+       FROM ${t("responses")}
        WHERE survey_run_id = $1`,
       [surveyRunId],
     );
@@ -131,7 +132,7 @@ export async function submitSurveyResponse(
 
     // Check run exists and is active
     const runResult = await client.query<SurveyRun>(
-      `SELECT * FROM surveys.survey_runs WHERE id = $1`,
+      `SELECT * FROM ${t("survey_runs")} WHERE id = $1`,
       [surveyRunId],
     );
     const run = runResult.rows[0];
@@ -157,7 +158,7 @@ export async function submitSurveyResponse(
     // Check max submissions
     const countResult = await client.query<{ count: string }>(
       `SELECT COUNT(*)::text as count
-       FROM surveys.responses
+       FROM ${t("responses")}
        WHERE survey_run_id = $1 AND user_id = $2`,
       [surveyRunId, authContext.firebaseUid],
     );
@@ -169,7 +170,7 @@ export async function submitSurveyResponse(
 
     // Insert response
     const responseResult = await client.query<SurveyResponse>(
-      `INSERT INTO surveys.responses (survey_run_id, user_id, submission_number, completed_at)
+      `INSERT INTO ${t("responses")} (survey_run_id, user_id, submission_number, completed_at)
        VALUES ($1, $2, $3, NOW())
        RETURNING *`,
       [surveyRunId, authContext.firebaseUid, existingCount + 1],
@@ -179,7 +180,7 @@ export async function submitSurveyResponse(
     // Insert answers
     for (const answer of answers) {
       await client.query(
-        `INSERT INTO surveys.answers (response_id, question_id, option_id, text_value, numeric_value, json_value)
+        `INSERT INTO ${t("answers")} (response_id, question_id, option_id, text_value, numeric_value, json_value)
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [
           response.id,
@@ -205,7 +206,7 @@ export async function getSurveyRunById(
   runId: string,
 ): Promise<SurveyRun | null> {
   const result = await query<SurveyRun>(
-    `SELECT * FROM surveys.survey_runs WHERE id = $1`,
+    `SELECT * FROM ${t("survey_runs")} WHERE id = $1`,
     [runId],
   );
   return result.rows[0] ?? null;

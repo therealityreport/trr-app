@@ -1,6 +1,7 @@
 import "server-only";
 
 import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
+import { t } from "./survey-schema";
 import type {
   NormalizedSurvey,
   QuestionOption,
@@ -16,14 +17,14 @@ import type {
 
 export async function listSurveys(): Promise<NormalizedSurvey[]> {
   const result = await query<NormalizedSurvey>(
-    `SELECT * FROM surveys.surveys ORDER BY created_at DESC`,
+    `SELECT * FROM ${t("surveys")} ORDER BY created_at DESC`,
   );
   return result.rows;
 }
 
 export async function getSurveyBySlug(slug: string): Promise<NormalizedSurvey | null> {
   const result = await query<NormalizedSurvey>(
-    `SELECT * FROM surveys.surveys WHERE slug = $1`,
+    `SELECT * FROM ${t("surveys")} WHERE slug = $1`,
     [slug],
   );
   return result.rows[0] ?? null;
@@ -31,7 +32,7 @@ export async function getSurveyBySlug(slug: string): Promise<NormalizedSurvey | 
 
 export async function getSurveyById(id: string): Promise<NormalizedSurvey | null> {
   const result = await query<NormalizedSurvey>(
-    `SELECT * FROM surveys.surveys WHERE id = $1`,
+    `SELECT * FROM ${t("surveys")} WHERE id = $1`,
     [id],
   );
   return result.rows[0] ?? null;
@@ -51,7 +52,7 @@ export async function createSurvey(
 ): Promise<NormalizedSurvey> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query<NormalizedSurvey>(
-      `INSERT INTO surveys.surveys (slug, title, description, is_active, metadata)
+      `INSERT INTO ${t("surveys")} (slug, title, description, is_active, metadata)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
       [
@@ -106,7 +107,7 @@ export async function updateSurvey(
 
     values.push(surveyId);
     const result = await client.query<NormalizedSurvey>(
-      `UPDATE surveys.surveys SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE ${t("surveys")} SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
       values,
     );
     return result.rows[0] ?? null;
@@ -119,7 +120,7 @@ export async function deleteSurvey(
 ): Promise<boolean> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query(
-      `DELETE FROM surveys.surveys WHERE id = $1`,
+      `DELETE FROM ${t("surveys")} WHERE id = $1`,
       [surveyId],
     );
     return (result.rowCount ?? 0) > 0;
@@ -132,7 +133,7 @@ export async function deleteSurvey(
 
 export async function listQuestions(surveyId: string): Promise<SurveyQuestion[]> {
   const result = await query<SurveyQuestion>(
-    `SELECT * FROM surveys.questions WHERE survey_id = $1 ORDER BY display_order`,
+    `SELECT * FROM ${t("questions")} WHERE survey_id = $1 ORDER BY display_order`,
     [surveyId],
   );
   return result.rows;
@@ -140,7 +141,7 @@ export async function listQuestions(surveyId: string): Promise<SurveyQuestion[]>
 
 export async function getQuestionById(questionId: string): Promise<SurveyQuestion | null> {
   const result = await query<SurveyQuestion>(
-    `SELECT * FROM surveys.questions WHERE id = $1`,
+    `SELECT * FROM ${t("questions")} WHERE id = $1`,
     [questionId],
   );
   return result.rows[0] ?? null;
@@ -165,14 +166,14 @@ export async function createQuestion(
     let displayOrder = input.display_order;
     if (displayOrder === undefined) {
       const maxResult = await client.query<{ max: number | null }>(
-        `SELECT MAX(display_order) as max FROM surveys.questions WHERE survey_id = $1`,
+        `SELECT MAX(display_order) as max FROM ${t("questions")} WHERE survey_id = $1`,
         [input.survey_id],
       );
       displayOrder = (maxResult.rows[0]?.max ?? -1) + 1;
     }
 
     const result = await client.query<SurveyQuestion>(
-      `INSERT INTO surveys.questions (survey_id, question_key, question_text, question_type, display_order, is_required, config)
+      `INSERT INTO ${t("questions")} (survey_id, question_key, question_text, question_type, display_order, is_required, config)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
@@ -239,7 +240,7 @@ export async function updateQuestion(
 
     values.push(questionId);
     const result = await client.query<SurveyQuestion>(
-      `UPDATE surveys.questions SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE ${t("questions")} SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
       values,
     );
     return result.rows[0] ?? null;
@@ -252,7 +253,7 @@ export async function deleteQuestion(
 ): Promise<boolean> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query(
-      `DELETE FROM surveys.questions WHERE id = $1`,
+      `DELETE FROM ${t("questions")} WHERE id = $1`,
       [questionId],
     );
     return (result.rowCount ?? 0) > 0;
@@ -265,7 +266,7 @@ export async function deleteQuestion(
 
 export async function listOptions(questionId: string): Promise<QuestionOption[]> {
   const result = await query<QuestionOption>(
-    `SELECT * FROM surveys.options WHERE question_id = $1 ORDER BY display_order`,
+    `SELECT * FROM ${t("options")} WHERE question_id = $1 ORDER BY display_order`,
     [questionId],
   );
   return result.rows;
@@ -273,7 +274,7 @@ export async function listOptions(questionId: string): Promise<QuestionOption[]>
 
 export async function getOptionById(optionId: string): Promise<QuestionOption | null> {
   const result = await query<QuestionOption>(
-    `SELECT * FROM surveys.options WHERE id = $1`,
+    `SELECT * FROM ${t("options")} WHERE id = $1`,
     [optionId],
   );
   return result.rows[0] ?? null;
@@ -295,14 +296,14 @@ export async function createOption(
     let displayOrder = input.display_order;
     if (displayOrder === undefined) {
       const maxResult = await client.query<{ max: number | null }>(
-        `SELECT MAX(display_order) as max FROM surveys.options WHERE question_id = $1`,
+        `SELECT MAX(display_order) as max FROM ${t("options")} WHERE question_id = $1`,
         [input.question_id],
       );
       displayOrder = (maxResult.rows[0]?.max ?? -1) + 1;
     }
 
     const result = await client.query<QuestionOption>(
-      `INSERT INTO surveys.options (question_id, option_key, option_text, display_order, metadata)
+      `INSERT INTO ${t("options")} (question_id, option_key, option_text, display_order, metadata)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
       [
@@ -357,7 +358,7 @@ export async function updateOption(
 
     values.push(optionId);
     const result = await client.query<QuestionOption>(
-      `UPDATE surveys.options SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE ${t("options")} SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
       values,
     );
     return result.rows[0] ?? null;
@@ -370,7 +371,7 @@ export async function deleteOption(
 ): Promise<boolean> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query(
-      `DELETE FROM surveys.options WHERE id = $1`,
+      `DELETE FROM ${t("options")} WHERE id = $1`,
       [optionId],
     );
     return (result.rowCount ?? 0) > 0;
@@ -383,7 +384,7 @@ export async function deleteOption(
 
 export async function listRuns(surveyId: string): Promise<SurveyRun[]> {
   const result = await query<SurveyRun>(
-    `SELECT * FROM surveys.survey_runs WHERE survey_id = $1 ORDER BY starts_at DESC`,
+    `SELECT * FROM ${t("survey_runs")} WHERE survey_id = $1 ORDER BY starts_at DESC`,
     [surveyId],
   );
   return result.rows;
@@ -391,7 +392,7 @@ export async function listRuns(surveyId: string): Promise<SurveyRun[]> {
 
 export async function getRunById(runId: string): Promise<SurveyRun | null> {
   const result = await query<SurveyRun>(
-    `SELECT * FROM surveys.survey_runs WHERE id = $1`,
+    `SELECT * FROM ${t("survey_runs")} WHERE id = $1`,
     [runId],
   );
   return result.rows[0] ?? null;
@@ -399,7 +400,7 @@ export async function getRunById(runId: string): Promise<SurveyRun | null> {
 
 export async function getRunByKey(surveyId: string, runKey: string): Promise<SurveyRun | null> {
   const result = await query<SurveyRun>(
-    `SELECT * FROM surveys.survey_runs WHERE survey_id = $1 AND run_key = $2`,
+    `SELECT * FROM ${t("survey_runs")} WHERE survey_id = $1 AND run_key = $2`,
     [surveyId, runKey],
   );
   return result.rows[0] ?? null;
@@ -422,7 +423,7 @@ export async function createRun(
 ): Promise<SurveyRun> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query<SurveyRun>(
-      `INSERT INTO surveys.survey_runs (survey_id, run_key, title, starts_at, ends_at, max_submissions_per_user, is_active, metadata)
+      `INSERT INTO ${t("survey_runs")} (survey_id, run_key, title, starts_at, ends_at, max_submissions_per_user, is_active, metadata)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
@@ -495,7 +496,7 @@ export async function updateRun(
 
     values.push(runId);
     const result = await client.query<SurveyRun>(
-      `UPDATE surveys.survey_runs SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE ${t("survey_runs")} SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
       values,
     );
     return result.rows[0] ?? null;
@@ -508,7 +509,7 @@ export async function deleteRun(
 ): Promise<boolean> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query(
-      `DELETE FROM surveys.survey_runs WHERE id = $1`,
+      `DELETE FROM ${t("survey_runs")} WHERE id = $1`,
       [runId],
     );
     return (result.rowCount ?? 0) > 0;
@@ -529,7 +530,7 @@ export async function listResponses(
 ): Promise<SurveyResponse[]> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query<SurveyResponse>(
-      `SELECT * FROM surveys.responses WHERE survey_run_id = $1 ORDER BY created_at DESC`,
+      `SELECT * FROM ${t("responses")} WHERE survey_run_id = $1 ORDER BY created_at DESC`,
       [runId],
     );
     return result.rows;
@@ -542,14 +543,14 @@ export async function getResponseWithAnswers(
 ): Promise<ResponseWithAnswers | null> {
   return withAuthTransaction(authContext, async (client) => {
     const responseResult = await client.query<SurveyResponse>(
-      `SELECT * FROM surveys.responses WHERE id = $1`,
+      `SELECT * FROM ${t("responses")} WHERE id = $1`,
       [responseId],
     );
     const response = responseResult.rows[0];
     if (!response) return null;
 
     const answersResult = await client.query<SurveyAnswer>(
-      `SELECT * FROM surveys.answers WHERE response_id = $1`,
+      `SELECT * FROM ${t("answers")} WHERE response_id = $1`,
       [responseId],
     );
 
@@ -562,7 +563,7 @@ export async function getResponseWithAnswers(
 
 export async function getResponseCount(runId: string): Promise<number> {
   const result = await query<{ count: string }>(
-    `SELECT COUNT(*)::text as count FROM surveys.responses WHERE survey_run_id = $1`,
+    `SELECT COUNT(*)::text as count FROM ${t("responses")} WHERE survey_run_id = $1`,
     [runId],
   );
   return parseInt(result.rows[0]?.count ?? "0", 10);

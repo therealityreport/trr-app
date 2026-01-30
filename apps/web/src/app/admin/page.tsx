@@ -6,6 +6,13 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const ADMIN_TOOLS = [
   {
+    key: "trr-shows",
+    title: "TRR Shows",
+    description: "Browse the TRR metadata database. View shows, seasons, cast, and create linked surveys.",
+    href: "/admin/trr-shows" as const,
+    badge: "API",
+  },
+  {
     key: "survey-responses",
     title: "Survey Responses",
     description: "Browse, filter, and export every survey captured in the TRR Postgres database.",

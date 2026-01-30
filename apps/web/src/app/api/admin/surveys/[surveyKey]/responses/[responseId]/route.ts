@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { fetchSurveyResponseById } from "@/lib/server/surveys/fetch";
 
+export const dynamic = "force-dynamic";
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ surveyKey: string; responseId: string }> },
