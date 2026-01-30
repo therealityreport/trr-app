@@ -2,16 +2,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Recommended Node version: 20.x (matches CI). See `../../.nvmrc`.
+
+First, install dependencies and run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
@@ -23,8 +20,8 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 ## Firebase Emulator (Auth + Firestore)
 
 - Enable: set `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true` (see `.env.example`). Optionally set `NEXT_PUBLIC_FIREBASE_EMULATOR_PROJECT_ID=demo-trr` so the Emulator UI shows your data.
-- Start emulators: from repo root run `npm run emulators`. This uses `firebase.json` ports (Auth `9099`, Firestore `8080`) and persists data in `.emulator-data/`.
-- Start the app against emulators: from `apps/web/`, run `npm run dev:emu`. Alternatively, export the env var inline: `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true npm run dev`.
+- Start emulators: from repo root run `pnpm run emulators`. This uses `firebase.json` ports (Auth `9099`, Firestore `8080`) and persists data in `.emulator-data/`.
+- Start the app against emulators: from `apps/web/`, run `pnpm run dev:emu`. Alternatively, export the env var inline: `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true pnpm run dev`.
 - Toggle back to prod: set `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=false` (or use the default `dev` script) and restart the dev server.
 
 Notes

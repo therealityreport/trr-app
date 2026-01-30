@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Route } from "next";
 import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";

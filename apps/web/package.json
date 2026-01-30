@@ -12,13 +12,15 @@
     "clean": "rm -rf .next",
     "test": "vitest run -c vitest.config.ts",
     "test:watch": "vitest -c vitest.config.ts",
+    "test:ci": "NODE_OPTIONS=--max-old-space-size=4096 vitest run -c vitest.config.ts --pool=forks --poolOptions.forks.singleFork",
     "db:migrate": "node ./scripts/run-migrations.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
+    "@supabase/supabase-js": "^2.93.3",
     "firebase": "^12.1.0",
     "firebase-admin": "^12.6.0",
-    "next": "15.5.7",
+    "next": "16.1.6",
     "pg": "^8.16.3",
     "react": "19.1.0",
     "react-dom": "19.1.0"
@@ -26,6 +28,8 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
     "@types/pg": "^8.15.6",
     "@types/react": "^19",
@@ -33,12 +37,13 @@
     "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "15.5.0",
+    "jsdom": "^27.4.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite-tsconfig-paths": "^5.1.3",
     "vitest": "^2.1.4"
   },
   "engines": {
-    "node": ">=18.18"
+    "node": ">=20"
   }
 }

@@ -2,6 +2,7 @@ import "server-only";
 
 import { query, withTransaction } from "@/lib/server/postgres";
 import type { NormalizedSurvey, SurveyRun } from "@/lib/surveys/normalized-types";
+import { t } from "./survey-schema";
 
 interface SchedulerResult {
   surveySlug: string;
@@ -87,7 +88,7 @@ export async function createWeeklySurveyRuns(): Promise<SchedulerResult[]> {
 
   // Get surveys configured for auto-run creation
   const surveysResult = await query<SurveyWithSchedulerConfig>(
-    `SELECT * FROM surveys.surveys
+    `SELECT * FROM ${t("surveys")}
      WHERE is_active = true
        AND (metadata->>'autoCreateRuns')::boolean = true`,
   );
@@ -96,7 +97,7 @@ export async function createWeeklySurveyRuns(): Promise<SchedulerResult[]> {
     try {
       // Check if run already exists (idempotent)
       const existingResult = await query<SurveyRun>(
-        `SELECT * FROM surveys.survey_runs
+        `SELECT * FROM ${t("survey_runs")}
          WHERE survey_id = $1 AND run_key = $2`,
         [survey.id, runKey],
       );
@@ -113,7 +114,7 @@ export async function createWeeklySurveyRuns(): Promise<SchedulerResult[]> {
       // Create new run
       await withTransaction(async (client) => {
         await client.query(
-          `INSERT INTO surveys.survey_runs (survey_id, run_key, title, starts_at, ends_at, max_submissions_per_user, is_active)
+          `INSERT INTO ${t("survey_runs")} (survey_id, run_key, title, starts_at, ends_at, max_submissions_per_user, is_active)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [
             survey.id,

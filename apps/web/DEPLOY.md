@@ -4,8 +4,8 @@ Root Directory
 - Set the project Root Directory to `apps/web` in Vercel.
 
 Build
-- Install: `npm install`
-- Build: `npm run build`
+- Install: `pnpm install`
+- Build: `pnpm run build`
 - Output: `.next`
 - Node: 22.x (recommended)
 

@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/server/auth";
 import { getQuestionColumns, getSurveyDefinition } from "@/lib/server/surveys/definitions";
 import { upsertSurveyResponse } from "@/lib/server/surveys/repository";
 
+export const dynamic = "force-dynamic";
 interface ShowSurveyPayload {
   surveyKey?: string;
   appUserId: string;

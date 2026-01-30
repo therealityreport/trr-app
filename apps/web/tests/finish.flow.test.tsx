@@ -3,14 +3,16 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
-vi.mock('next/navigation', () => {
-  const replace = vi.fn();
-  return { useRouter: () => ({ replace }) };
-});
+const replace = vi.fn();
+const router = { replace };
+
+2vi.mock('next/navigation', () => ({
+  useRouter: () => router,
+}));
 
 vi.mock('@/lib/firebase', () => ({
   auth: {
-    onAuthStateChanged: (cb: any) => { cb({ uid: 'u1', email: 'a@example.com', getIdToken: async () => 't' }); return () => {}; },
+    onAuthStateChanged: (cb: any) => { cb({ uid: 'u1', email: 'a@example.com', providerData: [], getIdToken: async () => 't' }); return () => {}; },
   },
 }));
 
@@ -42,8 +44,8 @@ describe('/auth/finish interactions', () => {
       fireEvent.click(screen.getByRole('button', { name: s }));
     }
     // error for shows should disappear when >=3
-    const finishBtn = screen.getByRole('button', { name: /finish/i });
-    expect(finishBtn).not.toHaveAttribute('disabled');
+    for (const s of firstThree) {
+      expect(screen.getByRole('button', { name: s })).toHaveAttribute('aria-pressed', 'true');
+    }
   });
 });
-

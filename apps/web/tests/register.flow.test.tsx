@@ -3,13 +3,14 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
-vi.mock('next/navigation', () => {
-  const replace = vi.fn();
-  const push = vi.fn();
-  return {
-    useRouter: () => ({ replace, push }),
-  };
-});
+const push = vi.fn();
+const replace = vi.fn();
+const router = { replace, push };
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => router,
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 // Mock firebase client lib used by the page
 vi.mock('@/lib/firebase', () => {
@@ -41,6 +42,8 @@ global.fetch = vi.fn().mockResolvedValue({ ok: true });
 // Mock DB upsert used after signup
 vi.mock('@/lib/db/users', () => ({
   upsertUserProfile: vi.fn().mockResolvedValue(undefined),
+  getUserProfile: vi.fn().mockResolvedValue(null),
+  checkUserExists: vi.fn().mockResolvedValue(false),
 }));
 
 import RegisterPage from '@/app/auth/register/page';
@@ -61,21 +64,16 @@ describe('/auth/register two-stage flow', () => {
     expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument();
   });
 
-  it('Edit email returns to Stage A and preserves name/birthday on re-enter', async () => {
+  it('Edit email routes back to home', async () => {
     render(<RegisterPage />);
     fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'user@example.com' } });
     fireEvent.submit(screen.getByLabelText(/email address/i).closest('form')!);
 
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Alex' } });
-    fireEvent.change(screen.getByLabelText(/birthday/i), { target: { value: '2000-01-01' } });
+    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Alex' } });
+    fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: 'Smith' } });
     fireEvent.click(screen.getByRole('button', { name: /edit/i }));
 
-    // back to stage A with email input visible
-    expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
-    // go forward again
-    fireEvent.submit(screen.getByLabelText(/email address/i).closest('form')!);
-    expect(screen.getByDisplayValue('Alex')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('2000-01-01')).toBeInTheDocument();
+    expect(push).toHaveBeenCalledWith('/');
   });
 
   it('Validates email format on Stage A', () => {
@@ -85,4 +83,3 @@ describe('/auth/register two-stage flow', () => {
     expect(screen.getByText(/enter a valid email address/i)).toBeInTheDocument();
   });
 });
-

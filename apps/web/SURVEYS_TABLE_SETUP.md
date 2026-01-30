@@ -49,7 +49,7 @@ Seeds initial surveys:
 
 1. **Run migrations** (in order):
    ```bash
-   npm run db:migrate
+   pnpm run db:migrate
    ```
 
    This will:
@@ -59,7 +59,7 @@ Seeds initial surveys:
 
 2. **Restart dev server** to pick up code changes:
    ```bash
-   npm run web:dev
+   pnpm run web:dev
    ```
 
 3. **Verify** surveys appear in admin UI:
@@ -145,7 +145,7 @@ To add a new survey to the system:
    }
    ```
 
-4. **Run migration**: `npm run db:migrate`
+4. **Run migration**: `pnpm run db:migrate`
 
 The survey will automatically appear in the admin UI!
 

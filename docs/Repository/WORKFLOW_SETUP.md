@@ -44,6 +44,8 @@ gh secret set OPENAI_API_KEY
 
 ## What Gets Generated
 
+Generated outputs are written to `docs/Repository/generated/` and are **artifact-only** (gitignored and not committed).
+
 ### With OPENAI_API_KEY (full mode)
 - `docs/Repository/generated/REPO_STRUCTURE.md` - Directory tree listing
 - `docs/Repository/generated/REPO_STRUCTURE.mermaid.md` - Visual structure diagram

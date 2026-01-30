@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -104,7 +105,14 @@ export default function RhoslcSurveyResultsPage() {
                   <div className="flex items-center gap-3">
                     <div className="size-12 overflow-hidden rounded-full border border-rose-100">
                       {item.img ? (
-                        <img src={item.img} alt={item.label} className="h-full w-full object-cover" />
+                        <Image
+                          src={item.img}
+                          alt={item.label}
+                          width={48}
+                          height={48}
+                          className="h-full w-full object-cover"
+                          unoptimized
+                        />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center bg-rose-200 text-xs font-bold uppercase text-rose-700">
                           {item.label.split(" ").map((part) => part[0]).join("")}

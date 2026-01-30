@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/server/auth";
 import { upsertSurveyResponse } from "@/lib/server/surveys/repository";
 import { normalizeStringArrayValue } from "@/lib/server/surveys/normalizers";
 
+export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     const user = await requireUser(request);

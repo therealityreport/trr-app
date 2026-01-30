@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, signInWithGoogle } from "@/lib/firebase";
@@ -94,10 +95,13 @@ function LoginContent() {
     <div className="min-h-screen w-full relative bg-white">
       {/* Header → Banner */}
       <div className="w-full h-20 border-b border-black flex items-center justify-center">
-        <img 
-          className="w-80 h-[70.2px]" 
-          src="/images/logos/FullName-Black.png" 
+        <Image
+          className="w-80 h-[70.2px]"
+          src="/images/logos/FullName-Black.png"
           alt="The Reality Report"
+          width={320}
+          height={70}
+          priority
         />
       </div>
 

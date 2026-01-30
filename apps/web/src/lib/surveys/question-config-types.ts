@@ -1,0 +1,310 @@
+/**
+ * Question Config Types
+ *
+ * These types define the `config` JSONB structure stored in firebase_surveys.questions.
+ * The `uiVariant` field determines which input component to render.
+ *
+ * DB Type → UI Variant mappings:
+ * - numeric → "numeric-ranking" | "numeric-scale-slider"
+ * - ranking → "circle-ranking" | "rectangle-ranking"
+ * - single_choice → "two-choice-slider" | "text-multiple-choice" | "image-multiple-choice" | "dropdown"
+ * - multi_choice → "multi-select-choice"
+ * - likert → "three-choice-slider" | "agree-likert-scale"
+ * - free_text → "text-entry"
+ */
+
+// ============================================================================
+// UI Variant Union
+// ============================================================================
+
+export type UiVariant =
+  | "numeric-ranking"        // Episode rating with stars (0-10)
+  | "numeric-scale-slider"   // Cast member slider (Boring/Entertaining)
+  | "circle-ranking"         // Cast power rankings - grid with circles
+  | "rectangle-ranking"      // Season/franchise rankings - classic list
+  | "three-choice-slider"    // Keep/Fire/Demote slider
+  | "agree-likert-scale"     // Agree/Disagree statements
+  | "two-choice-slider"      // Whose side feuds
+  | "multi-select-choice"    // Multi-select checkboxes
+  | "text-multiple-choice"   // Single select radio buttons
+  | "image-multiple-choice"  // Single select with images
+  | "dropdown"               // Dropdown select
+  | "text-entry";            // Free text input
+
+// ============================================================================
+// Supporting Types
+// ============================================================================
+
+/** Cast member reference for sliders and whose-side questions */
+export interface CastMemberSubject {
+  id: string;
+  name: string;
+  img: string;
+}
+
+/** Row definition for matrix-likert questions (stored in config) */
+export interface MatrixRow {
+  id: string;
+  label: string;
+  img?: string;
+}
+
+/** Slider choice option */
+export interface SliderChoice {
+  value: string;
+  label: string;
+}
+
+/** Text validation rules */
+export interface TextValidation {
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  errorMessage?: string;
+}
+
+// ============================================================================
+// Config Interfaces by UI Variant
+// ============================================================================
+
+/** Base config shared by all questions */
+export interface BaseQuestionConfig {
+  uiVariant?: UiVariant;
+  description?: string;
+}
+
+/**
+ * Numeric Ranking Config (numeric-ranking)
+ * Episode rating with stars, text input, and slider (0-10 scale)
+ */
+export interface NumericRankingConfig extends BaseQuestionConfig {
+  uiVariant: "numeric-ranking";
+  min: number;
+  max: number;
+  /** Step size for slider precision (default: 0.1) */
+  step?: number;
+  labels?: {
+    min: string;
+    max: string;
+  };
+}
+
+/**
+ * Numeric Scale Slider Config (numeric-scale-slider)
+ * Horizontal slider for cast member ratings (Boring/Entertaining)
+ */
+export interface NumericScaleSliderConfig extends BaseQuestionConfig {
+  uiVariant: "numeric-scale-slider";
+  min: number;
+  max: number;
+  step?: number;
+  minLabel: string;
+  maxLabel: string;
+  /** Cast member this slider is about */
+  subject?: CastMemberSubject;
+}
+
+/**
+ * Circle Ranking Config (circle-ranking)
+ * Drag-and-drop grid with circular cast member tokens
+ */
+export interface CircleRankingConfig extends BaseQuestionConfig {
+  uiVariant: "circle-ranking";
+  lineLabelTop?: string;
+  lineLabelBottom?: string;
+}
+
+/**
+ * Rectangle Ranking Config (rectangle-ranking)
+ * Drag-and-drop list with rectangular items
+ */
+export interface RectangleRankingConfig extends BaseQuestionConfig {
+  uiVariant: "rectangle-ranking";
+  lineLabelTop?: string;
+  lineLabelBottom?: string;
+}
+
+/**
+ * Three Choice Slider Config (three-choice-slider)
+ * Fire/Demote/Keep slider for cast verdicts
+ * Rows are cast members, choices are the verdict options
+ */
+export interface ThreeChoiceSliderConfig extends BaseQuestionConfig {
+  uiVariant: "three-choice-slider";
+  choices: SliderChoice[];
+  /** Cast members or items to rate (rows in the matrix view) */
+  rows?: MatrixRow[];
+}
+
+/**
+ * Agree Likert Scale Config (agree-likert-scale)
+ * Standard agree/disagree scale for statements
+ * Rows are statements, scale options come from options table
+ */
+export interface AgreeLikertScaleConfig extends BaseQuestionConfig {
+  uiVariant: "agree-likert-scale";
+  /** Statements to rate (rows in the matrix view) */
+  rows?: MatrixRow[];
+}
+
+/**
+ * Two Choice Slider Config (two-choice-slider)
+ * Whose side feuds - slider between two cast members
+ * Options A and B come from the options table with metadata.imagePath
+ */
+export interface TwoChoiceSliderConfig extends BaseQuestionConfig {
+  uiVariant: "two-choice-slider";
+  /** Optional neutral/neither option text */
+  neutralOption?: string;
+}
+
+/**
+ * Multi Select Choice Config (multi-select-choice)
+ * Checkboxes with optional min/max constraints
+ */
+export interface MultiSelectChoiceConfig extends BaseQuestionConfig {
+  uiVariant: "multi-select-choice";
+  minSelections?: number;
+  maxSelections?: number;
+}
+
+/**
+ * Text Multiple Choice Config (text-multiple-choice)
+ * Standard radio button group with text options
+ */
+export interface TextMultipleChoiceConfig extends BaseQuestionConfig {
+  uiVariant: "text-multiple-choice";
+}
+
+/**
+ * Image Multiple Choice Config (image-multiple-choice)
+ * Single select with image options
+ */
+export interface ImageMultipleChoiceConfig extends BaseQuestionConfig {
+  uiVariant: "image-multiple-choice";
+  columns?: number;
+}
+
+/**
+ * Dropdown Config (dropdown)
+ * Native select element
+ */
+export interface DropdownConfig extends BaseQuestionConfig {
+  uiVariant: "dropdown";
+  placeholder?: string;
+}
+
+/**
+ * Text Entry Config (text-entry)
+ * Text input with optional validation
+ */
+export interface TextEntryConfig extends BaseQuestionConfig {
+  uiVariant: "text-entry";
+  inputType?: "text" | "email" | "number" | "tel";
+  placeholder?: string;
+  validation?: TextValidation;
+}
+
+// ============================================================================
+// Union Type
+// ============================================================================
+
+/**
+ * Union of all question config types.
+ * Use type narrowing on `uiVariant` to access specific fields.
+ */
+export type QuestionConfig =
+  | NumericRankingConfig
+  | NumericScaleSliderConfig
+  | CircleRankingConfig
+  | RectangleRankingConfig
+  | ThreeChoiceSliderConfig
+  | AgreeLikertScaleConfig
+  | TwoChoiceSliderConfig
+  | MultiSelectChoiceConfig
+  | TextMultipleChoiceConfig
+  | ImageMultipleChoiceConfig
+  | DropdownConfig
+  | TextEntryConfig
+  | BaseQuestionConfig;
+
+// ============================================================================
+// Type Guards
+// ============================================================================
+
+export function isNumericRankingConfig(config: QuestionConfig): config is NumericRankingConfig {
+  return config.uiVariant === "numeric-ranking";
+}
+
+export function isNumericScaleSliderConfig(config: QuestionConfig): config is NumericScaleSliderConfig {
+  return config.uiVariant === "numeric-scale-slider";
+}
+
+export function isCircleRankingConfig(config: QuestionConfig): config is CircleRankingConfig {
+  return config.uiVariant === "circle-ranking";
+}
+
+export function isRectangleRankingConfig(config: QuestionConfig): config is RectangleRankingConfig {
+  return config.uiVariant === "rectangle-ranking";
+}
+
+export function isThreeChoiceSliderConfig(config: QuestionConfig): config is ThreeChoiceSliderConfig {
+  return config.uiVariant === "three-choice-slider";
+}
+
+export function isAgreeLikertScaleConfig(config: QuestionConfig): config is AgreeLikertScaleConfig {
+  return config.uiVariant === "agree-likert-scale";
+}
+
+export function isTwoChoiceSliderConfig(config: QuestionConfig): config is TwoChoiceSliderConfig {
+  return config.uiVariant === "two-choice-slider";
+}
+
+export function isMultiSelectChoiceConfig(config: QuestionConfig): config is MultiSelectChoiceConfig {
+  return config.uiVariant === "multi-select-choice";
+}
+
+export function isTextMultipleChoiceConfig(config: QuestionConfig): config is TextMultipleChoiceConfig {
+  return config.uiVariant === "text-multiple-choice";
+}
+
+export function isImageMultipleChoiceConfig(config: QuestionConfig): config is ImageMultipleChoiceConfig {
+  return config.uiVariant === "image-multiple-choice";
+}
+
+export function isDropdownConfig(config: QuestionConfig): config is DropdownConfig {
+  return config.uiVariant === "dropdown";
+}
+
+export function isTextEntryConfig(config: QuestionConfig): config is TextEntryConfig {
+  return config.uiVariant === "text-entry";
+}
+
+// ============================================================================
+// Helper: Infer default uiVariant from question_type
+// ============================================================================
+
+import type { QuestionType } from "./normalized-types";
+
+/**
+ * Infer the default uiVariant when config.uiVariant is not set.
+ * Used for backwards compatibility with questions created before uiVariant was added.
+ */
+export function inferUiVariant(questionType: QuestionType): UiVariant {
+  switch (questionType) {
+    case "numeric":
+      return "numeric-scale-slider";
+    case "ranking":
+      return "rectangle-ranking";
+    case "single_choice":
+      return "text-multiple-choice";
+    case "multi_choice":
+      return "multi-select-choice";
+    case "likert":
+      return "agree-likert-scale";
+    case "free_text":
+      return "text-entry";
+    default:
+      return "text-entry";
+  }
+}

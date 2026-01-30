@@ -1,0 +1,158 @@
+"use client";
+
+import * as React from "react";
+import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
+import type { QuestionConfig, UiVariant } from "@/lib/surveys/question-config-types";
+import { inferUiVariant } from "@/lib/surveys/question-config-types";
+
+import StarRatingInput from "./StarRatingInput";
+import SliderInput from "./SliderInput";
+import RankOrderInput from "./RankOrderInput";
+import WhoseSideInput from "./WhoseSideInput";
+import MatrixLikertInput from "./MatrixLikertInput";
+import MultiSelectInput from "./MultiSelectInput";
+import SingleSelectInput from "./SingleSelectInput";
+import DropdownInput from "./DropdownInput";
+import TextEntryInput from "./TextEntryInput";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface QuestionRendererProps {
+  question: SurveyQuestion & { options: QuestionOption[] };
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled?: boolean;
+}
+
+// ============================================================================
+// Component
+// ============================================================================
+
+/**
+ * QuestionRenderer - Dispatches to the appropriate input component
+ * based on question_type and config.uiVariant.
+ */
+export default function QuestionRenderer({
+  question,
+  value,
+  onChange,
+  disabled = false,
+}: QuestionRendererProps) {
+  const config = question.config as QuestionConfig;
+  const uiVariant: UiVariant = config.uiVariant ?? inferUiVariant(question.question_type);
+
+  const commonProps = {
+    question,
+    disabled,
+  };
+
+  switch (uiVariant) {
+    // Numeric rating questions
+    case "numeric-ranking":
+      return (
+        <StarRatingInput
+          {...commonProps}
+          value={value as number | null}
+          onChange={onChange}
+        />
+      );
+
+    case "numeric-scale-slider":
+      return (
+        <SliderInput
+          {...commonProps}
+          value={value as number | null}
+          onChange={onChange}
+        />
+      );
+
+    // Ranking questions (drag and drop)
+    case "circle-ranking":
+    case "rectangle-ranking":
+      return (
+        <RankOrderInput
+          {...commonProps}
+          value={value as string[] | null}
+          onChange={onChange}
+        />
+      );
+
+    // Slider choice questions
+    case "two-choice-slider":
+      return (
+        <WhoseSideInput
+          {...commonProps}
+          value={value as string | null}
+          onChange={onChange}
+        />
+      );
+
+    case "three-choice-slider":
+    case "agree-likert-scale":
+      return (
+        <MatrixLikertInput
+          {...commonProps}
+          value={value as Record<string, string> | null}
+          onChange={onChange}
+        />
+      );
+
+    // Multiple choice questions
+    case "multi-select-choice":
+      return (
+        <MultiSelectInput
+          {...commonProps}
+          value={value as string[] | null}
+          onChange={onChange}
+        />
+      );
+
+    case "text-multiple-choice":
+      return (
+        <SingleSelectInput
+          {...commonProps}
+          value={value as string | null}
+          onChange={onChange}
+        />
+      );
+
+    case "image-multiple-choice":
+      return (
+        <SingleSelectInput
+          {...commonProps}
+          value={value as string | null}
+          onChange={onChange}
+          layout="grid"
+        />
+      );
+
+    case "dropdown":
+      return (
+        <DropdownInput
+          {...commonProps}
+          value={value as string | null}
+          onChange={onChange}
+        />
+      );
+
+    case "text-entry":
+      return (
+        <TextEntryInput
+          {...commonProps}
+          value={value as string | null}
+          onChange={onChange}
+        />
+      );
+
+    default:
+      return (
+        <div className="p-4 border border-red-300 bg-red-50 rounded-lg">
+          <p className="text-red-600 text-sm">
+            Unknown question type: {question.question_type} / {uiVariant}
+          </p>
+        </div>
+      );
+  }
+}
