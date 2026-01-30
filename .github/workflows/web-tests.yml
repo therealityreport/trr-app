@@ -36,7 +36,14 @@ jobs:
       - name: Run unit tests with coverage
         run: pnpm run test:ci -- --coverage
       - name: Build (no DATABASE_URL)
-        run: env -u DATABASE_URL pnpm run build
+        run: pnpm run build
+        env:
+          # Unset DATABASE_URL to test build without DB
+          DATABASE_URL: ""
+          # Provide placeholder Firebase config for build (pages prerender during build)
+          NEXT_PUBLIC_FIREBASE_API_KEY: "placeholder-api-key-for-build"
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "placeholder.firebaseapp.com"
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-build"
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         if: always()
