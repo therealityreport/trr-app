@@ -110,6 +110,38 @@ export interface TrrPerson {
   updated_at: string;
 }
 
+export interface TrrCastFandom {
+  id: string;
+  person_id: string;
+  source: string;
+  source_url: string;
+  page_title: string | null;
+  scraped_at: string;
+  // Biographical
+  full_name: string | null;
+  birthdate: string | null;
+  birthdate_display: string | null;
+  gender: string | null;
+  resides_in: string | null;
+  hair_color: string | null;
+  eye_color: string | null;
+  height_display: string | null;
+  weight_display: string | null;
+  // Relationships
+  romances: string[] | null;
+  family: Record<string, unknown> | null;
+  friends: Record<string, unknown> | null;
+  enemies: Record<string, unknown> | null;
+  // Show data
+  installment: string | null;
+  installment_url: string | null;
+  main_seasons_display: string | null;
+  summary: string | null;
+  taglines: Record<string, unknown> | null;
+  reunion_seating: Record<string, unknown> | null;
+  trivia: Record<string, unknown> | null;
+}
+
 // ============================================================================
 // Pagination
 // ============================================================================
@@ -582,6 +614,35 @@ export async function getPersonById(personId: string): Promise<TrrPerson | null>
   return data as TrrPerson;
 }
 
+/**
+ * Search people by name using PREFIX match (index-friendly).
+ * Uses `query%` pattern instead of `%query%` for better performance.
+ * Results are ordered by full_name ASC.
+ */
+export async function searchPeople(
+  query: string,
+  options?: PaginationOptions
+): Promise<TrrPerson[]> {
+  const { limit, offset } = normalizePagination(options);
+  const supabase = getSupabaseTrrCore();
+
+  // Use PREFIX match (query%) - much faster than contains (%query%)
+  // This matches "John Smith" when searching "john" but not "Smithjohn"
+  const { data, error } = await supabase
+    .from("people")
+    .select("id, full_name, known_for, external_ids, created_at, updated_at")
+    .ilike("full_name", `${query}%`)
+    .order("full_name", { ascending: true })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    console.error("[trr-shows-repository] searchPeople error:", error);
+    throw new Error(`Failed to search people: ${error.message}`);
+  }
+
+  return (data ?? []) as TrrPerson[];
+}
+
 // ============================================================================
 // Person Photo & Credit Functions
 // ============================================================================
@@ -921,4 +982,30 @@ export async function getAssetsByShowSeason(
   });
 
   return assets.slice(0, limit);
+}
+
+// ============================================================================
+// Fandom/Wikia Functions
+// ============================================================================
+
+/**
+ * Get Fandom/Wikia data for a person by their person_id.
+ */
+export async function getFandomDataByPersonId(
+  personId: string
+): Promise<TrrCastFandom[]> {
+  const supabase = getSupabaseTrrCore();
+
+  const { data, error } = await supabase
+    .from("cast_fandom")
+    .select("*")
+    .eq("person_id", personId)
+    .order("scraped_at", { ascending: false });
+
+  if (error) {
+    console.error("[trr-shows-repository] getFandomDataByPersonId error:", error);
+    throw new Error(`Failed to get fandom data: ${error.message}`);
+  }
+
+  return (data ?? []) as TrrCastFandom[];
 }
