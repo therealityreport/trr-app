@@ -663,6 +663,7 @@ export interface TrrPersonPhoto {
   title_names: string[] | null;
   metadata: Record<string, unknown> | null;
   fetched_at: string | null;
+  created_at: string | null;
 }
 
 export interface TrrPersonCredit {
@@ -678,6 +679,7 @@ export interface TrrPersonCredit {
 /**
  * Get all photos for a person, ordered by source then gallery_index.
  * Only returns photos with hosted_url (mirrored to CloudFront).
+ * Queries both cast_photos table AND media_links/media_assets for imported photos.
  */
 export async function getPhotosByPersonId(
   personId: string,
@@ -686,21 +688,119 @@ export async function getPhotosByPersonId(
   const { limit, offset } = normalizePagination(options);
   const supabase = getSupabaseTrrCore();
 
-  const { data, error } = await supabase
+  // Query 1: Get photos from cast_photos table
+  const { data: castPhotos, error: castError } = await supabase
     .from("cast_photos")
     .select("id, person_id, source, url, hosted_url, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at")
     .eq("person_id", personId)
     .not("hosted_url", "is", null)
     .order("source", { ascending: true })
-    .order("gallery_index", { ascending: true, nullsFirst: false })
-    .range(offset, offset + limit - 1);
+    .order("gallery_index", { ascending: true, nullsFirst: false });
 
-  if (error) {
-    console.error("[trr-shows-repository] getPhotosByPersonId error:", error);
-    throw new Error(`Failed to get photos: ${error.message}`);
+  if (castError) {
+    console.error("[trr-shows-repository] getPhotosByPersonId cast_photos error:", castError);
+    throw new Error(`Failed to get photos: ${castError.message}`);
   }
 
-  return (data ?? []) as TrrPersonPhoto[];
+  // Query 2: Get photos from media_links joined with media_assets
+  // These tables may not be in generated types, so we use explicit types
+  interface MediaLinkRow {
+    id: string;
+    entity_id: string;
+    media_asset_id: string;
+    kind: string;
+    position: number | null;
+    context: Record<string, unknown> | null;
+    created_at: string;
+  }
+  interface MediaAssetRow {
+    id: string;
+    source: string;
+    source_url: string | null;
+    hosted_url: string | null;
+    caption: string | null;
+    width: number | null;
+    height: number | null;
+    metadata: Record<string, unknown>;
+    fetched_at: string | null;
+  }
+
+  // First get media_links for this person
+  const { data: mediaLinksRaw, error: linksError } = await supabase
+    .from("media_links")
+    .select("id, entity_id, media_asset_id, kind, position, context, created_at")
+    .eq("entity_type", "person")
+    .eq("entity_id", personId)
+    .eq("kind", "gallery")
+    .order("position", { ascending: true, nullsFirst: false });
+
+  const mediaLinks = mediaLinksRaw as MediaLinkRow[] | null;
+
+  if (linksError) {
+    console.error("[trr-shows-repository] getPhotosByPersonId media_links error:", linksError);
+    // Don't fail completely if media_links query fails, just use cast_photos
+  }
+
+  // If we have media links, fetch the corresponding assets
+  let mediaPhotos: TrrPersonPhoto[] = [];
+  if (mediaLinks && mediaLinks.length > 0) {
+    const assetIds = mediaLinks.map(link => link.media_asset_id);
+    const { data: assetsRaw, error: assetsError } = await supabase
+      .from("media_assets")
+      .select("id, source, source_url, hosted_url, caption, width, height, metadata, fetched_at")
+      .in("id", assetIds)
+      .not("hosted_url", "is", null);
+
+    const assets = assetsRaw as MediaAssetRow[] | null;
+
+    if (assetsError) {
+      console.error("[trr-shows-repository] getPhotosByPersonId media_assets error:", assetsError);
+    } else if (assets) {
+      // Create a map for quick lookup
+      const assetMap = new Map(assets.map(a => [a.id, a]));
+
+      // Transform media_links + media_assets to TrrPersonPhoto format
+      mediaPhotos = mediaLinks
+        .map(link => {
+          const asset = assetMap.get(link.media_asset_id);
+          if (!asset || !asset.hosted_url) return null;
+
+          const context = link.context;
+          return {
+            id: link.id,
+            person_id: personId,
+            source: asset.source || "web_scrape",
+            url: asset.source_url,
+            hosted_url: asset.hosted_url,
+            caption: asset.caption,
+            width: asset.width,
+            height: asset.height,
+            context_type: context?.context_type as string | null ?? null,
+            season: context?.season as number | null ?? null,
+            people_names: null,
+            title_names: null,
+            metadata: asset.metadata,
+            fetched_at: asset.fetched_at,
+            created_at: link.created_at,
+          } as TrrPersonPhoto;
+        })
+        .filter((p): p is TrrPersonPhoto => p !== null);
+    }
+  }
+
+  // Merge both sources, cast_photos first then media_links
+  const allPhotos = [...(castPhotos ?? []) as TrrPersonPhoto[], ...mediaPhotos];
+
+  // Deduplicate by hosted_url (in case same image exists in both sources)
+  const seenUrls = new Set<string>();
+  const dedupedPhotos = allPhotos.filter(photo => {
+    if (!photo.hosted_url || seenUrls.has(photo.hosted_url)) return false;
+    seenUrls.add(photo.hosted_url);
+    return true;
+  });
+
+  // Apply pagination
+  return dedupedPhotos.slice(offset, offset + limit);
 }
 
 /**

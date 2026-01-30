@@ -11,6 +11,7 @@ import SocialPostsSection from "@/components/admin/social-posts-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
+import { ImageScrapeDrawer, type SeasonContext } from "@/components/admin/ImageScrapeDrawer";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -71,29 +72,57 @@ interface TrrCastMember {
 
 type TabId = "seasons" | "gallery" | "cast" | "surveys" | "social" | "details";
 
-// Cast photo with error handling - falls back to placeholder on broken images
-function CastPhoto({ src, alt }: { src: string; alt: string }) {
+// Generic gallery image with error handling - falls back to placeholder on broken images
+function GalleryImage({
+  src,
+  alt,
+  sizes = "200px",
+  className = "object-cover",
+  children,
+}: {
+  src: string;
+  alt: string;
+  sizes?: string;
+  className?: string;
+  children?: React.ReactNode;
+}) {
   const [hasError, setHasError] = useState(false);
 
   if (hasError) {
     return (
-      <div className="flex h-full items-center justify-center text-zinc-400">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-          <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+      <div className="flex h-full items-center justify-center bg-zinc-100 text-zinc-400">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
+          <path d="M21 15l-5-5L5 21" stroke="currentColor" strokeWidth="2" />
         </svg>
       </div>
     );
   }
 
   return (
-    <Image
+    <>
+      <Image
+        src={src}
+        alt={alt}
+        fill
+        className={className}
+        sizes={sizes}
+        onError={() => setHasError(true)}
+      />
+      {children}
+    </>
+  );
+}
+
+// Cast photo with error handling - falls back to placeholder on broken images
+function CastPhoto({ src, alt }: { src: string; alt: string }) {
+  return (
+    <GalleryImage
       src={src}
       alt={alt}
-      fill
-      className="object-cover transition hover:scale-105"
       sizes="200px"
-      onError={() => setHasError(true)}
+      className="object-cover transition hover:scale-105"
     />
   );
 }
@@ -158,12 +187,47 @@ export default function TrrShowDetailPage() {
   const [isCovered, setIsCovered] = useState(false);
   const [coverageLoading, setCoverageLoading] = useState(false);
 
+  // Image scrape drawer state
+  const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
+  const [scrapeDrawerContext, setScrapeDrawerContext] = useState<SeasonContext | null>(null);
+
+  // Refresh images state
+  const [refreshingCastImages, setRefreshingCastImages] = useState(false);
+  const [refreshCastProgress, setRefreshCastProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshingPersonIds, setRefreshingPersonIds] = useState<Record<string, boolean>>({});
+
   // Helper to get auth headers
   const getAuthHeaders = useCallback(async () => {
     const token = await auth.currentUser?.getIdToken();
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  // Refresh images for a person
+  const refreshPersonImages = useCallback(async (personId: string) => {
+    const headers = await getAuthHeaders();
+    const response = await fetch(
+      `/api/admin/trr-api/people/${personId}/refresh-images`,
+      {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ skip_mirror: false }),
+      }
+    );
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = data.error || data.detail || "Failed to refresh images";
+      throw new Error(message);
+    }
+
+    return data;
+  }, [getAuthHeaders]);
 
   // Fetch show details
   const fetchShow = useCallback(async () => {
@@ -381,6 +445,91 @@ export default function TrrShowDetailPage() {
     }
   }, [activeTab, selectedGallerySeason, loadGalleryAssets, seasons.length]);
 
+  const refreshCastImages = useCallback(async () => {
+    if (refreshingCastImages) return;
+
+    const personIds = Array.from(
+      new Set(cast.map((member) => member.person_id).filter(Boolean))
+    );
+
+    if (personIds.length === 0) {
+      setRefreshError("No cast members available to refresh.");
+      return;
+    }
+
+    setRefreshingCastImages(true);
+    setRefreshCastProgress({ current: 0, total: personIds.length });
+    setRefreshNotice(null);
+    setRefreshError(null);
+
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (let i = 0; i < personIds.length; i += 1) {
+      const personId = personIds[i];
+      setRefreshCastProgress({ current: i + 1, total: personIds.length });
+      try {
+        await refreshPersonImages(personId);
+        successCount += 1;
+      } catch (err) {
+        failureCount += 1;
+        console.error("Failed to refresh cast member images:", err);
+      }
+    }
+
+    setRefreshingCastImages(false);
+    setRefreshCastProgress(null);
+
+    if (successCount > 0) {
+      await fetchCast();
+      if (activeTab === "gallery") {
+        await loadGalleryAssets(selectedGallerySeason);
+      }
+    }
+
+    setRefreshNotice(
+      `Refreshed ${successCount}/${personIds.length} cast members${
+        failureCount ? ` (${failureCount} failed)` : ""
+      }.`
+    );
+  }, [
+    cast,
+    refreshPersonImages,
+    refreshingCastImages,
+    fetchCast,
+    activeTab,
+    loadGalleryAssets,
+    selectedGallerySeason,
+  ]);
+
+  const handleRefreshCastMember = useCallback(
+    async (personId: string, label: string) => {
+      if (!personId) return;
+
+      setRefreshingPersonIds((prev) => ({ ...prev, [personId]: true }));
+      setRefreshNotice(null);
+      setRefreshError(null);
+
+      try {
+        await refreshPersonImages(personId);
+        await fetchCast();
+        setRefreshNotice(`Refreshed images for ${label}.`);
+      } catch (err) {
+        console.error("Failed to refresh person images:", err);
+        setRefreshError(
+          err instanceof Error ? err.message : "Failed to refresh images"
+        );
+      } finally {
+        setRefreshingPersonIds((prev) => {
+          const next = { ...prev };
+          delete next[personId];
+          return next;
+        });
+      }
+    },
+    [refreshPersonImages, fetchCast]
+  );
+
   // Open lightbox for gallery asset
   const openAssetLightbox = (
     asset: SeasonAsset,
@@ -569,6 +718,26 @@ export default function TrrShowDetailPage() {
                   </button>
                 )}
 
+                <button
+                  onClick={refreshCastImages}
+                  disabled={refreshingCastImages || cast.length === 0}
+                  className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
+                  </svg>
+                  {refreshingCastImages
+                    ? refreshCastProgress
+                      ? `Refreshing ${refreshCastProgress.current}/${refreshCastProgress.total}`
+                      : "Refreshing..."
+                    : "Refresh Cast Images"}
+                </button>
+                {(refreshNotice || refreshError) && (
+                  <p className={`text-xs ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
+                    {refreshError || refreshNotice}
+                  </p>
+                )}
+
                 {/* Ratings */}
                 {show.tmdb_vote_average && (
                   <div className="flex items-center gap-1 text-sm">
@@ -687,9 +856,18 @@ export default function TrrShowDetailPage() {
                           )}
                         </div>
                       </div>
-                      <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                        {episodes.length} episodes
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
+                          {episodes.length} episodes
+                        </span>
+                        <button
+                          onClick={refreshCastImages}
+                          disabled={refreshingCastImages || cast.length === 0}
+                          className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                        >
+                          {refreshingCastImages ? "Refreshing..." : "Refresh Cast Images"}
+                        </button>
+                      </div>
                     </div>
                     <div className="space-y-3">
                       {episodes.map((episode) => (
@@ -715,11 +893,9 @@ export default function TrrShowDetailPage() {
                               }}
                               className="relative h-16 w-28 flex-shrink-0 overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
-                              <Image
+                              <GalleryImage
                                 src={episode.url_original_still}
                                 alt={episode.title || `Episode ${episode.episode_number}`}
-                                fill
-                                className="object-cover"
                                 sizes="112px"
                               />
                             </button>
@@ -798,27 +974,49 @@ export default function TrrShowDetailPage() {
                 <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
               </div>
 
-              {/* Season filter */}
-              <div className="mb-6 flex items-center gap-4">
-                <label className="text-sm font-medium text-zinc-700">
-                  Filter by season:
-                </label>
-                <select
-                  value={selectedGallerySeason}
-                  onChange={(e) =>
-                    setSelectedGallerySeason(
-                      e.target.value === "all" ? "all" : parseInt(e.target.value)
-                    )
-                  }
-                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
-                >
-                  <option value="all">All Seasons</option>
-                  {seasons.map((s) => (
-                    <option key={s.id} value={s.season_number}>
-                      Season {s.season_number}
-                    </option>
-                  ))}
-                </select>
+              {/* Season filter and Import button */}
+              <div className="mb-6 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <label className="text-sm font-medium text-zinc-700">
+                    Filter by season:
+                  </label>
+                  <select
+                    value={selectedGallerySeason}
+                    onChange={(e) =>
+                      setSelectedGallerySeason(
+                        e.target.value === "all" ? "all" : parseInt(e.target.value)
+                      )
+                    }
+                    className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
+                  >
+                    <option value="all">All Seasons</option>
+                    {seasons.map((s) => (
+                      <option key={s.id} value={s.season_number}>
+                        Season {s.season_number}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {/* Import Images button - only show when a specific season is selected */}
+                {selectedGallerySeason !== "all" && (
+                  <button
+                    onClick={() => {
+                      setScrapeDrawerContext({
+                        type: "season",
+                        showId: showId,
+                        showName: show.name,
+                        seasonNumber: selectedGallerySeason,
+                      });
+                      setScrapeDrawerOpen(true);
+                    }}
+                    className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Import Images
+                  </button>
+                )}
               </div>
 
               {galleryLoading ? (
@@ -842,17 +1040,15 @@ export default function TrrShowDetailPage() {
                           .filter((a) => a.type === "season")
                           .map((asset, i, arr) => (
                             <button
-                              key={asset.id}
+                              key={`${asset.id}-${i}`}
                               onClick={(e) =>
                                 openAssetLightbox(asset, i, arr, e.currentTarget)
                               }
                               className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
-                              <Image
+                              <GalleryImage
                                 src={asset.hosted_url}
                                 alt={asset.caption || "Season poster"}
-                                fill
-                                className="object-cover"
                                 sizes="200px"
                               />
                             </button>
@@ -873,17 +1069,15 @@ export default function TrrShowDetailPage() {
                           .filter((a) => a.type === "episode")
                           .map((asset, i, arr) => (
                             <button
-                              key={asset.id}
+                              key={`${asset.id}-${i}`}
                               onClick={(e) =>
                                 openAssetLightbox(asset, i, arr, e.currentTarget)
                               }
                               className="relative aspect-video overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
-                              <Image
+                              <GalleryImage
                                 src={asset.hosted_url}
                                 alt={asset.caption || "Episode still"}
-                                fill
-                                className="object-cover"
                                 sizes="150px"
                               />
                             </button>
@@ -903,17 +1097,15 @@ export default function TrrShowDetailPage() {
                           .filter((a) => a.type === "cast")
                           .map((asset, i, arr) => (
                             <button
-                              key={asset.id}
+                              key={`${asset.id}-${i}`}
                               onClick={(e) =>
                                 openAssetLightbox(asset, i, arr, e.currentTarget)
                               }
                               className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
-                              <Image
+                              <GalleryImage
                                 src={asset.hosted_url}
                                 alt={asset.caption || "Cast photo"}
-                                fill
-                                className="object-cover"
                                 sizes="180px"
                               />
                               {asset.person_name && (
@@ -945,9 +1137,18 @@ export default function TrrShowDetailPage() {
                     {show.name}
                   </h3>
                 </div>
-                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                  {cast.length} members
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
+                    {cast.length} members
+                  </span>
+                  <button
+                    onClick={refreshCastImages}
+                    disabled={refreshingCastImages || cast.length === 0}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {refreshingCastImages ? "Refreshing..." : "Refresh Cast Images"}
+                  </button>
+                </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {cast.map((member) => (
@@ -987,6 +1188,23 @@ export default function TrrShowDetailPage() {
                         </span>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handleRefreshCastMember(
+                          member.person_id,
+                          member.full_name || member.cast_member_name || "Cast member"
+                        );
+                      }}
+                      disabled={Boolean(refreshingPersonIds[member.person_id])}
+                      className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                    >
+                      {refreshingPersonIds[member.person_id]
+                        ? "Refreshing..."
+                        : "Refresh Images"}
+                    </button>
                   </Link>
                 ))}
               </div>
@@ -1184,6 +1402,24 @@ export default function TrrShowDetailPage() {
             hasPrevious={assetLightbox.index > 0}
             hasNext={assetLightbox.index < assetLightbox.filteredAssets.length - 1}
             triggerRef={assetTriggerRef as React.RefObject<HTMLElement | null>}
+          />
+        )}
+
+        {/* Image scrape drawer */}
+        {scrapeDrawerContext && (
+          <ImageScrapeDrawer
+            isOpen={scrapeDrawerOpen}
+            onClose={() => {
+              setScrapeDrawerOpen(false);
+              setScrapeDrawerContext(null);
+            }}
+            entityContext={scrapeDrawerContext}
+            onImportComplete={() => {
+              // Refresh gallery after import
+              if (activeTab === "gallery") {
+                loadGalleryAssets(selectedGallerySeason);
+              }
+            }}
           />
         )}
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -9,6 +9,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
+import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import { mapPhotoToMetadata } from "@/lib/photo-metadata";
 
 // Types
@@ -37,7 +38,10 @@ interface TrrPersonPhoto {
   title_names: string[] | null;
   metadata: Record<string, unknown> | null;
   fetched_at: string | null;
+  created_at: string | null;
 }
+
+type GallerySortOption = "newest" | "oldest" | "source";
 
 interface TrrPersonCredit {
   id: string;
@@ -85,6 +89,37 @@ interface TrrCastFandom {
 }
 
 type TabId = "overview" | "gallery" | "credits" | "fandom";
+
+// Profile photo with error handling
+function ProfilePhoto({ url, name }: { url: string | null | undefined; name: string }) {
+  const [hasError, setHasError] = useState(false);
+
+  if (!url || hasError) {
+    return (
+      <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
+        <div className="flex h-full items-center justify-center text-zinc-400">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+            <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+          </svg>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
+      <Image
+        src={url}
+        alt={name}
+        fill
+        className="object-cover"
+        sizes="128px"
+        onError={() => setHasError(true)}
+      />
+    </div>
+  );
+}
 
 // Photo with error handling
 function GalleryPhoto({
@@ -174,12 +209,86 @@ export default function PersonProfilePage() {
   const [coverPhoto, setCoverPhoto] = useState<CoverPhoto | null>(null);
   const [settingCover, setSettingCover] = useState(false);
 
+  // Image scrape drawer state
+  const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
+
+  // Refresh images state
+  const [refreshingImages, setRefreshingImages] = useState(false);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  // Gallery filter/sort state
+  const [gallerySourceFilter, setGallerySourceFilter] = useState<string>("all");
+  const [gallerySortOption, setGallerySortOption] = useState<GallerySortOption>("newest");
+
+  // Compute unique sources from photos
+  const uniqueSources = useMemo(() => {
+    const sources = new Set(photos.map(p => p.source).filter(Boolean));
+    return Array.from(sources).sort();
+  }, [photos]);
+
+  // Filter and sort photos for gallery
+  const filteredPhotos = useMemo(() => {
+    let result = [...photos];
+
+    // Apply source filter
+    if (gallerySourceFilter !== "all") {
+      result = result.filter(p => p.source === gallerySourceFilter);
+    }
+
+    // Apply sort
+    switch (gallerySortOption) {
+      case "newest":
+        result.sort((a, b) => {
+          const dateA = a.created_at || a.fetched_at || "";
+          const dateB = b.created_at || b.fetched_at || "";
+          return dateB.localeCompare(dateA);
+        });
+        break;
+      case "oldest":
+        result.sort((a, b) => {
+          const dateA = a.created_at || a.fetched_at || "";
+          const dateB = b.created_at || b.fetched_at || "";
+          return dateA.localeCompare(dateB);
+        });
+        break;
+      case "source":
+        result.sort((a, b) => (a.source || "").localeCompare(b.source || ""));
+        break;
+    }
+
+    return result;
+  }, [photos, gallerySourceFilter, gallerySortOption]);
+
   // Helper to get auth headers
   const getAuthHeaders = useCallback(async () => {
     const token = await auth.currentUser?.getIdToken();
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  // Refresh images for this person
+  const refreshPersonImages = useCallback(
+    async (options?: { skip_mirror?: boolean }) => {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/people/${personId}/refresh-images`,
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(options ?? {}),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = data.error || data.detail || "Failed to refresh images";
+        throw new Error(message);
+      }
+      return data;
+    },
+    [getAuthHeaders, personId]
+  );
 
   // Fetch person details
   const fetchPerson = useCallback(async () => {
@@ -286,6 +395,41 @@ export default function PersonProfilePage() {
     }
   };
 
+  const handleRefreshImages = useCallback(async () => {
+    if (refreshingImages) return;
+
+    setRefreshingImages(true);
+    setRefreshNotice(null);
+    setRefreshError(null);
+
+    try {
+      const result = await refreshPersonImages({ skip_mirror: false });
+      await Promise.all([fetchPhotos(), fetchCoverPhoto()]);
+
+      let summaryText: string | null = null;
+      if (result && typeof result === "object" && "summary" in result) {
+        const summary = (result as { summary?: unknown }).summary;
+        if (typeof summary === "string") {
+          summaryText = summary;
+        } else if (summary && typeof summary === "object") {
+          const parts = Object.entries(summary as Record<string, unknown>)
+            .filter(([, value]) => typeof value === "number")
+            .map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`);
+          summaryText = parts.length > 0 ? parts.join(", ") : null;
+        }
+      }
+
+      setRefreshNotice(summaryText || "Images refreshed.");
+    } catch (err) {
+      console.error("Failed to refresh images:", err);
+      setRefreshError(
+        err instanceof Error ? err.message : "Failed to refresh images"
+      );
+    } finally {
+      setRefreshingImages(false);
+    }
+  }, [refreshingImages, refreshPersonImages, fetchPhotos, fetchCoverPhoto]);
+
   // Initial load
   useEffect(() => {
     if (!hasAccess) return;
@@ -311,13 +455,13 @@ export default function PersonProfilePage() {
     setLightboxOpen(true);
   };
 
-  // Navigate between photos in lightbox
+  // Navigate between photos in lightbox (uses filteredPhotos)
   const navigateLightbox = (direction: "prev" | "next") => {
     if (!lightboxPhoto) return;
     const newIndex =
       direction === "prev" ? lightboxPhoto.index - 1 : lightboxPhoto.index + 1;
-    if (newIndex >= 0 && newIndex < photos.length) {
-      setLightboxPhoto({ photo: photos[newIndex], index: newIndex });
+    if (newIndex >= 0 && newIndex < filteredPhotos.length) {
+      setLightboxPhoto({ photo: filteredPhotos[newIndex], index: newIndex });
     }
   };
 
@@ -402,24 +546,7 @@ export default function PersonProfilePage() {
             </div>
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
               {/* Profile Photo */}
-              <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
-                {primaryPhotoUrl ? (
-                  <Image
-                    src={primaryPhotoUrl}
-                    alt={person.full_name}
-                    fill
-                    className="object-cover"
-                    sizes="128px"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-zinc-400">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                      <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                    </svg>
-                  </div>
-                )}
-              </div>
+              <ProfilePhoto url={primaryPhotoUrl} name={person.full_name} />
 
               {/* Person Info */}
               <div className="flex-1">
@@ -448,7 +575,19 @@ export default function PersonProfilePage() {
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
                     {credits.length} credits
                   </span>
+                  <button
+                    onClick={handleRefreshImages}
+                    disabled={refreshingImages}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {refreshingImages ? "Refreshing..." : "Refresh Images"}
+                  </button>
                 </div>
+                {(refreshNotice || refreshError) && (
+                  <p className={`mt-2 text-xs ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
+                    {refreshError || refreshNotice}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -612,16 +751,84 @@ export default function PersonProfilePage() {
           {/* Gallery Tab */}
           {activeTab === "gallery" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Photo Gallery
-                </p>
-                <h3 className="text-xl font-bold text-zinc-900">
-                  {person.full_name}
-                </h3>
+              <div className="mb-6 flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Photo Gallery
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">
+                    {person.full_name}
+                  </h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleRefreshImages}
+                    disabled={refreshingImages}
+                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
+                    </svg>
+                    {refreshingImages ? "Refreshing..." : "Refresh Images"}
+                  </button>
+                  <button
+                    onClick={() => setScrapeDrawerOpen(true)}
+                    className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Import Images
+                  </button>
+                </div>
               </div>
+
+              {/* Filter and Sort Controls */}
+              <div className="mb-6 flex flex-wrap items-center gap-4">
+                {/* Source Filter */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-zinc-700">Source:</label>
+                  <select
+                    value={gallerySourceFilter}
+                    onChange={(e) => setGallerySourceFilter(e.target.value)}
+                    className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                  >
+                    <option value="all">All Sources ({photos.length})</option>
+                    {uniqueSources.map((source) => {
+                      const count = photos.filter(p => p.source === source).length;
+                      return (
+                        <option key={source} value={source}>
+                          {source} ({count})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* Sort */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-zinc-700">Sort:</label>
+                  <select
+                    value={gallerySortOption}
+                    onChange={(e) => setGallerySortOption(e.target.value as GallerySortOption)}
+                    className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                  >
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                    <option value="source">By Source</option>
+                  </select>
+                </div>
+
+                {/* Count indicator */}
+                {gallerySourceFilter !== "all" && (
+                  <span className="text-sm text-zinc-500">
+                    Showing {filteredPhotos.length} of {photos.length} photos
+                  </span>
+                )}
+              </div>
+
               <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {photos.map((photo, index) => (
+                {filteredPhotos.map((photo, index) => (
                   <div
                     key={photo.id}
                     role="button"
@@ -652,6 +859,11 @@ export default function PersonProfilePage() {
                   </div>
                 ))}
               </div>
+              {filteredPhotos.length === 0 && photos.length > 0 && (
+                <p className="text-sm text-zinc-500">
+                  No photos match the current filter.
+                </p>
+              )}
               {photos.length === 0 && (
                 <p className="text-sm text-zinc-500">
                   No photos available for this person.
@@ -827,14 +1039,29 @@ export default function PersonProfilePage() {
             isOpen={lightboxOpen}
             onClose={closeLightbox}
             metadata={mapPhotoToMetadata(lightboxPhoto.photo)}
-            position={{ current: lightboxPhoto.index + 1, total: photos.length }}
+            position={{ current: lightboxPhoto.index + 1, total: filteredPhotos.length }}
             onPrevious={() => navigateLightbox("prev")}
             onNext={() => navigateLightbox("next")}
             hasPrevious={lightboxPhoto.index > 0}
-            hasNext={lightboxPhoto.index < photos.length - 1}
+            hasNext={lightboxPhoto.index < filteredPhotos.length - 1}
             triggerRef={lightboxTriggerRef as React.RefObject<HTMLElement | null>}
           />
         )}
+
+        {/* Image scrape drawer */}
+        <ImageScrapeDrawer
+          isOpen={scrapeDrawerOpen}
+          onClose={() => setScrapeDrawerOpen(false)}
+          entityContext={{
+            type: "person",
+            personId: personId,
+            personName: person.full_name,
+          } as PersonContext}
+          onImportComplete={() => {
+            // Refresh photos after import
+            fetchPhotos();
+          }}
+        />
       </div>
     </ClientOnly>
   );
