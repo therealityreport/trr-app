@@ -85,7 +85,20 @@ const ChevronDownIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-interface ImageLightboxProps {
+export type ImageType = "cast" | "episode" | "season";
+
+interface ImageManagementProps {
+  imageType?: ImageType;
+  imageId?: string;
+  isArchived?: boolean;
+  canManage?: boolean;
+  onArchive?: () => Promise<void>;
+  onUnarchive?: () => Promise<void>;
+  onDelete?: () => Promise<void>;
+  onReassign?: () => void;
+}
+
+interface ImageLightboxProps extends ImageManagementProps {
   src: string;
   alt: string;
   isOpen: boolean;
@@ -102,13 +115,35 @@ interface ImageLightboxProps {
 interface MetadataPanelProps {
   metadata: PhotoMetadata;
   isExpanded: boolean;
+  management?: {
+    isArchived?: boolean;
+    canManage?: boolean;
+    onArchive?: () => Promise<void>;
+    onUnarchive?: () => Promise<void>;
+    onDelete?: () => Promise<void>;
+    onReassign?: () => void;
+  };
 }
 
-function MetadataPanel({ metadata, isExpanded }: MetadataPanelProps) {
+function MetadataPanel({ metadata, isExpanded, management }: MetadataPanelProps) {
   const [showFullCaption, setShowFullCaption] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const captionTruncateLength = 200;
   const needsTruncation =
     metadata.caption && metadata.caption.length > captionTruncateLength;
+
+  const handleAction = async (
+    action: "archive" | "unarchive" | "delete",
+    handler?: () => Promise<void>
+  ) => {
+    if (!handler || actionLoading) return;
+    setActionLoading(action);
+    try {
+      await handler();
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   return (
     <div
@@ -241,6 +276,56 @@ function MetadataPanel({ metadata, isExpanded }: MetadataPanelProps) {
             </p>
           </div>
         )}
+
+        {/* Management Actions */}
+        {management?.canManage && (
+          <div className="mt-6 pt-4 border-t border-white/10">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Actions
+            </span>
+            <div className="mt-2 space-y-2">
+              {management.isArchived ? (
+                <button
+                  onClick={() => handleAction("unarchive", management.onUnarchive)}
+                  disabled={actionLoading !== null}
+                  className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
+                >
+                  {actionLoading === "unarchive" ? "Unarchiving..." : "📦 Unarchive"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleAction("archive", management.onArchive)}
+                  disabled={actionLoading !== null}
+                  className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
+                >
+                  {actionLoading === "archive" ? "Archiving..." : "📦 Archive"}
+                </button>
+              )}
+              <button
+                onClick={() => management.onReassign?.()}
+                disabled={actionLoading !== null}
+                className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
+              >
+                📁 Re-assign
+              </button>
+              <button
+                onClick={async () => {
+                  if (
+                    confirm(
+                      "Are you sure you want to permanently delete this image? This action cannot be undone."
+                    )
+                  ) {
+                    await handleAction("delete", management.onDelete);
+                  }
+                }}
+                disabled={actionLoading !== null}
+                className="w-full rounded bg-red-500/20 px-3 py-2 text-sm text-red-300 hover:bg-red-500/30 text-left disabled:opacity-50"
+              >
+                {actionLoading === "delete" ? "Deleting..." : "🗑️ Delete"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -275,6 +360,13 @@ export function ImageLightbox({
   hasPrevious = false,
   hasNext = false,
   triggerRef,
+  // Management props (imageType/imageId used by parent to construct handlers)
+  isArchived,
+  canManage,
+  onArchive,
+  onUnarchive,
+  onDelete,
+  onReassign,
 }: ImageLightboxProps) {
   const [showMetadata, setShowMetadata] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -477,7 +569,22 @@ export function ImageLightbox({
 
         {/* Metadata panel (overlay) */}
         {metadata && (
-          <MetadataPanel metadata={metadata} isExpanded={showMetadata} />
+          <MetadataPanel
+            metadata={metadata}
+            isExpanded={showMetadata}
+            management={
+              canManage
+                ? {
+                    isArchived,
+                    canManage,
+                    onArchive,
+                    onUnarchive,
+                    onDelete,
+                    onReassign,
+                  }
+                : undefined
+            }
+          />
         )}
       </div>
 
