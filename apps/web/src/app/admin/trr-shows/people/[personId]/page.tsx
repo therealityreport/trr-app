@@ -516,19 +516,17 @@ export default function PersonProfilePage() {
                   )}
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {photos.slice(0, 6).map((photo) => (
-                    <div
+                  {photos.slice(0, 6).map((photo, index) => (
+                    <button
                       key={photo.id}
-                      className="relative aspect-square overflow-hidden rounded-lg bg-zinc-200"
+                      onClick={(e) => openLightbox(photo, index, e.currentTarget)}
+                      className="relative aspect-square overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                     >
                       <GalleryPhoto
                         photo={photo}
-                        onClick={() => openLightbox(
-                          photo.hosted_url || photo.url || "",
-                          photo.caption || person.full_name
-                        )}
+                        onClick={() => {}}
                       />
-                    </div>
+                    </button>
                   ))}
                 </div>
                 {photos.length === 0 && (
@@ -623,17 +621,15 @@ export default function PersonProfilePage() {
                 </h3>
               </div>
               <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {photos.map((photo) => (
-                  <div
+                {photos.map((photo, index) => (
+                  <button
                     key={photo.id}
-                    className="group relative aspect-square overflow-hidden rounded-lg bg-zinc-200"
+                    onClick={(e) => openLightbox(photo, index, e.currentTarget)}
+                    className="group relative aspect-square overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                   >
                     <GalleryPhoto
                       photo={photo}
-                      onClick={() => openLightbox(
-                        photo.hosted_url || photo.url || "",
-                        photo.caption || person.full_name
-                      )}
+                      onClick={() => {}}
                       isCover={coverPhoto?.photo_id === photo.id}
                       onSetCover={photo.hosted_url ? () => handleSetCover(photo) : undefined}
                       settingCover={settingCover}
@@ -645,7 +641,7 @@ export default function PersonProfilePage() {
                         {photo.season && ` • S${photo.season}`}
                       </p>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
               {photos.length === 0 && (
@@ -815,16 +811,20 @@ export default function PersonProfilePage() {
           )}
         </main>
 
-        {/* Lightbox */}
-        {lightboxImage && (
+        {/* Lightbox with metadata and navigation */}
+        {lightboxPhoto && (
           <ImageLightbox
-            src={lightboxImage.src}
-            alt={lightboxImage.alt}
+            src={lightboxPhoto.photo.hosted_url || lightboxPhoto.photo.url || ""}
+            alt={lightboxPhoto.photo.caption || person.full_name}
             isOpen={lightboxOpen}
-            onClose={() => {
-              setLightboxOpen(false);
-              setLightboxImage(null);
-            }}
+            onClose={closeLightbox}
+            metadata={mapPhotoToMetadata(lightboxPhoto.photo)}
+            position={{ current: lightboxPhoto.index + 1, total: photos.length }}
+            onPrevious={() => navigateLightbox("prev")}
+            onNext={() => navigateLightbox("next")}
+            hasPrevious={lightboxPhoto.index > 0}
+            hasNext={lightboxPhoto.index < photos.length - 1}
+            triggerRef={lightboxTriggerRef as React.RefObject<HTMLElement | null>}
           />
         )}
       </div>
