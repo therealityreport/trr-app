@@ -199,7 +199,7 @@ export default function PersonProfilePage() {
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/photos?limit=100`,
+        `/api/admin/trr-api/people/${personId}/photos?limit=500`,
         { headers }
       );
       if (!response.ok) throw new Error("Failed to fetch photos");
