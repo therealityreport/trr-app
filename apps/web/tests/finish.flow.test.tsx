@@ -6,7 +6,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 const replace = vi.fn();
 const router = { replace };
 
-2vi.mock('next/navigation', () => ({
+vi.mock('next/navigation', () => ({
   useRouter: () => router,
 }));
 
