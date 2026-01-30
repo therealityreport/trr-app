@@ -13,6 +13,13 @@ const ADMIN_TOOLS = [
     badge: "API",
   },
   {
+    key: "scrape-images",
+    title: "Scrape Images",
+    description: "Import images from URLs (like Deadline articles) into show/season galleries on S3.",
+    href: "/admin/scrape-images" as const,
+    badge: "Media",
+  },
+  {
     key: "survey-responses",
     title: "Survey Responses",
     description: "Browse, filter, and export every survey captured in the TRR Postgres database.",
