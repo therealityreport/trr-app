@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -9,6 +9,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
+import { mapPhotoToMetadata } from "@/lib/photo-metadata";
 
 // Types
 interface TrrPerson {
@@ -31,6 +32,11 @@ interface TrrPersonPhoto {
   height: number | null;
   context_type: string | null;
   season: number | null;
+  // Metadata fields for lightbox display
+  people_names: string[] | null;
+  title_names: string[] | null;
+  metadata: Record<string, unknown> | null;
+  fetched_at: string | null;
 }
 
 interface TrrPersonCredit {
@@ -156,9 +162,13 @@ export default function PersonProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Lightbox state
+  // Lightbox state - track full photo object + index for navigation
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [lightboxImage, setLightboxImage] = useState<{ src: string; alt: string } | null>(null);
+  const [lightboxPhoto, setLightboxPhoto] = useState<{
+    photo: TrrPersonPhoto;
+    index: number;
+  } | null>(null);
+  const lightboxTriggerRef = useRef<HTMLElement | null>(null);
 
   // Cover photo state
   const [coverPhoto, setCoverPhoto] = useState<CoverPhoto | null>(null);
@@ -290,10 +300,31 @@ export default function PersonProfilePage() {
     loadData();
   }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, fetchFandomData]);
 
-  // Open lightbox
-  const openLightbox = (src: string, alt: string) => {
-    setLightboxImage({ src, alt });
+  // Open lightbox with photo, index, and trigger element for focus restoration
+  const openLightbox = (
+    photo: TrrPersonPhoto,
+    index: number,
+    triggerElement: HTMLElement
+  ) => {
+    lightboxTriggerRef.current = triggerElement;
+    setLightboxPhoto({ photo, index });
     setLightboxOpen(true);
+  };
+
+  // Navigate between photos in lightbox
+  const navigateLightbox = (direction: "prev" | "next") => {
+    if (!lightboxPhoto) return;
+    const newIndex =
+      direction === "prev" ? lightboxPhoto.index - 1 : lightboxPhoto.index + 1;
+    if (newIndex >= 0 && newIndex < photos.length) {
+      setLightboxPhoto({ photo: photos[newIndex], index: newIndex });
+    }
+  };
+
+  // Close lightbox and clean up state
+  const closeLightbox = () => {
+    setLightboxOpen(false);
+    setLightboxPhoto(null);
   };
 
   // Get primary photo - use cover photo if set, otherwise first hosted photo
@@ -835,36 +866,102 @@ function FandomList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function FandomJsonList({ title, data }: { title: string; data: Record<string, unknown> }) {
-  const entries = Object.entries(data);
-  if (entries.length === 0) return null;
+function FandomJsonList({ title, data }: { title: string; data: Record<string, unknown> | unknown[] }) {
+  // Handle both array and object formats
+  const items: string[] = [];
+
+  if (Array.isArray(data)) {
+    // Array of objects like [{name: "Person", relation: "Friend"}] or just strings
+    for (const item of data) {
+      if (typeof item === 'string') {
+        items.push(item);
+      } else if (item && typeof item === 'object') {
+        // Try to extract meaningful display text from the object
+        const obj = item as Record<string, unknown>;
+        if (obj.name) {
+          const relation = obj.relation ? ` (${obj.relation})` : '';
+          items.push(`${obj.name}${relation}`);
+        } else {
+          // Fall back to showing the first string value found
+          const firstVal = Object.values(obj).find(v => typeof v === 'string');
+          if (firstVal) items.push(firstVal as string);
+        }
+      }
+    }
+  } else {
+    // Object format like {key: value}
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === 'string') {
+        items.push(`${key}: ${value}`);
+      } else if (value && typeof value === 'object') {
+        const obj = value as Record<string, unknown>;
+        if (obj.name) {
+          items.push(`${key}: ${obj.name}`);
+        }
+      }
+    }
+  }
+
+  if (items.length === 0) return null;
   return (
     <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 p-3">
       <p className="text-xs font-semibold text-zinc-500 mb-2">{title}</p>
       <ul className="space-y-1">
-        {entries.map(([key, value], i) => (
-          <li key={i} className="text-sm text-zinc-700">
-            <span className="font-medium">{key}:</span> {String(value)}
-          </li>
+        {items.map((item, i) => (
+          <li key={i} className="text-sm text-zinc-700">• {item}</li>
         ))}
       </ul>
     </div>
   );
 }
 
-function FandomTaglines({ taglines }: { taglines: Record<string, unknown> }) {
-  const entries = Object.entries(taglines);
-  if (entries.length === 0) return null;
+function FandomTaglines({ taglines }: { taglines: Record<string, unknown> | unknown[] }) {
+  // Handle both array and object formats
+  const items: { season: string; tagline: string }[] = [];
+
+  if (Array.isArray(taglines)) {
+    // Array format like [{season: "1", tagline: "Quote"}]
+    for (const item of taglines) {
+      if (item && typeof item === 'object') {
+        const obj = item as Record<string, unknown>;
+        const season = obj.season ? String(obj.season) : obj.year ? String(obj.year) : `#${items.length + 1}`;
+        const rawTagline = obj.tagline || obj.quote || obj.text;
+        if (rawTagline) {
+          // Strip outer quotes if present (data often has embedded quotes)
+          let tagline = String(rawTagline);
+          if (tagline.startsWith('"') && tagline.endsWith('"')) {
+            tagline = tagline.slice(1, -1);
+          }
+          items.push({ season, tagline });
+        }
+      } else if (typeof item === 'string') {
+        items.push({ season: `#${items.length + 1}`, tagline: item });
+      }
+    }
+  } else {
+    // Object format like {"Season 1": "Quote"}
+    for (const [season, tagline] of Object.entries(taglines)) {
+      if (typeof tagline === 'string') {
+        items.push({ season, tagline });
+      } else if (tagline && typeof tagline === 'object') {
+        const obj = tagline as Record<string, unknown>;
+        const text = obj.tagline || obj.quote || obj.text;
+        if (text) items.push({ season, tagline: String(text) });
+      }
+    }
+  }
+
+  if (items.length === 0) return null;
   return (
     <div className="mt-6">
       <h4 className="text-sm font-semibold text-zinc-700 mb-3">Taglines</h4>
       <div className="space-y-2">
-        {entries.map(([season, tagline], i) => (
+        {items.map((item, i) => (
           <div key={i} className="flex gap-3 p-3 rounded-lg bg-amber-50 border border-amber-100">
             <span className="text-xs font-semibold text-amber-700 bg-amber-200 px-2 py-0.5 rounded h-fit">
-              {season}
+              {item.season}
             </span>
-            <p className="text-sm text-amber-900 italic">&ldquo;{String(tagline)}&rdquo;</p>
+            <p className="text-sm text-amber-900 italic">&ldquo;{item.tagline}&rdquo;</p>
           </div>
         ))}
       </div>
@@ -873,7 +970,31 @@ function FandomTaglines({ taglines }: { taglines: Record<string, unknown> }) {
 }
 
 function FandomTrivia({ trivia }: { trivia: Record<string, unknown> | unknown[] }) {
-  const items = Array.isArray(trivia) ? trivia : Object.values(trivia);
+  // Handle both array and object formats
+  const items: string[] = [];
+
+  if (Array.isArray(trivia)) {
+    for (const item of trivia) {
+      if (typeof item === 'string') {
+        items.push(item);
+      } else if (item && typeof item === 'object') {
+        const obj = item as Record<string, unknown>;
+        const text = obj.text || obj.fact || obj.trivia || obj.content;
+        if (text) items.push(String(text));
+      }
+    }
+  } else {
+    for (const value of Object.values(trivia)) {
+      if (typeof value === 'string') {
+        items.push(value);
+      } else if (value && typeof value === 'object') {
+        const obj = value as Record<string, unknown>;
+        const text = obj.text || obj.fact || obj.trivia || obj.content;
+        if (text) items.push(String(text));
+      }
+    }
+  }
+
   if (items.length === 0) return null;
   return (
     <div className="mt-6">
@@ -881,7 +1002,7 @@ function FandomTrivia({ trivia }: { trivia: Record<string, unknown> | unknown[] 
       <ul className="space-y-2">
         {items.map((item, i) => (
           <li key={i} className="text-sm text-zinc-600 pl-4 border-l-2 border-zinc-200">
-            {String(item)}
+            {item}
           </li>
         ))}
       </ul>
@@ -889,17 +1010,44 @@ function FandomTrivia({ trivia }: { trivia: Record<string, unknown> | unknown[] 
   );
 }
 
-function FandomReunionSeating({ seating }: { seating: Record<string, unknown> }) {
-  const entries = Object.entries(seating);
-  if (entries.length === 0) return null;
+function FandomReunionSeating({ seating }: { seating: Record<string, unknown> | unknown[] }) {
+  // Handle both array and object formats
+  const items: { reunion: string; position: string }[] = [];
+
+  if (Array.isArray(seating)) {
+    // Array format like [{reunion: "Season 1 Reunion", position: "3"}]
+    for (const item of seating) {
+      if (item && typeof item === 'object') {
+        const obj = item as Record<string, unknown>;
+        const season = obj.season;
+        const seatOrder = obj.seat_order ?? obj.position ?? obj.seat;
+        if (season !== undefined && seatOrder) {
+          items.push({ reunion: `Season ${season} Reunion`, position: String(seatOrder) });
+        }
+      }
+    }
+  } else {
+    // Object format like {"Season 1 Reunion": "3"}
+    for (const [reunion, position] of Object.entries(seating)) {
+      if (typeof position === 'string' || typeof position === 'number') {
+        items.push({ reunion, position: String(position) });
+      } else if (position && typeof position === 'object') {
+        const obj = position as Record<string, unknown>;
+        const pos = obj.position || obj.seat || obj.order;
+        if (pos !== undefined) items.push({ reunion, position: String(pos) });
+      }
+    }
+  }
+
+  if (items.length === 0) return null;
   return (
     <div className="mt-6">
       <h4 className="text-sm font-semibold text-zinc-700 mb-3">Reunion Seating</h4>
       <div className="grid gap-2 sm:grid-cols-2">
-        {entries.map(([reunion, position], i) => (
+        {items.map((item, i) => (
           <div key={i} className="flex justify-between p-2 rounded bg-zinc-50 text-sm">
-            <span className="text-zinc-600">{reunion}</span>
-            <span className="font-medium text-zinc-900">{String(position)}</span>
+            <span className="text-zinc-600">{item.reunion}</span>
+            <span className="font-medium text-zinc-900">{item.position}</span>
           </div>
         ))}
       </div>
