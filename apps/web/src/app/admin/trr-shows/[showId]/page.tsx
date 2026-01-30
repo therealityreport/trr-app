@@ -12,6 +12,7 @@ import SurveysSection from "@/components/admin/surveys-section";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
+import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
 interface TrrShow {
@@ -68,7 +69,7 @@ interface TrrCastMember {
   photo_url: string | null;
 }
 
-type TabId = "seasons" | "cast" | "surveys" | "social" | "details";
+type TabId = "seasons" | "gallery" | "cast" | "surveys" | "social" | "details";
 
 // Cast photo with error handling - falls back to placeholder on broken images
 function CastPhoto({ src, alt }: { src: string; alt: string }) {
@@ -137,6 +138,21 @@ export default function TrrShowDetailPage() {
     seasonEpisodes: TrrEpisode[];
   } | null>(null);
   const episodeTriggerRef = useRef<HTMLElement | null>(null);
+
+  // Gallery state
+  const [galleryAssets, setGalleryAssets] = useState<SeasonAsset[]>([]);
+  const [selectedGallerySeason, setSelectedGallerySeason] = useState<
+    number | "all"
+  >("all");
+  const [galleryLoading, setGalleryLoading] = useState(false);
+
+  // Gallery asset lightbox state
+  const [assetLightbox, setAssetLightbox] = useState<{
+    asset: SeasonAsset;
+    index: number;
+    filteredAssets: SeasonAsset[];
+  } | null>(null);
+  const assetTriggerRef = useRef<HTMLElement | null>(null);
 
   // Covered shows state
   const [isCovered, setIsCovered] = useState(false);
@@ -321,6 +337,108 @@ export default function TrrShowDetailPage() {
     setEpisodeLightbox(null);
   };
 
+  // Load gallery assets for a season (or all seasons)
+  const loadGalleryAssets = useCallback(
+    async (seasonNumber: number | "all") => {
+      setGalleryLoading(true);
+      try {
+        const headers = await getAuthHeaders();
+        if (seasonNumber === "all") {
+          // Fetch for all seasons
+          const allAssets: SeasonAsset[] = [];
+          for (const season of seasons) {
+            const res = await fetch(
+              `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets`,
+              { headers }
+            );
+            if (res.ok) {
+              const data = await res.json();
+              allAssets.push(...(data.assets || []));
+            }
+          }
+          setGalleryAssets(allAssets);
+        } else {
+          const res = await fetch(
+            `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`,
+            { headers }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            setGalleryAssets(data.assets || []);
+          }
+        }
+      } finally {
+        setGalleryLoading(false);
+      }
+    },
+    [showId, seasons, getAuthHeaders]
+  );
+
+  // Load gallery when tab becomes active or season filter changes
+  useEffect(() => {
+    if (activeTab === "gallery" && seasons.length > 0) {
+      loadGalleryAssets(selectedGallerySeason);
+    }
+  }, [activeTab, selectedGallerySeason, loadGalleryAssets, seasons.length]);
+
+  // Open lightbox for gallery asset
+  const openAssetLightbox = (
+    asset: SeasonAsset,
+    index: number,
+    filteredAssets: SeasonAsset[],
+    triggerElement: HTMLElement
+  ) => {
+    assetTriggerRef.current = triggerElement;
+    setAssetLightbox({ asset, index, filteredAssets });
+  };
+
+  // Navigate between assets in lightbox
+  const navigateAssetLightbox = (direction: "prev" | "next") => {
+    if (!assetLightbox) return;
+    const { index, filteredAssets } = assetLightbox;
+    const newIndex = direction === "prev" ? index - 1 : index + 1;
+    if (newIndex >= 0 && newIndex < filteredAssets.length) {
+      setAssetLightbox({
+        asset: filteredAssets[newIndex],
+        index: newIndex,
+        filteredAssets,
+      });
+    }
+  };
+
+  // Close asset lightbox
+  const closeAssetLightbox = () => {
+    setAssetLightbox(null);
+  };
+
+  // Map gallery asset to metadata for lightbox
+  const mapAssetToMetadata = (asset: SeasonAsset): PhotoMetadata => {
+    const SOURCE_COLORS: Record<string, string> = {
+      imdb: "#f5c518",
+      tmdb: "#01d277",
+    };
+    return {
+      source: asset.source,
+      sourceBadgeColor:
+        SOURCE_COLORS[asset.source.toLowerCase()] ?? "#6b7280",
+      caption: asset.caption,
+      dimensions:
+        asset.width && asset.height
+          ? { width: asset.width, height: asset.height }
+          : null,
+      season: null, // SeasonAsset doesn't include season number
+      contextType:
+        asset.type === "episode"
+          ? `Episode ${asset.episode_number}`
+          : asset.type === "season"
+            ? "Season Poster"
+            : "Cast Photo",
+      people: asset.person_name ? [asset.person_name] : [],
+      titles: show?.name ? [show.name] : [],
+      fetchedAt: null,
+    };
+  };
+
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -482,6 +600,7 @@ export default function TrrShowDetailPage() {
               {(
                 [
                   { id: "seasons", label: "Seasons & Episodes" },
+                  { id: "gallery", label: "Gallery" },
                   { id: "cast", label: "Cast" },
                   { id: "surveys", label: "Surveys" },
                   { id: "social", label: "Social Posts" },
@@ -666,6 +785,151 @@ export default function TrrShowDetailPage() {
                   </p>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Gallery Tab */}
+          {activeTab === "gallery" && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                  Season Gallery
+                </p>
+                <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
+              </div>
+
+              {/* Season filter */}
+              <div className="mb-6 flex items-center gap-4">
+                <label className="text-sm font-medium text-zinc-700">
+                  Filter by season:
+                </label>
+                <select
+                  value={selectedGallerySeason}
+                  onChange={(e) =>
+                    setSelectedGallerySeason(
+                      e.target.value === "all" ? "all" : parseInt(e.target.value)
+                    )
+                  }
+                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
+                >
+                  <option value="all">All Seasons</option>
+                  {seasons.map((s) => (
+                    <option key={s.id} value={s.season_number}>
+                      Season {s.season_number}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {galleryLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-blue-500" />
+                </div>
+              ) : galleryAssets.length === 0 ? (
+                <p className="py-8 text-center text-zinc-500">
+                  No images found for this selection.
+                </p>
+              ) : (
+                <div className="space-y-8">
+                  {/* Season Posters */}
+                  {galleryAssets.filter((a) => a.type === "season").length > 0 && (
+                    <section>
+                      <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                        Season Posters
+                      </h4>
+                      <div className="grid grid-cols-4 gap-4">
+                        {galleryAssets
+                          .filter((a) => a.type === "season")
+                          .map((asset, i, arr) => (
+                            <button
+                              key={asset.id}
+                              onClick={(e) =>
+                                openAssetLightbox(asset, i, arr, e.currentTarget)
+                              }
+                              className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <Image
+                                src={asset.hosted_url}
+                                alt={asset.caption || "Season poster"}
+                                fill
+                                className="object-cover"
+                                sizes="200px"
+                              />
+                            </button>
+                          ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Episode Stills */}
+                  {galleryAssets.filter((a) => a.type === "episode").length >
+                    0 && (
+                    <section>
+                      <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                        Episode Stills
+                      </h4>
+                      <div className="grid grid-cols-6 gap-3">
+                        {galleryAssets
+                          .filter((a) => a.type === "episode")
+                          .map((asset, i, arr) => (
+                            <button
+                              key={asset.id}
+                              onClick={(e) =>
+                                openAssetLightbox(asset, i, arr, e.currentTarget)
+                              }
+                              className="relative aspect-video overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <Image
+                                src={asset.hosted_url}
+                                alt={asset.caption || "Episode still"}
+                                fill
+                                className="object-cover"
+                                sizes="150px"
+                              />
+                            </button>
+                          ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Cast Photos */}
+                  {galleryAssets.filter((a) => a.type === "cast").length > 0 && (
+                    <section>
+                      <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                        Cast Photos
+                      </h4>
+                      <div className="grid grid-cols-5 gap-4">
+                        {galleryAssets
+                          .filter((a) => a.type === "cast")
+                          .map((asset, i, arr) => (
+                            <button
+                              key={asset.id}
+                              onClick={(e) =>
+                                openAssetLightbox(asset, i, arr, e.currentTarget)
+                              }
+                              className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <Image
+                                src={asset.hosted_url}
+                                alt={asset.caption || "Cast photo"}
+                                fill
+                                className="object-cover"
+                                sizes="180px"
+                              />
+                              {asset.person_name && (
+                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                                  <p className="truncate text-xs text-white">
+                                    {asset.person_name}
+                                  </p>
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                      </div>
+                    </section>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -900,6 +1164,26 @@ export default function TrrShowDetailPage() {
             hasPrevious={episodeLightbox.index > 0}
             hasNext={episodeLightbox.index < episodeLightbox.seasonEpisodes.length - 1}
             triggerRef={episodeTriggerRef as React.RefObject<HTMLElement | null>}
+          />
+        )}
+
+        {/* Lightbox for gallery assets */}
+        {assetLightbox && (
+          <ImageLightbox
+            src={assetLightbox.asset.hosted_url}
+            alt={assetLightbox.asset.caption || "Gallery image"}
+            isOpen={true}
+            onClose={closeAssetLightbox}
+            metadata={mapAssetToMetadata(assetLightbox.asset)}
+            position={{
+              current: assetLightbox.index + 1,
+              total: assetLightbox.filteredAssets.length,
+            }}
+            onPrevious={() => navigateAssetLightbox("prev")}
+            onNext={() => navigateAssetLightbox("next")}
+            hasPrevious={assetLightbox.index > 0}
+            hasNext={assetLightbox.index < assetLightbox.filteredAssets.length - 1}
+            triggerRef={assetTriggerRef as React.RefObject<HTMLElement | null>}
           />
         )}
       </div>
