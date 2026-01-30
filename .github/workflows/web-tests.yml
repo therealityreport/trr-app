@@ -22,13 +22,15 @@ jobs:
             echo "apps/web/package-lock.json detected. Use pnpm and remove npm lockfiles." >&2
             exit 1
           fi
+        working-directory: .
+      - name: Enable corepack
+        run: corepack enable
+        working-directory: .
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
           cache-dependency-path: apps/web/pnpm-lock.yaml
-      - name: Enable corepack
-        run: corepack enable
       - name: Install deps
         run: pnpm install --frozen-lockfile
       - name: Run unit tests with coverage
