@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -11,6 +11,7 @@ import SocialPostsSection from "@/components/admin/social-posts-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
+import type { PhotoMetadata } from "@/lib/photo-metadata";
 
 // Types
 interface TrrShow {
@@ -96,6 +97,21 @@ function CastPhoto({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+// Helper to map episode to metadata format for lightbox display
+function mapEpisodeToMetadata(episode: TrrEpisode, showName?: string): PhotoMetadata {
+  return {
+    source: "tmdb",
+    sourceBadgeColor: "#01d277",
+    caption: episode.title || `Episode ${episode.episode_number}`,
+    dimensions: null,
+    season: episode.season_number,
+    contextType: `Episode ${episode.episode_number}`,
+    people: [],
+    titles: showName ? [showName] : [],
+    fetchedAt: null,
+  };
+}
+
 export default function TrrShowDetailPage() {
   const params = useParams();
   const showId = params.showId as string;
@@ -110,9 +126,17 @@ export default function TrrShowDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Lightbox state
+  // Lightbox state (for cast photos)
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<{ src: string; alt: string } | null>(null);
+
+  // Episode lightbox state - track episode and position within season
+  const [episodeLightbox, setEpisodeLightbox] = useState<{
+    episode: TrrEpisode;
+    index: number;
+    seasonEpisodes: TrrEpisode[];
+  } | null>(null);
+  const episodeTriggerRef = useRef<HTMLElement | null>(null);
 
   // Covered shows state
   const [isCovered, setIsCovered] = useState(false);
@@ -265,6 +289,36 @@ export default function TrrShowDetailPage() {
   const openLightbox = (src: string, alt: string) => {
     setLightboxImage({ src, alt });
     setLightboxOpen(true);
+  };
+
+  // Open lightbox for episode still
+  const openEpisodeLightbox = (
+    episode: TrrEpisode,
+    index: number,
+    seasonEpisodes: TrrEpisode[],
+    triggerElement: HTMLElement
+  ) => {
+    episodeTriggerRef.current = triggerElement;
+    setEpisodeLightbox({ episode, index, seasonEpisodes });
+  };
+
+  // Navigate between episodes in lightbox
+  const navigateEpisodeLightbox = (direction: "prev" | "next") => {
+    if (!episodeLightbox) return;
+    const { index, seasonEpisodes } = episodeLightbox;
+    const newIndex = direction === "prev" ? index - 1 : index + 1;
+    if (newIndex >= 0 && newIndex < seasonEpisodes.length) {
+      setEpisodeLightbox({
+        episode: seasonEpisodes[newIndex],
+        index: newIndex,
+        seasonEpisodes,
+      });
+    }
+  };
+
+  // Close episode lightbox
+  const closeEpisodeLightbox = () => {
+    setEpisodeLightbox(null);
   };
 
   if (checking) {
@@ -525,7 +579,23 @@ export default function TrrShowDetailPage() {
                           className="flex items-start gap-4 rounded-lg border border-zinc-100 bg-zinc-50/50 p-4"
                         >
                           {episode.url_original_still && (
-                            <div className="relative h-16 w-28 flex-shrink-0 overflow-hidden rounded-lg bg-zinc-200">
+                            <button
+                              onClick={(e) => {
+                                const episodesWithStills = episodes.filter(
+                                  (ep) => ep.url_original_still
+                                );
+                                const idx = episodesWithStills.findIndex(
+                                  (ep) => ep.id === episode.id
+                                );
+                                openEpisodeLightbox(
+                                  episode,
+                                  idx,
+                                  episodesWithStills,
+                                  e.currentTarget
+                                );
+                              }}
+                              className="relative h-16 w-28 flex-shrink-0 overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
                               <Image
                                 src={episode.url_original_still}
                                 alt={episode.title || `Episode ${episode.episode_number}`}
@@ -533,7 +603,7 @@ export default function TrrShowDetailPage() {
                                 className="object-cover"
                                 sizes="112px"
                               />
-                            </div>
+                            </button>
                           )}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2">
@@ -797,7 +867,7 @@ export default function TrrShowDetailPage() {
           )}
         </main>
 
-        {/* Lightbox */}
+        {/* Lightbox for cast photos */}
         {lightboxImage && (
           <ImageLightbox
             src={lightboxImage.src}
@@ -807,6 +877,29 @@ export default function TrrShowDetailPage() {
               setLightboxOpen(false);
               setLightboxImage(null);
             }}
+          />
+        )}
+
+        {/* Lightbox for episode stills */}
+        {episodeLightbox && (
+          <ImageLightbox
+            src={episodeLightbox.episode.url_original_still || ""}
+            alt={
+              episodeLightbox.episode.title ||
+              `Episode ${episodeLightbox.episode.episode_number}`
+            }
+            isOpen={true}
+            onClose={closeEpisodeLightbox}
+            metadata={mapEpisodeToMetadata(episodeLightbox.episode, show?.name)}
+            position={{
+              current: episodeLightbox.index + 1,
+              total: episodeLightbox.seasonEpisodes.length,
+            }}
+            onPrevious={() => navigateEpisodeLightbox("prev")}
+            onNext={() => navigateEpisodeLightbox("next")}
+            hasPrevious={episodeLightbox.index > 0}
+            hasNext={episodeLightbox.index < episodeLightbox.seasonEpisodes.length - 1}
+            triggerRef={episodeTriggerRef as React.RefObject<HTMLElement | null>}
           />
         )}
       </div>
