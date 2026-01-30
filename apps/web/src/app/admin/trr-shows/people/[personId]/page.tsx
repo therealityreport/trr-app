@@ -622,9 +622,17 @@ export default function PersonProfilePage() {
               </div>
               <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                 {photos.map((photo, index) => (
-                  <button
+                  <div
                     key={photo.id}
-                    onClick={(e) => openLightbox(photo, index, e.currentTarget)}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openLightbox(photo, index, e.currentTarget as HTMLElement);
+                      }
+                    }}
                     className="group relative aspect-square overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                   >
                     <GalleryPhoto
@@ -641,7 +649,7 @@ export default function PersonProfilePage() {
                         {photo.season && ` • S${photo.season}`}
                       </p>
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
               {photos.length === 0 && (
