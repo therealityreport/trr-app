@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -32,6 +32,7 @@ interface TrrPersonPhoto {
   caption: string | null;
   width: number | null;
   height: number | null;
+  context_section: string | null;
   context_type: string | null;
   season: number | null;
   // Metadata fields for lightbox display
@@ -51,6 +52,7 @@ interface TrrPersonPhoto {
 }
 
 type GallerySortOption = "newest" | "oldest" | "source";
+type GalleryShowFilter = "all" | "this-show" | "other-shows";
 
 interface TrrPersonCredit {
   id: string;
@@ -121,11 +123,40 @@ const formatRefreshSummary = (summary: unknown): string | null => {
   return null;
 };
 
+const SHOW_ACRONYM_RE = /\bRH[A-Z0-9]{2,6}\b/g;
+
+const buildShowAcronym = (name: string | null | undefined): string | null => {
+  if (!name) return null;
+  const words = name
+    .replace(/[^a-z0-9 ]/gi, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return null;
+  const filtered = words.filter(
+    (word) => !["the", "and", "a", "an", "to", "for"].includes(word.toLowerCase())
+  );
+  const acronym = (filtered.length > 0 ? filtered : words)
+    .map((word) => word[0]?.toUpperCase?.() ?? "")
+    .join("");
+  return acronym || null;
+};
+
+const extractShowAcronyms = (text: string): Set<string> => {
+  const matches = text.toUpperCase().match(SHOW_ACRONYM_RE) ?? [];
+  return new Set(matches);
+};
+
 // Profile photo with error handling
 function ProfilePhoto({ url, name }: { url: string | null | undefined; name: string }) {
   const [hasError, setHasError] = useState(false);
+  const [currentSrc, setCurrentSrc] = useState<string | null>(url ?? null);
 
-  if (!url || hasError) {
+  useEffect(() => {
+    setHasError(false);
+    setCurrentSrc(url ?? null);
+  }, [url]);
+
+  if (!currentSrc || hasError) {
     return (
       <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
         <div className="flex h-full items-center justify-center text-zinc-400">
@@ -141,11 +172,12 @@ function ProfilePhoto({ url, name }: { url: string | null | undefined; name: str
   return (
     <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
       <Image
-        src={url}
+        src={currentSrc}
         alt={name}
         fill
         className="object-cover"
         sizes="128px"
+        unoptimized
         onError={() => setHasError(true)}
       />
     </div>
@@ -207,9 +239,25 @@ function GalleryPhoto({
   settingCover?: boolean;
 }) {
   const [hasError, setHasError] = useState(false);
-  const src = photo.hosted_url || photo.url;
+  const [currentSrc, setCurrentSrc] = useState<string | null>(photo.hosted_url || photo.url || null);
+  const triedFallbackRef = useRef(false);
 
-  if (hasError || !src) {
+  useEffect(() => {
+    setHasError(false);
+    triedFallbackRef.current = false;
+    setCurrentSrc(photo.hosted_url || photo.url || null);
+  }, [photo.hosted_url, photo.url]);
+
+  const handleError = () => {
+    if (!triedFallbackRef.current && photo.url && currentSrc !== photo.url) {
+      triedFallbackRef.current = true;
+      setCurrentSrc(photo.url);
+      return;
+    }
+    setHasError(true);
+  };
+
+  if (hasError || !currentSrc) {
     return (
       <div className="flex h-full items-center justify-center bg-zinc-200 text-zinc-400">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
@@ -224,13 +272,14 @@ function GalleryPhoto({
   return (
     <>
       <Image
-        src={src}
+        src={currentSrc}
         alt={photo.caption || "Photo"}
         fill
         className="object-cover cursor-zoom-in transition hover:scale-105"
         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 200px"
+        unoptimized
         onClick={onClick}
-        onError={() => setHasError(true)}
+        onError={handleError}
       />
       {/* Cover badge */}
       {isCover && (
@@ -860,7 +909,9 @@ function TagPeoplePanel({
 
 export default function PersonProfilePage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const personId = params.personId as string;
+  const showIdParam = searchParams.get("showId");
   const { user, checking, hasAccess } = useAdminGuard();
 
   const [person, setPerson] = useState<TrrPerson | null>(null);
@@ -901,6 +952,43 @@ export default function PersonProfilePage() {
   const [gallerySourceFilter, setGallerySourceFilter] = useState<string>("all");
   const [gallerySortOption, setGallerySortOption] = useState<GallerySortOption>("newest");
   const [galleryPeopleFilter, setGalleryPeopleFilter] = useState<"solo" | "all">("solo");
+  const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>(
+    showIdParam ? "this-show" : "all"
+  );
+
+  useEffect(() => {
+    if (!showIdParam) {
+      setGalleryShowFilter("all");
+      return;
+    }
+    setGalleryShowFilter((prev) => (prev === "all" ? "this-show" : prev));
+  }, [showIdParam]);
+
+  const activeShow = useMemo(
+    () => (showIdParam ? credits.find((credit) => credit.show_id === showIdParam) ?? null : null),
+    [credits, showIdParam]
+  );
+  const activeShowName = activeShow?.show_name ?? null;
+  const activeShowAcronym = useMemo(
+    () => buildShowAcronym(activeShowName),
+    [activeShowName]
+  );
+  const otherShowNames = useMemo(
+    () =>
+      credits
+        .filter((credit) => credit.show_id !== showIdParam)
+        .map((credit) => credit.show_name)
+        .filter((name): name is string => Boolean(name)),
+    [credits, showIdParam]
+  );
+  const otherShowAcronyms = useMemo(() => {
+    const acronyms = new Set<string>();
+    for (const name of otherShowNames) {
+      const acronym = buildShowAcronym(name);
+      if (acronym) acronyms.add(acronym.toUpperCase());
+    }
+    return acronyms;
+  }, [otherShowNames]);
 
   // Compute unique sources from photos
   const uniqueSources = useMemo(() => {
@@ -911,6 +999,54 @@ export default function PersonProfilePage() {
   // Filter and sort photos for gallery
   const filteredPhotos = useMemo(() => {
     let result = [...photos];
+
+    // Apply show filter (if coming from a show context)
+    if (showIdParam && galleryShowFilter !== "all") {
+      const showNameLower = activeShowName?.toLowerCase?.() ?? null;
+      const showAcronym = activeShowAcronym?.toUpperCase?.() ?? null;
+      result = result.filter((photo) => {
+        const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+        const text = [
+          photo.caption,
+          photo.context_section,
+          photo.context_type,
+          typeof metadata.fandom_section_label === "string"
+            ? metadata.fandom_section_label
+            : null,
+          ...(photo.title_names ?? []),
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const textLower = text.toLowerCase();
+        const matchesShowName = showNameLower ? textLower.includes(showNameLower) : false;
+        const acronyms = extractShowAcronyms(text);
+        const matchesShowAcronym = showAcronym ? acronyms.has(showAcronym) : false;
+        const metadataShowName =
+          typeof metadata.show_name === "string" ? metadata.show_name.toLowerCase() : null;
+        const metadataMatchesThisShow =
+          Boolean(metadataShowName && showNameLower && metadataShowName.includes(showNameLower));
+        const metadataMatchesOtherShow =
+          Boolean(metadataShowName && showNameLower && !metadataShowName.includes(showNameLower));
+        const matchesOtherShowName = otherShowNames.some((name) =>
+          textLower.includes(name.toLowerCase())
+        );
+        const matchesOtherShowAcronym = Array.from(acronyms).some((acro) =>
+          otherShowAcronyms.has(acro)
+        );
+
+        if (galleryShowFilter === "this-show") {
+          return matchesShowName || matchesShowAcronym || metadataMatchesThisShow;
+        }
+        if (galleryShowFilter === "other-shows") {
+          return (
+            matchesOtherShowName ||
+            matchesOtherShowAcronym ||
+            metadataMatchesOtherShow
+          );
+        }
+        return true;
+      });
+    }
 
     // Apply source filter
     if (gallerySourceFilter !== "all") {
@@ -957,7 +1093,18 @@ export default function PersonProfilePage() {
     }
 
     return result;
-  }, [photos, gallerySourceFilter, galleryPeopleFilter, gallerySortOption]);
+  }, [
+    photos,
+    galleryShowFilter,
+    gallerySourceFilter,
+    galleryPeopleFilter,
+    gallerySortOption,
+    showIdParam,
+    activeShowName,
+    activeShowAcronym,
+    otherShowNames,
+    otherShowAcronyms,
+  ]);
 
   // Helper to get auth headers
   const getAuthHeaders = useCallback(async () => {
@@ -968,23 +1115,39 @@ export default function PersonProfilePage() {
 
   // Refresh images for this person
   const refreshPersonImages = useCallback(
-    async (options?: { skip_mirror?: boolean }) => {
+    async (options?: {
+      skip_mirror?: boolean;
+      limit_per_source?: number;
+      force_mirror?: boolean;
+    }) => {
       const headers = await getAuthHeaders();
       const response = await fetch(
         `/api/admin/trr-api/people/${personId}/refresh-images`,
         {
           method: "POST",
           headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify(options ?? {}),
+          body: JSON.stringify({ limit_per_source: 200, force_mirror: true, ...options }),
         }
       );
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
+        const normalizeValue = (value: unknown): string | null => {
+          if (!value) return null;
+          if (typeof value === "string") return value;
+          if (value instanceof Error) return value.message;
+          try {
+            return JSON.stringify(value);
+          } catch {
+            return String(value);
+          }
+        };
+        const errorText = normalizeValue(data.error);
+        const detailText = normalizeValue(data.detail);
         const message =
-          data.error && data.detail
-            ? `${data.error}: ${data.detail}`
-            : data.error || data.detail || "Failed to refresh images";
+          errorText && detailText
+            ? `${errorText}: ${detailText}`
+            : errorText || detailText || "Failed to refresh images";
         throw new Error(message);
       }
       return data;
@@ -1219,7 +1382,11 @@ export default function PersonProfilePage() {
           {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ skip_mirror: false }),
+            body: JSON.stringify({
+              skip_mirror: false,
+              force_mirror: true,
+              limit_per_source: 200,
+            }),
           }
         );
 
@@ -1330,7 +1497,7 @@ export default function PersonProfilePage() {
       }
 
       if (streamFailed) {
-        const result = await refreshPersonImages({ skip_mirror: false });
+        const result = await refreshPersonImages({ skip_mirror: false, force_mirror: true });
         const summary =
           result && typeof result === "object" && "summary" in result
             ? (result as { summary?: unknown }).summary
@@ -1339,7 +1506,13 @@ export default function PersonProfilePage() {
         setRefreshNotice(summaryText || "Images refreshed.");
       }
 
-      await Promise.all([fetchPhotos(), fetchCoverPhoto()]);
+      await Promise.all([
+        fetchPerson(),
+        fetchCredits(),
+        fetchFandomData(),
+        fetchPhotos(),
+        fetchCoverPhoto(),
+      ]);
     } catch (err) {
       console.error("Failed to refresh images:", err);
       setRefreshError(
@@ -1349,7 +1522,17 @@ export default function PersonProfilePage() {
       setRefreshingImages(false);
       setRefreshProgress(null);
     }
-  }, [refreshingImages, refreshPersonImages, fetchPhotos, fetchCoverPhoto, getAuthHeaders, personId]);
+  }, [
+    refreshingImages,
+    refreshPersonImages,
+    fetchPerson,
+    fetchCredits,
+    fetchFandomData,
+    fetchPhotos,
+    fetchCoverPhoto,
+    getAuthHeaders,
+    personId,
+  ]);
 
   // Initial load
   useEffect(() => {
@@ -1728,6 +1911,38 @@ export default function PersonProfilePage() {
                 )}
               </div>
 
+              {showIdParam && (
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Media View
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setGalleryShowFilter("this-show")}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        galleryShowFilter === "this-show"
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      {activeShowName ? `This Show (${activeShowName})` : "This Show"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGalleryShowFilter("all")}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        galleryShowFilter === "all"
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      All Media
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Filter and Sort Controls */}
               <div className="mb-6 flex flex-wrap items-center gap-4">
                 {/* Source Filter */}
@@ -1778,7 +1993,9 @@ export default function PersonProfilePage() {
                 </div>
 
                 {/* Count indicator */}
-                {(gallerySourceFilter !== "all" || galleryPeopleFilter !== "all") && (
+                {(gallerySourceFilter !== "all" ||
+                  galleryPeopleFilter !== "all" ||
+                  galleryShowFilter !== "all") && (
                   <span className="text-sm text-zinc-500">
                     Showing {filteredPhotos.length} of {photos.length} photos
                   </span>
@@ -1993,6 +2210,9 @@ export default function PersonProfilePage() {
         {lightboxPhoto && (
           <ImageLightbox
             src={lightboxPhoto.photo.hosted_url || lightboxPhoto.photo.url || ""}
+            fallbackSrc={
+              lightboxPhoto.photo.hosted_url ? lightboxPhoto.photo.url : null
+            }
             alt={lightboxPhoto.photo.caption || person.full_name}
             isOpen={lightboxOpen}
             onClose={closeLightbox}

@@ -109,6 +109,7 @@ function GalleryImage({
         fill
         className={className}
         sizes={sizes}
+        unoptimized
         onError={() => setHasError(true)}
       />
       {children}
@@ -172,12 +173,14 @@ function RefreshProgressBar({
 function mapEpisodeToMetadata(episode: TrrEpisode, showName?: string): PhotoMetadata {
   const fileTypeMatch = episode.url_original_still?.match(/\.([a-z0-9]+)$/i);
   const fileType = fileTypeMatch ? fileTypeMatch[1].toLowerCase() : null;
+  const createdAt = episode.air_date ? new Date(episode.air_date) : null;
   return {
     source: "tmdb",
     sourceBadgeColor: "#01d277",
     fileType,
     caption: episode.title || `Episode ${episode.episode_number}`,
     dimensions: null,
+    createdAt,
     season: episode.season_number,
     contextType: `Episode ${episode.episode_number}`,
     people: [],
@@ -1278,7 +1281,7 @@ export default function TrrShowDetailPage() {
                   return (
                     <Link
                       key={member.id}
-                      href={`/admin/trr-shows/people/${member.person_id}`}
+                      href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
                       className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                     >
                       <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">

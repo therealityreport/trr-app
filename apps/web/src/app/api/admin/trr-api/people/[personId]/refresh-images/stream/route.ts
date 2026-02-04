@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    const backendUrl = process.env.TRR_API_URL;
+    const backendUrl = getBackendApiUrl(`/admin/person/${personId}/refresh-images/stream`);
     if (!backendUrl) {
       return new Response(
         `event: error\ndata: ${JSON.stringify({ error: "Backend API not configured" })}\n\n`,
@@ -49,17 +50,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const backendResponse = await fetch(
-      `${backendUrl}/api/v1/admin/person/${personId}/refresh-images/stream`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceRoleKey}`,
-        },
-        body: JSON.stringify(body ?? {}),
-      }
-    );
+    const backendResponse = await fetch(backendUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      body: JSON.stringify(body ?? {}),
+    });
 
     if (!backendResponse.ok) {
       const errorText = await backendResponse.text();

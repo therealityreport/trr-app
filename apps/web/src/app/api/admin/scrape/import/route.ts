@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get TRR-Backend URL from environment
-    const backendUrl = process.env.TRR_API_URL;
+    const backendUrl = getBackendApiUrl("/admin/scrape/import");
     if (!backendUrl) {
       console.error("[scrape/import] TRR_API_URL not configured");
       return NextResponse.json(
@@ -86,7 +87,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Forward entire body to backend (it handles validation and entity-specific logic)
-    const backendResponse = await fetch(`${backendUrl}/api/v1/admin/scrape/import`, {
+    const backendResponse = await fetch(backendUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
