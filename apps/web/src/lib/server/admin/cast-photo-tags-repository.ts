@@ -18,21 +18,43 @@ export interface CastPhotoTags {
 const TAG_FIELDS =
   "cast_photo_id, people_names, people_ids, people_count, people_count_source, detector, created_at, updated_at, created_by_firebase_uid, updated_by_firebase_uid";
 
+const ADMIN_SCHEMA = "admin";
+let adminSchemaAvailable: boolean | null = null;
+
+const isInvalidSchemaError = (message: string | null | undefined): boolean =>
+  typeof message === "string" &&
+  message.toLowerCase().includes("invalid schema") &&
+  message.includes(ADMIN_SCHEMA);
+
+const markAdminSchemaUnavailable = (message: string) => {
+  if (adminSchemaAvailable === false) return;
+  adminSchemaAvailable = false;
+  console.warn(
+    `[cast-photo-tags] Admin schema not exposed. Add "admin" to Supabase API exposed schemas.`,
+    message
+  );
+};
+
 export async function getTagsByPhotoIds(
   photoIds: string[]
 ): Promise<Map<string, CastPhotoTags>> {
   const tags = new Map<string, CastPhotoTags>();
   if (photoIds.length === 0) return tags;
+  if (adminSchemaAvailable === false) return tags;
 
   try {
     const supabase = getSupabaseTrrCore();
     const { data, error } = await supabase
-      .schema("admin")
+      .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .select(TAG_FIELDS)
       .in("cast_photo_id", photoIds);
 
     if (error) {
+      if (isInvalidSchemaError(error.message)) {
+        markAdminSchemaUnavailable(error.message);
+        return tags;
+      }
       console.warn(
         "[cast-photo-tags] Failed to fetch tags (admin.cast_photo_people_tags)",
         error.message
@@ -52,16 +74,21 @@ export async function getTagsByPhotoIds(
 
 export async function getPhotoIdsByPersonId(personId: string): Promise<string[]> {
   if (!personId) return [];
+  if (adminSchemaAvailable === false) return [];
 
   try {
     const supabase = getSupabaseTrrCore();
     const { data, error } = await supabase
-      .schema("admin")
+      .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .select("cast_photo_id")
       .contains("people_ids", [personId]);
 
     if (error) {
+      if (isInvalidSchemaError(error.message)) {
+        markAdminSchemaUnavailable(error.message);
+        return [];
+      }
       console.warn(
         "[cast-photo-tags] Failed to fetch tag photo IDs",
         error.message
@@ -88,6 +115,7 @@ export async function upsertCastPhotoTags(
     updated_by_firebase_uid?: string | null;
   }
 ): Promise<CastPhotoTags | null> {
+  if (adminSchemaAvailable === false) return null;
   try {
     const supabase = getSupabaseTrrCore();
     const now = new Date().toISOString();
@@ -104,13 +132,17 @@ export async function upsertCastPhotoTags(
     };
 
     const { data, error } = await supabase
-      .schema("admin")
+      .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .upsert(row, { onConflict: "cast_photo_id", defaultToNull: false })
       .select(TAG_FIELDS)
       .single();
 
     if (error) {
+      if (isInvalidSchemaError(error.message)) {
+        markAdminSchemaUnavailable(error.message);
+        return null;
+      }
       console.warn("[cast-photo-tags] Failed to upsert tags", error.message);
       return null;
     }

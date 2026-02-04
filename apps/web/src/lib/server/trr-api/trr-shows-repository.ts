@@ -538,14 +538,37 @@ export async function getCastByShowId(
   const photosMap: Map<string, string> = new Map();
 
   // First try the view - it has display_url which picks the best available URL
-  const { data: viewPhotos, error: viewError } = await supabase
-    .from("v_cast_photos")
-    .select("person_id, display_url, hosted_url, url")
-    .in("person_id", personIds);
+  let viewPhotos: Array<{ person_id: string; display_url?: string; hosted_url?: string; url?: string }> | null = null;
+  if (vCastPhotosAvailable !== false) {
+    const { data: viewData, error: viewError } = await supabase
+      .from("v_cast_photos")
+      .select("person_id, display_url, hosted_url, url")
+      .in("person_id", personIds);
 
-  if (viewError) {
-    console.log("[trr-shows-repository] v_cast_photos view not available:", viewError.message);
+    if (viewError) {
+      if (isViewUnavailableError(viewError.message)) {
+        if (vCastPhotosAvailable !== false) {
+          vCastPhotosAvailable = false;
+          console.log(
+            "[trr-shows-repository] v_cast_photos view not available:",
+            viewError.message
+          );
+        }
+      } else {
+        console.log("[trr-shows-repository] v_cast_photos view error:", viewError.message);
+      }
+    } else {
+      vCastPhotosAvailable = true;
+      viewPhotos = (viewData ?? []) as Array<{
+        person_id: string;
+        display_url?: string;
+        hosted_url?: string;
+        url?: string;
+      }>;
+    }
+  }
 
+  if (!viewPhotos || viewPhotos.length === 0) {
     // Fall back to cast_photos table
     const { data: tablePhotos, error: tableError } = await supabase
       .from("cast_photos")
@@ -559,18 +582,17 @@ export async function getCastByShowId(
       for (const photo of typedPhotos) {
         // Only use hosted URLs (CloudFront) - skip unmirrored external images
         const photoUrl = photo.hosted_url;
-        if (photoUrl && !photosMap.has(photo.person_id)) {
+        if (photoUrl && isLikelyImage(null, photoUrl) && !photosMap.has(photo.person_id)) {
           photosMap.set(photo.person_id, photoUrl);
         }
       }
       console.log(`[trr-shows-repository] Loaded ${photosMap.size} hosted photos from cast_photos table`);
     }
-  } else if (viewPhotos) {
-    const typedPhotos = viewPhotos as Array<{ person_id: string; display_url?: string; hosted_url?: string; url?: string }>;
-    for (const photo of typedPhotos) {
+  } else {
+    for (const photo of viewPhotos) {
       // Only use hosted URLs (CloudFront) - skip unmirrored external images
       const photoUrl = photo.hosted_url;
-      if (photoUrl && !photosMap.has(photo.person_id)) {
+      if (photoUrl && isLikelyImage(null, photoUrl) && !photosMap.has(photo.person_id)) {
         photosMap.set(photo.person_id, photoUrl);
       }
     }
@@ -715,6 +737,31 @@ const normalizeFandomSource = (
   return { source: "fandom", metadata: nextMetadata };
 };
 
+const isLikelyImage = (
+  contentType: string | null | undefined,
+  url: string | null | undefined
+): boolean => {
+  if (contentType && !contentType.toLowerCase().startsWith("image/")) {
+    return false;
+  }
+  if (url && url.toLowerCase().endsWith(".bin")) {
+    return false;
+  }
+  return true;
+};
+
+let vCastPhotosAvailable: boolean | null = null;
+
+const isViewUnavailableError = (message: string | null | undefined): boolean => {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("permission denied") ||
+    lower.includes("does not exist") ||
+    lower.includes("not found")
+  );
+};
+
 export interface TrrPersonPhoto {
   id: string;
   person_id: string;
@@ -725,8 +772,10 @@ export interface TrrPersonPhoto {
   caption: string | null;
   width: number | null;
   height: number | null;
+  context_section: string | null;
   context_type: string | null;
   season: number | null;
+  source_page_url?: string | null;
   // Metadata fields
   people_names: string[] | null;
   people_ids: string[] | null;
@@ -772,7 +821,7 @@ export async function getPhotosByPersonId(
   // Query 1: Get photos from cast_photos table
   const { data: castPhotosByPerson, error: castError } = await supabase
     .from("cast_photos")
-    .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at, created_at")
+    .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_section, context_type, season, source_page_url, people_names, title_names, metadata, fetched_at")
     .eq("person_id", personId)
     .not("hosted_url", "is", null)
     .order("source", { ascending: true })
@@ -787,7 +836,7 @@ export async function getPhotosByPersonId(
   if (fullName) {
     const { data: namePhotosRaw, error: nameError } = await supabase
       .from("cast_photos")
-      .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at, created_at")
+      .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_section, context_type, season, source_page_url, people_names, title_names, metadata, fetched_at")
       .contains("people_names", [fullName])
       .not("hosted_url", "is", null)
       .order("source", { ascending: true })
@@ -804,7 +853,7 @@ export async function getPhotosByPersonId(
   if (manualTagPhotoIds.length > 0) {
     const { data: manualPhotosRaw, error: manualError } = await supabase
       .from("cast_photos")
-      .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at, created_at")
+      .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_section, context_type, season, source_page_url, people_names, title_names, metadata, fetched_at")
       .in("id", manualTagPhotoIds)
       .not("hosted_url", "is", null)
       .order("source", { ascending: true })
@@ -830,14 +879,21 @@ export async function getPhotosByPersonId(
       photo.url,
       photo.metadata
     );
+    const mergedMetadata = {
+      ...(photo.metadata ?? {}),
+      ...(photo.source_page_url
+        ? { source_page_url: photo.source_page_url }
+        : null),
+    };
     const normalizedFandom = normalizeFandomSource(
       normalizedScrape,
-      photo.metadata
+      mergedMetadata
     );
     return {
       ...photo,
       source: normalizedFandom.source,
       metadata: normalizedFandom.metadata,
+      created_at: photo.created_at ?? null,
       people_ids: null,
       people_count: null,
       people_count_source: null,
@@ -848,10 +904,14 @@ export async function getPhotosByPersonId(
     };
   });
 
-  const tagRows = await getTagsByPhotoIds(
-    castPhotos.map((photo) => photo.id)
+  const castPhotosFiltered = castPhotos.filter((photo) =>
+    isLikelyImage(photo.hosted_content_type, photo.hosted_url)
   );
-  const castPhotosWithTags = castPhotos.map((photo) => {
+
+  const tagRows = await getTagsByPhotoIds(
+    castPhotosFiltered.map((photo) => photo.id)
+  );
+  const castPhotosWithTags = castPhotosFiltered.map((photo) => {
     const tagRow = tagRows.get(photo.id);
     if (!tagRow) return photo;
     return {
@@ -972,6 +1032,7 @@ export async function getPhotosByPersonId(
             caption: asset.caption,
             width: asset.width,
             height: asset.height,
+            context_section: context?.context_section as string | null ?? null,
             context_type: context?.context_type as string | null ?? null,
             season: context?.season as number | null ?? null,
             people_names: peopleNames,
@@ -990,6 +1051,12 @@ export async function getPhotosByPersonId(
         })
         .filter((p): p is TrrPersonPhoto => p !== null);
     }
+  }
+
+  if (mediaPhotos.length > 0) {
+    mediaPhotos = mediaPhotos.filter((photo) =>
+      isLikelyImage(photo.hosted_content_type, photo.hosted_url)
+    );
   }
 
   // Merge both sources, cast_photos first then media_links
@@ -1098,7 +1165,11 @@ export async function getCastByShowSeason(
     type PhotoRow = { person_id: string; hosted_url: string | null };
     const typedPhotoData = photoData as PhotoRow[];
     for (const photo of typedPhotoData) {
-      if (photo.hosted_url && !photosMap.has(photo.person_id)) {
+      if (
+        photo.hosted_url &&
+        isLikelyImage(null, photo.hosted_url) &&
+        !photosMap.has(photo.person_id)
+      ) {
         photosMap.set(photo.person_id, photo.hosted_url);
       }
     }
@@ -1256,6 +1327,9 @@ export async function getAssetsByShowSeason(
       };
       const typedPhotos = castPhotos as PhotoRow[];
       for (const photo of typedPhotos) {
+        if (!isLikelyImage(null, photo.hosted_url)) {
+          continue;
+        }
         assets.push({
           id: photo.id,
           type: "cast",

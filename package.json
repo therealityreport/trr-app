@@ -4,7 +4,8 @@
     "firebase-admin": "^13.5.0"
   },
   "scripts": {
-    "dev": "pnpm run web:dev",
+    "dev": "lsof -i:8000 >/dev/null 2>&1 && echo 'API already running on :8000' && pnpm run web:dev || concurrently -k -n api,web -c yellow,green \"cd ../TRR-Backend && source .venv/bin/activate && uvicorn api.main:app --reload --port 8000\" \"pnpm run web:dev\"",
+    "dev:web-only": "pnpm run web:dev",
     "dev:stable": "pnpm run web:dev:stable",
     "emulators": "firebase emulators:start --import=.emulator-data --export-on-exit",
     "dev:local": "concurrently -k -n emu,web -c blue,green \"pnpm run emulators\" \"pnpm -C apps/web run dev:emu\"",

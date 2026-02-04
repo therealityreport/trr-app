@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "assetId is required" }, { status: 400 });
     }
 
-    const backendUrl = process.env.TRR_API_URL;
+    const backendUrl = getBackendApiUrl(`/admin/media-assets/${assetId}/mirror`);
     if (!backendUrl) {
       return NextResponse.json(
         { error: "Backend API not configured" },
@@ -45,17 +46,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     let backendResponse: Response;
     let data: Record<string, unknown> = {};
     try {
-      backendResponse = await fetch(
-        `${backendUrl}/api/v1/admin/media-assets/${assetId}/mirror`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${serviceRoleKey}`,
-          },
-          body: JSON.stringify(body ?? {}),
-        }
-      );
+      backendResponse = await fetch(backendUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
+        body: JSON.stringify(body ?? {}),
+      });
       data = (await backendResponse.json().catch(() => ({}))) as Record<
         string,
         unknown
@@ -69,7 +67,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json(
         {
           error: "Backend fetch failed",
-          detail: `${baseDetail}${causeDetail} (TRR_API_URL=${backendUrl})`,
+          detail: `${baseDetail}${causeDetail} (TRR_API_URL=${process.env.TRR_API_URL ?? "unset"})`,
         },
         { status: 502 }
       );

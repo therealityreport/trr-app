@@ -100,6 +100,7 @@ interface ImageManagementProps {
 
 interface ImageLightboxProps extends ImageManagementProps {
   src: string;
+  fallbackSrc?: string | null;
   alt: string;
   isOpen: boolean;
   onClose: () => void;
@@ -475,6 +476,7 @@ function isInputElement(element: EventTarget | null): boolean {
 
 export function ImageLightbox({
   src,
+  fallbackSrc,
   alt,
   isOpen,
   onClose,
@@ -494,11 +496,29 @@ export function ImageLightbox({
   onDelete,
   onReassign,
 }: ImageLightboxProps) {
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [imageFailed, setImageFailed] = useState(false);
+  const triedFallbackRef = useRef(false);
   const [showMetadata, setShowMetadata] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const lastButtonRef = useRef<HTMLButtonElement>(null);
   const previousTrigger = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setCurrentSrc(src);
+    setImageFailed(false);
+    triedFallbackRef.current = false;
+  }, [src, fallbackSrc]);
+
+  const handleImageError = () => {
+    if (!triedFallbackRef.current && fallbackSrc && fallbackSrc !== currentSrc) {
+      triedFallbackRef.current = true;
+      setCurrentSrc(fallbackSrc);
+      return;
+    }
+    setImageFailed(true);
+  };
 
   // Store trigger element when opening
   useEffect(() => {
@@ -684,14 +704,22 @@ export function ImageLightbox({
         className="relative max-h-[90vh] max-w-[90vw]"
         onClick={(e) => e.stopPropagation()}
       >
-        <Image
-          src={src}
-          alt={alt}
-          width={800}
-          height={1200}
-          className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl"
-          priority
-        />
+        {imageFailed ? (
+          <div className="flex h-[60vh] w-[60vw] max-w-[90vw] items-center justify-center rounded-lg bg-black/40 text-sm text-white/70">
+            Image failed to load
+          </div>
+        ) : (
+          <Image
+            src={currentSrc}
+            alt={alt}
+            width={800}
+            height={1200}
+            className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl"
+            priority
+            unoptimized
+            onError={handleImageError}
+          />
+        )}
 
         {/* Metadata panel (overlay) */}
         {metadata && (

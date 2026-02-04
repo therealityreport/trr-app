@@ -85,6 +85,29 @@ const inferFileType = (
   return null;
 };
 
+const inferFandomSectionTag = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const text = value.toLowerCase();
+  if (text.includes("confessional")) return "CONFESSIONAL";
+  if (text.includes("intro") || text.includes("tagline") || text.includes("opening")) return "INTRO";
+  if (text.includes("reunion")) return "REUNION";
+  if (text.includes("promo") || text.includes("promotional")) return "PROMO";
+  if (text.includes("episode") || text.includes("still")) return "EPISODE STILL";
+  return "OTHER";
+};
+
+const parseSeasonNumber = (value: string | null | undefined): number | null => {
+  if (!value) return null;
+  const text = value.trim();
+  if (!text) return null;
+  const match = text.match(/\b(?:season|s)\s*([0-9]{1,2})\b/i);
+  if (match) {
+    const num = Number.parseInt(match[1], 10);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+};
+
 export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
   const ingestStatus = (photo.ingest_status ?? "").toLowerCase();
   const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
@@ -101,9 +124,18 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
       ? metadata.fandom_section_label
       : typeof metadata.context_section === "string"
         ? metadata.context_section
+        : typeof photo.context_section === "string"
+          ? photo.context_section
         : null;
+  const normalizedSectionTag = sectionTagRaw
+    ? inferFandomSectionTag(sectionTagRaw) ?? sectionTagRaw
+    : null;
+  const inferredTagInput = [photo.context_type, sectionLabel, photo.caption]
+    .filter(Boolean)
+    .join(" ");
   const sectionTag =
-    sectionTagRaw ?? (isFandom ? photo.context_type ?? null : null);
+    normalizedSectionTag ??
+    (isFandom ? inferFandomSectionTag(inferredTagInput) : null);
 
   const imdbTypeRaw =
     typeof metadata.imdb_image_type === "string"
@@ -147,6 +179,7 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     metadata.createdAt ??
     metadata.original_created_at ??
     metadata.source_created_at ??
+    metadata.episode_air_date ??
     metadata.photo_date ??
     metadata.date ??
     metadata.release_date ??
@@ -157,6 +190,23 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     photo.hosted_content_type ?? null,
     photo.hosted_url || photo.url || null
   );
+  const metadataWidth =
+    typeof metadata.image_width === "number"
+      ? metadata.image_width
+      : typeof metadata.width === "number"
+        ? metadata.width
+        : null;
+  const metadataHeight =
+    typeof metadata.image_height === "number"
+      ? metadata.image_height
+      : typeof metadata.height === "number"
+        ? metadata.height
+        : null;
+  const inferredSeason =
+    photo.season ??
+    (typeof metadata.season_number === "number" ? metadata.season_number : null) ??
+    parseSeasonNumber(sectionLabel) ??
+    parseSeasonNumber(photo.caption ?? null);
   return {
     source: photo.source,
     sourceBadgeColor: SOURCE_COLORS[photo.source.toLowerCase()] ?? "#6b7280",
@@ -173,10 +223,13 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     sourceUrl,
     caption: photo.caption,
     dimensions:
-      photo.width && photo.height
-        ? { width: photo.width, height: photo.height }
+      (photo.width ?? metadataWidth) && (photo.height ?? metadataHeight)
+        ? {
+            width: (photo.width ?? metadataWidth) as number,
+            height: (photo.height ?? metadataHeight) as number,
+          }
         : null,
-    season: photo.season,
+    season: inferredSeason,
     contextType: photo.context_type,
     people: [...new Set(photo.people_names ?? [])],
     titles: [...new Set(photo.title_names ?? [])],
