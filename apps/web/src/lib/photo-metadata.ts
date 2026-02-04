@@ -127,7 +127,7 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
         : typeof photo.context_section === "string"
           ? photo.context_section
         : null;
-  const normalizedSectionTag = sectionTagRaw
+  const normalizedSectionTag = isFandom && sectionTagRaw
     ? inferFandomSectionTag(sectionTagRaw) ?? sectionTagRaw
     : null;
   const inferredTagInput = [photo.context_type, sectionLabel, photo.caption]
@@ -135,7 +135,9 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     .join(" ");
   const sectionTag =
     normalizedSectionTag ??
-    (isFandom ? inferFandomSectionTag(inferredTagInput) : null);
+    (isFandom
+      ? inferFandomSectionTag(inferredTagInput)
+      : sectionTagRaw ?? sectionLabel ?? null);
 
   const imdbTypeRaw =
     typeof metadata.imdb_image_type === "string"
