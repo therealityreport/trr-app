@@ -4,40 +4,25 @@ import { requireAdmin } from "@/lib/server/auth";
 export const dynamic = "force-dynamic";
 
 interface RouteParams {
-  params: Promise<{ personId: string }>;
+  params: Promise<{ showId: string }>;
 }
 
 /**
- * POST /api/admin/trr-api/people/[personId]/refresh-images
+ * POST /api/admin/trr-api/shows/[showId]/auto-count-images
  *
- * Proxies refresh images request to TRR-Backend for a person.
+ * Proxy to TRR-Backend auto-count for show/season/episode images.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     await requireAdmin(request);
+    const { showId } = await params;
 
-    const { personId } = await params;
-
-    if (!personId) {
-      return NextResponse.json(
-        { error: "personId is required" },
-        { status: 400 }
-      );
-    }
-
-    // Parse JSON body if provided (optional)
-    let body: Record<string, unknown> | undefined;
-    if (request.headers.get("content-type")?.includes("application/json")) {
-      try {
-        body = await request.json();
-      } catch {
-        body = undefined;
-      }
+    if (!showId) {
+      return NextResponse.json({ error: "showId is required" }, { status: 400 });
     }
 
     const backendUrl = process.env.TRR_API_URL;
     if (!backendUrl) {
-      console.error("[person/refresh-images] TRR_API_URL not configured");
       return NextResponse.json(
         { error: "Backend API not configured" },
         { status: 500 }
@@ -46,27 +31,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      console.error(
-        "[person/refresh-images] TRR_CORE_SUPABASE_SERVICE_ROLE_KEY not configured"
-      );
       return NextResponse.json(
         { error: "Backend auth not configured" },
         { status: 500 }
       );
     }
 
+    let body: Record<string, unknown> = {};
+    if (request.headers.get("content-type")?.includes("application/json")) {
+      body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    }
+
     let backendResponse: Response;
     let data: Record<string, unknown> = {};
     try {
       backendResponse = await fetch(
-        `${backendUrl}/api/v1/admin/person/${personId}/refresh-images`,
+        `${backendUrl}/api/v1/admin/shows/${showId}/auto-count-images`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${serviceRoleKey}`,
           },
-          body: JSON.stringify(body ?? {}),
+          body: JSON.stringify(body),
         }
       );
       data = (await backendResponse.json().catch(() => ({}))) as Record<
@@ -74,27 +61,34 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         unknown
       >;
     } catch (error) {
-      console.error("[person/refresh-images] Backend fetch failed", {
-        backendUrl,
-        error,
-      });
-      const detail = error instanceof Error ? error.message : "unknown error";
+      const baseDetail = error instanceof Error ? error.message : "unknown error";
+      const causeDetail =
+        error instanceof Error && error.cause
+          ? `; cause=${String(error.cause)}`
+          : "";
       return NextResponse.json(
-        { error: "Backend fetch failed", detail: `${detail} (TRR_API_URL=${backendUrl})` },
+        {
+          error: "Backend fetch failed",
+          detail: `${baseDetail}${causeDetail} (TRR_API_URL=${backendUrl})`,
+        },
         { status: 502 }
       );
     }
 
     if (!backendResponse.ok) {
+      const errorMessage =
+        typeof data.error === "string" ? data.error : "Auto-count failed";
+      const detail =
+        typeof data.detail === "string" ? data.detail : undefined;
       return NextResponse.json(
-        { error: data.detail || data.error || "Refresh failed" },
+        detail ? { error: errorMessage, detail } : { error: errorMessage },
         { status: backendResponse.status }
       );
     }
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error("[api] Failed to refresh person images", error);
+    console.error("[api] Failed to auto-count show images", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =
       message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;

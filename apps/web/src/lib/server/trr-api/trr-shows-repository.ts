@@ -1,5 +1,9 @@
 import "server-only";
 import { getSupabaseTrrCore } from "@/lib/server/supabase-trr-core";
+import {
+  getPhotoIdsByPersonId,
+  getTagsByPhotoIds,
+} from "@/lib/server/admin/cast-photo-tags-repository";
 
 // ============================================================================
 // Types
@@ -647,12 +651,77 @@ export async function searchPeople(
 // Person Photo & Credit Functions
 // ============================================================================
 
+const getMetadataString = (
+  metadata: Record<string, unknown> | null | undefined,
+  key: string
+): string | null => {
+  if (!metadata) return null;
+  const value = metadata[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+};
+
+const normalizeScrapeSource = (
+  source: string | null | undefined,
+  url: string | null | undefined,
+  metadata?: Record<string, unknown> | null
+): string => {
+  const rawSource = source ?? "";
+  const lower = rawSource.toLowerCase();
+  if (!lower.startsWith("web_scrape") && !lower.startsWith("webscrape")) {
+    return rawSource;
+  }
+
+  const metadataUrl =
+    getMetadataString(metadata, "source_url") ??
+    getMetadataString(metadata, "sourceUrl") ??
+    getMetadataString(metadata, "source_page_url") ??
+    getMetadataString(metadata, "sourcePageUrl") ??
+    null;
+  const candidateUrl = url ?? metadataUrl;
+  if (!candidateUrl) {
+    const cleaned = lower.replace(/^web[_-]?scrape[:]?/, "").replace(/^www\./, "");
+    if (cleaned && cleaned.includes(".")) {
+      return cleaned;
+    }
+    return rawSource;
+  }
+
+  try {
+    const hostname = new URL(candidateUrl).hostname.toLowerCase();
+    const normalized = hostname.replace(/^www\./, "");
+    return normalized || rawSource;
+  } catch {
+    return rawSource;
+  }
+};
+
+const normalizeFandomSource = (
+  source: string,
+  metadata?: Record<string, unknown> | null
+): { source: string; metadata: Record<string, unknown> | null } => {
+  const lower = source.toLowerCase();
+  if (lower !== "fandom-gallery") {
+    return { source, metadata: metadata ?? null };
+  }
+
+  const nextMetadata = metadata ?? {};
+  if (typeof nextMetadata.source_variant !== "string") {
+    return {
+      source: "fandom",
+      metadata: { ...nextMetadata, source_variant: "fandom_gallery" },
+    };
+  }
+
+  return { source: "fandom", metadata: nextMetadata };
+};
+
 export interface TrrPersonPhoto {
   id: string;
   person_id: string;
   source: string;
   url: string | null;
   hosted_url: string | null;
+  hosted_content_type?: string | null;
   caption: string | null;
   width: number | null;
   height: number | null;
@@ -660,10 +729,18 @@ export interface TrrPersonPhoto {
   season: number | null;
   // Metadata fields
   people_names: string[] | null;
+  people_ids: string[] | null;
+  people_count?: number | null;
+  people_count_source?: "auto" | "manual" | null;
+  ingest_status?: string | null;
   title_names: string[] | null;
   metadata: Record<string, unknown> | null;
   fetched_at: string | null;
   created_at: string | null;
+  // Origin metadata
+  origin: "cast_photos" | "media_links";
+  link_id?: string | null;
+  media_asset_id?: string | null;
 }
 
 export interface TrrPersonCredit {
@@ -688,10 +765,14 @@ export async function getPhotosByPersonId(
   const { limit, offset } = normalizePagination(options);
   const supabase = getSupabaseTrrCore();
 
+  const person = await getPersonById(personId);
+  const fullName = person?.full_name?.trim() ?? null;
+  const manualTagPhotoIds = await getPhotoIdsByPersonId(personId);
+
   // Query 1: Get photos from cast_photos table
-  const { data: castPhotos, error: castError } = await supabase
+  const { data: castPhotosByPerson, error: castError } = await supabase
     .from("cast_photos")
-    .select("id, person_id, source, url, hosted_url, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at")
+    .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at, created_at")
     .eq("person_id", personId)
     .not("hosted_url", "is", null)
     .order("source", { ascending: true })
@@ -701,6 +782,86 @@ export async function getPhotosByPersonId(
     console.error("[trr-shows-repository] getPhotosByPersonId cast_photos error:", castError);
     throw new Error(`Failed to get photos: ${castError.message}`);
   }
+
+  let castPhotosByName: TrrPersonPhoto[] = [];
+  if (fullName) {
+    const { data: namePhotosRaw, error: nameError } = await supabase
+      .from("cast_photos")
+      .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at, created_at")
+      .contains("people_names", [fullName])
+      .not("hosted_url", "is", null)
+      .order("source", { ascending: true })
+      .order("gallery_index", { ascending: true, nullsFirst: false });
+
+    if (nameError) {
+      console.error("[trr-shows-repository] getPhotosByPersonId cast_photos name error:", nameError);
+    } else {
+      castPhotosByName = (namePhotosRaw ?? []) as TrrPersonPhoto[];
+    }
+  }
+
+  let castPhotosByManualTags: TrrPersonPhoto[] = [];
+  if (manualTagPhotoIds.length > 0) {
+    const { data: manualPhotosRaw, error: manualError } = await supabase
+      .from("cast_photos")
+      .select("id, person_id, source, url, hosted_url, hosted_content_type, caption, width, height, context_type, season, people_names, title_names, metadata, fetched_at, created_at")
+      .in("id", manualTagPhotoIds)
+      .not("hosted_url", "is", null)
+      .order("source", { ascending: true })
+      .order("gallery_index", { ascending: true, nullsFirst: false });
+
+    if (manualError) {
+      console.error(
+        "[trr-shows-repository] getPhotosByPersonId cast_photos manual tag error:",
+        manualError
+      );
+    } else {
+      castPhotosByManualTags = (manualPhotosRaw ?? []) as TrrPersonPhoto[];
+    }
+  }
+
+  const castPhotos = [
+    ...((castPhotosByPerson ?? []) as TrrPersonPhoto[]),
+    ...castPhotosByName,
+    ...castPhotosByManualTags,
+  ].map((photo) => {
+    const normalizedScrape = normalizeScrapeSource(
+      photo.source,
+      photo.url,
+      photo.metadata
+    );
+    const normalizedFandom = normalizeFandomSource(
+      normalizedScrape,
+      photo.metadata
+    );
+    return {
+      ...photo,
+      source: normalizedFandom.source,
+      metadata: normalizedFandom.metadata,
+      people_ids: null,
+      people_count: null,
+      people_count_source: null,
+      ingest_status: null,
+      origin: "cast_photos" as const,
+      link_id: null,
+      media_asset_id: null,
+    };
+  });
+
+  const tagRows = await getTagsByPhotoIds(
+    castPhotos.map((photo) => photo.id)
+  );
+  const castPhotosWithTags = castPhotos.map((photo) => {
+    const tagRow = tagRows.get(photo.id);
+    if (!tagRow) return photo;
+    return {
+      ...photo,
+      people_names: tagRow.people_names ?? photo.people_names,
+      people_ids: tagRow.people_ids ?? null,
+      people_count: tagRow.people_count ?? null,
+      people_count_source: tagRow.people_count_source ?? null,
+    } as TrrPersonPhoto;
+  });
 
   // Query 2: Get photos from media_links joined with media_assets
   // These tables may not be in generated types, so we use explicit types
@@ -718,11 +879,14 @@ export async function getPhotosByPersonId(
     source: string;
     source_url: string | null;
     hosted_url: string | null;
+    hosted_content_type: string | null;
     caption: string | null;
     width: number | null;
     height: number | null;
-    metadata: Record<string, unknown>;
+    metadata: Record<string, unknown> | null;
     fetched_at: string | null;
+    created_at: string | null;
+    ingest_status: string | null;
   }
 
   // First get media_links for this person
@@ -747,7 +911,7 @@ export async function getPhotosByPersonId(
     const assetIds = mediaLinks.map(link => link.media_asset_id);
     const { data: assetsRaw, error: assetsError } = await supabase
       .from("media_assets")
-      .select("id, source, source_url, hosted_url, caption, width, height, metadata, fetched_at")
+      .select("id, source, source_url, hosted_url, hosted_content_type, caption, width, height, metadata, fetched_at, created_at, ingest_status")
       .in("id", assetIds)
       .not("hosted_url", "is", null);
 
@@ -766,22 +930,62 @@ export async function getPhotosByPersonId(
           if (!asset || !asset.hosted_url) return null;
 
           const context = link.context;
+          const contextPeopleNames = Array.isArray((context as { people_names?: unknown })?.people_names)
+            ? ((context as { people_names: unknown }).people_names as string[])
+            : null;
+          const contextPeopleIds = Array.isArray((context as { people_ids?: unknown })?.people_ids)
+            ? ((context as { people_ids: unknown }).people_ids as string[])
+            : null;
+          const rawPeopleCount = (context as { people_count?: unknown } | null)?.people_count;
+          const contextPeopleCount =
+            typeof rawPeopleCount === "number"
+              ? rawPeopleCount
+              : typeof rawPeopleCount === "string" && rawPeopleCount.trim().length > 0
+                ? Number.parseInt(rawPeopleCount, 10)
+                : null;
+          const contextPeopleCountSource =
+            typeof (context as { people_count_source?: unknown } | null)?.people_count_source === "string"
+              ? ((context as { people_count_source: string }).people_count_source as
+                  | "auto"
+                  | "manual")
+              : null;
+          const metadataPeopleNames = Array.isArray((asset.metadata as { people_names?: unknown } | null)?.people_names)
+            ? ((asset.metadata as { people_names: unknown }).people_names as string[])
+            : null;
+          const peopleNames = contextPeopleNames ?? metadataPeopleNames ?? null;
+          const normalizedScrape = normalizeScrapeSource(
+            asset.source || "web_scrape",
+            asset.source_url,
+            asset.metadata
+          );
+          const normalizedFandom = normalizeFandomSource(
+            normalizedScrape,
+            asset.metadata
+          );
           return {
             id: link.id,
             person_id: personId,
-            source: asset.source || "web_scrape",
+            source: normalizedFandom.source,
             url: asset.source_url,
             hosted_url: asset.hosted_url,
+            hosted_content_type: asset.hosted_content_type ?? null,
             caption: asset.caption,
             width: asset.width,
             height: asset.height,
             context_type: context?.context_type as string | null ?? null,
             season: context?.season as number | null ?? null,
-            people_names: null,
+            people_names: peopleNames,
+            people_ids: contextPeopleIds,
+            people_count: contextPeopleCount,
+            people_count_source: contextPeopleCountSource,
+            ingest_status: asset.ingest_status ?? null,
             title_names: null,
-            metadata: asset.metadata,
+            metadata: normalizedFandom.metadata,
             fetched_at: asset.fetched_at,
-            created_at: link.created_at,
+            created_at: asset.created_at ?? link.created_at,
+            origin: "media_links",
+            link_id: link.id,
+            media_asset_id: link.media_asset_id,
           } as TrrPersonPhoto;
         })
         .filter((p): p is TrrPersonPhoto => p !== null);
@@ -789,7 +993,7 @@ export async function getPhotosByPersonId(
   }
 
   // Merge both sources, cast_photos first then media_links
-  const allPhotos = [...(castPhotos ?? []) as TrrPersonPhoto[], ...mediaPhotos];
+  const allPhotos = [...(castPhotosWithTags ?? []) as TrrPersonPhoto[], ...mediaPhotos];
 
   // Deduplicate by hosted_url (in case same image exists in both sources)
   const seenUrls = new Set<string>();

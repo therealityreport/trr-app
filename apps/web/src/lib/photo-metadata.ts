@@ -3,6 +3,17 @@ import type { TrrPersonPhoto } from "@/lib/server/trr-api/trr-shows-repository";
 export interface PhotoMetadata {
   source: string;
   sourceBadgeColor: string;
+  s3Mirroring?: boolean;
+  fileType?: string | null;
+  createdAt?: Date | null;
+  addedAt?: Date | null;
+  sectionTag?: string | null;
+  sectionLabel?: string | null;
+  imdbType?: string | null;
+  episodeLabel?: string | null;
+  sourceVariant?: string | null;
+  sourcePageTitle?: string | null;
+  sourceUrl?: string | null;
   caption: string | null;
   dimensions: { width: number; height: number } | null;
   season: number | null;
@@ -15,12 +26,151 @@ export interface PhotoMetadata {
 const SOURCE_COLORS: Record<string, string> = {
   imdb: "#f5c518",
   tmdb: "#01d277",
+  fandom: "#00d6a3",
+  "fandom-gallery": "#00d6a3",
+};
+
+const CONTENT_TYPE_TO_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/avif": "avif",
+  "image/gif": "gif",
+  "video/webm": "webm",
+  "image/svg+xml": "svg",
+};
+
+const parseDateValue = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "number") {
+    const ms = value > 1e12 ? value : value * 1000;
+    const date = new Date(ms);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const date = new Date(trimmed);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+};
+
+const inferFileType = (
+  contentType: string | null | undefined,
+  url: string | null | undefined
+): string | null => {
+  if (contentType) {
+    const normalized = contentType.split(";")[0].trim().toLowerCase();
+    if (CONTENT_TYPE_TO_EXT[normalized]) {
+      return CONTENT_TYPE_TO_EXT[normalized];
+    }
+    if (normalized.includes("/")) {
+      const ext = normalized.split("/")[1];
+      return ext || null;
+    }
+  }
+  if (url) {
+    try {
+      const path = new URL(url).pathname;
+      const match = path.match(/\.([a-z0-9]+)$/i);
+      if (match) return match[1].toLowerCase();
+    } catch {
+      const match = url.match(/\.([a-z0-9]+)$/i);
+      if (match) return match[1].toLowerCase();
+    }
+  }
+  return null;
 };
 
 export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
+  const ingestStatus = (photo.ingest_status ?? "").toLowerCase();
+  const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+  const sourceLower = photo.source?.toLowerCase?.() ?? "";
+  const isFandom = sourceLower === "fandom" || sourceLower === "fandom-gallery";
+  const isImdb = sourceLower === "imdb";
+
+  const sectionTagRaw =
+    typeof metadata.fandom_section_tag === "string"
+      ? metadata.fandom_section_tag
+      : null;
+  const sectionLabel =
+    typeof metadata.fandom_section_label === "string"
+      ? metadata.fandom_section_label
+      : typeof metadata.context_section === "string"
+        ? metadata.context_section
+        : null;
+  const sectionTag =
+    sectionTagRaw ?? (isFandom ? photo.context_type ?? null : null);
+
+  const imdbTypeRaw =
+    typeof metadata.imdb_image_type === "string"
+      ? metadata.imdb_image_type
+      : null;
+  const imdbType = imdbTypeRaw ?? (isImdb ? photo.context_type ?? null : null);
+
+  const episodeNumber =
+    typeof metadata.episode_number === "number"
+      ? metadata.episode_number
+      : typeof metadata.episode_number === "string"
+        ? Number.parseInt(metadata.episode_number, 10)
+        : null;
+  const episodeTitle =
+    typeof metadata.episode_title === "string" ? metadata.episode_title : null;
+  const episodeLabel =
+    episodeNumber && Number.isFinite(episodeNumber)
+      ? `Episode ${episodeNumber}${episodeTitle ? ` - ${episodeTitle}` : ""}`
+      : episodeTitle;
+
+  const sourceVariant =
+    typeof metadata.source_variant === "string"
+      ? metadata.source_variant
+      : null;
+  const sourcePageTitle =
+    typeof metadata.source_page_title === "string"
+      ? metadata.source_page_title
+      : typeof metadata.page_title === "string"
+        ? metadata.page_title
+      : null;
+  const sourceUrl =
+    typeof metadata.source_page_url === "string"
+      ? metadata.source_page_url
+      : typeof metadata.source_url === "string"
+        ? metadata.source_url
+        : typeof metadata.page_url === "string"
+          ? metadata.page_url
+        : null;
+  const rawCreatedAt =
+    metadata.created_at ??
+    metadata.createdAt ??
+    metadata.original_created_at ??
+    metadata.source_created_at ??
+    metadata.photo_date ??
+    metadata.date ??
+    metadata.release_date ??
+    null;
+  const createdAt = parseDateValue(rawCreatedAt);
+  const addedAt = photo.created_at ? parseDateValue(photo.created_at) : null;
+  const fileType = inferFileType(
+    photo.hosted_content_type ?? null,
+    photo.hosted_url || photo.url || null
+  );
   return {
     source: photo.source,
     sourceBadgeColor: SOURCE_COLORS[photo.source.toLowerCase()] ?? "#6b7280",
+    s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
+    fileType,
+    createdAt: createdAt ?? null,
+    addedAt: createdAt ? null : addedAt,
+    sectionTag,
+    sectionLabel,
+    imdbType,
+    episodeLabel,
+    sourceVariant,
+    sourcePageTitle,
+    sourceUrl,
     caption: photo.caption,
     dimensions:
       photo.width && photo.height

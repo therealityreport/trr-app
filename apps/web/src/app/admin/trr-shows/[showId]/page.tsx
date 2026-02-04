@@ -68,6 +68,7 @@ interface TrrCastMember {
   billing_order: number | null;
   credit_category: string;
   photo_url: string | null;
+  cover_photo_url: string | null;
 }
 
 type TabId = "seasons" | "gallery" | "cast" | "surveys" | "social" | "details";
@@ -127,11 +128,54 @@ function CastPhoto({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+function RefreshProgressBar({
+  show,
+  current,
+  total,
+}: {
+  show: boolean;
+  current?: number | null;
+  total?: number | null;
+}) {
+  if (!show) return null;
+  const hasProgress =
+    typeof current === "number" &&
+    typeof total === "number" &&
+    total > 0 &&
+    current >= 0;
+  const percent = hasProgress
+    ? Math.min(100, Math.round((current / total) * 100))
+    : 0;
+
+  return (
+    <div className="mt-2 w-full">
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
+        {hasProgress ? (
+          <div
+            className="h-full rounded-full bg-zinc-700 transition-all"
+            style={{ width: `${percent}%` }}
+          />
+        ) : (
+          <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-zinc-700/70" />
+        )}
+      </div>
+      {hasProgress && (
+        <p className="mt-1 text-[11px] text-zinc-500">
+          {current}/{total}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Helper to map episode to metadata format for lightbox display
 function mapEpisodeToMetadata(episode: TrrEpisode, showName?: string): PhotoMetadata {
+  const fileTypeMatch = episode.url_original_still?.match(/\.([a-z0-9]+)$/i);
+  const fileType = fileTypeMatch ? fileTypeMatch[1].toLowerCase() : null;
   return {
     source: "tmdb",
     sourceBadgeColor: "#01d277",
+    fileType,
     caption: episode.title || `Episode ${episode.episode_number}`,
     dimensions: null,
     season: episode.season_number,
@@ -222,12 +266,50 @@ export default function TrrShowDetailPage() {
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const message = data.error || data.detail || "Failed to refresh images";
+      const message =
+        data.error && data.detail
+          ? `${data.error}: ${data.detail}`
+          : data.error || data.detail || "Failed to refresh images";
       throw new Error(message);
     }
 
     return data;
   }, [getAuthHeaders]);
+
+  const autoCountShowImages = useCallback(
+    async (seasonNumber: number | "all") => {
+      const headers = await getAuthHeaders();
+      const payload: Record<string, unknown> = {};
+      if (seasonNumber !== "all") {
+        payload.season_number = seasonNumber;
+      }
+
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${showId}/auto-count-images`,
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data.error && data.detail
+            ? `${data.error}: ${data.detail}`
+            : data.error || data.detail || "Failed to auto-count images";
+        throw new Error(message);
+      }
+      return data as {
+        assets_total?: number;
+        assets_counted?: number;
+        assets_skipped?: number;
+        assets_failed?: number;
+      };
+    },
+    [getAuthHeaders, showId]
+  );
 
   // Fetch show details
   const fetchShow = useCallback(async () => {
@@ -487,10 +569,30 @@ export default function TrrShowDetailPage() {
       }
     }
 
+    let autoCountSummary: string | null = null;
+    if (activeTab === "gallery") {
+      try {
+        const autoCount = await autoCountShowImages(selectedGallerySeason);
+        if (autoCount && typeof autoCount === "object") {
+          const total = typeof autoCount.assets_total === "number" ? autoCount.assets_total : null;
+          const counted =
+            typeof autoCount.assets_counted === "number" ? autoCount.assets_counted : null;
+          if (total !== null && counted !== null) {
+            autoCountSummary = `People counts: ${counted}/${total}`;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to auto-count show images:", err);
+        setRefreshError(
+          err instanceof Error ? err.message : "Failed to auto-count show images"
+        );
+      }
+    }
+
     setRefreshNotice(
       `Refreshed ${successCount}/${personIds.length} cast members${
         failureCount ? ` (${failureCount} failed)` : ""
-      }.`
+      }.${autoCountSummary ? ` ${autoCountSummary}.` : ""}`
     );
   }, [
     cast,
@@ -500,6 +602,7 @@ export default function TrrShowDetailPage() {
     activeTab,
     loadGalleryAssets,
     selectedGallerySeason,
+    autoCountShowImages,
   ]);
 
   const handleRefreshCastMember = useCallback(
@@ -566,10 +669,13 @@ export default function TrrShowDetailPage() {
       imdb: "#f5c518",
       tmdb: "#01d277",
     };
+    const fileTypeMatch = asset.hosted_url.match(/\.([a-z0-9]+)$/i);
+    const fileType = fileTypeMatch ? fileTypeMatch[1].toLowerCase() : null;
     return {
       source: asset.source,
       sourceBadgeColor:
         SOURCE_COLORS[asset.source.toLowerCase()] ?? "#6b7280",
+      fileType,
       caption: asset.caption,
       dimensions:
         asset.width && asset.height
@@ -732,6 +838,11 @@ export default function TrrShowDetailPage() {
                       : "Refreshing..."
                     : "Refresh Cast Images"}
                 </button>
+                <RefreshProgressBar
+                  show={refreshingCastImages}
+                  current={refreshCastProgress?.current}
+                  total={refreshCastProgress?.total}
+                />
                 {(refreshNotice || refreshError) && (
                   <p className={`text-xs ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
                     {refreshError || refreshNotice}
@@ -869,6 +980,11 @@ export default function TrrShowDetailPage() {
                         </button>
                       </div>
                     </div>
+                    <RefreshProgressBar
+                      show={refreshingCastImages}
+                      current={refreshCastProgress?.current}
+                      total={refreshCastProgress?.total}
+                    />
                     <div className="space-y-3">
                       {episodes.map((episode) => (
                         <div
@@ -1150,63 +1266,72 @@ export default function TrrShowDetailPage() {
                   </button>
                 </div>
               </div>
+              <RefreshProgressBar
+                show={refreshingCastImages}
+                current={refreshCastProgress?.current}
+                total={refreshCastProgress?.total}
+              />
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {cast.map((member) => (
-                  <Link
-                    key={member.id}
-                    href={`/admin/trr-shows/people/${member.person_id}`}
-                    className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                  >
-                    <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
-                      {member.photo_url ? (
-                        <CastPhoto
-                          src={member.photo_url}
-                          alt={member.full_name || member.cast_member_name || "Cast member"}
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-zinc-400">
-                          <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                            <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                            <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                          </svg>
-                        </div>
-                      )}
-                    </div>
-                    <p className="font-semibold text-zinc-900">
-                      {member.full_name || member.cast_member_name || "Unknown"}
-                    </p>
-                    {member.role && (
-                      <p className="text-sm text-zinc-600">{member.role}</p>
-                    )}
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-                        {member.credit_category}
-                      </span>
-                      {member.billing_order && (
-                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
-                          #{member.billing_order}
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        handleRefreshCastMember(
-                          member.person_id,
-                          member.full_name || member.cast_member_name || "Cast member"
-                        );
-                      }}
-                      disabled={Boolean(refreshingPersonIds[member.person_id])}
-                      className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                {cast.map((member) => {
+                  const thumbnailUrl = member.cover_photo_url || member.photo_url;
+
+                  return (
+                    <Link
+                      key={member.id}
+                      href={`/admin/trr-shows/people/${member.person_id}`}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                     >
-                      {refreshingPersonIds[member.person_id]
-                        ? "Refreshing..."
-                        : "Refresh Images"}
-                    </button>
-                  </Link>
-                ))}
+                      <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
+                        {thumbnailUrl ? (
+                          <CastPhoto
+                            src={thumbnailUrl}
+                            alt={member.full_name || member.cast_member_name || "Cast member"}
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-zinc-400">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                              <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                              <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                      <p className="font-semibold text-zinc-900">
+                        {member.full_name || member.cast_member_name || "Unknown"}
+                      </p>
+                      {member.role && (
+                        <p className="text-sm text-zinc-600">{member.role}</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                          {member.credit_category}
+                        </span>
+                        {member.billing_order && (
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
+                            #{member.billing_order}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleRefreshCastMember(
+                            member.person_id,
+                            member.full_name || member.cast_member_name || "Cast member"
+                          );
+                        }}
+                        disabled={Boolean(refreshingPersonIds[member.person_id])}
+                        className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                      >
+                        {refreshingPersonIds[member.person_id]
+                          ? "Refreshing..."
+                          : "Refresh Images"}
+                      </button>
+                    </Link>
+                  );
+                })}
               </div>
               {cast.length === 0 && (
                 <p className="text-sm text-zinc-500">

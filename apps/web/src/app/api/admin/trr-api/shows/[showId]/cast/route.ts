@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { getCoverPhotos } from "@/lib/server/admin/person-cover-photos-repository";
 import { getCastByShowId } from "@/lib/server/trr-api/trr-shows-repository";
 
 export const dynamic = "force-dynamic";
@@ -37,13 +38,31 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
 
     const cast = await getCastByShowId(showId, { limit, offset });
+    let castWithCover = cast;
+
+    if (cast.length > 0) {
+      const personIds = [...new Set(cast.map((member) => member.person_id))];
+      try {
+        const coverPhotos = await getCoverPhotos(personIds);
+        castWithCover = cast.map((member) => ({
+          ...member,
+          cover_photo_url: coverPhotos.get(member.person_id)?.photo_url ?? null,
+        }));
+      } catch (error) {
+        console.error("[api] Failed to load cover photos for cast", error);
+        castWithCover = cast.map((member) => ({
+          ...member,
+          cover_photo_url: null,
+        }));
+      }
+    }
 
     return NextResponse.json({
-      cast,
+      cast: castWithCover,
       pagination: {
         limit,
         offset,
-        count: cast.length,
+        count: castWithCover.length,
       },
     });
   } catch (error) {

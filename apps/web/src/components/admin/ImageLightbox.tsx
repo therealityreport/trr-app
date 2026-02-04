@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import Image from "next/image";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 
@@ -104,6 +104,7 @@ interface ImageLightboxProps extends ImageManagementProps {
   isOpen: boolean;
   onClose: () => void;
   metadata?: PhotoMetadata | null;
+  metadataExtras?: ReactNode;
   position?: { current: number; total: number };
   onPrevious?: () => void;
   onNext?: () => void;
@@ -123,14 +124,23 @@ interface MetadataPanelProps {
     onDelete?: () => Promise<void>;
     onReassign?: () => void;
   };
+  extras?: ReactNode;
 }
 
-function MetadataPanel({ metadata, isExpanded, management }: MetadataPanelProps) {
+function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPanelProps) {
   const [showFullCaption, setShowFullCaption] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const captionTruncateLength = 200;
   const needsTruncation =
     metadata.caption && metadata.caption.length > captionTruncateLength;
+  const normalizedContextType = metadata.contextType?.toLowerCase?.() ?? null;
+  const normalizedSectionTag = metadata.sectionTag?.toLowerCase?.() ?? null;
+  const normalizedImdbType = metadata.imdbType?.toLowerCase?.() ?? null;
+  const showContextType =
+    Boolean(metadata.contextType) &&
+    normalizedContextType !== normalizedSectionTag &&
+    normalizedContextType !== normalizedImdbType;
+  const sourcePageLabel = metadata.sourcePageTitle || metadata.sourceUrl || null;
 
   const handleAction = async (
     action: "archive" | "unarchive" | "delete",
@@ -158,6 +168,11 @@ function MetadataPanel({ metadata, isExpanded, management }: MetadataPanelProps)
             Source
           </span>
           <div className="mt-1 flex items-center gap-2">
+            {metadata.s3Mirroring && (
+              <span className="inline-block rounded px-2 py-0.5 text-xs font-medium text-white bg-blue-500/80">
+                S3 MIRRORING
+              </span>
+            )}
             <span
               className="inline-block rounded px-2 py-0.5 text-xs font-medium text-black"
               style={{ backgroundColor: metadata.sourceBadgeColor }}
@@ -167,6 +182,59 @@ function MetadataPanel({ metadata, isExpanded, management }: MetadataPanelProps)
           </div>
         </div>
 
+        {metadata.sourceVariant && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Source Variant
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.sourceVariant}
+            </p>
+          </div>
+        )}
+
+        {sourcePageLabel && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Source Page
+            </span>
+            {metadata.sourceUrl ? (
+              <a
+                href={metadata.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 block text-sm text-white/90 underline break-all"
+              >
+                {sourcePageLabel}
+              </a>
+            ) : (
+              <p className="mt-1 text-sm text-white/90 break-all">{sourcePageLabel}</p>
+            )}
+          </div>
+        )}
+
+        {metadata.sectionTag && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Tags
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.sectionTag}
+            </p>
+          </div>
+        )}
+
+        {metadata.sectionLabel && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Section
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.sectionLabel}
+            </p>
+          </div>
+        )}
+
         {/* Dimensions */}
         {metadata.dimensions && (
           <div className="mb-4">
@@ -175,6 +243,39 @@ function MetadataPanel({ metadata, isExpanded, management }: MetadataPanelProps)
             </span>
             <p className="mt-1 text-sm text-white/90">
               {metadata.dimensions.width} × {metadata.dimensions.height}
+            </p>
+          </div>
+        )}
+
+        {metadata.fileType && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              File Type
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.fileType.toUpperCase()}
+            </p>
+          </div>
+        )}
+
+        {metadata.createdAt && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Created
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.createdAt.toLocaleDateString()}
+            </p>
+          </div>
+        )}
+
+        {!metadata.createdAt && metadata.addedAt && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Added
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.addedAt.toLocaleDateString()}
             </p>
           </div>
         )}
@@ -191,8 +292,30 @@ function MetadataPanel({ metadata, isExpanded, management }: MetadataPanelProps)
           </div>
         )}
 
+        {metadata.episodeLabel && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Episode
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.episodeLabel}
+            </p>
+          </div>
+        )}
+
+        {metadata.imdbType && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              IMDb Type
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.imdbType}
+            </p>
+          </div>
+        )}
+
         {/* Context Type */}
-        {metadata.contextType && (
+        {showContextType && (
           <div className="mb-4">
             <span className="tracking-widest text-[10px] uppercase text-white/50">
               Type
@@ -248,6 +371,8 @@ function MetadataPanel({ metadata, isExpanded, management }: MetadataPanelProps)
             </div>
           </div>
         )}
+
+        {extras && <div className="mb-4">{extras}</div>}
 
         {/* Titles */}
         {metadata.titles.length > 0 && (
@@ -354,6 +479,7 @@ export function ImageLightbox({
   isOpen,
   onClose,
   metadata,
+  metadataExtras,
   position,
   onPrevious,
   onNext,
@@ -584,6 +710,7 @@ export function ImageLightbox({
                   }
                 : undefined
             }
+            extras={metadataExtras}
           />
         )}
       </div>
