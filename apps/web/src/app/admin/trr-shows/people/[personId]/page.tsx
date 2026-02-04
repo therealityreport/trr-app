@@ -1020,7 +1020,7 @@ export default function PersonProfilePage() {
         const textLower = text.toLowerCase();
         const matchesShowName = showNameLower ? textLower.includes(showNameLower) : false;
         const acronyms = extractShowAcronyms(text);
-        const matchesShowAcronym = Boolean(showAcronym) && acronyms.has(showAcronym);
+        const matchesShowAcronym = showAcronym ? acronyms.has(showAcronym) : false;
         const metadataShowName =
           typeof metadata.show_name === "string" ? metadata.show_name.toLowerCase() : null;
         const metadataMatchesThisShow =
