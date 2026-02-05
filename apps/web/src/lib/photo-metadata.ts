@@ -1,4 +1,4 @@
-import type { TrrPersonPhoto } from "@/lib/server/trr-api/trr-shows-repository";
+import type { TrrPersonPhoto, SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 export interface PhotoMetadata {
   source: string;
@@ -236,5 +236,159 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     people: [...new Set(photo.people_names ?? [])],
     titles: [...new Set(photo.title_names ?? [])],
     fetchedAt: photo.fetched_at ? new Date(photo.fetched_at) : null,
+  };
+}
+
+/**
+ * Maps a SeasonAsset (from Show/Season galleries) to PhotoMetadata format.
+ * Extracts rich metadata similar to mapPhotoToMetadata for People photos.
+ */
+export function mapSeasonAssetToMetadata(
+  asset: SeasonAsset,
+  seasonNumber?: number,
+  showName?: string
+): PhotoMetadata {
+  const ingestStatus = (asset.ingest_status ?? "").toLowerCase();
+  const metadata = (asset.metadata ?? {}) as Record<string, unknown>;
+  const sourceLower = asset.source?.toLowerCase?.() ?? "";
+  const isFandom = sourceLower === "fandom" || sourceLower === "fandom-gallery";
+  const isImdb = sourceLower === "imdb";
+
+  // Section tag handling (similar to mapPhotoToMetadata)
+  const sectionTagRaw =
+    typeof metadata.fandom_section_tag === "string"
+      ? metadata.fandom_section_tag
+      : null;
+  const sectionLabel =
+    typeof metadata.fandom_section_label === "string"
+      ? metadata.fandom_section_label
+      : typeof metadata.context_section === "string"
+        ? metadata.context_section
+        : typeof asset.context_section === "string"
+          ? asset.context_section
+          : null;
+  const normalizedSectionTag = isFandom && sectionTagRaw
+    ? inferFandomSectionTag(sectionTagRaw) ?? sectionTagRaw
+    : null;
+  const inferredTagInput = [asset.context_type, sectionLabel, asset.caption]
+    .filter(Boolean)
+    .join(" ");
+  const sectionTag =
+    normalizedSectionTag ??
+    (isFandom
+      ? inferFandomSectionTag(inferredTagInput)
+      : sectionTagRaw ?? sectionLabel ?? null);
+
+  // IMDb type handling
+  const imdbTypeRaw =
+    typeof metadata.imdb_image_type === "string"
+      ? metadata.imdb_image_type
+      : null;
+  const imdbType = imdbTypeRaw ?? (isImdb ? asset.context_type ?? null : null);
+
+  // Episode handling
+  const episodeNumber =
+    asset.episode_number ??
+    (typeof metadata.episode_number === "number"
+      ? metadata.episode_number
+      : typeof metadata.episode_number === "string"
+        ? Number.parseInt(metadata.episode_number, 10)
+        : null);
+  const episodeTitle =
+    typeof metadata.episode_title === "string" ? metadata.episode_title : null;
+  const episodeLabel =
+    episodeNumber && Number.isFinite(episodeNumber)
+      ? `Episode ${episodeNumber}${episodeTitle ? ` - ${episodeTitle}` : ""}`
+      : episodeTitle;
+
+  // Source page info
+  const sourceVariant =
+    typeof metadata.source_variant === "string"
+      ? metadata.source_variant
+      : null;
+  const sourcePageTitle =
+    typeof metadata.source_page_title === "string"
+      ? metadata.source_page_title
+      : typeof metadata.page_title === "string"
+        ? metadata.page_title
+        : null;
+  const sourceUrl =
+    typeof metadata.source_page_url === "string"
+      ? metadata.source_page_url
+      : typeof metadata.source_url === "string"
+        ? metadata.source_url
+        : typeof metadata.page_url === "string"
+          ? metadata.page_url
+          : null;
+
+  // Dates
+  const rawCreatedAt =
+    metadata.created_at ??
+    metadata.createdAt ??
+    metadata.original_created_at ??
+    metadata.source_created_at ??
+    metadata.episode_air_date ??
+    metadata.photo_date ??
+    metadata.date ??
+    metadata.release_date ??
+    null;
+  const createdAt = parseDateValue(rawCreatedAt);
+  const addedAt = asset.created_at ? parseDateValue(asset.created_at) : null;
+
+  // File type
+  const fileType = inferFileType(
+    asset.hosted_content_type ?? null,
+    asset.hosted_url ?? null
+  );
+
+  // Dimensions from metadata fallback
+  const metadataWidth =
+    typeof metadata.image_width === "number"
+      ? metadata.image_width
+      : typeof metadata.width === "number"
+        ? metadata.width
+        : null;
+  const metadataHeight =
+    typeof metadata.image_height === "number"
+      ? metadata.image_height
+      : typeof metadata.height === "number"
+        ? metadata.height
+        : null;
+
+  // Determine context type label
+  const contextType =
+    asset.type === "episode"
+      ? `Episode ${asset.episode_number ?? ""}`
+      : asset.type === "season"
+        ? "Season Poster"
+        : asset.context_type ?? "Cast Photo";
+
+  return {
+    source: asset.source,
+    sourceBadgeColor: SOURCE_COLORS[asset.source.toLowerCase()] ?? "#6b7280",
+    s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
+    fileType,
+    createdAt: createdAt ?? null,
+    addedAt: createdAt ? null : addedAt,
+    sectionTag,
+    sectionLabel,
+    imdbType,
+    episodeLabel,
+    sourceVariant,
+    sourcePageTitle,
+    sourceUrl,
+    caption: asset.caption,
+    dimensions:
+      (asset.width ?? metadataWidth) && (asset.height ?? metadataHeight)
+        ? {
+            width: (asset.width ?? metadataWidth) as number,
+            height: (asset.height ?? metadataHeight) as number,
+          }
+        : null,
+    season: asset.season_number ?? seasonNumber ?? null,
+    contextType,
+    people: asset.person_name ? [asset.person_name] : [],
+    titles: showName ? [showName] : [],
+    fetchedAt: asset.fetched_at ? new Date(asset.fetched_at) : null,
   };
 }

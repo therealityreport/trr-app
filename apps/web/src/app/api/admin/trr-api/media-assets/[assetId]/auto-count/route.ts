@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getMediaLinksByAssetId, updateMediaLinksContext } from "@/lib/server/trr-api/media-links-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,27 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         detail ? { error: errorMessage, detail } : { error: errorMessage },
         { status: backendResponse.status }
       );
+    }
+
+    const rawCount = (data as { people_count?: unknown }).people_count;
+    const parsedCount =
+      typeof rawCount === "number" && Number.isFinite(rawCount)
+        ? Math.max(1, Math.floor(rawCount))
+        : null;
+
+    if (parsedCount !== null) {
+      const links = await getMediaLinksByAssetId(assetId);
+      if (links.length > 0) {
+        const baseContext =
+          links[0].context && typeof links[0].context === "object"
+            ? (links[0].context as Record<string, unknown>)
+            : {};
+        await updateMediaLinksContext(assetId, {
+          ...baseContext,
+          people_count: parsedCount,
+          people_count_source: "auto",
+        });
+      }
     }
 
     return NextResponse.json(data);
