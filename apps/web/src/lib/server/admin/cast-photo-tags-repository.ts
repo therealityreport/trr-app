@@ -98,7 +98,7 @@ export async function getPhotoIdsByPersonId(personId: string): Promise<string[]>
       return [];
     }
 
-    return (data ?? []).map((row) => row.cast_photo_id as string);
+    return (data ?? []).map((row: { cast_photo_id: string }) => row.cast_photo_id);
   } catch (error) {
     console.warn("[cast-photo-tags] Failed to fetch tag photo IDs", error);
     return [];
