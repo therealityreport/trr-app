@@ -1619,7 +1619,7 @@ export async function getSeasonCastWithEpisodeCounts(
 
   const results = personIds.map((personId) => ({
     person_id: personId,
-    person_name: peopleMap.get(personId)?.full_name ?? nameFallbackMap.get(personId) ?? null,
+    person_name: peopleMap.get(personId)?.full_name ?? null,
     episodes_in_season: episodeCounts.get(personId)?.size ?? 0,
     total_episodes: totalsMap.get(personId) ?? null,
     photo_url: photosMap.get(personId) ?? null,
