@@ -18,7 +18,8 @@ export interface CastPhotoTags {
 const TAG_FIELDS =
   "cast_photo_id, people_names, people_ids, people_count, people_count_source, detector, created_at, updated_at, created_by_firebase_uid, updated_by_firebase_uid";
 
-const ADMIN_SCHEMA = "admin";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ADMIN_SCHEMA = "admin" as any;
 let adminSchemaAvailable: boolean | null = null;
 
 const isInvalidSchemaError = (message: string | null | undefined): boolean =>
