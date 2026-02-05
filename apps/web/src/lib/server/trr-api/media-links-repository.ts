@@ -23,7 +23,8 @@ const MEDIA_LINK_FIELDS =
 
 export async function getMediaLinkById(linkId: string): Promise<MediaLinkRow | null> {
   const supabase = getSupabaseTrrCore();
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("media_links")
     .select(MEDIA_LINK_FIELDS)
     .eq("id", linkId)
@@ -43,7 +44,8 @@ export async function getMediaLinksByAssetId(
   mediaAssetId: string
 ): Promise<MediaLinkRow[]> {
   const supabase = getSupabaseTrrCore();
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("media_links")
     .select(MEDIA_LINK_FIELDS)
     .eq("media_asset_id", mediaAssetId)
@@ -94,7 +96,8 @@ export async function updateMediaLinksContext(
   context: Record<string, unknown>
 ): Promise<void> {
   const supabase = getSupabaseTrrCore();
-  const { error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any)
     .from("media_links")
     .update({ context })
     .eq("media_asset_id", mediaAssetId)
@@ -130,7 +133,8 @@ export async function createMediaLink(
   const { media_asset_id, entity_type, entity_id, kind = "gallery", context = {} } = params;
 
   // Check if link already exists
-  const { data: existing, error: checkError } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: existing, error: checkError } = await (supabase as any)
     .from("media_links")
     .select(MEDIA_LINK_FIELDS)
     .eq("media_asset_id", media_asset_id)
@@ -148,7 +152,8 @@ export async function createMediaLink(
   }
 
   // Create new link
-  const { data: newLink, error: insertError } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: newLink, error: insertError } = await (supabase as any)
     .from("media_links")
     .insert({
       media_asset_id,
