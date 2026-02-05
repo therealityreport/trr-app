@@ -541,7 +541,7 @@ export async function getCastByShowId(
 
   // First try the view - it has display_url which picks the best available URL
   let viewPhotos: Array<{ person_id: string; display_url?: string; hosted_url?: string; url?: string }> | null = null;
-  if (vCastPhotosAvailable !== false) {
+  if (vCastPhotosAvailable !== (false as boolean | null)) {
     const { data: viewData, error: viewError } = await supabase
       .from("v_cast_photos")
       .select("person_id, display_url, hosted_url, url")
@@ -549,7 +549,7 @@ export async function getCastByShowId(
 
     if (viewError) {
       if (isViewUnavailableError(viewError.message)) {
-        if (vCastPhotosAvailable !== false) {
+        if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
           console.log(
             "[trr-shows-repository] v_cast_photos view not available:",
@@ -703,7 +703,7 @@ export async function getShowCastWithStats(
     | Array<{ person_id: string; display_url?: string | null; hosted_url?: string | null; url?: string | null }>
     | null = null;
 
-  if (vCastPhotosAvailable !== false) {
+  if (vCastPhotosAvailable !== (false as boolean | null)) {
     const { data: viewData, error: viewError } = await supabase
       .from("v_cast_photos")
       .select("person_id, display_url, hosted_url, url")
@@ -711,7 +711,7 @@ export async function getShowCastWithStats(
 
     if (viewError) {
       if (isViewUnavailableError(viewError.message)) {
-        if (vCastPhotosAvailable !== false) {
+        if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
           console.log(
             "[trr-shows-repository] v_cast_photos view not available:",
@@ -1409,7 +1409,7 @@ async function getSeasonCastFallbackFromShowCast(
     return null;
   };
 
-  if (vCastPhotosAvailable !== false) {
+  if (vCastPhotosAvailable !== (false as boolean | null)) {
     const { data: viewData, error: viewError } = await supabase
       .from("v_cast_photos")
       .select("person_id, display_url, hosted_url, url")
@@ -1417,7 +1417,7 @@ async function getSeasonCastFallbackFromShowCast(
 
     if (viewError) {
       if (isViewUnavailableError(viewError.message)) {
-        if (vCastPhotosAvailable !== false) {
+        if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
         }
       }
@@ -1556,7 +1556,7 @@ export async function getSeasonCastWithEpisodeCounts(
     | Array<{ person_id: string; display_url?: string | null; hosted_url?: string | null; url?: string | null }>
     | null = null;
 
-  if (vCastPhotosAvailable !== false) {
+  if (vCastPhotosAvailable !== (false as boolean | null)) {
     const { data: viewData, error: viewError } = await supabase
       .from("v_cast_photos")
       .select("person_id, display_url, hosted_url, url")
@@ -1564,7 +1564,7 @@ export async function getSeasonCastWithEpisodeCounts(
 
     if (viewError) {
       if (isViewUnavailableError(viewError.message)) {
-        if (vCastPhotosAvailable !== false) {
+        if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
           console.log(
             "[trr-shows-repository] v_cast_photos view not available:",
