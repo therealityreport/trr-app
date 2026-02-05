@@ -1714,7 +1714,7 @@ export default function PersonProfilePage() {
             {error || "Person not found"}
           </p>
           <Link
-            href={backHref}
+            href={backHref as "/admin/trr-shows"}
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
             {backLabel}
@@ -1732,7 +1732,7 @@ export default function PersonProfilePage() {
           <div className="mx-auto max-w-6xl">
             <div className="mb-4">
               <Link
-                href={backHref}
+                href={backHref as "/admin/trr-shows"}
                 className="text-sm text-zinc-500 hover:text-zinc-900"
               >
                 {backLabel}
