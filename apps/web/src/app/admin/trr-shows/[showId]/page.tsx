@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -483,6 +483,54 @@ export default function TrrShowDetailPage() {
     return `${formatDate(premiere)} – ${formatDate(finale)}`;
   };
 
+  const isSeasonBackdrop = (asset: SeasonAsset) => {
+    if (asset.kind === "backdrop") return true;
+    const metadata = asset.metadata;
+    if (!metadata || typeof metadata !== "object") return false;
+    const meta = metadata as Record<string, unknown>;
+    if (meta.season_backdrop === true) return true;
+    const roles = meta.image_roles;
+    return Array.isArray(roles) && roles.includes("backdrop");
+  };
+
+  const today = useMemo(() => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }, []);
+
+  const isSeasonAired = useCallback(
+    (season: TrrSeason) => {
+      const summary = seasonEpisodeSummaries[season.id];
+      const premiereDate = summary?.premiereDate ?? season.air_date;
+      if (!premiereDate) return true;
+      const airDate = new Date(premiereDate);
+      if (Number.isNaN(airDate.getTime())) return true;
+      airDate.setHours(0, 0, 0, 0);
+      return airDate <= today;
+    },
+    [seasonEpisodeSummaries, today]
+  );
+
+  const visibleSeasons = useMemo(
+    () => seasons.filter((season) => isSeasonAired(season)),
+    [seasons, isSeasonAired]
+  );
+
+  useEffect(() => {
+    if (visibleSeasons.length === 0) return;
+    if (!openSeasonId || !visibleSeasons.some((season) => season.id === openSeasonId)) {
+      setOpenSeasonId(visibleSeasons[0].id);
+    }
+  }, [visibleSeasons, openSeasonId]);
+
+  useEffect(() => {
+    if (selectedGallerySeason === "all") return;
+    if (!visibleSeasons.some((season) => season.season_number === selectedGallerySeason)) {
+      setSelectedGallerySeason("all");
+    }
+  }, [selectedGallerySeason, visibleSeasons]);
+
   // Load gallery assets for a season (or all seasons)
   const loadGalleryAssets = useCallback(
     async (seasonNumber: number | "all") => {
@@ -492,7 +540,7 @@ export default function TrrShowDetailPage() {
         if (seasonNumber === "all") {
           // Fetch for all seasons
           const allAssets: SeasonAsset[] = [];
-          for (const season of seasons) {
+          for (const season of visibleSeasons) {
             const res = await fetch(
               `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets`,
               { headers }
@@ -517,15 +565,15 @@ export default function TrrShowDetailPage() {
         setGalleryLoading(false);
       }
     },
-    [showId, seasons, getAuthHeaders]
+    [showId, visibleSeasons, getAuthHeaders]
   );
 
   // Load gallery when tab becomes active or season filter changes
   useEffect(() => {
-    if (activeTab === "gallery" && seasons.length > 0) {
+    if (activeTab === "gallery" && visibleSeasons.length > 0) {
       loadGalleryAssets(selectedGallerySeason);
     }
-  }, [activeTab, selectedGallerySeason, loadGalleryAssets, seasons.length]);
+  }, [activeTab, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
 
   const refreshCastImages = useCallback(async () => {
     if (refreshingCastImages) return;
@@ -882,7 +930,7 @@ export default function TrrShowDetailPage() {
                 <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
               </div>
               <div className="space-y-3">
-                {seasons.map((season) => {
+                {visibleSeasons.map((season) => {
                   const summary = seasonEpisodeSummaries[season.id];
                   const isOpen = openSeasonId === season.id;
                   const countLabel = summary
@@ -969,7 +1017,7 @@ export default function TrrShowDetailPage() {
                     </div>
                   );
                 })}
-                {seasons.length === 0 && (
+                {visibleSeasons.length === 0 && (
                   <p className="text-sm text-zinc-500">No seasons found</p>
                 )}
               </div>
@@ -1002,7 +1050,7 @@ export default function TrrShowDetailPage() {
                     className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
                   >
                     <option value="all">All Seasons</option>
-                    {seasons.map((s) => (
+                    {visibleSeasons.map((s) => (
                       <option key={s.id} value={s.season_number}>
                         Season {s.season_number}
                       </option>
@@ -1013,11 +1061,15 @@ export default function TrrShowDetailPage() {
                 {selectedGallerySeason !== "all" && (
                   <button
                     onClick={() => {
+                      const selectedSeason = visibleSeasons.find(
+                        (season) => season.season_number === selectedGallerySeason
+                      );
                       setScrapeDrawerContext({
                         type: "season",
                         showId: showId,
                         showName: show.name,
                         seasonNumber: selectedGallerySeason,
+                        seasonId: selectedSeason?.id,
                       });
                       setScrapeDrawerOpen(true);
                     }}
@@ -1042,6 +1094,35 @@ export default function TrrShowDetailPage() {
               ) : (
                 <div className="space-y-8">
                   {/* Season Posters */}
+                  {galleryAssets.filter((a) => a.type === "season" && isSeasonBackdrop(a))
+                    .length > 0 && (
+                    <section>
+                      <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                        Season Backdrops
+                      </h4>
+                      <div className="grid grid-cols-3 gap-4">
+                        {galleryAssets
+                          .filter((a) => a.type === "season" && isSeasonBackdrop(a))
+                          .map((asset, i, arr) => (
+                            <button
+                              key={`${asset.id}-${i}`}
+                              onClick={(e) =>
+                                openAssetLightbox(asset, i, arr, e.currentTarget)
+                              }
+                              className="relative aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <GalleryImage
+                                src={asset.hosted_url}
+                                alt={asset.caption || "Season backdrop"}
+                                sizes="300px"
+                                className="object-cover"
+                              />
+                            </button>
+                          ))}
+                      </div>
+                    </section>
+                  )}
+
                   {galleryAssets.filter((a) => a.type === "season").length > 0 && (
                     <section>
                       <h4 className="mb-3 text-sm font-semibold text-zinc-900">

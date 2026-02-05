@@ -55,6 +55,7 @@ interface ImportProgress {
 interface DuplicateImage {
   url: string;
   media_asset_id: string;
+  kind?: ImageKind;
   linked: boolean;
   linking: boolean;
 }
@@ -72,6 +73,7 @@ export interface SeasonContext {
   showId: string;
   showName: string;
   seasonNumber: number;
+  seasonId?: string;
 }
 
 export interface PersonContext {
@@ -81,6 +83,16 @@ export interface PersonContext {
 }
 
 export type EntityContext = SeasonContext | PersonContext;
+
+type ImageKind = "poster" | "backdrop" | "episode_still" | "cast" | "other";
+
+const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
+  { value: "poster", label: "Poster" },
+  { value: "backdrop", label: "Backdrop" },
+  { value: "episode_still", label: "Episode Still" },
+  { value: "cast", label: "Cast Photos" },
+  { value: "other", label: "Other" },
+];
 
 interface ImageScrapeDrawerProps {
   isOpen: boolean;
@@ -138,11 +150,15 @@ export function ImageScrapeDrawer({
   // Duplicate tracking for linking
   const [duplicates, setDuplicates] = useState<DuplicateImage[]>([]);
 
+  const [bulkCastSelection, setBulkCastSelection] = useState<string[]>([]);
+
   // Season cast members (for assigning images to cast)
   const [seasonCast, setSeasonCast] = useState<SeasonCastMember[]>([]);
   const [castLoading, setCastLoading] = useState(false);
-  // Map of image candidate ID -> assigned person_id
-  const [personAssignments, setPersonAssignments] = useState<Record<string, string>>({});
+  // Map of image candidate ID -> assigned person_ids
+  const [personAssignments, setPersonAssignments] = useState<Record<string, string[]>>({});
+  // Map of image candidate ID -> image kind
+  const [imageKinds, setImageKinds] = useState<Record<string, ImageKind>>({});
 
   // Error state
   const [error, setError] = useState<string | null>(null);
@@ -186,7 +202,7 @@ export function ImageScrapeDrawer({
             media_asset_id: duplicate.media_asset_id,
             entity_type: entityType === "season" ? "season" : "person",
             entity_id: entityId,
-            kind: "gallery",
+            kind: entityType === "season" ? duplicate.kind || "other" : "gallery",
             context:
               entityContext.type === "season"
                 ? {
@@ -241,6 +257,8 @@ export function ImageScrapeDrawer({
       setSelectedImages(new Set());
       setCaptions({});
       setPersonAssignments({});
+      setImageKinds({});
+      setBulkCastSelection([]);
       setImportProgress(null);
       setImportResult(null);
       setDuplicates([]);
@@ -316,6 +334,8 @@ export function ImageScrapeDrawer({
       setSelectedImages(new Set());
       setCaptions({});
       setPersonAssignments({});
+      setImageKinds({});
+      setBulkCastSelection([]);
       setImportResult(null);
 
       const headers = await getAuthHeaders();
@@ -394,8 +414,16 @@ export function ImageScrapeDrawer({
           candidate_id: img.id,
           url: img.best_url,
           caption: captions[img.id] || null,
-          person_id: personAssignments[img.id] || null,
+          kind: imageKinds[img.id] || "other",
+          person_ids: personAssignments[img.id] || [],
         }));
+
+      const urlToKindMap = new Map<string, ImageKind>();
+      const urlToPersonMap = new Map<string, string[]>();
+      for (const img of imagesToImport) {
+        urlToKindMap.set(img.url, img.kind as ImageKind);
+        urlToPersonMap.set(img.url, img.person_ids as string[]);
+      }
 
       // Build payload based on entity context
       const payload =
@@ -404,6 +432,7 @@ export function ImageScrapeDrawer({
               entity_type: "season" as const,
               show_id: entityContext.showId,
               season_number: entityContext.seasonNumber,
+              ...(entityContext.seasonId ? { season_id: entityContext.seasonId } : {}),
               source_url: url.trim(),
               images: imagesToImport,
             }
@@ -476,11 +505,14 @@ export function ImageScrapeDrawer({
 
                 // Track duplicates that have asset IDs for potential linking
                 if (data.status === "duplicate" && data.media_asset_id) {
+                  const duplicateKind =
+                    urlToKindMap.get(data.url) ?? "other";
                   setDuplicates((prev) => [
                     ...prev,
                     {
                       url: data.url,
                       media_asset_id: data.media_asset_id,
+                      kind: duplicateKind,
                       linked: false,
                       linking: false,
                     },
@@ -501,39 +533,33 @@ export function ImageScrapeDrawer({
                 // Create person links for imported assets with cast assignments
                 if (entityContext.type === "season" && data.assets?.length > 0) {
                   // Build URL to person mapping from original images
-                  const urlToPersonMap = new Map<string, string>();
-                  for (const img of imagesToImport) {
-                    if (img.person_id) {
-                      urlToPersonMap.set(img.url, img.person_id);
-                    }
-                  }
-
                   // Create person links for assets that had assignments
                   for (const asset of data.assets as ImportedAsset[]) {
                     // Try to find matching person by URL or by hosted_url containing similar path
-                    const matchedPersonId = Array.from(urlToPersonMap.entries()).find(
+                    const matchedPersonIds = Array.from(urlToPersonMap.entries()).find(
                       ([url]) => asset.hosted_url?.includes(url.split("/").pop() || "NOMATCH")
                     )?.[1];
 
-                    if (matchedPersonId && asset.id) {
-                      // Create link to person (fire and forget)
-                      fetch("/api/admin/trr-api/media-links", {
-                        method: "POST",
-                        headers: {
-                          Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
-                          "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({
-                          media_asset_id: asset.id,
-                          entity_type: "person",
-                          entity_id: matchedPersonId,
-                          kind: "gallery",
-                          context: {
-                            show_id: entityContext.showId,
-                            season_number: entityContext.seasonNumber,
+                    if (matchedPersonIds && matchedPersonIds.length > 0 && asset.id) {
+                      for (const personId of matchedPersonIds) {
+                        fetch("/api/admin/trr-api/media-links", {
+                          method: "POST",
+                          headers: {
+                            Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+                            "Content-Type": "application/json",
                           },
-                        }),
-                      }).catch((err) => console.error("Failed to link asset to person:", err));
+                          body: JSON.stringify({
+                            media_asset_id: asset.id,
+                            entity_type: "person",
+                            entity_id: personId,
+                            kind: "gallery",
+                            context: {
+                              show_id: entityContext.showId,
+                              season_number: entityContext.seasonNumber,
+                            },
+                          }),
+                        }).catch((err) => console.error("Failed to link asset to person:", err));
+                      }
                     }
                   }
                 }
@@ -670,48 +696,99 @@ export function ImageScrapeDrawer({
                 </div>
               </div>
 
-              {/* Bulk Cast Assignment (season context only) */}
+              {/* Bulk Assignments (season context only) */}
               {entityContext.type === "season" && selectedImages.size > 0 && (
-                <div className="mb-4 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                  <span className="text-xs font-semibold text-zinc-600">
-                    Assign all selected to:
-                  </span>
-                  {castLoading ? (
-                    <span className="text-xs text-zinc-400">Loading cast...</span>
-                  ) : seasonCast.length > 0 ? (
+                <div className="mb-4 grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-xs font-semibold text-zinc-600">
+                      Set kind for all selected:
+                    </span>
                     <select
                       onChange={(e) => {
-                        const personId = e.target.value;
-                        if (!personId) return;
-                        // Assign to all selected images
-                        setPersonAssignments((prev) => {
+                        const value = e.target.value as ImageKind;
+                        if (!value) return;
+                        setImageKinds((prev) => {
                           const next = { ...prev };
                           for (const imgId of selectedImages) {
-                            next[imgId] = personId;
+                            next[imgId] = value;
                           }
                           return next;
                         });
-                        // Reset select
                         e.target.value = "";
                       }}
-                      className="flex-1 rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                      className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                     >
-                      <option value="">Select cast member...</option>
-                      {seasonCast.map((member) => (
-                        <option key={member.person_id} value={member.person_id}>
-                          {member.person_name || "Unknown"} ({member.episodes_in_season} eps)
+                      <option value="">Select kind...</option>
+                      {IMAGE_KIND_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
                         </option>
                       ))}
                     </select>
-                  ) : (
-                    <span className="text-xs text-zinc-400">No cast found for this season</span>
-                  )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-xs font-semibold text-zinc-600">
+                      Assign all selected to:
+                    </span>
+                    {castLoading ? (
+                      <span className="text-xs text-zinc-400">Loading cast...</span>
+                    ) : seasonCast.length > 0 ? (
+                      <>
+                        <select
+                          multiple
+                          value={bulkCastSelection}
+                          onChange={(e) => {
+                            const selected = Array.from(e.target.selectedOptions).map(
+                              (opt) => opt.value
+                            );
+                            setBulkCastSelection(selected);
+                          }}
+                          className="min-w-[220px] rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                        >
+                          {seasonCast.map((member) => (
+                            <option key={member.person_id} value={member.person_id}>
+                              {member.person_name || "Unknown"} (
+                              {member.episodes_in_season > 0
+                                ? `${member.episodes_in_season} eps`
+                                : "appeared"}
+                              )
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => {
+                            if (bulkCastSelection.length === 0) return;
+                            setPersonAssignments((prev) => {
+                              const next = { ...prev };
+                              for (const imgId of selectedImages) {
+                                next[imgId] = [...bulkCastSelection];
+                              }
+                              return next;
+                            });
+                          }}
+                          className="rounded bg-zinc-900 px-2 py-1 text-xs font-semibold text-white hover:bg-zinc-800"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          onClick={() => setBulkCastSelection([])}
+                          className="text-xs font-medium text-zinc-600 hover:text-zinc-800"
+                        >
+                          Clear
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-zinc-400">No cast found for this season</span>
+                    )}
+                  </div>
+
                   {Object.keys(personAssignments).length > 0 && (
                     <button
                       onClick={() => setPersonAssignments({})}
                       className="text-xs font-medium text-red-600 hover:text-red-700"
                     >
-                      Clear all
+                      Clear all assignments
                     </button>
                   )}
                 </div>
@@ -782,15 +859,33 @@ export function ImageScrapeDrawer({
                             className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                             onClick={(e) => e.stopPropagation()}
                           />
+                          <select
+                            value={imageKinds[img.id] || "other"}
+                            onChange={(e) => {
+                              const value = e.target.value as ImageKind;
+                              setImageKinds((prev) => ({ ...prev, [img.id]: value }));
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                          >
+                            {IMAGE_KIND_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                           {/* Cast Member Assignment (season context only) */}
                           {entityContext.type === "season" && seasonCast.length > 0 && (
                             <select
-                              value={personAssignments[img.id] || ""}
+                              multiple
+                              value={personAssignments[img.id] || []}
                               onChange={(e) => {
-                                const value = e.target.value;
+                                const value = Array.from(e.target.selectedOptions).map(
+                                  (opt) => opt.value
+                                );
                                 setPersonAssignments((prev) => {
                                   const next = { ...prev };
-                                  if (value) {
+                                  if (value.length > 0) {
                                     next[img.id] = value;
                                   } else {
                                     delete next[img.id];
@@ -801,10 +896,11 @@ export function ImageScrapeDrawer({
                               onClick={(e) => e.stopPropagation()}
                               className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                             >
-                              <option value="">Assign to cast...</option>
                               {seasonCast.map((member) => (
                                 <option key={member.person_id} value={member.person_id}>
-                                  {member.person_name || "Unknown"} ({member.episodes_in_season} eps)
+                                  {member.person_name || "Unknown"} (
+                                  {member.episodes_in_season > 0 ? `${member.episodes_in_season} eps` : "appeared"}
+                                  )
                                 </option>
                               ))}
                             </select>
