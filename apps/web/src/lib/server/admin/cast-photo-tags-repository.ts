@@ -44,8 +44,8 @@ export async function getTagsByPhotoIds(
 
   try {
     const supabase = getSupabaseTrrCore();
-    // @ts-ignore - admin schema is not in generated types
-    const { data, error } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .select(TAG_FIELDS)
@@ -79,8 +79,8 @@ export async function getPhotoIdsByPersonId(personId: string): Promise<string[]>
 
   try {
     const supabase = getSupabaseTrrCore();
-    // @ts-ignore - admin schema is not in generated types
-    const { data, error } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .select("cast_photo_id")
@@ -133,8 +133,8 @@ export async function upsertCastPhotoTags(
       created_by_firebase_uid: payload.created_by_firebase_uid ?? null,
     };
 
-    // @ts-ignore - admin schema is not in generated types
-    const { data, error } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .upsert(row, { onConflict: "cast_photo_id", defaultToNull: false })
