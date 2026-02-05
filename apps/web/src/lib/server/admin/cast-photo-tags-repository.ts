@@ -44,7 +44,7 @@ export async function getTagsByPhotoIds(
 
   try {
     const supabase = getSupabaseTrrCore();
-    // @ts-expect-error - admin schema is not in generated types
+    // @ts-ignore - admin schema is not in generated types
     const { data, error } = await supabase
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
@@ -79,7 +79,7 @@ export async function getPhotoIdsByPersonId(personId: string): Promise<string[]>
 
   try {
     const supabase = getSupabaseTrrCore();
-    // @ts-expect-error - admin schema is not in generated types
+    // @ts-ignore - admin schema is not in generated types
     const { data, error } = await supabase
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
@@ -133,7 +133,7 @@ export async function upsertCastPhotoTags(
       created_by_firebase_uid: payload.created_by_firebase_uid ?? null,
     };
 
-    // @ts-expect-error - admin schema is not in generated types
+    // @ts-ignore - admin schema is not in generated types
     const { data, error } = await supabase
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
