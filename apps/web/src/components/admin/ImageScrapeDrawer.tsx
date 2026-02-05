@@ -49,6 +49,21 @@ interface ImportProgress {
   url: string;
   status: "downloading" | "success" | "duplicate" | "error";
   error?: string;
+  media_asset_id?: string; // Present for duplicates if backend provides it
+}
+
+interface DuplicateImage {
+  url: string;
+  media_asset_id: string;
+  linked: boolean;
+  linking: boolean;
+}
+
+interface SeasonCastMember {
+  person_id: string;
+  person_name: string | null;
+  episodes_in_season: number;
+  photo_url: string | null;
 }
 
 // Entity context - pass one of these to pre-configure the drawer
@@ -120,6 +135,15 @@ export function ImageScrapeDrawer({
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importResult, setImportResult] = useState<ImportResponse | null>(null);
 
+  // Duplicate tracking for linking
+  const [duplicates, setDuplicates] = useState<DuplicateImage[]>([]);
+
+  // Season cast members (for assigning images to cast)
+  const [seasonCast, setSeasonCast] = useState<SeasonCastMember[]>([]);
+  const [castLoading, setCastLoading] = useState(false);
+  // Map of image candidate ID -> assigned person_id
+  const [personAssignments, setPersonAssignments] = useState<Record<string, string>>({});
+
   // Error state
   const [error, setError] = useState<string | null>(null);
 
@@ -130,6 +154,85 @@ export function ImageScrapeDrawer({
     return { Authorization: `Bearer ${token}` };
   }, []);
 
+  // Link a duplicate image to the current entity
+  const linkDuplicate = useCallback(
+    async (duplicate: DuplicateImage) => {
+      // Mark as linking
+      setDuplicates((prev) =>
+        prev.map((d) =>
+          d.media_asset_id === duplicate.media_asset_id
+            ? { ...d, linking: true }
+            : d
+        )
+      );
+
+      try {
+        const headers = await getAuthHeaders();
+
+        // Determine entity type and ID
+        const entityType = entityContext.type;
+        const entityId =
+          entityContext.type === "season"
+            ? entityContext.showId // For seasons, we link to the show with season context
+            : entityContext.personId;
+
+        const response = await fetch("/api/admin/trr-api/media-links", {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            media_asset_id: duplicate.media_asset_id,
+            entity_type: entityType === "season" ? "season" : "person",
+            entity_id: entityId,
+            kind: "gallery",
+            context:
+              entityContext.type === "season"
+                ? {
+                    show_id: entityContext.showId,
+                    season_number: entityContext.seasonNumber,
+                  }
+                : {},
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to link image");
+        }
+
+        // Mark as linked
+        setDuplicates((prev) =>
+          prev.map((d) =>
+            d.media_asset_id === duplicate.media_asset_id
+              ? { ...d, linked: true, linking: false }
+              : d
+          )
+        );
+      } catch (err) {
+        console.error("Failed to link duplicate:", err);
+        // Reset linking state on error
+        setDuplicates((prev) =>
+          prev.map((d) =>
+            d.media_asset_id === duplicate.media_asset_id
+              ? { ...d, linking: false }
+              : d
+          )
+        );
+      }
+    },
+    [entityContext, getAuthHeaders]
+  );
+
+  // Link all unlinked duplicates
+  const linkAllDuplicates = useCallback(async () => {
+    const unlinked = duplicates.filter((d) => !d.linked && !d.linking);
+    for (const dup of unlinked) {
+      await linkDuplicate(dup);
+    }
+  }, [duplicates, linkDuplicate]);
+
   // Reset state when drawer closes
   useEffect(() => {
     if (!isOpen) {
@@ -137,11 +240,44 @@ export function ImageScrapeDrawer({
       setPreviewData(null);
       setSelectedImages(new Set());
       setCaptions({});
+      setPersonAssignments({});
       setImportProgress(null);
       setImportResult(null);
+      setDuplicates([]);
       setError(null);
     }
   }, [isOpen]);
+
+  // Fetch season cast when drawer opens in season context
+  useEffect(() => {
+    if (!isOpen || entityContext.type !== "season") {
+      setSeasonCast([]);
+      return;
+    }
+
+    const fetchSeasonCast = async () => {
+      try {
+        setCastLoading(true);
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/shows/${entityContext.showId}/seasons/${entityContext.seasonNumber}/cast?limit=500`,
+          { headers }
+        );
+        if (!response.ok) {
+          console.error("Failed to fetch season cast");
+          return;
+        }
+        const data = await response.json();
+        setSeasonCast(data.cast || []);
+      } catch (err) {
+        console.error("Failed to fetch season cast:", err);
+      } finally {
+        setCastLoading(false);
+      }
+    };
+
+    fetchSeasonCast();
+  }, [isOpen, entityContext, getAuthHeaders]);
 
   // Body scroll lock
   useEffect(() => {
@@ -179,6 +315,7 @@ export function ImageScrapeDrawer({
       setPreviewData(null);
       setSelectedImages(new Set());
       setCaptions({});
+      setPersonAssignments({});
       setImportResult(null);
 
       const headers = await getAuthHeaders();
@@ -257,6 +394,7 @@ export function ImageScrapeDrawer({
           candidate_id: img.id,
           url: img.best_url,
           caption: captions[img.id] || null,
+          person_id: personAssignments[img.id] || null,
         }));
 
       // Build payload based on entity context
@@ -333,7 +471,21 @@ export function ImageScrapeDrawer({
                   url: data.url,
                   status: data.status,
                   error: data.error,
+                  media_asset_id: data.media_asset_id,
                 });
+
+                // Track duplicates that have asset IDs for potential linking
+                if (data.status === "duplicate" && data.media_asset_id) {
+                  setDuplicates((prev) => [
+                    ...prev,
+                    {
+                      url: data.url,
+                      media_asset_id: data.media_asset_id,
+                      linked: false,
+                      linking: false,
+                    },
+                  ]);
+                }
               }
 
               // Handle completion
@@ -345,6 +497,47 @@ export function ImageScrapeDrawer({
                   assets: data.assets,
                 };
                 setImportResult(result);
+
+                // Create person links for imported assets with cast assignments
+                if (entityContext.type === "season" && data.assets?.length > 0) {
+                  // Build URL to person mapping from original images
+                  const urlToPersonMap = new Map<string, string>();
+                  for (const img of imagesToImport) {
+                    if (img.person_id) {
+                      urlToPersonMap.set(img.url, img.person_id);
+                    }
+                  }
+
+                  // Create person links for assets that had assignments
+                  for (const asset of data.assets as ImportedAsset[]) {
+                    // Try to find matching person by URL or by hosted_url containing similar path
+                    const matchedPersonId = Array.from(urlToPersonMap.entries()).find(
+                      ([url]) => asset.hosted_url?.includes(url.split("/").pop() || "NOMATCH")
+                    )?.[1];
+
+                    if (matchedPersonId && asset.id) {
+                      // Create link to person (fire and forget)
+                      fetch("/api/admin/trr-api/media-links", {
+                        method: "POST",
+                        headers: {
+                          Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                          media_asset_id: asset.id,
+                          entity_type: "person",
+                          entity_id: matchedPersonId,
+                          kind: "gallery",
+                          context: {
+                            show_id: entityContext.showId,
+                            season_number: entityContext.seasonNumber,
+                          },
+                        }),
+                      }).catch((err) => console.error("Failed to link asset to person:", err));
+                    }
+                  }
+                }
+
                 setPreviewData(null);
                 setSelectedImages(new Set());
                 onImportComplete?.(result);
@@ -477,6 +670,53 @@ export function ImageScrapeDrawer({
                 </div>
               </div>
 
+              {/* Bulk Cast Assignment (season context only) */}
+              {entityContext.type === "season" && selectedImages.size > 0 && (
+                <div className="mb-4 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                  <span className="text-xs font-semibold text-zinc-600">
+                    Assign all selected to:
+                  </span>
+                  {castLoading ? (
+                    <span className="text-xs text-zinc-400">Loading cast...</span>
+                  ) : seasonCast.length > 0 ? (
+                    <select
+                      onChange={(e) => {
+                        const personId = e.target.value;
+                        if (!personId) return;
+                        // Assign to all selected images
+                        setPersonAssignments((prev) => {
+                          const next = { ...prev };
+                          for (const imgId of selectedImages) {
+                            next[imgId] = personId;
+                          }
+                          return next;
+                        });
+                        // Reset select
+                        e.target.value = "";
+                      }}
+                      className="flex-1 rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                    >
+                      <option value="">Select cast member...</option>
+                      {seasonCast.map((member) => (
+                        <option key={member.person_id} value={member.person_id}>
+                          {member.person_name || "Unknown"} ({member.episodes_in_season} eps)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-xs text-zinc-400">No cast found for this season</span>
+                  )}
+                  {Object.keys(personAssignments).length > 0 && (
+                    <button
+                      onClick={() => setPersonAssignments({})}
+                      className="text-xs font-medium text-red-600 hover:text-red-700"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Image Grid */}
               <div className="mb-6 grid grid-cols-3 gap-3">
                 {previewData.images.map((img) => {
@@ -531,9 +771,9 @@ export function ImageScrapeDrawer({
                         )}
                       </div>
 
-                      {/* Caption Input */}
+                      {/* Caption and Cast Assignment */}
                       {isSelected && (
-                        <div className="p-1.5">
+                        <div className="space-y-1.5 p-1.5">
                           <input
                             type="text"
                             value={captions[img.id] || ""}
@@ -542,6 +782,33 @@ export function ImageScrapeDrawer({
                             className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                             onClick={(e) => e.stopPropagation()}
                           />
+                          {/* Cast Member Assignment (season context only) */}
+                          {entityContext.type === "season" && seasonCast.length > 0 && (
+                            <select
+                              value={personAssignments[img.id] || ""}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setPersonAssignments((prev) => {
+                                  const next = { ...prev };
+                                  if (value) {
+                                    next[img.id] = value;
+                                  } else {
+                                    delete next[img.id];
+                                  }
+                                  return next;
+                                });
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                            >
+                              <option value="">Assign to cast...</option>
+                              {seasonCast.map((member) => (
+                                <option key={member.person_id} value={member.person_id}>
+                                  {member.person_name || "Unknown"} ({member.episodes_in_season} eps)
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       )}
                     </div>
@@ -664,11 +931,62 @@ export function ImageScrapeDrawer({
                 </div>
               )}
 
+              {/* Duplicates that can be linked */}
+              {duplicates.length > 0 && (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-amber-800">
+                      Link Existing Images ({duplicates.filter((d) => !d.linked).length} available)
+                    </p>
+                    {duplicates.some((d) => !d.linked && !d.linking) && (
+                      <button
+                        onClick={linkAllDuplicates}
+                        className="rounded bg-amber-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-amber-700"
+                      >
+                        Link All
+                      </button>
+                    )}
+                  </div>
+                  <p className="mb-3 text-xs text-amber-700">
+                    These images already exist in the system. Link them to add them to this gallery without re-downloading.
+                  </p>
+                  <div className="space-y-2">
+                    {duplicates.map((dup) => (
+                      <div
+                        key={dup.media_asset_id}
+                        className="flex items-center gap-2 rounded bg-white p-2"
+                      >
+                        <span className="flex-1 truncate text-xs text-zinc-600">
+                          {dup.url.split("/").pop() || dup.url}
+                        </span>
+                        {dup.linked ? (
+                          <span className="rounded bg-green-100 px-2 py-1 text-xs font-medium text-green-700">
+                            Linked
+                          </span>
+                        ) : dup.linking ? (
+                          <span className="rounded bg-zinc-100 px-2 py-1 text-xs text-zinc-500">
+                            Linking...
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => linkDuplicate(dup)}
+                            className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-200"
+                          >
+                            Link
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <button
                   onClick={() => {
                     setUrl("");
                     setImportResult(null);
+                    setDuplicates([]);
                   }}
                   className="flex-1 rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100"
                 >

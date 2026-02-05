@@ -100,6 +100,8 @@ export interface TrrCastMember {
   known_for: string | null;
   // Photo URL (from view or joined)
   photo_url: string | null;
+  // Stats
+  total_episodes?: number | null;
   // Timestamps
   created_at: string;
   updated_at: string;
@@ -539,7 +541,7 @@ export async function getCastByShowId(
 
   // First try the view - it has display_url which picks the best available URL
   let viewPhotos: Array<{ person_id: string; display_url?: string; hosted_url?: string; url?: string }> | null = null;
-  if (vCastPhotosAvailable !== false) {
+  if (vCastPhotosAvailable !== (false as boolean | null)) {
     const { data: viewData, error: viewError } = await supabase
       .from("v_cast_photos")
       .select("person_id, display_url, hosted_url, url")
@@ -547,7 +549,7 @@ export async function getCastByShowId(
 
     if (viewError) {
       if (isViewUnavailableError(viewError.message)) {
-        if (vCastPhotosAvailable !== false) {
+        if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
           console.log(
             "[trr-shows-repository] v_cast_photos view not available:",
@@ -613,6 +615,160 @@ export async function getCastByShowId(
       full_name: person?.full_name ?? (cast as { cast_member_name?: string }).cast_member_name ?? null,
       known_for: person?.known_for ?? null,
       photo_url: photosMap.get(cast.person_id) ?? null,
+    } as TrrCastMember;
+  });
+}
+
+/**
+ * Get cast members for a show with total episode counts and any available photo URL.
+ * Uses v_person_show_seasons for totals and v_cast_photos for display_url (fallback to hosted/url).
+ */
+export async function getShowCastWithStats(
+  showId: string,
+  options?: PaginationOptions
+): Promise<TrrCastMember[]> {
+  const { limit, offset } = normalizePagination(options);
+  const supabase = getSupabaseTrrCore();
+
+  const { data: castData, error: castError } = await supabase
+    .from("show_cast")
+    .select("*")
+    .eq("show_id", showId)
+    .order("billing_order", { ascending: true, nullsFirst: false })
+    .range(offset, offset + limit - 1);
+
+  if (castError) {
+    console.error("[trr-shows-repository] getShowCastWithStats cast error:", castError);
+    throw new Error(`Failed to get cast: ${castError.message}`);
+  }
+
+  if (!castData || castData.length === 0) {
+    return [];
+  }
+
+  const typedCastData = castData as Array<{ person_id: string; [key: string]: unknown }>;
+  const personIds = [...new Set(typedCastData.map((c) => c.person_id))];
+
+  const { data: peopleData, error: peopleError } = await supabase
+    .from("people")
+    .select("id, full_name, known_for")
+    .in("id", personIds);
+
+  if (peopleError) {
+    console.error("[trr-shows-repository] getShowCastWithStats people error:", peopleError);
+  }
+
+  const totalsMap: Map<string, number> = new Map();
+  const nameFallbackMap: Map<string, string> = new Map();
+  const { data: totalsData, error: totalsError } = await supabase
+    .from("v_person_show_seasons")
+    .select("person_id, total_episodes, person_name")
+    .eq("show_id", showId)
+    .in("person_id", personIds);
+
+  if (totalsError) {
+    console.error("[trr-shows-repository] getShowCastWithStats totals error:", totalsError);
+  } else if (totalsData) {
+    const typedTotals = totalsData as Array<{
+      person_id: string;
+      total_episodes: number | null;
+      person_name?: string | null;
+    }>;
+    for (const row of typedTotals) {
+      if (typeof row.total_episodes === "number") {
+        totalsMap.set(row.person_id, row.total_episodes);
+      }
+      if (row.person_name) {
+        nameFallbackMap.set(row.person_id, row.person_name);
+      }
+    }
+  }
+
+  const pickPhotoUrl = (row: {
+    display_url?: string | null;
+    hosted_url?: string | null;
+    url?: string | null;
+  }): string | null => {
+    const candidates = [row.display_url, row.hosted_url, row.url];
+    for (const candidate of candidates) {
+      if (candidate && isLikelyImage(null, candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  };
+
+  const photosMap: Map<string, string> = new Map();
+  let viewPhotos:
+    | Array<{ person_id: string; display_url?: string | null; hosted_url?: string | null; url?: string | null }>
+    | null = null;
+
+  if (vCastPhotosAvailable !== (false as boolean | null)) {
+    const { data: viewData, error: viewError } = await supabase
+      .from("v_cast_photos")
+      .select("person_id, display_url, hosted_url, url")
+      .in("person_id", personIds);
+
+    if (viewError) {
+      if (isViewUnavailableError(viewError.message)) {
+        if (vCastPhotosAvailable !== (false as boolean | null)) {
+          vCastPhotosAvailable = false;
+          console.log(
+            "[trr-shows-repository] v_cast_photos view not available:",
+            viewError.message
+          );
+        }
+      } else {
+        console.log("[trr-shows-repository] v_cast_photos view error:", viewError.message);
+      }
+    } else {
+      vCastPhotosAvailable = true;
+      viewPhotos = (viewData ?? []) as Array<{
+        person_id: string;
+        display_url?: string | null;
+        hosted_url?: string | null;
+        url?: string | null;
+      }>;
+    }
+  }
+
+  if (!viewPhotos || viewPhotos.length === 0) {
+    const { data: tablePhotos, error: tableError } = await supabase
+      .from("cast_photos")
+      .select("person_id, hosted_url, url")
+      .in("person_id", personIds);
+
+    if (tableError) {
+      console.log("[trr-shows-repository] getShowCastWithStats cast_photos error:", tableError.message);
+    } else if (tablePhotos) {
+      const typedPhotos = tablePhotos as Array<{ person_id: string; hosted_url?: string | null; url?: string | null }>;
+      for (const photo of typedPhotos) {
+        const photoUrl = pickPhotoUrl({ hosted_url: photo.hosted_url, url: photo.url });
+        if (photoUrl && !photosMap.has(photo.person_id)) {
+          photosMap.set(photo.person_id, photoUrl);
+        }
+      }
+    }
+  } else {
+    for (const photo of viewPhotos) {
+      const photoUrl = pickPhotoUrl(photo);
+      if (photoUrl && !photosMap.has(photo.person_id)) {
+        photosMap.set(photo.person_id, photoUrl);
+      }
+    }
+  }
+
+  const typedPeopleData = (peopleData ?? []) as Array<{ id: string; full_name?: string; known_for?: string }>;
+  const peopleMap = new Map(typedPeopleData.map((p) => [p.id, p]));
+
+  return typedCastData.map((cast) => {
+    const person = peopleMap.get(cast.person_id);
+    return {
+      ...cast,
+      full_name: person?.full_name ?? (cast as { cast_member_name?: string }).cast_member_name ?? null,
+      known_for: person?.known_for ?? null,
+      photo_url: photosMap.get(cast.person_id) ?? null,
+      total_episodes: totalsMap.get(cast.person_id) ?? null,
     } as TrrCastMember;
   });
 }
@@ -893,7 +1049,7 @@ export async function getPhotosByPersonId(
       ...photo,
       source: normalizedFandom.source,
       metadata: normalizedFandom.metadata,
-      created_at: photo.created_at ?? null,
+      created_at: (photo as { created_at?: string | null }).created_at ?? photo.fetched_at ?? null,
       people_ids: null,
       people_count: null,
       people_count_source: null,
@@ -1111,6 +1267,14 @@ export interface SeasonCastMember {
   photo_url: string | null;
 }
 
+export interface SeasonCastEpisodeCount {
+  person_id: string;
+  person_name: string | null;
+  episodes_in_season: number;
+  total_episodes: number | null;
+  photo_url: string | null;
+}
+
 /**
  * Get cast members who appeared in a specific season of a show.
  * Uses v_person_show_seasons view and joins with photos.
@@ -1184,6 +1348,287 @@ export async function getCastByShowSeason(
   }));
 }
 
+/**
+ * Fallback function when episode_cast (Credits V2) has no data.
+ * Returns show-level cast from show_cast table without per-season episode counts.
+ */
+async function getSeasonCastFallbackFromShowCast(
+  showId: string,
+  options?: PaginationOptions
+): Promise<SeasonCastEpisodeCount[]> {
+  const { limit, offset } = normalizePagination(options);
+  const supabase = getSupabaseTrrCore();
+
+  // Query show_cast for all cast members of this show
+  const { data: showCastData, error: showCastError } = await supabase
+    .from("show_cast")
+    .select("person_id, cast_member_name, billing_order")
+    .eq("show_id", showId)
+    .order("billing_order", { ascending: true, nullsFirst: false });
+
+  if (showCastError) {
+    console.error("[trr-shows-repository] getSeasonCastFallbackFromShowCast error:", showCastError);
+    return [];
+  }
+
+  if (!showCastData || showCastData.length === 0) {
+    return [];
+  }
+
+  type ShowCastRow = { person_id: string; cast_member_name: string | null; billing_order: number | null };
+  const typedShowCast = showCastData as ShowCastRow[];
+  const personIds = [...new Set(typedShowCast.map((c) => c.person_id))];
+
+  // Get people names
+  const { data: peopleData, error: peopleError } = await supabase
+    .from("people")
+    .select("id, full_name")
+    .in("id", personIds);
+
+  if (peopleError) {
+    console.error("[trr-shows-repository] getSeasonCastFallbackFromShowCast people error:", peopleError);
+  }
+
+  type PeopleRow = { id: string; full_name?: string | null };
+  const peopleMap = new Map((peopleData as PeopleRow[] ?? []).map((p) => [p.id, p.full_name ?? null]));
+
+  // Get photos
+  const photosMap: Map<string, string> = new Map();
+
+  const pickPhotoUrl = (row: {
+    display_url?: string | null;
+    hosted_url?: string | null;
+    url?: string | null;
+  }): string | null => {
+    const candidates = [row.display_url, row.hosted_url, row.url];
+    for (const candidate of candidates) {
+      if (candidate && isLikelyImage(null, candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  };
+
+  if (vCastPhotosAvailable !== (false as boolean | null)) {
+    const { data: viewData, error: viewError } = await supabase
+      .from("v_cast_photos")
+      .select("person_id, display_url, hosted_url, url")
+      .in("person_id", personIds);
+
+    if (viewError) {
+      if (isViewUnavailableError(viewError.message)) {
+        if (vCastPhotosAvailable !== (false as boolean | null)) {
+          vCastPhotosAvailable = false;
+        }
+      }
+    } else if (viewData) {
+      type PhotoRow = { person_id: string; display_url?: string | null; hosted_url?: string | null; url?: string | null };
+      for (const photo of viewData as PhotoRow[]) {
+        const photoUrl = pickPhotoUrl(photo);
+        if (photoUrl && !photosMap.has(photo.person_id)) {
+          photosMap.set(photo.person_id, photoUrl);
+        }
+      }
+    }
+  }
+
+  // If view didn't return photos, try the table directly
+  if (photosMap.size === 0) {
+    const { data: tablePhotos, error: tableError } = await supabase
+      .from("cast_photos")
+      .select("person_id, hosted_url, url")
+      .in("person_id", personIds);
+
+    if (!tableError && tablePhotos) {
+      type TablePhotoRow = { person_id: string; hosted_url?: string | null; url?: string | null };
+      for (const photo of tablePhotos as TablePhotoRow[]) {
+        const photoUrl = pickPhotoUrl({ hosted_url: photo.hosted_url, url: photo.url });
+        if (photoUrl && !photosMap.has(photo.person_id)) {
+          photosMap.set(photo.person_id, photoUrl);
+        }
+      }
+    }
+  }
+
+  // Build results - dedupe by person_id and use first occurrence (sorted by billing_order)
+  const seen = new Set<string>();
+  const results: SeasonCastEpisodeCount[] = [];
+
+  for (const cast of typedShowCast) {
+    if (seen.has(cast.person_id)) continue;
+    seen.add(cast.person_id);
+
+    results.push({
+      person_id: cast.person_id,
+      person_name: peopleMap.get(cast.person_id) ?? cast.cast_member_name ?? null,
+      episodes_in_season: 0, // Unknown without Credits V2 data
+      total_episodes: null, // Unknown without Credits V2 data
+      photo_url: photosMap.get(cast.person_id) ?? null,
+    });
+  }
+
+  return results.slice(offset, offset + limit);
+}
+
+/**
+ * Get cast members who appeared in a specific season with per-season episode counts.
+ * Uses episode_cast to count appearances and v_cast_photos for any available photo URL.
+ */
+export async function getSeasonCastWithEpisodeCounts(
+  showId: string,
+  seasonNumber: number,
+  options?: PaginationOptions
+): Promise<SeasonCastEpisodeCount[]> {
+  const { limit, offset } = normalizePagination(options);
+  const supabase = getSupabaseTrrCore();
+
+  const { data: episodeCast, error: episodeCastError } = await supabase
+    .from("episode_cast")
+    .select("person_id, episode_id")
+    .eq("show_id", showId)
+    .eq("season_number", seasonNumber);
+
+  if (episodeCastError) {
+    console.error("[trr-shows-repository] getSeasonCastWithEpisodeCounts episode_cast error:", episodeCastError);
+    throw new Error(`Failed to get season cast: ${episodeCastError.message}`);
+  }
+
+  const castRows = (episodeCast ?? []) as Array<{ person_id: string; episode_id: string | number }>;
+
+  // If episode_cast has no data (Credits V2 not populated), fall back to show_cast
+  if (castRows.length === 0) {
+    return getSeasonCastFallbackFromShowCast(showId, options);
+  }
+
+  const episodeCounts = new Map<string, Set<string>>();
+  for (const row of castRows) {
+    if (!episodeCounts.has(row.person_id)) {
+      episodeCounts.set(row.person_id, new Set());
+    }
+    episodeCounts.get(row.person_id)?.add(String(row.episode_id));
+  }
+
+  const personIds = Array.from(episodeCounts.keys());
+
+  const { data: peopleData, error: peopleError } = await supabase
+    .from("people")
+    .select("id, full_name")
+    .in("id", personIds);
+
+  if (peopleError) {
+    console.error("[trr-shows-repository] getSeasonCastWithEpisodeCounts people error:", peopleError);
+  }
+
+  const totalsMap: Map<string, number> = new Map();
+  const { data: totalsData, error: totalsError } = await supabase
+    .from("v_person_show_seasons")
+    .select("person_id, total_episodes")
+    .eq("show_id", showId)
+    .in("person_id", personIds);
+
+  if (totalsError) {
+    console.error("[trr-shows-repository] getSeasonCastWithEpisodeCounts totals error:", totalsError);
+  } else if (totalsData) {
+    const typedTotals = totalsData as Array<{ person_id: string; total_episodes: number | null }>;
+    for (const row of typedTotals) {
+      if (typeof row.total_episodes === "number") {
+        totalsMap.set(row.person_id, row.total_episodes);
+      }
+    }
+  }
+
+  const pickPhotoUrl = (row: {
+    display_url?: string | null;
+    hosted_url?: string | null;
+    url?: string | null;
+  }): string | null => {
+    const candidates = [row.display_url, row.hosted_url, row.url];
+    for (const candidate of candidates) {
+      if (candidate && isLikelyImage(null, candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  };
+
+  const photosMap: Map<string, string> = new Map();
+  let viewPhotos:
+    | Array<{ person_id: string; display_url?: string | null; hosted_url?: string | null; url?: string | null }>
+    | null = null;
+
+  if (vCastPhotosAvailable !== (false as boolean | null)) {
+    const { data: viewData, error: viewError } = await supabase
+      .from("v_cast_photos")
+      .select("person_id, display_url, hosted_url, url")
+      .in("person_id", personIds);
+
+    if (viewError) {
+      if (isViewUnavailableError(viewError.message)) {
+        if (vCastPhotosAvailable !== (false as boolean | null)) {
+          vCastPhotosAvailable = false;
+          console.log(
+            "[trr-shows-repository] v_cast_photos view not available:",
+            viewError.message
+          );
+        }
+      } else {
+        console.log("[trr-shows-repository] v_cast_photos view error:", viewError.message);
+      }
+    } else {
+      vCastPhotosAvailable = true;
+      viewPhotos = (viewData ?? []) as Array<{
+        person_id: string;
+        display_url?: string | null;
+        hosted_url?: string | null;
+        url?: string | null;
+      }>;
+    }
+  }
+
+  if (!viewPhotos || viewPhotos.length === 0) {
+    const { data: tablePhotos, error: tableError } = await supabase
+      .from("cast_photos")
+      .select("person_id, hosted_url, url")
+      .in("person_id", personIds);
+
+    if (tableError) {
+      console.log(
+        "[trr-shows-repository] getSeasonCastWithEpisodeCounts cast_photos error:",
+        tableError.message
+      );
+    } else if (tablePhotos) {
+      const typedPhotos = tablePhotos as Array<{ person_id: string; hosted_url?: string | null; url?: string | null }>;
+      for (const photo of typedPhotos) {
+        const photoUrl = pickPhotoUrl({ hosted_url: photo.hosted_url, url: photo.url });
+        if (photoUrl && !photosMap.has(photo.person_id)) {
+          photosMap.set(photo.person_id, photoUrl);
+        }
+      }
+    }
+  } else {
+    for (const photo of viewPhotos) {
+      const photoUrl = pickPhotoUrl(photo);
+      if (photoUrl && !photosMap.has(photo.person_id)) {
+        photosMap.set(photo.person_id, photoUrl);
+      }
+    }
+  }
+
+  const typedPeopleData = (peopleData ?? []) as Array<{ id: string; full_name?: string }>;
+  const peopleMap = new Map(typedPeopleData.map((p) => [p.id, p]));
+
+  const results = personIds.map((personId) => ({
+    person_id: personId,
+    person_name: peopleMap.get(personId)?.full_name ?? null,
+    episodes_in_season: episodeCounts.get(personId)?.size ?? 0,
+    total_episodes: totalsMap.get(personId) ?? null,
+    photo_url: photosMap.get(personId) ?? null,
+  }));
+
+  results.sort((a, b) => b.episodes_in_season - a.episodes_in_season);
+  return results.slice(offset, offset + limit);
+}
+
 // ============================================================================
 // Season Assets Functions
 // ============================================================================
@@ -1200,6 +1645,15 @@ export interface SeasonAsset {
   episode_number?: number;
   person_name?: string;
   person_id?: string;
+  // Rich metadata fields (matching People gallery)
+  season_number?: number;
+  ingest_status?: string | null;
+  created_at?: string | null;
+  fetched_at?: string | null;
+  context_section?: string | null;
+  context_type?: string | null;
+  metadata?: Record<string, unknown> | null;
+  hosted_content_type?: string | null;
 }
 
 /**
@@ -1218,7 +1672,7 @@ export async function getAssetsByShowSeason(
   // 1. Get season images
   const { data: seasonImages, error: seasonError } = await supabase
     .from("season_images")
-    .select("id, source, image_type, hosted_url, width, height")
+    .select("id, source, image_type, hosted_url, width, height, created_at, ingest_status, metadata")
     .eq("show_id", showId)
     .eq("season_number", seasonNumber)
     .not("hosted_url", "is", null)
@@ -1234,6 +1688,9 @@ export async function getAssetsByShowSeason(
       hosted_url: string;
       width: number | null;
       height: number | null;
+      created_at: string | null;
+      ingest_status: string | null;
+      metadata: Record<string, unknown> | null;
     };
     const typedSeasonImages = seasonImages as SeasonImageRow[];
     for (const img of typedSeasonImages) {
@@ -1246,6 +1703,10 @@ export async function getAssetsByShowSeason(
         width: img.width,
         height: img.height,
         caption: `Season ${seasonNumber}`,
+        season_number: seasonNumber,
+        created_at: img.created_at,
+        ingest_status: img.ingest_status,
+        metadata: img.metadata,
       });
     }
   }
@@ -1253,7 +1714,7 @@ export async function getAssetsByShowSeason(
   // 2. Get episode images
   const { data: episodeImages, error: episodeError } = await supabase
     .from("episode_images")
-    .select("id, source, image_type, hosted_url, width, height, episode_number")
+    .select("id, source, image_type, hosted_url, width, height, episode_number, created_at, ingest_status, metadata")
     .eq("show_id", showId)
     .eq("season_number", seasonNumber)
     .not("hosted_url", "is", null)
@@ -1271,6 +1732,9 @@ export async function getAssetsByShowSeason(
       width: number | null;
       height: number | null;
       episode_number: number;
+      created_at: string | null;
+      ingest_status: string | null;
+      metadata: Record<string, unknown> | null;
     };
     const typedEpisodeImages = episodeImages as EpisodeImageRow[];
     for (const img of typedEpisodeImages) {
@@ -1284,6 +1748,10 @@ export async function getAssetsByShowSeason(
         height: img.height,
         caption: `Episode ${img.episode_number}`,
         episode_number: img.episode_number,
+        season_number: seasonNumber,
+        created_at: img.created_at,
+        ingest_status: img.ingest_status,
+        metadata: img.metadata,
       });
     }
   }
@@ -1308,7 +1776,7 @@ export async function getAssetsByShowSeason(
     // Get photos for these people
     const { data: castPhotos, error: photoError } = await supabase
       .from("cast_photos")
-      .select("id, person_id, source, hosted_url, width, height, caption")
+      .select("id, person_id, source, hosted_url, hosted_content_type, width, height, caption, context_section, context_type, season, fetched_at, created_at, metadata, ingest_status")
       .in("person_id", personIds)
       .not("hosted_url", "is", null)
       .limit(100);
@@ -1321,9 +1789,17 @@ export async function getAssetsByShowSeason(
         person_id: string;
         source: string;
         hosted_url: string;
+        hosted_content_type: string | null;
         width: number | null;
         height: number | null;
         caption: string | null;
+        context_section: string | null;
+        context_type: string | null;
+        season: number | null;
+        fetched_at: string | null;
+        created_at: string | null;
+        metadata: Record<string, unknown> | null;
+        ingest_status: string | null;
       };
       const typedPhotos = castPhotos as PhotoRow[];
       for (const photo of typedPhotos) {
@@ -1341,6 +1817,14 @@ export async function getAssetsByShowSeason(
           caption: photo.caption,
           person_id: photo.person_id,
           person_name: personNameMap.get(photo.person_id) ?? undefined,
+          season_number: photo.season ?? seasonNumber,
+          context_section: photo.context_section,
+          context_type: photo.context_type,
+          fetched_at: photo.fetched_at,
+          created_at: photo.created_at,
+          metadata: photo.metadata,
+          ingest_status: photo.ingest_status,
+          hosted_content_type: photo.hosted_content_type,
         });
       }
     }

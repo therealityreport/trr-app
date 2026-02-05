@@ -51,7 +51,7 @@ interface TrrPersonPhoto {
   media_asset_id?: string | null;
 }
 
-type GallerySortOption = "newest" | "oldest" | "source";
+type GallerySortOption = "newest" | "oldest" | "source" | "season-asc" | "season-desc";
 type GalleryShowFilter = "all" | "this-show" | "other-shows";
 
 interface TrrPersonCredit {
@@ -912,6 +912,10 @@ export default function PersonProfilePage() {
   const searchParams = useSearchParams();
   const personId = params.personId as string;
   const showIdParam = searchParams.get("showId");
+  const backHref = showIdParam
+    ? `/admin/trr-shows/${showIdParam}?tab=cast`
+    : "/admin/trr-shows";
+  const backLabel = showIdParam ? "← Back to Cast" : "← Back to Shows";
   const { user, checking, hasAccess } = useAdminGuard();
 
   const [person, setPerson] = useState<TrrPerson | null>(null);
@@ -955,6 +959,7 @@ export default function PersonProfilePage() {
   const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>(
     showIdParam ? "this-show" : "all"
   );
+  const [seasonPremiereMap, setSeasonPremiereMap] = useState<Record<number, string>>({});
 
   useEffect(() => {
     if (!showIdParam) {
@@ -995,6 +1000,21 @@ export default function PersonProfilePage() {
     const sources = new Set(photos.map(p => p.source).filter(Boolean));
     return Array.from(sources).sort();
   }, [photos]);
+
+  const getPhotoSortDate = useCallback(
+    (photo: TrrPersonPhoto): number => {
+      const metadata = mapPhotoToMetadata(photo);
+      if (metadata.createdAt) return metadata.createdAt.getTime();
+      if (metadata.addedAt) return metadata.addedAt.getTime();
+      const seasonNumber = typeof photo.season === "number" ? photo.season : null;
+      if (seasonNumber && seasonPremiereMap[seasonNumber]) {
+        const date = new Date(seasonPremiereMap[seasonNumber]);
+        if (!Number.isNaN(date.getTime())) return date.getTime();
+      }
+      return 0;
+    },
+    [seasonPremiereMap]
+  );
 
   // Filter and sort photos for gallery
   const filteredPhotos = useMemo(() => {
@@ -1074,17 +1094,35 @@ export default function PersonProfilePage() {
     // Apply sort
     switch (gallerySortOption) {
       case "newest":
-        result.sort((a, b) => {
-          const dateA = a.created_at || a.fetched_at || "";
-          const dateB = b.created_at || b.fetched_at || "";
-          return dateB.localeCompare(dateA);
-        });
+        result.sort((a, b) => getPhotoSortDate(b) - getPhotoSortDate(a));
         break;
       case "oldest":
+        result.sort((a, b) => getPhotoSortDate(a) - getPhotoSortDate(b));
+        break;
+      case "season-asc":
         result.sort((a, b) => {
-          const dateA = a.created_at || a.fetched_at || "";
-          const dateB = b.created_at || b.fetched_at || "";
-          return dateA.localeCompare(dateB);
+          const seasonA = typeof a.season === "number" ? a.season : null;
+          const seasonB = typeof b.season === "number" ? b.season : null;
+          if (seasonA === null && seasonB === null) {
+            return getPhotoSortDate(b) - getPhotoSortDate(a);
+          }
+          if (seasonA === null) return 1;
+          if (seasonB === null) return -1;
+          if (seasonA !== seasonB) return seasonA - seasonB;
+          return getPhotoSortDate(b) - getPhotoSortDate(a);
+        });
+        break;
+      case "season-desc":
+        result.sort((a, b) => {
+          const seasonA = typeof a.season === "number" ? a.season : null;
+          const seasonB = typeof b.season === "number" ? b.season : null;
+          if (seasonA === null && seasonB === null) {
+            return getPhotoSortDate(b) - getPhotoSortDate(a);
+          }
+          if (seasonA === null) return 1;
+          if (seasonB === null) return -1;
+          if (seasonA !== seasonB) return seasonB - seasonA;
+          return getPhotoSortDate(b) - getPhotoSortDate(a);
         });
         break;
       case "source":
@@ -1104,6 +1142,7 @@ export default function PersonProfilePage() {
     activeShowAcronym,
     otherShowNames,
     otherShowAcronyms,
+    getPhotoSortDate,
   ]);
 
   // Helper to get auth headers
@@ -1112,6 +1151,57 @@ export default function PersonProfilePage() {
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  useEffect(() => {
+    if (!showIdParam || !hasAccess) {
+      setSeasonPremiereMap({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSeasonPremieres = async () => {
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) {
+          if (!cancelled) {
+            setSeasonPremiereMap({});
+          }
+          return;
+        }
+        const response = await fetch(
+          `/api/admin/trr-api/shows/${showIdParam}/seasons?limit=50`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.ok) throw new Error("Failed to fetch seasons");
+        const data = await response.json();
+        const nextMap: Record<number, string> = {};
+        for (const season of (data.seasons ?? []) as Array<{
+          season_number: number;
+          premiere_date?: string | null;
+          air_date?: string | null;
+        }>) {
+          const date = season.premiere_date ?? season.air_date ?? null;
+          if (date && Number.isFinite(season.season_number)) {
+            nextMap[season.season_number] = date;
+          }
+        }
+        if (!cancelled) {
+          setSeasonPremiereMap(nextMap);
+        }
+      } catch (err) {
+        console.error("Failed to fetch season premiere dates:", err);
+        if (!cancelled) {
+          setSeasonPremiereMap({});
+        }
+      }
+    };
+
+    loadSeasonPremieres();
+    return () => {
+      cancelled = true;
+    };
+  }, [showIdParam, hasAccess]);
 
   // Refresh images for this person
   const refreshPersonImages = useCallback(
@@ -1624,10 +1714,10 @@ export default function PersonProfilePage() {
             {error || "Person not found"}
           </p>
           <Link
-            href="/admin/trr-shows"
+            href={backHref as "/admin/trr-shows"}
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
-            ← Back to Shows
+            {backLabel}
           </Link>
         </div>
       </div>
@@ -1642,10 +1732,10 @@ export default function PersonProfilePage() {
           <div className="mx-auto max-w-6xl">
             <div className="mb-4">
               <Link
-                href="/admin/trr-shows"
+                href={backHref as "/admin/trr-shows"}
                 className="text-sm text-zinc-500 hover:text-zinc-900"
               >
-                ← Back to Shows
+                {backLabel}
               </Link>
             </div>
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
@@ -1988,6 +2078,8 @@ export default function PersonProfilePage() {
                   >
                     <option value="newest">Newest First</option>
                     <option value="oldest">Oldest First</option>
+                    <option value="season-desc">Season (Newest)</option>
+                    <option value="season-asc">Season (Oldest)</option>
                     <option value="source">By Source</option>
                   </select>
                 </div>

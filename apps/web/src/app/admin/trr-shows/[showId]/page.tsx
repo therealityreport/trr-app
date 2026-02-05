@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -12,7 +12,7 @@ import SurveysSection from "@/components/admin/surveys-section";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer, type SeasonContext } from "@/components/admin/ImageScrapeDrawer";
-import type { PhotoMetadata } from "@/lib/photo-metadata";
+import { mapSeasonAssetToMetadata } from "@/lib/photo-metadata";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -45,19 +45,6 @@ interface TrrSeason {
   tmdb_season_id: number | null;
 }
 
-interface TrrEpisode {
-  id: string;
-  season_number: number;
-  episode_number: number;
-  title: string | null;
-  synopsis: string | null;
-  air_date: string | null;
-  runtime: number | null;
-  imdb_rating: number | null;
-  url_original_still: string | null;
-  tmdb_episode_id: number | null;
-  imdb_episode_id: string | null;
-}
 
 interface TrrCastMember {
   id: string;
@@ -69,6 +56,7 @@ interface TrrCastMember {
   credit_category: string;
   photo_url: string | null;
   cover_photo_url: string | null;
+  total_episodes?: number | null;
 }
 
 type TabId = "seasons" | "gallery" | "cast" | "surveys" | "social" | "details";
@@ -169,51 +157,27 @@ function RefreshProgressBar({
   );
 }
 
-// Helper to map episode to metadata format for lightbox display
-function mapEpisodeToMetadata(episode: TrrEpisode, showName?: string): PhotoMetadata {
-  const fileTypeMatch = episode.url_original_still?.match(/\.([a-z0-9]+)$/i);
-  const fileType = fileTypeMatch ? fileTypeMatch[1].toLowerCase() : null;
-  const createdAt = episode.air_date ? new Date(episode.air_date) : null;
-  return {
-    source: "tmdb",
-    sourceBadgeColor: "#01d277",
-    fileType,
-    caption: episode.title || `Episode ${episode.episode_number}`,
-    dimensions: null,
-    createdAt,
-    season: episode.season_number,
-    contextType: `Episode ${episode.episode_number}`,
-    people: [],
-    titles: showName ? [showName] : [],
-    fetchedAt: null,
-  };
-}
 
 export default function TrrShowDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const showId = params.showId as string;
   const { user, checking, hasAccess } = useAdminGuard();
 
   const [show, setShow] = useState<TrrShow | null>(null);
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
   const [cast, setCast] = useState<TrrCastMember[]>([]);
-  const [episodes, setEpisodes] = useState<TrrEpisode[]>([]);
-  const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("seasons");
+  const [openSeasonId, setOpenSeasonId] = useState<string | null>(null);
+  const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<
+    Record<string, { count: number; premiereDate: string | null; finaleDate: string | null }>
+  >({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Lightbox state (for cast photos)
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<{ src: string; alt: string } | null>(null);
-
-  // Episode lightbox state - track episode and position within season
-  const [episodeLightbox, setEpisodeLightbox] = useState<{
-    episode: TrrEpisode;
-    index: number;
-    seasonEpisodes: TrrEpisode[];
-  } | null>(null);
-  const episodeTriggerRef = useRef<HTMLElement | null>(null);
 
   // Gallery state
   const [galleryAssets, setGalleryAssets] = useState<SeasonAsset[]>([]);
@@ -247,6 +211,14 @@ export default function TrrShowDetailPage() {
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshingPersonIds, setRefreshingPersonIds] = useState<Record<string, boolean>>({});
+
+  const tabParam = searchParams.get("tab");
+  useEffect(() => {
+    const allowedTabs: TabId[] = ["seasons", "gallery", "cast", "surveys", "social", "details"];
+    if (tabParam && allowedTabs.includes(tabParam as TabId)) {
+      setActiveTab(tabParam as TabId);
+    }
+  }, [tabParam]);
 
   // Helper to get auth headers
   const getAuthHeaders = useCallback(async () => {
@@ -338,20 +310,84 @@ export default function TrrShowDetailPage() {
       if (!response.ok) throw new Error("Failed to fetch seasons");
       const data = await response.json();
       setSeasons(data.seasons);
-      if (data.seasons.length > 0 && !selectedSeasonId) {
-        setSelectedSeasonId(data.seasons[0].id);
+      if (data.seasons.length > 0 && !openSeasonId) {
+        setOpenSeasonId(data.seasons[0].id);
       }
     } catch (err) {
       console.error("Failed to fetch seasons:", err);
     }
-  }, [showId, selectedSeasonId, getAuthHeaders]);
+  }, [showId, openSeasonId, getAuthHeaders]);
+
+  const fetchSeasonEpisodeSummaries = useCallback(
+    async (seasonList: TrrSeason[]) => {
+      if (seasonList.length === 0) {
+        setSeasonEpisodeSummaries({});
+        return;
+      }
+      try {
+        const headers = await getAuthHeaders();
+        const results = await Promise.all(
+          seasonList.map(async (season) => {
+            try {
+              const response = await fetch(
+                `/api/admin/trr-api/seasons/${season.id}/episodes?limit=500`,
+                { headers }
+              );
+              if (!response.ok) throw new Error("Failed to fetch episodes");
+              const data = await response.json();
+              const episodes = (data.episodes ?? []) as Array<{ air_date: string | null }>;
+              const dates = episodes
+                .map((ep) => ep.air_date)
+                .filter((date): date is string => Boolean(date))
+                .map((date) => new Date(date))
+                .filter((date) => !Number.isNaN(date.getTime()));
+              const premiere =
+                dates.length > 0
+                  ? new Date(Math.min(...dates.map((d) => d.getTime()))).toISOString()
+                  : null;
+              const finale =
+                dates.length > 0
+                  ? new Date(Math.max(...dates.map((d) => d.getTime()))).toISOString()
+                  : null;
+              return {
+                seasonId: season.id,
+                summary: {
+                  count: episodes.length,
+                  premiereDate: premiere,
+                  finaleDate: finale,
+                },
+              };
+            } catch (error) {
+              console.error("Failed to fetch season episodes:", error);
+              return null;
+            }
+          })
+        );
+
+        const nextSummaries: Record<
+          string,
+          { count: number; premiereDate: string | null; finaleDate: string | null }
+        > = {};
+        for (const result of results) {
+          if (result) {
+            nextSummaries[result.seasonId] = result.summary;
+          }
+        }
+        setSeasonEpisodeSummaries(nextSummaries);
+      } catch (error) {
+        console.error("Failed to compute season episode summaries:", error);
+      }
+    },
+    [getAuthHeaders]
+  );
 
   // Fetch cast
   const fetchCast = useCallback(async () => {
     try {
       const headers = await getAuthHeaders();
+      // Fetch all cast without filters - photo filtering done client-side if needed
       const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/cast?limit=50`,
+        `/api/admin/trr-api/shows/${showId}/cast?limit=500`,
         { headers }
       );
       if (!response.ok) throw new Error("Failed to fetch cast");
@@ -361,22 +397,6 @@ export default function TrrShowDetailPage() {
       console.error("Failed to fetch cast:", err);
     }
   }, [showId, getAuthHeaders]);
-
-  // Fetch episodes for selected season
-  const fetchEpisodes = useCallback(async (seasonId: string) => {
-    try {
-      const headers = await getAuthHeaders();
-      const response = await fetch(
-        `/api/admin/trr-api/seasons/${seasonId}/episodes?limit=50`,
-        { headers }
-      );
-      if (!response.ok) throw new Error("Failed to fetch episodes");
-      const data = await response.json();
-      setEpisodes(data.episodes);
-    } catch (err) {
-      console.error("Failed to fetch episodes:", err);
-    }
-  }, [getAuthHeaders]);
 
   // Check if show is covered
   const checkCoverage = useCallback(async () => {
@@ -443,12 +463,11 @@ export default function TrrShowDetailPage() {
     loadData();
   }, [hasAccess, fetchShow, fetchSeasons, fetchCast, checkCoverage]);
 
-  // Load episodes when season changes
   useEffect(() => {
-    if (selectedSeasonId) {
-      fetchEpisodes(selectedSeasonId);
+    if (seasons.length > 0) {
+      fetchSeasonEpisodeSummaries(seasons);
     }
-  }, [selectedSeasonId, fetchEpisodes]);
+  }, [seasons, fetchSeasonEpisodeSummaries]);
 
   // Open lightbox for cast photo
   const openLightbox = (src: string, alt: string) => {
@@ -456,34 +475,12 @@ export default function TrrShowDetailPage() {
     setLightboxOpen(true);
   };
 
-  // Open lightbox for episode still
-  const openEpisodeLightbox = (
-    episode: TrrEpisode,
-    index: number,
-    seasonEpisodes: TrrEpisode[],
-    triggerElement: HTMLElement
-  ) => {
-    episodeTriggerRef.current = triggerElement;
-    setEpisodeLightbox({ episode, index, seasonEpisodes });
-  };
+  const formatDate = (value: string | null) =>
+    value ? new Date(value).toLocaleDateString() : "TBD";
 
-  // Navigate between episodes in lightbox
-  const navigateEpisodeLightbox = (direction: "prev" | "next") => {
-    if (!episodeLightbox) return;
-    const { index, seasonEpisodes } = episodeLightbox;
-    const newIndex = direction === "prev" ? index - 1 : index + 1;
-    if (newIndex >= 0 && newIndex < seasonEpisodes.length) {
-      setEpisodeLightbox({
-        episode: seasonEpisodes[newIndex],
-        index: newIndex,
-        seasonEpisodes,
-      });
-    }
-  };
-
-  // Close episode lightbox
-  const closeEpisodeLightbox = () => {
-    setEpisodeLightbox(null);
+  const formatDateRange = (premiere: string | null, finale: string | null) => {
+    if (!premiere && !finale) return "Dates unavailable";
+    return `${formatDate(premiere)} – ${formatDate(finale)}`;
   };
 
   // Load gallery assets for a season (or all seasons)
@@ -666,37 +663,6 @@ export default function TrrShowDetailPage() {
     setAssetLightbox(null);
   };
 
-  // Map gallery asset to metadata for lightbox
-  const mapAssetToMetadata = (asset: SeasonAsset): PhotoMetadata => {
-    const SOURCE_COLORS: Record<string, string> = {
-      imdb: "#f5c518",
-      tmdb: "#01d277",
-    };
-    const fileTypeMatch = asset.hosted_url.match(/\.([a-z0-9]+)$/i);
-    const fileType = fileTypeMatch ? fileTypeMatch[1].toLowerCase() : null;
-    return {
-      source: asset.source,
-      sourceBadgeColor:
-        SOURCE_COLORS[asset.source.toLowerCase()] ?? "#6b7280",
-      fileType,
-      caption: asset.caption,
-      dimensions:
-        asset.width && asset.height
-          ? { width: asset.width, height: asset.height }
-          : null,
-      season: null, // SeasonAsset doesn't include season number
-      contextType:
-        asset.type === "episode"
-          ? `Episode ${asset.episode_number}`
-          : asset.type === "season"
-            ? "Season Poster"
-            : "Cast Photo",
-      people: asset.person_name ? [asset.person_name] : [],
-      titles: show?.name ? [show.name] : [],
-      fetchedAt: null,
-    };
-  };
-
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -740,8 +706,6 @@ export default function TrrShowDetailPage() {
       </div>
     );
   }
-
-  const selectedSeason = seasons.find((s) => s.id === selectedSeasonId);
 
   return (
     <ClientOnly>
@@ -910,174 +874,103 @@ export default function TrrShowDetailPage() {
         <main className="mx-auto max-w-6xl px-6 py-8">
           {/* Seasons Tab */}
           {activeTab === "seasons" && (
-            <div className="grid gap-6 lg:grid-cols-[280px,1fr]">
-              {/* Season List */}
-              <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm h-fit">
-                <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
                   Seasons
-                </h3>
-                <div className="flex flex-col gap-2">
-                  {seasons.map((season) => (
-                    <button
-                      key={season.id}
-                      onClick={() => setSelectedSeasonId(season.id)}
-                      className={`rounded-lg px-3 py-2 text-left text-sm transition ${
-                        selectedSeasonId === season.id
-                          ? "bg-zinc-900 text-white"
-                          : "bg-zinc-50 text-zinc-700 hover:bg-zinc-100"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold">Season {season.season_number}</p>
-                          {season.air_date && (
-                            <p className="text-xs opacity-70">
-                              {new Date(season.air_date).getFullYear()}
-                            </p>
-                          )}
-                        </div>
-                        {season.tmdb_season_id && show.tmdb_id && (
-                          <TmdbLinkIcon
-                            showTmdbId={show.tmdb_id}
-                            seasonNumber={season.season_number}
-                            type="season"
-                            className={selectedSeasonId === season.id ? "text-white/70 hover:text-white" : ""}
-                          />
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                  {seasons.length === 0 && (
-                    <p className="text-sm text-zinc-500">No seasons found</p>
-                  )}
-                </div>
+                </p>
+                <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
               </div>
-
-              {/* Episode List */}
-              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                {selectedSeason ? (
-                  <>
-                    <div className="mb-6 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
+              <div className="space-y-3">
+                {seasons.map((season) => {
+                  const summary = seasonEpisodeSummaries[season.id];
+                  const isOpen = openSeasonId === season.id;
+                  const countLabel = summary
+                    ? `${summary.count} episodes`
+                    : "Episodes: —";
+                  const dateRange = summary
+                    ? formatDateRange(summary.premiereDate, summary.finaleDate)
+                    : "Dates unavailable";
+                  return (
+                    <div
+                      key={season.id}
+                      className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOpenSeasonId((prev) => (prev === season.id ? null : season.id))
+                        }
+                        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
+                      >
                         <div>
-                          <h3 className="text-xl font-bold text-zinc-900">
-                            Season {selectedSeason.season_number}
-                          </h3>
-                          {selectedSeason.overview && (
-                            <p className="mt-1 text-sm text-zinc-600">
-                              {selectedSeason.overview}
+                          <div className="flex items-center gap-3">
+                            <p className="text-lg font-semibold text-zinc-900">
+                              Season {season.season_number}
                             </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                          {episodes.length} episodes
-                        </span>
-                        <button
-                          onClick={refreshCastImages}
-                          disabled={refreshingCastImages || cast.length === 0}
-                          className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                        >
-                          {refreshingCastImages ? "Refreshing..." : "Refresh Cast Images"}
-                        </button>
-                      </div>
-                    </div>
-                    <RefreshProgressBar
-                      show={refreshingCastImages}
-                      current={refreshCastProgress?.current}
-                      total={refreshCastProgress?.total}
-                    />
-                    <div className="space-y-3">
-                      {episodes.map((episode) => (
-                        <div
-                          key={episode.id}
-                          className="flex items-start gap-4 rounded-lg border border-zinc-100 bg-zinc-50/50 p-4"
-                        >
-                          {episode.url_original_still && (
-                            <button
-                              onClick={(e) => {
-                                const episodesWithStills = episodes.filter(
-                                  (ep) => ep.url_original_still
-                                );
-                                const idx = episodesWithStills.findIndex(
-                                  (ep) => ep.id === episode.id
-                                );
-                                openEpisodeLightbox(
-                                  episode,
-                                  idx,
-                                  episodesWithStills,
-                                  e.currentTarget
-                                );
-                              }}
-                              className="relative h-16 w-28 flex-shrink-0 overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <GalleryImage
-                                src={episode.url_original_still}
-                                alt={episode.title || `Episode ${episode.episode_number}`}
-                                sizes="112px"
+                            {season.tmdb_season_id && show.tmdb_id && (
+                              <TmdbLinkIcon
+                                showTmdbId={show.tmdb_id}
+                                seasonNumber={season.season_number}
+                                type="season"
                               />
-                            </button>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <p className="text-xs font-semibold text-zinc-500">
-                                    Episode {episode.episode_number}
-                                  </p>
-                                  {show.tmdb_id && episode.tmdb_episode_id && (
-                                    <TmdbLinkIcon
-                                      showTmdbId={show.tmdb_id}
-                                      seasonNumber={episode.season_number}
-                                      episodeNumber={episode.episode_number}
-                                      type="episode"
-                                    />
-                                  )}
-                                  {episode.imdb_episode_id && (
-                                    <ImdbLinkIcon imdbId={episode.imdb_episode_id} type="title" />
-                                  )}
-                                </div>
-                                <p className="font-semibold text-zinc-900">
-                                  {episode.title || "Untitled"}
-                                </p>
-                              </div>
-                              {episode.imdb_rating && (
-                                <span className="flex items-center gap-1 text-sm text-zinc-600">
-                                  <span className="text-yellow-500">★</span>
-                                  {episode.imdb_rating.toFixed(1)}
-                                </span>
-                              )}
-                            </div>
-                            {episode.synopsis && (
-                              <p className="mt-1 text-sm text-zinc-600 line-clamp-2">
-                                {episode.synopsis}
-                              </p>
                             )}
-                            <div className="mt-2 flex gap-3 text-xs text-zinc-500">
-                              {episode.air_date && (
-                                <span>
-                                  {new Date(episode.air_date).toLocaleDateString()}
-                                </span>
-                              )}
-                              {episode.runtime && (
-                                <span>{episode.runtime} min</span>
-                              )}
-                            </div>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-3 text-xs text-zinc-500">
+                            <span>{countLabel}</span>
+                            <span>{dateRange}</span>
                           </div>
                         </div>
-                      ))}
-                      {episodes.length === 0 && (
-                        <p className="text-sm text-zinc-500">
-                          No episodes found for this season.
-                        </p>
+                        <span
+                          className={`text-zinc-400 transition-transform ${
+                            isOpen ? "rotate-180" : ""
+                          }`}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                            <path
+                              d="M6 9l6 6 6-6"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <div className="border-t border-zinc-100 px-4 py-4">
+                          {season.overview && (
+                            <p className="text-sm text-zinc-600">
+                              {season.overview}
+                            </p>
+                          )}
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <Link
+                              href={`/admin/trr-shows/${show.id}/seasons/${season.season_number}?tab=episodes`}
+                              className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              EPISODES
+                            </Link>
+                            <Link
+                              href={`/admin/trr-shows/${show.id}/seasons/${season.season_number}?tab=media`}
+                              className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              MEDIA
+                            </Link>
+                            <Link
+                              href={`/admin/trr-shows/${show.id}/seasons/${season.season_number}?tab=cast`}
+                              className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              CAST MEMBERS
+                            </Link>
+                          </div>
+                        </div>
                       )}
                     </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-zinc-500">
-                    Select a season to view episodes.
-                  </p>
+                  );
+                })}
+                {seasons.length === 0 && (
+                  <p className="text-sm text-zinc-500">No seasons found</p>
                 )}
               </div>
             </div>
@@ -1277,6 +1170,14 @@ export default function TrrShowDetailPage() {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {cast.map((member) => {
                   const thumbnailUrl = member.cover_photo_url || member.photo_url;
+                  const roleLabel =
+                    member.role && member.role.toLowerCase() !== "self"
+                      ? member.role
+                      : null;
+                  const episodeLabel =
+                    typeof member.total_episodes === "number"
+                      ? `${member.total_episodes} episodes`
+                      : null;
 
                   return (
                     <Link
@@ -1302,8 +1203,11 @@ export default function TrrShowDetailPage() {
                       <p className="font-semibold text-zinc-900">
                         {member.full_name || member.cast_member_name || "Unknown"}
                       </p>
-                      {member.role && (
-                        <p className="text-sm text-zinc-600">{member.role}</p>
+                      {episodeLabel && (
+                        <p className="text-sm text-zinc-600">{episodeLabel}</p>
+                      )}
+                      {roleLabel && (
+                        <p className="text-xs text-zinc-500">{roleLabel}</p>
                       )}
                       <div className="mt-2 flex flex-wrap gap-1">
                         <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
@@ -1490,29 +1394,6 @@ export default function TrrShowDetailPage() {
           />
         )}
 
-        {/* Lightbox for episode stills */}
-        {episodeLightbox && (
-          <ImageLightbox
-            src={episodeLightbox.episode.url_original_still || ""}
-            alt={
-              episodeLightbox.episode.title ||
-              `Episode ${episodeLightbox.episode.episode_number}`
-            }
-            isOpen={true}
-            onClose={closeEpisodeLightbox}
-            metadata={mapEpisodeToMetadata(episodeLightbox.episode, show?.name)}
-            position={{
-              current: episodeLightbox.index + 1,
-              total: episodeLightbox.seasonEpisodes.length,
-            }}
-            onPrevious={() => navigateEpisodeLightbox("prev")}
-            onNext={() => navigateEpisodeLightbox("next")}
-            hasPrevious={episodeLightbox.index > 0}
-            hasNext={episodeLightbox.index < episodeLightbox.seasonEpisodes.length - 1}
-            triggerRef={episodeTriggerRef as React.RefObject<HTMLElement | null>}
-          />
-        )}
-
         {/* Lightbox for gallery assets */}
         {assetLightbox && (
           <ImageLightbox
@@ -1520,7 +1401,7 @@ export default function TrrShowDetailPage() {
             alt={assetLightbox.asset.caption || "Gallery image"}
             isOpen={true}
             onClose={closeAssetLightbox}
-            metadata={mapAssetToMetadata(assetLightbox.asset)}
+            metadata={mapSeasonAssetToMetadata(assetLightbox.asset, selectedGallerySeason !== "all" ? selectedGallerySeason : undefined, show?.name)}
             position={{
               current: assetLightbox.index + 1,
               total: assetLightbox.filteredAssets.length,

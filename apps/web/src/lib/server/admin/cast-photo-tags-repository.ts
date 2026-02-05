@@ -44,7 +44,8 @@ export async function getTagsByPhotoIds(
 
   try {
     const supabase = getSupabaseTrrCore();
-    const { data, error } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .select(TAG_FIELDS)
@@ -78,7 +79,8 @@ export async function getPhotoIdsByPersonId(personId: string): Promise<string[]>
 
   try {
     const supabase = getSupabaseTrrCore();
-    const { data, error } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .select("cast_photo_id")
@@ -96,7 +98,7 @@ export async function getPhotoIdsByPersonId(personId: string): Promise<string[]>
       return [];
     }
 
-    return (data ?? []).map((row) => row.cast_photo_id as string);
+    return (data ?? []).map((row: { cast_photo_id: string }) => row.cast_photo_id);
   } catch (error) {
     console.warn("[cast-photo-tags] Failed to fetch tag photo IDs", error);
     return [];
@@ -131,7 +133,8 @@ export async function upsertCastPhotoTags(
       created_by_firebase_uid: payload.created_by_firebase_uid ?? null,
     };
 
-    const { data, error } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
       .upsert(row, { onConflict: "cast_photo_id", defaultToNull: false })

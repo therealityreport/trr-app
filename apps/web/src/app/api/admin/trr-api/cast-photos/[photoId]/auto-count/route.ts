@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getTagsByPhotoIds, upsertCastPhotoTags } from "@/lib/server/admin/cast-photo-tags-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         detail ? { error: errorMessage, detail } : { error: errorMessage },
         { status: backendResponse.status }
       );
+    }
+
+    const rawCount = (data as { people_count?: unknown }).people_count;
+    const parsedCount =
+      typeof rawCount === "number" && Number.isFinite(rawCount)
+        ? Math.max(1, Math.floor(rawCount))
+        : null;
+    if (parsedCount !== null) {
+      const existingTags = await getTagsByPhotoIds([photoId]);
+      const existing = existingTags.get(photoId) ?? null;
+      await upsertCastPhotoTags({
+        cast_photo_id: photoId,
+        people_names: existing?.people_names ?? null,
+        people_ids: existing?.people_ids ?? null,
+        people_count: parsedCount,
+        people_count_source: "auto",
+        detector: existing?.detector ?? null,
+      });
     }
 
     return NextResponse.json(data);

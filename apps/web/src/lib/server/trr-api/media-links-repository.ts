@@ -23,7 +23,8 @@ const MEDIA_LINK_FIELDS =
 
 export async function getMediaLinkById(linkId: string): Promise<MediaLinkRow | null> {
   const supabase = getSupabaseTrrCore();
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("media_links")
     .select(MEDIA_LINK_FIELDS)
     .eq("id", linkId)
@@ -43,7 +44,8 @@ export async function getMediaLinksByAssetId(
   mediaAssetId: string
 ): Promise<MediaLinkRow[]> {
   const supabase = getSupabaseTrrCore();
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("media_links")
     .select(MEDIA_LINK_FIELDS)
     .eq("media_asset_id", mediaAssetId)
@@ -82,7 +84,8 @@ export async function ensureMediaLinksForPeople(
 
   if (rows.length === 0) return;
 
-  const { error } = await supabase.from("media_links").insert(rows);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any).from("media_links").insert(rows);
   if (error) {
     throw new Error(`Failed to insert media links: ${error.message}`);
   }
@@ -93,7 +96,8 @@ export async function updateMediaLinksContext(
   context: Record<string, unknown>
 ): Promise<void> {
   const supabase = getSupabaseTrrCore();
-  const { error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any)
     .from("media_links")
     .update({ context })
     .eq("media_asset_id", mediaAssetId)
@@ -103,4 +107,87 @@ export async function updateMediaLinksContext(
   if (error) {
     throw new Error(`Failed to update media links context: ${error.message}`);
   }
+}
+
+export interface CreateMediaLinkParams {
+  media_asset_id: string;
+  entity_type: "person" | "season" | "show" | "episode";
+  entity_id: string;
+  kind?: string;
+  context?: Record<string, unknown>;
+}
+
+export interface CreateMediaLinkResult {
+  link: MediaLinkRow;
+  already_exists: boolean;
+}
+
+/**
+ * Create a media link between an existing media asset and an entity.
+ * Returns the link (existing or new) and whether it already existed.
+ */
+export async function createMediaLink(
+  params: CreateMediaLinkParams
+): Promise<CreateMediaLinkResult> {
+  const supabase = getSupabaseTrrCore();
+  const { media_asset_id, entity_type, entity_id, kind = "gallery", context = {} } = params;
+
+  // Check if link already exists
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: existing, error: checkError } = await (supabase as any)
+    .from("media_links")
+    .select(MEDIA_LINK_FIELDS)
+    .eq("media_asset_id", media_asset_id)
+    .eq("entity_type", entity_type)
+    .eq("entity_id", entity_id)
+    .eq("kind", kind)
+    .maybeSingle();
+
+  if (checkError) {
+    throw new Error(`Failed to check existing link: ${checkError.message}`);
+  }
+
+  if (existing) {
+    return { link: existing as MediaLinkRow, already_exists: true };
+  }
+
+  // Create new link
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: newLink, error: insertError } = await (supabase as any)
+    .from("media_links")
+    .insert({
+      media_asset_id,
+      entity_type,
+      entity_id,
+      kind,
+      position: null,
+      context,
+    })
+    .select(MEDIA_LINK_FIELDS)
+    .single();
+
+  if (insertError) {
+    throw new Error(`Failed to create media link: ${insertError.message}`);
+  }
+
+  return { link: newLink as MediaLinkRow, already_exists: false };
+}
+
+/**
+ * Get all media links for a specific media asset (across all entity types).
+ */
+export async function getAllLinksForAsset(
+  mediaAssetId: string
+): Promise<MediaLinkRow[]> {
+  const supabase = getSupabaseTrrCore();
+  const { data, error } = await supabase
+    .from("media_links")
+    .select(MEDIA_LINK_FIELDS)
+    .eq("media_asset_id", mediaAssetId);
+
+  if (error) {
+    throw new Error(`Failed to get media links: ${error.message}`);
+  }
+
+  return (data ?? []) as MediaLinkRow[];
 }
