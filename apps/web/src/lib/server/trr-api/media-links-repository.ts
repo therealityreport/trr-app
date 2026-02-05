@@ -82,7 +82,8 @@ export async function ensureMediaLinksForPeople(
 
   if (rows.length === 0) return;
 
-  const { error } = await supabase.from("media_links").insert(rows);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any).from("media_links").insert(rows);
   if (error) {
     throw new Error(`Failed to insert media links: ${error.message}`);
   }
