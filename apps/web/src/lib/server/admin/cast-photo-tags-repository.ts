@@ -18,8 +18,7 @@ export interface CastPhotoTags {
 const TAG_FIELDS =
   "cast_photo_id, people_names, people_ids, people_count, people_count_source, detector, created_at, updated_at, created_by_firebase_uid, updated_by_firebase_uid";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ADMIN_SCHEMA = "admin" as any;
+const ADMIN_SCHEMA = "admin";
 let adminSchemaAvailable: boolean | null = null;
 
 const isInvalidSchemaError = (message: string | null | undefined): boolean =>
@@ -45,6 +44,7 @@ export async function getTagsByPhotoIds(
 
   try {
     const supabase = getSupabaseTrrCore();
+    // @ts-expect-error - admin schema is not in generated types
     const { data, error } = await supabase
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
@@ -79,6 +79,7 @@ export async function getPhotoIdsByPersonId(personId: string): Promise<string[]>
 
   try {
     const supabase = getSupabaseTrrCore();
+    // @ts-expect-error - admin schema is not in generated types
     const { data, error } = await supabase
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
@@ -132,6 +133,7 @@ export async function upsertCastPhotoTags(
       created_by_firebase_uid: payload.created_by_firebase_uid ?? null,
     };
 
+    // @ts-expect-error - admin schema is not in generated types
     const { data, error } = await supabase
       .schema(ADMIN_SCHEMA)
       .from("cast_photo_people_tags")
