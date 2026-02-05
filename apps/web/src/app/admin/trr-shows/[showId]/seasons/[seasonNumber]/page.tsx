@@ -144,6 +144,7 @@ export default function SeasonDetailPage() {
   const [activeTab, setActiveTab] = useState<TabId>("episodes");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshingAssets, setRefreshingAssets] = useState(false);
 
   const [episodeLightbox, setEpisodeLightbox] = useState<{
     episode: TrrEpisode;
@@ -244,6 +245,29 @@ export default function SeasonDetailPage() {
     loadSeasonData();
   }, [hasAccess, loadSeasonData]);
 
+  const fetchAssets = useCallback(async () => {
+    const headers = await getAuthHeaders();
+    const response = await fetch(
+      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`,
+      { headers }
+    );
+    if (!response.ok) throw new Error("Failed to fetch season media");
+    const data = await response.json();
+    setAssets(data.assets ?? []);
+  }, [showId, seasonNumber, getAuthHeaders]);
+
+  const handleRefreshImages = useCallback(async () => {
+    if (refreshingAssets) return;
+    setRefreshingAssets(true);
+    try {
+      await fetchAssets();
+    } catch (err) {
+      console.error("Failed to refresh images:", err);
+    } finally {
+      setRefreshingAssets(false);
+    }
+  }, [refreshingAssets, fetchAssets]);
+
   const openEpisodeLightbox = (
     episode: TrrEpisode,
     index: number,
@@ -319,6 +343,24 @@ export default function SeasonDetailPage() {
 
     return { main, recurring, guest };
   }, [cast, totalEpisodes]);
+
+  const hasEpisodeCounts = useMemo(
+    () => cast.some((member) => member.episodes_in_season > 0),
+    [cast]
+  );
+
+  const formatEpisodesLabel = (count: number) =>
+    count > 0 ? `${count} episodes this season` : "Appeared this season";
+
+  const isSeasonBackdrop = (asset: SeasonAsset) => {
+    if (asset.kind === "backdrop") return true;
+    const metadata = asset.metadata;
+    if (!metadata || typeof metadata !== "object") return false;
+    const meta = metadata as Record<string, unknown>;
+    if (meta.season_backdrop === true) return true;
+    const roles = meta.image_roles;
+    return Array.isArray(roles) && roles.includes("backdrop");
+  };
 
   if (checking) {
     return (
@@ -537,18 +579,54 @@ export default function SeasonDetailPage() {
                     {show.name} · Season {season.season_number}
                   </h3>
                 </div>
-                <button
-                  onClick={() => setScrapeDrawerOpen(true)}
-                  className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  Import Images
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleRefreshImages}
+                    disabled={refreshingAssets}
+                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
+                    </svg>
+                    {refreshingAssets ? "Refreshing..." : "Refresh Images"}
+                  </button>
+                  <button
+                    onClick={() => setScrapeDrawerOpen(true)}
+                    className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Import Images
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-8">
+                {assets.filter((a) => a.type === "season" && isSeasonBackdrop(a)).length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Season Backdrops</h4>
+                    <div className="grid grid-cols-3 gap-4">
+                      {assets
+                        .filter((a) => a.type === "season" && isSeasonBackdrop(a))
+                        .map((asset, i, arr) => (
+                          <button
+                            key={`${asset.id}-${i}`}
+                            onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                            className="relative aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <GalleryImage
+                              src={asset.hosted_url}
+                              alt={asset.caption || "Season backdrop"}
+                              sizes="300px"
+                              className="object-cover"
+                            />
+                          </button>
+                        ))}
+                    </div>
+                  </section>
+                )}
+
                 {assets.filter((a) => a.type === "season").length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Season Posters</h4>
@@ -647,7 +725,46 @@ export default function SeasonDetailPage() {
               </div>
 
               <div className="space-y-8">
-                {groupedCast.main.length > 0 && (
+                {!hasEpisodeCounts && cast.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Cast</h4>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {cast.map((member) => (
+                        <Link
+                          key={member.person_id}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                          className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
+                        >
+                          <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
+                            {member.photo_url ? (
+                              <CastPhoto src={member.photo_url} alt={member.person_name || "Cast"} />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-zinc-400">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                          <p className="font-semibold text-zinc-900">
+                            {member.person_name || "Unknown"}
+                          </p>
+                          <p className="text-sm text-zinc-600">
+                            {formatEpisodesLabel(member.episodes_in_season)}
+                          </p>
+                          {typeof member.total_episodes === "number" && (
+                            <p className="text-xs text-zinc-500">
+                              {member.total_episodes} total episodes
+                            </p>
+                          )}
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {hasEpisodeCounts && groupedCast.main.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Main Cast</h4>
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -673,7 +790,7 @@ export default function SeasonDetailPage() {
                             {member.person_name || "Unknown"}
                           </p>
                           <p className="text-sm text-zinc-600">
-                            {member.episodes_in_season} episodes this season
+                            {formatEpisodesLabel(member.episodes_in_season)}
                           </p>
                           {typeof member.total_episodes === "number" && (
                             <p className="text-xs text-zinc-500">
@@ -686,7 +803,7 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {groupedCast.recurring.length > 0 && (
+                {hasEpisodeCounts && groupedCast.recurring.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Recurring Cast</h4>
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -712,7 +829,7 @@ export default function SeasonDetailPage() {
                             {member.person_name || "Unknown"}
                           </p>
                           <p className="text-sm text-zinc-600">
-                            {member.episodes_in_season} episodes this season
+                            {formatEpisodesLabel(member.episodes_in_season)}
                           </p>
                           {typeof member.total_episodes === "number" && (
                             <p className="text-xs text-zinc-500">
@@ -725,7 +842,7 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {groupedCast.guest.length > 0 && (
+                {hasEpisodeCounts && groupedCast.guest.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Guest Appearances</h4>
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -751,7 +868,7 @@ export default function SeasonDetailPage() {
                             {member.person_name || "Unknown"}
                           </p>
                           <p className="text-sm text-zinc-600">
-                            {member.episodes_in_season} episodes this season
+                            {formatEpisodesLabel(member.episodes_in_season)}
                           </p>
                           {typeof member.total_episodes === "number" && (
                             <p className="text-xs text-zinc-500">
@@ -821,6 +938,7 @@ export default function SeasonDetailPage() {
             showId: showId,
             showName: show?.name ?? "",
             seasonNumber: seasonNumber,
+            seasonId: season?.id,
           }}
           onImportComplete={() => {
             loadSeasonData();
