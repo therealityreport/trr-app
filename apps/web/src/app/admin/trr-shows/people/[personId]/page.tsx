@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -10,7 +10,18 @@ import { auth } from "@/lib/firebase";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
+import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { mapPhotoToMetadata } from "@/lib/photo-metadata";
+import {
+  readAdvancedFilters,
+  writeAdvancedFilters,
+  type AdvancedFilterState,
+} from "@/lib/admin/advanced-filters";
+import {
+  inferHasTextOverlay,
+  inferPeopleCountForPersonPhoto,
+  matchesContentTypesForPersonPhoto,
+} from "@/lib/gallery-filter-utils";
 import {
   applyFacebankSeedUpdateToLightbox,
   applyFacebankSeedUpdateToPhotos,
@@ -191,38 +202,75 @@ function ProfilePhoto({ url, name }: { url: string | null | undefined; name: str
 
 function RefreshProgressBar({
   show,
+  phase,
+  message,
   current,
   total,
 }: {
   show: boolean;
+  phase?: string | null;
+  message?: string | null;
   current?: number | null;
   total?: number | null;
 }) {
   if (!show) return null;
-  const hasProgress =
+  const hasCounts =
     typeof current === "number" &&
+    Number.isFinite(current) &&
     typeof total === "number" &&
-    total > 0 &&
+    Number.isFinite(total) &&
+    total >= 0 &&
     current >= 0;
-  const percent = hasProgress
-    ? Math.min(100, Math.round((current / total) * 100))
+  const safeTotal = hasCounts ? Math.max(0, Math.floor(total)) : null;
+  const safeCurrent = hasCounts
+    ? Math.max(
+        0,
+        Math.floor(
+          safeTotal !== null && safeTotal > 0 ? Math.min(current, safeTotal) : current
+        )
+      )
+    : null;
+  const hasProgressBar = safeCurrent !== null && safeTotal !== null && safeTotal > 0;
+  const percent = hasProgressBar
+    ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100))
     : 0;
+  const phaseLabel =
+    typeof phase === "string" && phase.trim()
+      ? phase.replace(/[_-]+/g, " ").trim()
+      : null;
 
   return (
     <div className="w-full">
+      {(phaseLabel || message || hasCounts) && (
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
+            {message || phaseLabel || "Working..."}
+          </p>
+          {hasCounts && safeCurrent !== null && safeTotal !== null && safeTotal > 0 && (
+            <p className="text-[11px] tabular-nums text-zinc-500">
+              {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} images
+            </p>
+          )}
+          {hasCounts && safeCurrent !== null && safeTotal !== null && safeTotal === 0 && (
+            <p className="text-[11px] tabular-nums text-zinc-500">
+              {safeCurrent.toLocaleString()} images
+            </p>
+          )}
+        </div>
+      )}
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
-        {hasProgress ? (
+        {hasProgressBar ? (
           <div
             className="h-full rounded-full bg-zinc-700 transition-all"
             style={{ width: `${percent}%` }}
           />
-        ) : (
+        ) : safeTotal === 0 ? null : (
           <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-zinc-700/70" />
         )}
       </div>
-      {hasProgress && (
+      {hasProgressBar && (
         <p className="mt-1 text-[11px] text-zinc-500">
-          {current}/{total}
+          {percent}% complete
         </p>
       )}
     </div>
@@ -999,6 +1047,7 @@ function TagPeoplePanel({
 
 export default function PersonProfilePage() {
   const params = useParams();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const personId = params.personId as string;
   const showIdParam = searchParams.get("showId");
@@ -1030,22 +1079,41 @@ export default function PersonProfilePage() {
 
   // Image scrape drawer state
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
 
   // Refresh images state
   const [refreshingImages, setRefreshingImages] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState<{
-    current: number;
-    total: number;
-    phase?: string;
+    current?: number | null;
+    total?: number | null;
+    phase?: string | null;
+    message?: string | null;
   } | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [photosError, setPhotosError] = useState<string | null>(null);
 
+  const advancedFilters = useMemo(
+    () =>
+      readAdvancedFilters(new URLSearchParams(searchParams.toString()), {
+        sort: "newest",
+      }),
+    [searchParams]
+  );
+
+  const setAdvancedFilters = useCallback(
+    (next: AdvancedFilterState) => {
+      const out = writeAdvancedFilters(
+        new URLSearchParams(searchParams.toString()),
+        next,
+        { sort: "newest" }
+      );
+      router.replace(`?${out.toString()}`, { scroll: false });
+    },
+    [router, searchParams]
+  );
+
   // Gallery filter/sort state
-  const [gallerySourceFilter, setGallerySourceFilter] = useState<string>("all");
-  const [gallerySortOption, setGallerySortOption] = useState<GallerySortOption>("newest");
-  const [galleryPeopleFilter, setGalleryPeopleFilter] = useState<"solo" | "all">("solo");
   const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>(
     showIdParam ? "this-show" : "all"
   );
@@ -1090,6 +1158,18 @@ export default function PersonProfilePage() {
     const sources = new Set(photos.map(p => p.source).filter(Boolean));
     return Array.from(sources).sort();
   }, [photos]);
+
+  const isTextFilterActive = useMemo(() => {
+    const wantsText = advancedFilters.text.includes("text");
+    const wantsNoText = advancedFilters.text.includes("no_text");
+    return wantsText !== wantsNoText;
+  }, [advancedFilters.text]);
+
+  const unknownTextCount = useMemo(() => {
+    if (!isTextFilterActive) return 0;
+    return photos.filter((p) => inferHasTextOverlay(p.metadata ?? null) === null)
+      .length;
+  }, [isTextFilterActive, photos]);
 
   const getPhotoSortDate = useCallback(
     (photo: TrrPersonPhoto): number => {
@@ -1158,31 +1238,54 @@ export default function PersonProfilePage() {
       });
     }
 
-    // Apply source filter
-    if (gallerySourceFilter !== "all") {
-      result = result.filter(p => p.source === gallerySourceFilter);
+    // Apply sources filter (OR within category)
+    if (advancedFilters.sources.length > 0) {
+      result = result.filter((p) => advancedFilters.sources.includes(p.source));
     }
 
-    // Apply people filter
-    if (galleryPeopleFilter === "solo") {
+    // Apply text overlay filter (if exactly one of TEXT/NO TEXT is selected)
+    const wantsText = advancedFilters.text.includes("text");
+    const wantsNoText = advancedFilters.text.includes("no_text");
+    const textFilterActive = wantsText !== wantsNoText;
+    if (textFilterActive) {
       result = result.filter((photo) => {
-        const rawCount = photo.people_count as unknown;
-        const parsedCount =
-          typeof rawCount === "number"
-            ? rawCount
-            : typeof rawCount === "string" && rawCount.trim().length > 0
-              ? Number.parseInt(rawCount, 10)
-              : null;
-        const inferredCount =
-          parsedCount !== null && Number.isFinite(parsedCount)
-            ? parsedCount
-            : photo.people_names?.length ?? 0;
-        return inferredCount <= 1;
+        const v = inferHasTextOverlay(photo.metadata ?? null);
+        if (v === null) return false;
+        return wantsText ? v === true : v === false;
       });
     }
 
+    // Apply SOLO/GROUP filter (if exactly one is selected)
+    const wantsSolo = advancedFilters.people.includes("solo");
+    const wantsGroup = advancedFilters.people.includes("group");
+    const peopleFilterActive = wantsSolo !== wantsGroup;
+    if (peopleFilterActive) {
+      result = result.filter((photo) => {
+        const count = inferPeopleCountForPersonPhoto(photo);
+        if (count === null) return false;
+        return wantsSolo ? count <= 1 : count >= 2;
+      });
+    }
+
+    // Apply seeded filter (if exactly one is selected)
+    const wantsSeeded = advancedFilters.seeded.includes("seeded");
+    const wantsNotSeeded = advancedFilters.seeded.includes("not_seeded");
+    const seededFilterActive = wantsSeeded !== wantsNotSeeded;
+    if (seededFilterActive) {
+      result = result.filter((photo) =>
+        wantsSeeded ? Boolean(photo.facebank_seed) : !Boolean(photo.facebank_seed)
+      );
+    }
+
+    // Apply content type filter
+    if (advancedFilters.contentTypes.length > 0) {
+      result = result.filter((photo) =>
+        matchesContentTypesForPersonPhoto(photo, advancedFilters.contentTypes)
+      );
+    }
+
     // Apply sort
-    switch (gallerySortOption) {
+    switch (advancedFilters.sort as GallerySortOption) {
       case "newest":
         result.sort((a, b) => getPhotoSortDate(b) - getPhotoSortDate(a));
         break;
@@ -1224,9 +1327,12 @@ export default function PersonProfilePage() {
   }, [
     photos,
     galleryShowFilter,
-    gallerySourceFilter,
-    galleryPeopleFilter,
-    gallerySortOption,
+    advancedFilters.sources,
+    advancedFilters.text,
+    advancedFilters.people,
+    advancedFilters.contentTypes,
+    advancedFilters.seeded,
+    advancedFilters.sort,
     showIdParam,
     activeShowName,
     activeShowAcronym,
@@ -1371,6 +1477,42 @@ export default function PersonProfilePage() {
       setPhotosError(err instanceof Error ? err.message : "Failed to fetch photos");
     }
   }, [personId, getAuthHeaders]);
+
+  const detectTextOverlayForUnknown = useCallback(async () => {
+    // Best-effort batch for the current gallery set (capped to reduce cost).
+    const targets = photos
+      .filter(
+        (p) =>
+          inferHasTextOverlay(p.metadata ?? null) === null
+      )
+      .slice(0, 25);
+    if (targets.length === 0) return;
+
+    const headers = await getAuthHeaders();
+    for (const photo of targets) {
+      try {
+        if (photo.origin === "media_links") {
+          const assetId = photo.media_asset_id;
+          if (!assetId) continue;
+          await fetch(`/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ force: false }),
+          });
+        } else {
+          await fetch(`/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ force: false }),
+          });
+        }
+      } catch (err) {
+        console.warn("Text overlay detect failed:", err);
+      }
+    }
+
+    await fetchPhotos();
+  }, [photos, getAuthHeaders, fetchPhotos]);
 
   // Fetch credits
   const fetchCredits = useCallback(async () => {
@@ -1623,6 +1765,16 @@ export default function PersonProfilePage() {
             }
 
             if (eventType === "progress" && payload && typeof payload === "object") {
+              const phase =
+                typeof (payload as { phase?: unknown }).phase === "string"
+                  ? ((payload as { phase: string }).phase)
+                  : typeof (payload as { stage?: unknown }).stage === "string"
+                    ? ((payload as { stage: string }).stage)
+                    : null;
+              const message =
+                typeof (payload as { message?: unknown }).message === "string"
+                  ? ((payload as { message: string }).message)
+                  : null;
               const currentRaw = (payload as { current?: unknown }).current;
               const totalRaw = (payload as { total?: unknown }).total;
               const current =
@@ -1637,21 +1789,12 @@ export default function PersonProfilePage() {
                   : typeof totalRaw === "string"
                     ? Number.parseInt(totalRaw, 10)
                     : null;
-              if (
-                typeof current === "number" &&
-                Number.isFinite(current) &&
-                typeof total === "number" &&
-                Number.isFinite(total)
-              ) {
-                setRefreshProgress({
-                  current,
-                  total,
-                  phase:
-                    typeof (payload as { phase?: unknown }).phase === "string"
-                      ? ((payload as { phase: string }).phase)
-                      : undefined,
-                });
-              }
+              setRefreshProgress({
+                current: typeof current === "number" && Number.isFinite(current) ? current : null,
+                total: typeof total === "number" && Number.isFinite(total) ? total : null,
+                phase,
+                message,
+              });
             } else if (eventType === "complete") {
               sawComplete = true;
               const summary = payload && typeof payload === "object" && "summary" in payload
@@ -1878,6 +2021,8 @@ export default function PersonProfilePage() {
                 <div className="mt-2 space-y-2">
                   <RefreshProgressBar
                     show={refreshingImages}
+                    phase={refreshProgress?.phase}
+                    message={refreshProgress?.message}
                     current={refreshProgress?.current}
                     total={refreshProgress?.total}
                   />
@@ -2075,6 +2220,15 @@ export default function PersonProfilePage() {
                     {refreshingImages ? "Refreshing..." : "Refresh Images"}
                   </button>
                   <button
+                    onClick={() => setAdvancedFiltersOpen(true)}
+                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
+                    </svg>
+                    Filters
+                  </button>
+                  <button
                     onClick={() => setScrapeDrawerOpen(true)}
                     className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
                   >
@@ -2088,6 +2242,8 @@ export default function PersonProfilePage() {
               <div className="mb-4 space-y-2">
                 <RefreshProgressBar
                   show={refreshingImages}
+                  phase={refreshProgress?.phase}
+                  message={refreshProgress?.message}
                   current={refreshProgress?.current}
                   total={refreshProgress?.total}
                 />
@@ -2131,65 +2287,10 @@ export default function PersonProfilePage() {
                 </div>
               )}
 
-              {/* Filter and Sort Controls */}
-              <div className="mb-6 flex flex-wrap items-center gap-4">
-                {/* Source Filter */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-zinc-700">Source:</label>
-                  <select
-                    value={gallerySourceFilter}
-                    onChange={(e) => setGallerySourceFilter(e.target.value)}
-                    className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
-                  >
-                    <option value="all">All Sources ({photos.length})</option>
-                    {uniqueSources.map((source) => {
-                      const count = photos.filter(p => p.source === source).length;
-                      return (
-                        <option key={source} value={source}>
-                          {source} ({count})
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-
-                {/* People Filter */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-zinc-700">People:</label>
-                  <select
-                    value={galleryPeopleFilter}
-                    onChange={(e) => setGalleryPeopleFilter(e.target.value as "solo" | "all")}
-                    className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
-                  >
-                    <option value="solo">Solo Only</option>
-                    <option value="all">All Photos</option>
-                  </select>
-                </div>
-
-                {/* Sort */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-zinc-700">Sort:</label>
-                  <select
-                    value={gallerySortOption}
-                    onChange={(e) => setGallerySortOption(e.target.value as GallerySortOption)}
-                    className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
-                  >
-                    <option value="newest">Newest First</option>
-                    <option value="oldest">Oldest First</option>
-                    <option value="season-desc">Season (Newest)</option>
-                    <option value="season-asc">Season (Oldest)</option>
-                    <option value="source">By Source</option>
-                  </select>
-                </div>
-
-                {/* Count indicator */}
-                {(gallerySourceFilter !== "all" ||
-                  galleryPeopleFilter !== "all" ||
-                  galleryShowFilter !== "all") && (
-                  <span className="text-sm text-zinc-500">
-                    Showing {filteredPhotos.length} of {photos.length} photos
-                  </span>
-                )}
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-zinc-500">
+                  Showing {filteredPhotos.length} of {photos.length} photos
+                </p>
               </div>
 
               <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -2438,6 +2539,25 @@ export default function PersonProfilePage() {
             // Refresh photos after import
             fetchPhotos();
           }}
+        />
+
+        <AdvancedFilterDrawer
+          isOpen={advancedFiltersOpen}
+          onClose={() => setAdvancedFiltersOpen(false)}
+          filters={advancedFilters}
+          onChange={setAdvancedFilters}
+          availableSources={uniqueSources}
+          showSeeded={true}
+          sortOptions={[
+            { value: "newest", label: "Newest First" },
+            { value: "oldest", label: "Oldest First" },
+            { value: "season-desc", label: "Season (Newest)" },
+            { value: "season-asc", label: "Season (Oldest)" },
+            { value: "source", label: "By Source" },
+          ]}
+          defaults={{ sort: "newest" }}
+          unknownTextCount={isTextFilterActive ? unknownTextCount : undefined}
+          onDetectTextForVisible={isTextFilterActive ? detectTextOverlayForUnknown : undefined}
         />
       </div>
     </ClientOnly>

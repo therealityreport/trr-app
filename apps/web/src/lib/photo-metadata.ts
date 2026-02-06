@@ -87,9 +87,18 @@ const inferFileType = (
 
 const inferFandomSectionTag = (value: string | null | undefined): string | null => {
   if (!value) return null;
-  const text = value.toLowerCase();
+  // Normalize common separators so matching works for labels like "Theme-Song" or "Chapter_Cards".
+  const text = value.toLowerCase().replace(/[_-]+/g, " ");
   if (text.includes("confessional")) return "CONFESSIONAL";
-  if (text.includes("intro") || text.includes("tagline") || text.includes("opening")) return "INTRO";
+  if (
+    text.includes("intro") ||
+    text.includes("tagline") ||
+    text.includes("opening") ||
+    text.includes("theme song") ||
+    text.includes("chapter card")
+  ) {
+    return "INTRO";
+  }
   if (text.includes("reunion")) return "REUNION";
   if (text.includes("promo") || text.includes("promotional")) return "PROMO";
   if (text.includes("episode") || text.includes("still")) return "EPISODE STILL";
@@ -127,17 +136,17 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
         : typeof photo.context_section === "string"
           ? photo.context_section
         : null;
-  const normalizedSectionTag = isFandom && sectionTagRaw
-    ? inferFandomSectionTag(sectionTagRaw) ?? sectionTagRaw
-    : null;
-  const inferredTagInput = [photo.context_type, sectionLabel, photo.caption]
+
+  // Fandom "content type" is primarily inferred from the section heading on the gallery page.
+  // Some historical rows stored OTHER even though the section label is informative (e.g. "Theme Song Snaps").
+  // Always infer using the combined label/caption/context so display + filtering is correct without DB backfills.
+  const fandomTagInput = [sectionTagRaw, sectionLabel, photo.context_type, photo.caption]
     .filter(Boolean)
     .join(" ");
-  const sectionTag =
-    normalizedSectionTag ??
-    (isFandom
-      ? inferFandomSectionTag(inferredTagInput)
-      : sectionTagRaw ?? sectionLabel ?? null);
+  const inferredFandomTag = isFandom ? inferFandomSectionTag(fandomTagInput) : null;
+  const sectionTag = isFandom
+    ? (inferredFandomTag ?? sectionTagRaw ?? sectionLabel ?? null)
+    : sectionTagRaw ?? sectionLabel ?? null;
 
   const imdbTypeRaw =
     typeof metadata.imdb_image_type === "string"
@@ -267,17 +276,13 @@ export function mapSeasonAssetToMetadata(
         : typeof asset.context_section === "string"
           ? asset.context_section
           : null;
-  const normalizedSectionTag = isFandom && sectionTagRaw
-    ? inferFandomSectionTag(sectionTagRaw) ?? sectionTagRaw
-    : null;
-  const inferredTagInput = [asset.context_type, sectionLabel, asset.caption]
+  const fandomTagInput = [sectionTagRaw, sectionLabel, asset.context_type, asset.caption]
     .filter(Boolean)
     .join(" ");
-  const sectionTag =
-    normalizedSectionTag ??
-    (isFandom
-      ? inferFandomSectionTag(inferredTagInput)
-      : sectionTagRaw ?? sectionLabel ?? null);
+  const inferredFandomTag = isFandom ? inferFandomSectionTag(fandomTagInput) : null;
+  const sectionTag = isFandom
+    ? (inferredFandomTag ?? sectionTagRaw ?? sectionLabel ?? null)
+    : sectionTagRaw ?? sectionLabel ?? null;
 
   // IMDb type handling
   const imdbTypeRaw =

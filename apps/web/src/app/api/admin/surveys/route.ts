@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { listSurveys } from "@/lib/server/surveys/normalized-survey-admin-repository";
+import { listSurveys as listLegacySurveys } from "@/lib/server/surveys/fetch";
+import { listSurveys as listNormalizedSurveys } from "@/lib/server/surveys/normalized-survey-admin-repository";
 import type { NormalizedSurvey } from "@/lib/surveys/normalized-types";
 
 export const dynamic = "force-dynamic";
@@ -35,8 +36,18 @@ function transformSurveyForAdmin(survey: NormalizedSurvey) {
 export async function GET(request: NextRequest) {
   try {
     await requireAdmin(request);
-    const surveys = await listSurveys();
-    const items = surveys.map(transformSurveyForAdmin);
+    const url = new URL(request.url);
+    const full = url.searchParams.get("full") === "true";
+
+    // `full=true` powers the new normalized survey editor (/admin/surveys).
+    if (full) {
+      const surveys = await listNormalizedSurveys();
+      const items = surveys.map(transformSurveyForAdmin);
+      return NextResponse.json({ items });
+    }
+
+    // Default: legacy survey response exports (/admin/survey-responses).
+    const items = await listLegacySurveys();
     return NextResponse.json({ items });
   } catch (error) {
     console.error("[api] Failed to list surveys", error);

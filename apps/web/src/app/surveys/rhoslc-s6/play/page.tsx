@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { AuthDebugger } from "@/lib/debug";
 import FlashbackRanker from "@/components/flashback-ranker";
+import IconRatingInput from "@/components/survey/IconRatingInput";
 import { useSurveyManager } from "@/lib/surveys/manager";
 import { RHOSLC_EPISODE_ID, RHOSLC_SEASON_ID, RHOSLC_SHOW_ID, RHOSLC_SURVEY_ID } from "@/lib/surveys/config";
 import type { SurveyEpisodeMeta, SurveyRankingItem, SurveyResponse } from "@/lib/surveys/types";
@@ -28,6 +29,8 @@ const CAST_MEMBERS: SurveyRankingItem[] = [
   { id: "danna", label: "Danna Bui-Negrete", img: "" },
 ];
 
+const SNOWFLAKE_ICON_SRC = "/icons/snowflake-solid-ice-7.svg";
+
 export default function RhoslcSurveyPlayPage() {
   const router = useRouter();
   const manager = useSurveyManager();
@@ -35,12 +38,36 @@ export default function RhoslcSurveyPlayPage() {
   const [user, setUser] = useState<User | null>(null);
   const [episodeMeta, setEpisodeMeta] = useState<SurveyEpisodeMeta | null>(null);
   const [response, setResponse] = useState<SurveyResponse | null>(null);
+  const [seasonRating, setSeasonRating] = useState<number | null>(null);
   const [rankingIds, setRankingIds] = useState<string[]>([]);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isMissingRatingDialogOpen, setIsMissingRatingDialogOpen] = useState(false);
+  const ratingRowRef = useRef<HTMLDivElement | null>(null);
+  const ratingCardRef = useRef<HTMLDivElement | null>(null);
+  const ratingSaveTimeoutRef = useRef<number | null>(null);
+  const rankingIdsRef = useRef<string[]>([]);
+  const responseCompletedRef = useRef<boolean | undefined>(undefined);
 
   const userId = user?.uid ?? null;
   const isClosed = episodeMeta?.isClosed ?? false;
+
+  useEffect(() => {
+    rankingIdsRef.current = rankingIds;
+  }, [rankingIds]);
+
+  useEffect(() => {
+    responseCompletedRef.current = response?.completed;
+  }, [response?.completed]);
+
+  useEffect(() => {
+    return () => {
+      if (ratingSaveTimeoutRef.current) {
+        window.clearTimeout(ratingSaveTimeoutRef.current);
+        ratingSaveTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     AuthDebugger.log("RHOSLC Survey Play: mounting");
@@ -77,6 +104,7 @@ export default function RhoslcSurveyPlayPage() {
         setResponse(next);
         const ids = next?.ranking?.map((item) => item.id) ?? [];
         setRankingIds(ids);
+        setSeasonRating(next?.seasonRating ?? null);
       });
     };
 
@@ -100,6 +128,7 @@ export default function RhoslcSurveyPlayPage() {
           userId,
           {
             ranking: nextRanking,
+            seasonRating,
             completionPct: Math.round((nextRanking.length / CAST_MEMBERS.length) * 100),
             completed,
           },
@@ -111,15 +140,69 @@ export default function RhoslcSurveyPlayPage() {
         setSaveState("error");
       }
     },
-    [manager, response?.completed, userId],
+    [manager, response?.completed, seasonRating, userId],
   );
 
-  const handleSubmit = useCallback(async () => {
+  const handleSeasonRatingChange = useCallback(
+    (next: number | null) => {
+      setSeasonRating(next);
+      if (!userId) return;
+
+      if (ratingSaveTimeoutRef.current) {
+        window.clearTimeout(ratingSaveTimeoutRef.current);
+        ratingSaveTimeoutRef.current = null;
+      }
+
+      setSaveState("saving");
+
+      ratingSaveTimeoutRef.current = window.setTimeout(async () => {
+        try {
+          const ids = rankingIdsRef.current;
+          const ranking = ids
+            .map((id) => CAST_MEMBERS.find((item) => item.id === id))
+            .filter(Boolean) as SurveyRankingItem[];
+          const completed = ranking.length === CAST_MEMBERS.length ? responseCompletedRef.current ?? false : false;
+
+          await manager.saveResponse(
+            IDENTIFIERS,
+            userId,
+            {
+              ranking,
+              seasonRating: next,
+              completionPct: Math.round((ranking.length / CAST_MEMBERS.length) * 100),
+              completed,
+            },
+            { surveyKey: RHOSLC_SURVEY_ID },
+          );
+          setSaveState("saved");
+        } catch (error) {
+          console.error("Failed to save season rating", error);
+          setSaveState("error");
+        }
+      }, 450);
+    },
+    [manager, userId],
+  );
+
+  const focusSeasonRating = useCallback(() => {
+    ratingCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => ratingRowRef.current?.focus(), 100);
+  }, []);
+
+  const handleSubmit = useCallback(async ({ allowMissingRating = false }: { allowMissingRating?: boolean } = {}) => {
     if (!userId) {
       router.push("/auth/register");
       return;
     }
     if (rankingIds.length !== CAST_MEMBERS.length) return;
+    if (!allowMissingRating && seasonRating === null) {
+      setIsMissingRatingDialogOpen(true);
+      return;
+    }
+    if (ratingSaveTimeoutRef.current) {
+      window.clearTimeout(ratingSaveTimeoutRef.current);
+      ratingSaveTimeoutRef.current = null;
+    }
     setSaveState("saving");
     try {
       const ranking = rankingIds.map((id) => CAST_MEMBERS.find((item) => item.id === id)).filter(Boolean) as SurveyRankingItem[];
@@ -128,6 +211,7 @@ export default function RhoslcSurveyPlayPage() {
         userId,
         {
           ranking,
+          seasonRating,
           completionPct: 100,
           completed: true,
         },
@@ -139,7 +223,7 @@ export default function RhoslcSurveyPlayPage() {
       console.error("Failed to submit survey", error);
       setSaveState("error");
     }
-  }, [manager, rankingIds, router, userId]);
+  }, [manager, rankingIds, router, seasonRating, userId]);
 
   const handleBack = () => {
     router.push("/surveys/rhoslc-s6");
@@ -234,6 +318,29 @@ export default function RhoslcSurveyPlayPage() {
           </div>
         </header>
 
+        <section ref={ratingCardRef} className="rounded-2xl border border-rose-100 bg-white p-6 shadow-sm">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <h2 className="font-['NYTKarnak_Condensed'] text-3xl font-bold uppercase tracking-wide text-rose-900">
+              Rate the season
+            </h2>
+            <p className="max-w-2xl text-sm text-rose-700">Pick 1 to 5 snowflakes. Halves are allowed.</p>
+            <IconRatingInput
+              ref={ratingRowRef}
+              value={seasonRating}
+              onChange={handleSeasonRatingChange}
+              min={1}
+              max={5}
+              step={0.5}
+              iconSrc={SNOWFLAKE_ICON_SRC}
+              iconCount={5}
+              sizePx={42}
+              fillColor="#0EA5E9"
+              emptyColor="#E5E7EB"
+              ariaLabel="Season rating"
+            />
+          </div>
+        </section>
+
         <FlashbackRanker
           items={CAST_MEMBERS}
           initialRankingIds={rankingIds}
@@ -245,7 +352,7 @@ export default function RhoslcSurveyPlayPage() {
         <div className="flex flex-col items-center gap-3">
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
             disabled={rankingIds.length !== CAST_MEMBERS.length || saveState === "saving"}
             className="inline-flex items-center rounded-full bg-rose-600 px-6 py-3 text-base font-semibold text-white shadow transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-rose-300"
           >
@@ -258,6 +365,46 @@ export default function RhoslcSurveyPlayPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-red-500">Failed to save. Try again.</p>
           )}
         </div>
+
+        {isMissingRatingDialogOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="relative z-10 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+            >
+              <h2 className="font-['NYTKarnak_Condensed'] text-2xl font-bold text-rose-900">
+                Add a season rating?
+              </h2>
+              <p className="mt-2 text-sm text-rose-700">
+                It’s optional, but it helps us understand the vibe of the season.
+              </p>
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMissingRatingDialogOpen(false);
+                    focusSeasonRating();
+                  }}
+                  className="rounded-full border border-rose-200 px-5 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
+                >
+                  Add rating
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMissingRatingDialogOpen(false);
+                    void handleSubmit({ allowMissingRating: true });
+                  }}
+                  className="rounded-full bg-rose-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
+                >
+                  Submit without rating
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );

@@ -58,6 +58,7 @@ export interface SurveyResponse {
   seasonId: string;
   episodeId: string;
   ranking: SurveyRankingItem[];
+  seasonRating?: number | null;
   completionPct: number;
   completed: boolean;
   createdAt: Timestamp | FieldValue;
@@ -76,6 +77,7 @@ export type ExWifeVerdictChoice = "bring-back" | "stay-gone";
 
 export interface SurveyResponseDraft {
   ranking: SurveyRankingItem[];
+  seasonRating?: number | null;
   completionPct: number;
   completed: boolean;
 }

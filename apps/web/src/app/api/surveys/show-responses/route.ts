@@ -14,6 +14,8 @@ interface ShowSurveyPayload {
   episodeId?: string | null;
   responses: {
     ranking?: unknown;
+    season_rating?: number | null;
+    seasonRating?: number | null;
     completion_pct?: number;
     completionPct?: number;
     completed?: boolean;
@@ -73,6 +75,12 @@ export async function POST(request: NextRequest) {
       episode_id: payload.episodeId ?? null,
       extra: payload.responses.extra ?? null,
     };
+    if (
+      Object.prototype.hasOwnProperty.call(payload.responses, "season_rating") ||
+      Object.prototype.hasOwnProperty.call(payload.responses, "seasonRating")
+    ) {
+      answers.season_rating = payload.responses.season_rating ?? payload.responses.seasonRating ?? null;
+    }
 
     await upsertSurveyResponse({
       surveyKey: payload.surveyKey,

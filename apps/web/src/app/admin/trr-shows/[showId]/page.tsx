@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -12,7 +12,17 @@ import SurveysSection from "@/components/admin/surveys-section";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer, type SeasonContext } from "@/components/admin/ImageScrapeDrawer";
+import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { mapSeasonAssetToMetadata } from "@/lib/photo-metadata";
+import {
+  readAdvancedFilters,
+  writeAdvancedFilters,
+  type AdvancedFilterState,
+} from "@/lib/admin/advanced-filters";
+import {
+  inferHasTextOverlay,
+} from "@/lib/gallery-filter-utils";
+import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -60,6 +70,10 @@ interface TrrCastMember {
 }
 
 type TabId = "seasons" | "gallery" | "cast" | "surveys" | "social" | "details";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const looksLikeUuid = (value: string) => UUID_RE.test(value);
 
 // Generic gallery image with error handling - falls back to placeholder on broken images
 function GalleryImage({
@@ -160,6 +174,7 @@ function RefreshProgressBar({
 
 export default function TrrShowDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const showId = params.showId as string;
   const { user, checking, hasAccess } = useAdminGuard();
@@ -185,6 +200,31 @@ export default function TrrShowDetailPage() {
     number | "all"
   >("all");
   const [galleryLoading, setGalleryLoading] = useState(false);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const advancedFilters = useMemo(
+    () =>
+      readAdvancedFilters(new URLSearchParams(searchParams.toString()), {
+        sort: "newest",
+      }),
+    [searchParams]
+  );
+
+  const setAdvancedFilters = useCallback(
+    (next: AdvancedFilterState) => {
+      const out = writeAdvancedFilters(
+        new URLSearchParams(searchParams.toString()),
+        next,
+        { sort: "newest" }
+      );
+      router.replace(`?${out.toString()}`, { scroll: false });
+    },
+    [router, searchParams]
+  );
+
+  const availableGallerySources = useMemo(() => {
+    const sources = new Set(galleryAssets.map((a) => a.source).filter(Boolean));
+    return Array.from(sources).sort();
+  }, [galleryAssets]);
 
   // Gallery asset lightbox state
   const [assetLightbox, setAssetLightbox] = useState<{
@@ -469,12 +509,6 @@ export default function TrrShowDetailPage() {
     }
   }, [seasons, fetchSeasonEpisodeSummaries]);
 
-  // Open lightbox for cast photo
-  const openLightbox = (src: string, alt: string) => {
-    setLightboxImage({ src, alt });
-    setLightboxOpen(true);
-  };
-
   const formatDate = (value: string | null) =>
     value ? new Date(value).toLocaleDateString() : "TBD";
 
@@ -492,6 +526,31 @@ export default function TrrShowDetailPage() {
     const roles = meta.image_roles;
     return Array.isArray(roles) && roles.includes("backdrop");
   };
+
+  const filteredGalleryAssets = useMemo(() => {
+    return applyAdvancedFiltersToSeasonAssets(galleryAssets, advancedFilters, {
+      showName: show?.name ?? undefined,
+      getSeasonNumber: (asset) =>
+        selectedGallerySeason === "all"
+          ? typeof asset.season_number === "number"
+            ? asset.season_number
+            : undefined
+          : selectedGallerySeason,
+    });
+  }, [galleryAssets, advancedFilters, selectedGallerySeason, show?.name]);
+
+  const isTextFilterActive = useMemo(() => {
+    const wantsText = advancedFilters.text.includes("text");
+    const wantsNoText = advancedFilters.text.includes("no_text");
+    return wantsText !== wantsNoText;
+  }, [advancedFilters.text]);
+
+  const unknownTextCount = useMemo(() => {
+    if (!isTextFilterActive) return 0;
+    return galleryAssets.filter(
+      (a) => looksLikeUuid(a.id) && inferHasTextOverlay(a.metadata ?? null) === null
+    ).length;
+  }, [isTextFilterActive, galleryAssets]);
 
   const today = useMemo(() => {
     const date = new Date();
@@ -567,6 +626,30 @@ export default function TrrShowDetailPage() {
     },
     [showId, visibleSeasons, getAuthHeaders]
   );
+
+  const detectTextOverlayForUnknown = useCallback(async () => {
+    const targets = galleryAssets
+      .filter((a) => looksLikeUuid(a.id) && inferHasTextOverlay(a.metadata ?? null) === null)
+      .slice(0, 25);
+    if (targets.length === 0) return;
+
+    const headers = await getAuthHeaders();
+    for (const asset of targets) {
+      try {
+        await fetch(`/api/admin/trr-api/media-assets/${asset.id}/detect-text-overlay`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ force: false }),
+        });
+      } catch (err) {
+        console.warn("Text overlay detect failed:", err);
+      }
+    }
+
+    if (activeTab === "gallery") {
+      await loadGalleryAssets(selectedGallerySeason);
+    }
+  }, [galleryAssets, getAuthHeaders, activeTab, loadGalleryAssets, selectedGallerySeason]);
 
   // Load gallery when tab becomes active or season filter changes
   useEffect(() => {
@@ -1057,51 +1140,63 @@ export default function TrrShowDetailPage() {
                     ))}
                   </select>
                 </div>
-                {/* Import Images button - only show when a specific season is selected */}
-                {selectedGallerySeason !== "all" && (
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
-                      const selectedSeason = visibleSeasons.find(
-                        (season) => season.season_number === selectedGallerySeason
-                      );
-                      setScrapeDrawerContext({
-                        type: "season",
-                        showId: showId,
-                        showName: show.name,
-                        seasonNumber: selectedGallerySeason,
-                        seasonId: selectedSeason?.id,
-                      });
-                      setScrapeDrawerOpen(true);
-                    }}
-                    className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                    onClick={() => setAdvancedFiltersOpen(true)}
+                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
                     </svg>
-                    Import Images
+                    Filters
                   </button>
-                )}
+
+                  {/* Import Images button - only show when a specific season is selected */}
+                  {selectedGallerySeason !== "all" && (
+                    <button
+                      onClick={() => {
+                        const selectedSeason = visibleSeasons.find(
+                          (season) => season.season_number === selectedGallerySeason
+                        );
+                        setScrapeDrawerContext({
+                          type: "season",
+                          showId: showId,
+                          showName: show.name,
+                          seasonNumber: selectedGallerySeason,
+                          seasonId: selectedSeason?.id,
+                        });
+                        setScrapeDrawerOpen(true);
+                      }}
+                      className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      Import Images
+                    </button>
+                  )}
+                </div>
               </div>
 
               {galleryLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-blue-500" />
                 </div>
-              ) : galleryAssets.length === 0 ? (
+              ) : filteredGalleryAssets.length === 0 ? (
                 <p className="py-8 text-center text-zinc-500">
                   No images found for this selection.
                 </p>
               ) : (
                 <div className="space-y-8">
                   {/* Season Posters */}
-                  {galleryAssets.filter((a) => a.type === "season" && isSeasonBackdrop(a))
+                  {filteredGalleryAssets.filter((a) => a.type === "season" && isSeasonBackdrop(a))
                     .length > 0 && (
                     <section>
                       <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                        Season Backdrops
+                        Backdrops
                       </h4>
                       <div className="grid grid-cols-3 gap-4">
-                        {galleryAssets
+                        {filteredGalleryAssets
                           .filter((a) => a.type === "season" && isSeasonBackdrop(a))
                           .map((asset, i, arr) => (
                             <button
@@ -1123,14 +1218,14 @@ export default function TrrShowDetailPage() {
                     </section>
                   )}
 
-                  {galleryAssets.filter((a) => a.type === "season").length > 0 && (
+                  {filteredGalleryAssets.filter((a) => a.type === "season" && !isSeasonBackdrop(a)).length > 0 && (
                     <section>
                       <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                         Season Posters
                       </h4>
                       <div className="grid grid-cols-4 gap-4">
-                        {galleryAssets
-                          .filter((a) => a.type === "season")
+                        {filteredGalleryAssets
+                          .filter((a) => a.type === "season" && !isSeasonBackdrop(a))
                           .map((asset, i, arr) => (
                             <button
                               key={`${asset.id}-${i}`}
@@ -1151,14 +1246,14 @@ export default function TrrShowDetailPage() {
                   )}
 
                   {/* Episode Stills */}
-                  {galleryAssets.filter((a) => a.type === "episode").length >
+                  {filteredGalleryAssets.filter((a) => a.type === "episode").length >
                     0 && (
                     <section>
                       <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                         Episode Stills
                       </h4>
                       <div className="grid grid-cols-6 gap-3">
-                        {galleryAssets
+                        {filteredGalleryAssets
                           .filter((a) => a.type === "episode")
                           .map((asset, i, arr) => (
                             <button
@@ -1180,13 +1275,13 @@ export default function TrrShowDetailPage() {
                   )}
 
                   {/* Cast Photos */}
-                  {galleryAssets.filter((a) => a.type === "cast").length > 0 && (
+                  {filteredGalleryAssets.filter((a) => a.type === "cast").length > 0 && (
                     <section>
                       <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                         Cast Photos
                       </h4>
                       <div className="grid grid-cols-5 gap-4">
-                        {galleryAssets
+                        {filteredGalleryAssets
                           .filter((a) => a.type === "cast")
                           .map((asset, i, arr) => (
                             <button
@@ -1512,6 +1607,22 @@ export default function TrrShowDetailPage() {
             }}
           />
         )}
+
+        <AdvancedFilterDrawer
+          isOpen={advancedFiltersOpen}
+          onClose={() => setAdvancedFiltersOpen(false)}
+          filters={advancedFilters}
+          onChange={setAdvancedFilters}
+          availableSources={availableGallerySources}
+          sortOptions={[
+            { value: "newest", label: "Newest" },
+            { value: "oldest", label: "Oldest" },
+            { value: "source", label: "Source" },
+          ]}
+          defaults={{ sort: "newest" }}
+          unknownTextCount={unknownTextCount}
+          onDetectTextForVisible={detectTextOverlayForUnknown}
+        />
       </div>
     </ClientOnly>
   );

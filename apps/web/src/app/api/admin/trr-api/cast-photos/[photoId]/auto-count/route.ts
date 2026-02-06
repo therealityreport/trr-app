@@ -1,13 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
-import { getTagsByPhotoIds, upsertCastPhotoTags } from "@/lib/server/admin/cast-photo-tags-repository";
 
 export const dynamic = "force-dynamic";
 
 interface RouteParams {
   params: Promise<{ photoId: string }>;
 }
+
+const fetchJsonWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<{ response: Response; data: Record<string, unknown> }> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    return { response, data };
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 /**
  * POST /api/admin/trr-api/cast-photos/[photoId]/auto-count
@@ -39,22 +54,38 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const body = (await request.json().catch(() => ({}))) as { force?: unknown };
+    const force = Boolean(body.force);
+    const backendUrlWithForce = `${backendUrl}${backendUrl.includes("?") ? "&" : "?"}force=${force ? "true" : "false"}`;
+
     let backendResponse: Response;
     let data: Record<string, unknown> = {};
     try {
-      backendResponse = await fetch(backendUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceRoleKey}`,
+      const out = await fetchJsonWithTimeout(
+        backendUrlWithForce,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          // Backend reads `force` from query param; still send a body for forward-compat.
+          body: JSON.stringify({ force }),
         },
-        body: JSON.stringify({ force: false }),
-      });
-      data = (await backendResponse.json().catch(() => ({}))) as Record<
-        string,
-        unknown
-      >;
+        60_000
+      );
+      backendResponse = out.response;
+      data = out.data;
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return NextResponse.json(
+          {
+            error: "Auto-count timed out",
+            detail: "Timed out waiting for backend auto-count response (60s).",
+          },
+          { status: 504 }
+        );
+      }
       const baseDetail = error instanceof Error ? error.message : "unknown error";
       const causeDetail =
         error instanceof Error && error.cause
@@ -78,24 +109,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         detail ? { error: errorMessage, detail } : { error: errorMessage },
         { status: backendResponse.status }
       );
-    }
-
-    const rawCount = (data as { people_count?: unknown }).people_count;
-    const parsedCount =
-      typeof rawCount === "number" && Number.isFinite(rawCount)
-        ? Math.max(1, Math.floor(rawCount))
-        : null;
-    if (parsedCount !== null) {
-      const existingTags = await getTagsByPhotoIds([photoId]);
-      const existing = existingTags.get(photoId) ?? null;
-      await upsertCastPhotoTags({
-        cast_photo_id: photoId,
-        people_names: existing?.people_names ?? null,
-        people_ids: existing?.people_ids ?? null,
-        people_count: parsedCount,
-        people_count_source: "auto",
-        detector: existing?.detector ?? null,
-      });
     }
 
     return NextResponse.json(data);

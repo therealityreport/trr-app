@@ -85,6 +85,26 @@ const ChevronDownIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+function formatContentTypeLabel(raw: string): string {
+  const normalized = raw.trim().toUpperCase();
+  switch (normalized) {
+    case "PROMO":
+      return "Promo Portraits";
+    case "CONFESSIONAL":
+      return "Confessional";
+    case "INTRO":
+      return "Intro";
+    case "REUNION":
+      return "Reunion";
+    case "EPISODE STILL":
+      return "Episode Still";
+    case "OTHER":
+      return "Other";
+    default:
+      return raw;
+  }
+}
+
 export type ImageType = "cast" | "episode" | "season";
 
 interface ImageManagementProps {
@@ -158,30 +178,28 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
 
   return (
     <div
-      className={`absolute right-0 top-0 bottom-0 z-10 transition-all duration-300 ease-out ${
-        isExpanded ? "w-72" : "w-0"
-      } overflow-hidden`}
+      data-expanded={isExpanded ? "true" : "false"}
+      className="h-full w-full overflow-y-auto bg-black/50 backdrop-blur-xl p-4"
     >
-      <div className="h-full w-72 overflow-y-auto bg-black/50 backdrop-blur-xl border-l border-white/10 p-4">
-        {/* Source Badge */}
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Source
-          </span>
-          <div className="mt-1 flex items-center gap-2">
-            {metadata.s3Mirroring && (
-              <span className="inline-block rounded px-2 py-0.5 text-xs font-medium text-white bg-blue-500/80">
-                S3 MIRRORING
-              </span>
-            )}
-            <span
-              className="inline-block rounded px-2 py-0.5 text-xs font-medium text-black"
-              style={{ backgroundColor: metadata.sourceBadgeColor }}
-            >
-              {metadata.source.toUpperCase()}
+      {/* Source Badge */}
+      <div className="mb-4">
+        <span className="tracking-widest text-[10px] uppercase text-white/50">
+          Source
+        </span>
+        <div className="mt-1 flex items-center gap-2">
+          {metadata.s3Mirroring && (
+            <span className="inline-block rounded px-2 py-0.5 text-xs font-medium text-white bg-blue-500/80">
+              S3 MIRRORING
             </span>
-          </div>
+          )}
+          <span
+            className="inline-block rounded px-2 py-0.5 text-xs font-medium text-black"
+            style={{ backgroundColor: metadata.sourceBadgeColor }}
+          >
+            {metadata.source.toUpperCase()}
+          </span>
         </div>
+      </div>
 
         {metadata.sourceVariant && (
           <div className="mb-4">
@@ -217,10 +235,10 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
         {metadata.sectionTag && (
           <div className="mb-4">
             <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Tags
+              Content Type
             </span>
             <p className="mt-1 text-sm text-white/90">
-              {metadata.sectionTag}
+              {formatContentTypeLabel(metadata.sectionTag)}
             </p>
           </div>
         )}
@@ -403,56 +421,55 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
           </div>
         )}
 
-        {/* Management Actions */}
-        {management?.canManage && (
-          <div className="mt-6 pt-4 border-t border-white/10">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Actions
-            </span>
-            <div className="mt-2 space-y-2">
-              {management.isArchived ? (
-                <button
-                  onClick={() => handleAction("unarchive", management.onUnarchive)}
-                  disabled={actionLoading !== null}
-                  className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
-                >
-                  {actionLoading === "unarchive" ? "Unarchiving..." : "📦 Unarchive"}
-                </button>
-              ) : (
-                <button
-                  onClick={() => handleAction("archive", management.onArchive)}
-                  disabled={actionLoading !== null}
-                  className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
-                >
-                  {actionLoading === "archive" ? "Archiving..." : "📦 Archive"}
-                </button>
-              )}
+      {/* Management Actions */}
+      {management?.canManage && (
+        <div className="mt-6 pt-4 border-t border-white/10">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Actions
+          </span>
+          <div className="mt-2 space-y-2">
+            {management.isArchived ? (
               <button
-                onClick={() => management.onReassign?.()}
+                onClick={() => handleAction("unarchive", management.onUnarchive)}
                 disabled={actionLoading !== null}
                 className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
               >
-                📁 Re-assign
+                {actionLoading === "unarchive" ? "Unarchiving..." : "📦 Unarchive"}
               </button>
+            ) : (
               <button
-                onClick={async () => {
-                  if (
-                    confirm(
-                      "Are you sure you want to permanently delete this image? This action cannot be undone."
-                    )
-                  ) {
-                    await handleAction("delete", management.onDelete);
-                  }
-                }}
+                onClick={() => handleAction("archive", management.onArchive)}
                 disabled={actionLoading !== null}
-                className="w-full rounded bg-red-500/20 px-3 py-2 text-sm text-red-300 hover:bg-red-500/30 text-left disabled:opacity-50"
+                className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
               >
-                {actionLoading === "delete" ? "Deleting..." : "🗑️ Delete"}
+                {actionLoading === "archive" ? "Archiving..." : "📦 Archive"}
               </button>
-            </div>
+            )}
+            <button
+              onClick={() => management.onReassign?.()}
+              disabled={actionLoading !== null}
+              className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
+            >
+              📁 Re-assign
+            </button>
+            <button
+              onClick={async () => {
+                if (
+                  confirm(
+                    "Are you sure you want to permanently delete this image? This action cannot be undone."
+                  )
+                ) {
+                  await handleAction("delete", management.onDelete);
+                }
+              }}
+              disabled={actionLoading !== null}
+              className="w-full rounded bg-red-500/20 px-3 py-2 text-sm text-red-300 hover:bg-red-500/30 text-left disabled:opacity-50"
+            >
+              {actionLoading === "delete" ? "Deleting..." : "🗑️ Delete"}
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -502,7 +519,6 @@ export function ImageLightbox({
   const [showMetadata, setShowMetadata] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const lastButtonRef = useRef<HTMLButtonElement>(null);
   const previousTrigger = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -699,47 +715,58 @@ export function ImageLightbox({
         </button>
       )}
 
-      {/* Image container with metadata panel overlay */}
+      {/* Image container with metadata panel (non-overlay) */}
       <div
-        className="relative max-h-[90vh] max-w-[90vw]"
+        className="relative flex max-h-[90vh] max-w-[90vw] flex-col overflow-hidden rounded-lg md:flex-row"
         onClick={(e) => e.stopPropagation()}
       >
-        {imageFailed ? (
-          <div className="flex h-[60vh] w-[60vw] max-w-[90vw] items-center justify-center rounded-lg bg-black/40 text-sm text-white/70">
-            Image failed to load
-          </div>
-        ) : (
-          <Image
-            src={currentSrc}
-            alt={alt}
-            width={800}
-            height={1200}
-            className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl"
-            priority
-            unoptimized
-            onError={handleImageError}
-          />
-        )}
+        <div className="relative flex flex-1 items-center justify-center bg-black/20">
+          {imageFailed ? (
+            <div className="flex h-[60vh] w-[60vw] max-w-[90vw] items-center justify-center rounded-lg bg-black/40 text-sm text-white/70">
+              Image failed to load
+            </div>
+          ) : (
+            <Image
+              src={currentSrc}
+              alt={alt}
+              width={800}
+              height={1200}
+              className="max-h-[80vh] w-auto object-contain shadow-2xl md:max-h-[90vh]"
+              priority
+              unoptimized
+              onError={handleImageError}
+            />
+          )}
+        </div>
 
-        {/* Metadata panel (overlay) */}
         {metadata && (
-          <MetadataPanel
-            metadata={metadata}
-            isExpanded={showMetadata}
-            management={
-              canManage
-                ? {
-                    isArchived,
-                    canManage,
-                    onArchive,
-                    onUnarchive,
-                    onDelete,
-                    onReassign,
-                  }
-                : undefined
-            }
-            extras={metadataExtras}
-          />
+          <div
+            className={`relative shrink-0 overflow-hidden border-t border-white/10 transition-all duration-300 ease-out md:border-t-0 md:border-l ${
+              showMetadata
+                ? "h-64 w-full md:h-auto md:w-80"
+                : "h-0 w-full md:h-auto md:w-0"
+            }`}
+          >
+            <div className={showMetadata ? "h-full w-full" : "pointer-events-none h-full w-full"}>
+              <MetadataPanel
+                metadata={metadata}
+                isExpanded={showMetadata}
+                management={
+                  canManage
+                    ? {
+                        isArchived,
+                        canManage,
+                        onArchive,
+                        onUnarchive,
+                        onDelete,
+                        onReassign,
+                      }
+                    : undefined
+                }
+                extras={metadataExtras}
+              />
+            </div>
+          </div>
         )}
       </div>
 

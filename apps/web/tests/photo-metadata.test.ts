@@ -194,4 +194,39 @@ describe("mapPhotoToMetadata", () => {
     });
     expect(heightOnly.dimensions).toBeNull();
   });
+
+  it("infers fandom content type from section label even when stored tag is OTHER", () => {
+    const cases = [
+      { sectionLabel: "Theme Song Snaps", rawTag: "OTHER", expected: "INTRO" },
+      { sectionLabel: "Chapter Cards", rawTag: "OTHER", expected: "INTRO" },
+      { sectionLabel: "Confessional Interview Looks", rawTag: "OTHER", expected: "CONFESSIONAL" },
+      { sectionLabel: "Promotional Portraits", rawTag: "OTHER", expected: "PROMO" },
+      { sectionLabel: "Reunion Dresses", rawTag: "OTHER", expected: "REUNION" },
+    ] as const;
+
+    for (const c of cases) {
+      const result = mapPhotoToMetadata({
+        id: "1",
+        person_id: "p1",
+        source: "fandom",
+        url: null,
+        hosted_url: null,
+        caption: null,
+        width: null,
+        height: null,
+        context_type: null,
+        season: null,
+        people_names: null,
+        title_names: null,
+        metadata: {
+          fandom_section_label: c.sectionLabel,
+          fandom_section_tag: c.rawTag,
+        },
+        fetched_at: null,
+      });
+
+      expect(result.sectionLabel).toBe(c.sectionLabel);
+      expect(result.sectionTag).toBe(c.expected);
+    }
+  });
 });

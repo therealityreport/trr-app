@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -9,8 +9,18 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
+import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { mapSeasonAssetToMetadata, type PhotoMetadata } from "@/lib/photo-metadata";
+import {
+  readAdvancedFilters,
+  writeAdvancedFilters,
+  type AdvancedFilterState,
+} from "@/lib/admin/advanced-filters";
+import {
+  inferHasTextOverlay,
+} from "@/lib/gallery-filter-utils";
+import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 interface TrrShow {
@@ -130,6 +140,7 @@ function mapEpisodeToMetadata(episode: TrrEpisode, showName?: string): PhotoMeta
 
 export default function SeasonDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const showId = params.showId as string;
   const seasonNumberParam = params.seasonNumber as string;
@@ -161,6 +172,42 @@ export default function SeasonDetailPage() {
   const assetTriggerRef = useRef<HTMLElement | null>(null);
 
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const advancedFilters = useMemo(
+    () =>
+      readAdvancedFilters(new URLSearchParams(searchParams.toString()), {
+        sort: "newest",
+      }),
+    [searchParams]
+  );
+
+  const setAdvancedFilters = useCallback(
+    (next: AdvancedFilterState) => {
+      const out = writeAdvancedFilters(
+        new URLSearchParams(searchParams.toString()),
+        next,
+        { sort: "newest" }
+      );
+      router.replace(`?${out.toString()}`, { scroll: false });
+    },
+    [router, searchParams]
+  );
+  const [addBackdropsOpen, setAddBackdropsOpen] = useState(false);
+  const [unassignedBackdrops, setUnassignedBackdrops] = useState<
+    Array<{
+      media_asset_id: string;
+      hosted_url: string;
+      width: number | null;
+      height: number | null;
+      caption: string | null;
+      fetched_at: string | null;
+      metadata: Record<string, unknown> | null;
+    }>
+  >([]);
+  const [backdropsLoading, setBackdropsLoading] = useState(false);
+  const [backdropsError, setBackdropsError] = useState<string | null>(null);
+  const [selectedBackdropIds, setSelectedBackdropIds] = useState<Set<string>>(new Set());
+  const [assigningBackdrops, setAssigningBackdrops] = useState(false);
 
   const tabParam = searchParams.get("tab");
   useEffect(() => {
@@ -268,6 +315,61 @@ export default function SeasonDetailPage() {
     }
   }, [refreshingAssets, fetchAssets]);
 
+  const openAddBackdrops = useCallback(async () => {
+    if (!season?.id) return;
+    setAddBackdropsOpen(true);
+    setBackdropsError(null);
+    setBackdropsLoading(true);
+    setSelectedBackdropIds(new Set());
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/seasons/${season.id}/unassigned-backdrops`,
+        { headers }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load backdrops");
+      }
+      setUnassignedBackdrops(data.backdrops ?? []);
+    } catch (err) {
+      setUnassignedBackdrops([]);
+      setBackdropsError(err instanceof Error ? err.message : "Failed to load backdrops");
+    } finally {
+      setBackdropsLoading(false);
+    }
+  }, [season?.id, getAuthHeaders]);
+
+  const assignSelectedBackdrops = useCallback(async () => {
+    if (!season?.id) return;
+    const ids = Array.from(selectedBackdropIds);
+    if (ids.length === 0) return;
+    setAssigningBackdrops(true);
+    setBackdropsError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/seasons/${season.id}/assign-backdrops`,
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ media_asset_ids: ids }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to assign backdrops");
+      }
+      setAddBackdropsOpen(false);
+      setSelectedBackdropIds(new Set());
+      await fetchAssets();
+    } catch (err) {
+      setBackdropsError(err instanceof Error ? err.message : "Failed to assign backdrops");
+    } finally {
+      setAssigningBackdrops(false);
+    }
+  }, [season?.id, selectedBackdropIds, getAuthHeaders, fetchAssets]);
+
   const openEpisodeLightbox = (
     episode: TrrEpisode,
     index: number,
@@ -361,6 +463,49 @@ export default function SeasonDetailPage() {
     const roles = meta.image_roles;
     return Array.isArray(roles) && roles.includes("backdrop");
   };
+
+  const filteredMediaAssets = useMemo(() => {
+    return applyAdvancedFiltersToSeasonAssets(assets, advancedFilters, {
+      showName: show?.name ?? undefined,
+      getSeasonNumber: () => seasonNumber,
+    });
+  }, [assets, advancedFilters, seasonNumber, show?.name]);
+
+  const isTextFilterActive = useMemo(() => {
+    const wantsText = advancedFilters.text.includes("text");
+    const wantsNoText = advancedFilters.text.includes("no_text");
+    return wantsText !== wantsNoText;
+  }, [advancedFilters.text]);
+
+  const unknownTextCount = useMemo(() => {
+    if (!isTextFilterActive) return 0;
+    return assets.filter((a) => inferHasTextOverlay(a.metadata ?? null) === null).length;
+  }, [isTextFilterActive, assets]);
+
+  const looksLikeUuid = (value: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+  const detectTextOverlayForUnknown = useCallback(async () => {
+    const targets = assets
+      .filter((a) => looksLikeUuid(a.id) && inferHasTextOverlay(a.metadata ?? null) === null)
+      .slice(0, 25);
+    if (targets.length === 0) return;
+
+    const headers = await getAuthHeaders();
+    for (const asset of targets) {
+      try {
+        await fetch(`/api/admin/trr-api/media-assets/${asset.id}/detect-text-overlay`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ force: false }),
+        });
+      } catch (err) {
+        console.warn("Text overlay detect failed:", err);
+      }
+    }
+
+    await fetchAssets();
+  }, [assets, getAuthHeaders, fetchAssets]);
 
   if (checking) {
     return (
@@ -591,6 +736,24 @@ export default function SeasonDetailPage() {
                     {refreshingAssets ? "Refreshing..." : "Refresh Images"}
                   </button>
                   <button
+                    onClick={() => setAdvancedFiltersOpen(true)}
+                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
+                    </svg>
+                    Filters
+                  </button>
+                  <button
+                    onClick={openAddBackdrops}
+                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add Backdrops
+                  </button>
+                  <button
                     onClick={() => setScrapeDrawerOpen(true)}
                     className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
                   >
@@ -603,11 +766,11 @@ export default function SeasonDetailPage() {
               </div>
 
               <div className="space-y-8">
-                {assets.filter((a) => a.type === "season" && isSeasonBackdrop(a)).length > 0 && (
+                {filteredMediaAssets.filter((a) => a.type === "season" && isSeasonBackdrop(a)).length > 0 && (
                   <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Season Backdrops</h4>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Backdrops</h4>
                     <div className="grid grid-cols-3 gap-4">
-                      {assets
+                      {filteredMediaAssets
                         .filter((a) => a.type === "season" && isSeasonBackdrop(a))
                         .map((asset, i, arr) => (
                           <button
@@ -627,12 +790,12 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {assets.filter((a) => a.type === "season").length > 0 && (
+                {filteredMediaAssets.filter((a) => a.type === "season" && !isSeasonBackdrop(a)).length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Season Posters</h4>
                     <div className="grid grid-cols-4 gap-4">
-                      {assets
-                        .filter((a) => a.type === "season")
+                      {filteredMediaAssets
+                        .filter((a) => a.type === "season" && !isSeasonBackdrop(a))
                         .map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
@@ -650,11 +813,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {assets.filter((a) => a.type === "episode").length > 0 && (
+                {filteredMediaAssets.filter((a) => a.type === "episode").length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Episode Stills</h4>
                     <div className="grid grid-cols-6 gap-3">
-                      {assets
+                      {filteredMediaAssets
                         .filter((a) => a.type === "episode")
                         .map((asset, i, arr) => (
                           <button
@@ -673,11 +836,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {assets.filter((a) => a.type === "cast").length > 0 && (
+                {filteredMediaAssets.filter((a) => a.type === "cast").length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Cast Photos</h4>
                     <div className="grid grid-cols-5 gap-4">
-                      {assets
+                      {filteredMediaAssets
                         .filter((a) => a.type === "cast")
                         .map((asset, i, arr) => (
                           <button
@@ -701,7 +864,7 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {assets.length === 0 && (
+                {filteredMediaAssets.length === 0 && (
                   <p className="text-sm text-zinc-500">No media found for this season.</p>
                 )}
               </div>
@@ -944,6 +1107,140 @@ export default function SeasonDetailPage() {
             loadSeasonData();
           }}
         />
+
+        <AdvancedFilterDrawer
+          isOpen={advancedFiltersOpen}
+          onClose={() => setAdvancedFiltersOpen(false)}
+          filters={advancedFilters}
+          onChange={setAdvancedFilters}
+          availableSources={[...new Set(assets.map((a) => a.source))].sort()}
+          showSeeded={false}
+          sortOptions={[
+            { value: "newest", label: "Newest First" },
+            { value: "oldest", label: "Oldest First" },
+            { value: "source", label: "By Source" },
+          ]}
+          defaults={{ sort: "newest" }}
+          unknownTextCount={isTextFilterActive ? unknownTextCount : undefined}
+          onDetectTextForVisible={isTextFilterActive ? detectTextOverlayForUnknown : undefined}
+        />
+
+        {/* Add Backdrops drawer */}
+        {addBackdropsOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/50"
+              onClick={assigningBackdrops ? undefined : () => setAddBackdropsOpen(false)}
+            />
+            <div
+              className="fixed inset-y-0 right-0 z-50 w-full max-w-3xl overflow-y-auto bg-white shadow-xl"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="sticky top-0 z-10 border-b border-zinc-200 bg-white px-6 py-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                      Backdrops
+                    </p>
+                    <h3 className="text-lg font-bold text-zinc-900">
+                      Add TMDb Backdrops
+                    </h3>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {selectedBackdropIds.size} selected
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAddBackdropsOpen(false)}
+                      disabled={assigningBackdrops}
+                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const all = new Set(unassignedBackdrops.map((b) => b.media_asset_id));
+                        if (selectedBackdropIds.size === all.size) {
+                          setSelectedBackdropIds(new Set());
+                        } else {
+                          setSelectedBackdropIds(all);
+                        }
+                      }}
+                      disabled={backdropsLoading || unassignedBackdrops.length === 0 || assigningBackdrops}
+                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                    >
+                      {selectedBackdropIds.size === unassignedBackdrops.length
+                        ? "Deselect All"
+                        : "Select All"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={assignSelectedBackdrops}
+                      disabled={assigningBackdrops || selectedBackdropIds.size === 0}
+                      className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                    >
+                      {assigningBackdrops
+                        ? "Assigning..."
+                        : `Assign ${selectedBackdropIds.size}`}
+                    </button>
+                  </div>
+                </div>
+                {backdropsError && (
+                  <p className="mt-3 text-sm text-red-600">{backdropsError}</p>
+                )}
+              </div>
+
+              <div className="p-6">
+                {backdropsLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-zinc-900" />
+                  </div>
+                ) : unassignedBackdrops.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No unassigned TMDb backdrops found.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                    {unassignedBackdrops.map((b) => {
+                      const selected = selectedBackdropIds.has(b.media_asset_id);
+                      return (
+                        <button
+                          key={b.media_asset_id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedBackdropIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(b.media_asset_id)) next.delete(b.media_asset_id);
+                              else next.add(b.media_asset_id);
+                              return next;
+                            });
+                          }}
+                          className={`relative aspect-[16/9] overflow-hidden rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            selected ? "border-zinc-900" : "border-zinc-200"
+                          }`}
+                        >
+                          <GalleryImage
+                            src={b.hosted_url}
+                            alt={b.caption || "Backdrop"}
+                            sizes="420px"
+                            className="object-cover"
+                          />
+                          <div className="absolute inset-0 bg-black/0 transition hover:bg-black/10" />
+                          {selected && (
+                            <div className="absolute left-2 top-2 rounded-full bg-zinc-900 px-2 py-1 text-xs font-semibold text-white shadow">
+                              Selected
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </ClientOnly>
   );

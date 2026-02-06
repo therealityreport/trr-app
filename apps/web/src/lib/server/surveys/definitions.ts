@@ -81,6 +81,7 @@ const rhoslcColumns: SurveyColumn[] = [
   { name: "season_id", label: "Season ID", type: "text" },
   { name: "episode_id", label: "Episode ID", type: "text" },
   { name: "ranking", label: "Ranking", type: "json", multiValue: true },
+  { name: "season_rating", label: "Season Rating", type: "number" },
   { name: "completion_pct", label: "Completion %", type: "int" },
   { name: "completed", label: "Completed", type: "bool" },
   { name: "client_schema_version", label: "Client Schema Version", type: "int" },
@@ -144,7 +145,16 @@ export const surveys: SurveyDefinition[] = [
     showId: "tt12623782",
     seasonNumber: 6,
     columns: withCommonColumns(rhoslcColumns),
-    previewColumns: ["created_at", "app_user_id", "ranking", "completion_pct", "completed", "season_id", "episode_id"],
+    previewColumns: [
+      "created_at",
+      "app_user_id",
+      "season_rating",
+      "ranking",
+      "completion_pct",
+      "completed",
+      "season_id",
+      "episode_id",
+    ],
     allowShowFilters: true,
     allowEpisodeFilters: true,
     defaultSortColumn: "created_at",
@@ -193,6 +203,11 @@ export const surveys: SurveyDefinition[] = [
 
 const DEFINITION_MAP = new Map(surveys.map((definition) => [definition.key, definition] as const));
 
+const SURVEY_KEY_ALIASES: Record<string, string> = {
+  // Client key (RHOSLC play page) -> server definition key (Postgres upsert/admin)
+  rhoslc_s6_v1: "rhoslc_s6",
+};
+
 export function listSurveyDefinitions(): SurveyDefinition[] {
   return surveys;
 }
@@ -200,7 +215,8 @@ export function listSurveyDefinitions(): SurveyDefinition[] {
 export const listSurveys = listSurveyDefinitions;
 
 export function getSurveyDefinition(key: string): SurveyDefinition | undefined {
-  return DEFINITION_MAP.get(key);
+  const resolvedKey = SURVEY_KEY_ALIASES[key] ?? key;
+  return DEFINITION_MAP.get(resolvedKey);
 }
 
 export function getColumnsForSurvey(definition: SurveyDefinition): SurveyColumn[] {

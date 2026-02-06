@@ -1105,14 +1105,25 @@ export async function getPhotosByPersonId(
       normalizedScrape,
       mergedMetadata
     );
+    const md = (normalizedFandom.metadata ?? {}) as Record<string, unknown>;
+    const mdPeopleCountRaw = md.people_count;
+    const mdPeopleCount =
+      typeof mdPeopleCountRaw === "number" && Number.isFinite(mdPeopleCountRaw)
+        ? Math.max(0, Math.floor(mdPeopleCountRaw))
+        : typeof mdPeopleCountRaw === "string" && mdPeopleCountRaw.trim()
+          ? Number.parseInt(mdPeopleCountRaw, 10)
+          : null;
+    const mdPeopleCountSourceRaw = md.people_count_source;
+    const mdPeopleCountSource =
+      typeof mdPeopleCountSourceRaw === "string" ? mdPeopleCountSourceRaw : null;
     return {
       ...photo,
       source: normalizedFandom.source,
       metadata: normalizedFandom.metadata,
       created_at: (photo as { created_at?: string | null }).created_at ?? photo.fetched_at ?? null,
       people_ids: null,
-      people_count: null,
-      people_count_source: null,
+      people_count: mdPeopleCount,
+      people_count_source: mdPeopleCountSource as "auto" | "manual" | null,
       ingest_status: null,
       origin: "cast_photos" as const,
       link_id: null,
@@ -1881,6 +1892,7 @@ export async function getAssetsByShowSeason(
   const { limit } = normalizePagination(options);
   const supabase = getSupabaseTrrCore();
   const assets: SeasonAsset[] = [];
+  const hostedUrlSeen = new Set<string>();
 
   const toDateOnly = (value?: string | null): Date | null => {
     if (!value) return null;
@@ -1989,6 +2001,98 @@ export async function getAssetsByShowSeason(
     showImdbId = externalIds.imdb_id ?? externalIds.imdb ?? null;
   }
 
+  // 0. Get season media assets from unified media_links/media_assets model (used by web scrape imports).
+  // Prefer these over legacy season_images when duplicates exist.
+  if (seasonId) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: seasonLinks, error: seasonLinksError } = await (supabase as any)
+        .from("media_links")
+        .select(
+          "id, kind, context, media_asset_id, media_assets:media_assets (id, source, hosted_url, hosted_content_type, width, height, caption, metadata, ingest_status, fetched_at, created_at, updated_at)"
+        )
+        .eq("entity_type", "season")
+        .eq("entity_id", seasonId)
+        .limit(500);
+
+      if (seasonLinksError) {
+        console.error(
+          "[trr-shows-repository] getAssetsByShowSeason media_links error:",
+          seasonLinksError
+        );
+      } else if (seasonLinks) {
+        type SeasonLinkRow = {
+          id: string;
+          kind: string | null;
+          context: Record<string, unknown> | null;
+          media_asset_id: string;
+          media_assets?: {
+            id: string;
+            source: string;
+            hosted_url: string | null;
+            hosted_content_type?: string | null;
+            width: number | null;
+            height: number | null;
+            caption: string | null;
+            metadata: Record<string, unknown> | null;
+            ingest_status?: string | null;
+            fetched_at?: string | null;
+            created_at?: string | null;
+            updated_at?: string | null;
+          } | null;
+        };
+        const typedLinks = seasonLinks as SeasonLinkRow[];
+        for (const link of typedLinks) {
+          const asset = link.media_assets ?? null;
+          const hostedUrl = asset?.hosted_url ?? null;
+          if (!hostedUrl) continue;
+          if (!isLikelyImage(null, hostedUrl)) continue;
+          if (hostedUrlSeen.has(hostedUrl)) continue;
+
+          const ctx = link.context && typeof link.context === "object" ? link.context : {};
+          const mergedMetadata =
+            asset?.metadata && typeof asset.metadata === "object"
+              ? ({ ...(asset.metadata as Record<string, unknown>), ...(ctx as Record<string, unknown>) } as Record<
+                  string,
+                  unknown
+                >)
+              : ({ ...(ctx as Record<string, unknown>) } as Record<string, unknown>);
+
+          const ctxSection =
+            typeof (ctx as Record<string, unknown>).context_section === "string"
+              ? ((ctx as Record<string, unknown>).context_section as string)
+              : null;
+          const ctxType =
+            typeof (ctx as Record<string, unknown>).context_type === "string"
+              ? ((ctx as Record<string, unknown>).context_type as string)
+              : null;
+
+          assets.push({
+            id: asset?.id ?? link.media_asset_id,
+            type: "season",
+            source: asset?.source ?? "unknown",
+            kind: link.kind ?? "other",
+            hosted_url: hostedUrl,
+            width: asset?.width ?? null,
+            height: asset?.height ?? null,
+            caption: asset?.caption ?? `Season ${seasonNumber}`,
+            season_number: seasonNumber,
+            context_section: ctxSection,
+            context_type: ctxType,
+            fetched_at: asset?.fetched_at ?? null,
+            created_at: asset?.created_at ?? null,
+            metadata: mergedMetadata,
+            ingest_status: asset?.ingest_status ?? null,
+            hosted_content_type: asset?.hosted_content_type ?? null,
+          });
+          hostedUrlSeen.add(hostedUrl);
+        }
+      }
+    } catch (error) {
+      console.error("[trr-shows-repository] getAssetsByShowSeason media_links exception:", error);
+    }
+  }
+
   // 1. Get season images
   const seasonSelects = [
     "id, source, kind, image_type, hosted_url, width, height, created_at, ingest_status, metadata",
@@ -2027,6 +2131,7 @@ export async function getAssetsByShowSeason(
     const typedSeasonImages = seasonImages as SeasonImageRow[];
     for (const img of typedSeasonImages) {
       const imageKind = img.image_type ?? img.kind ?? "poster";
+      if (!img.hosted_url || hostedUrlSeen.has(img.hosted_url)) continue;
       assets.push({
         id: img.id,
         type: "season",
@@ -2041,6 +2146,7 @@ export async function getAssetsByShowSeason(
         ingest_status: img.ingest_status,
         metadata: img.metadata,
       });
+      hostedUrlSeen.add(img.hosted_url);
     }
   }
 
@@ -2084,6 +2190,7 @@ export async function getAssetsByShowSeason(
     const typedEpisodeImages = episodeImages as EpisodeImageRow[];
     for (const img of typedEpisodeImages) {
       const imageKind = img.image_type ?? img.kind ?? "still";
+      if (!img.hosted_url || hostedUrlSeen.has(img.hosted_url)) continue;
       assets.push({
         id: img.id,
         type: "episode",
@@ -2099,6 +2206,7 @@ export async function getAssetsByShowSeason(
         ingest_status: img.ingest_status,
         metadata: img.metadata,
       });
+      hostedUrlSeen.add(img.hosted_url);
     }
   }
 
@@ -2194,6 +2302,9 @@ export async function getAssetsByShowSeason(
         if (!isLikelyImage(null, photo.hosted_url)) {
           continue;
         }
+        if (hostedUrlSeen.has(photo.hosted_url)) {
+          continue;
+        }
         assets.push({
           id: photo.id,
           type: "cast",
@@ -2214,6 +2325,7 @@ export async function getAssetsByShowSeason(
           ingest_status: photo.ingest_status,
           hosted_content_type: photo.hosted_content_type,
         });
+        hostedUrlSeen.add(photo.hosted_url);
       }
     }
   }

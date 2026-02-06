@@ -25,9 +25,9 @@ const fetchJsonWithTimeout = async (
 };
 
 /**
- * POST /api/admin/trr-api/media-assets/[assetId]/auto-count
+ * POST /api/admin/trr-api/media-assets/[assetId]/detect-text-overlay
  *
- * Proxy to TRR-Backend auto-count for media assets.
+ * Proxy to TRR-Backend detect-text-overlay endpoint for media assets.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
@@ -38,24 +38,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "assetId is required" }, { status: 400 });
     }
 
-    const backendUrl = getBackendApiUrl(`/admin/media-assets/${assetId}/auto-count`);
+    const backendUrl = getBackendApiUrl(`/admin/media-assets/${assetId}/detect-text-overlay`);
     if (!backendUrl) {
-      return NextResponse.json(
-        { error: "Backend API not configured" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
 
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      return NextResponse.json(
-        { error: "Backend auth not configured" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as { force?: unknown };
-    const force = Boolean(body.force);
+    const body = await request.json().catch(() => ({}));
+    const force = Boolean((body as { force?: unknown }).force);
 
     const backendUrlWithForce = `${backendUrl}${backendUrl.includes("?") ? "&" : "?"}force=${force ? "true" : "false"}`;
 
@@ -73,7 +67,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           // Backend reads `force` from query param; still send a body for forward-compat.
           body: JSON.stringify({ force }),
         },
-        60_000
+        90_000
       );
       backendResponse = out.response;
       data = out.data;
@@ -81,8 +75,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (error instanceof Error && error.name === "AbortError") {
         return NextResponse.json(
           {
-            error: "Auto-count timed out",
-            detail: "Timed out waiting for backend auto-count response (60s).",
+            error: "Detect text overlay timed out",
+            detail: "Timed out waiting for backend detect-text-overlay response (90s).",
           },
           { status: 504 }
         );
@@ -103,9 +97,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (!backendResponse.ok) {
       const errorMessage =
-        typeof data.error === "string" ? data.error : "Auto-count failed";
-      const detail =
-        typeof data.detail === "string" ? data.detail : undefined;
+        typeof data.error === "string" ? data.error : "Detect text overlay failed";
+      const detail = typeof data.detail === "string" ? data.detail : undefined;
       return NextResponse.json(
         detail ? { error: errorMessage, detail } : { error: errorMessage },
         { status: backendResponse.status }
@@ -114,7 +107,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error("[api] Failed to auto-count media asset", error);
+    console.error("[api] Failed to detect text overlay", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =
       message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;

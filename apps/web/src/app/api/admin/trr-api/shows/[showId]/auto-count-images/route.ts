@@ -8,6 +8,22 @@ interface RouteParams {
   params: Promise<{ showId: string }>;
 }
 
+const fetchJsonWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<{ response: Response; data: Record<string, unknown> }> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    return { response, data };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /**
  * POST /api/admin/trr-api/shows/[showId]/auto-count-images
  *
@@ -46,19 +62,30 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     let backendResponse: Response;
     let data: Record<string, unknown> = {};
     try {
-      backendResponse = await fetch(backendUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceRoleKey}`,
+      const out = await fetchJsonWithTimeout(
+        backendUrl,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
-      });
-      data = (await backendResponse.json().catch(() => ({}))) as Record<
-        string,
-        unknown
-      >;
+        180_000
+      );
+      backendResponse = out.response;
+      data = out.data;
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return NextResponse.json(
+          {
+            error: "Auto-count timed out",
+            detail: "Timed out waiting for backend show auto-count response (180s).",
+          },
+          { status: 504 }
+        );
+      }
       const baseDetail = error instanceof Error ? error.message : "unknown error";
       const causeDetail =
         error instanceof Error && error.cause

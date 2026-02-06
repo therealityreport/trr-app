@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- Simple "solid" snowflake built from thick rotated bars (mask-friendly). -->
+  <rect x="10.6" y="1.8" width="2.8" height="20.4" rx="1.4" fill="#000" />
+  <rect x="10.6" y="1.8" width="2.8" height="20.4" rx="1.4" fill="#000" transform="rotate(60 12 12)" />
+  <rect x="10.6" y="1.8" width="2.8" height="20.4" rx="1.4" fill="#000" transform="rotate(120 12 12)" />
+  <circle cx="12" cy="12" r="2.2" fill="#000" />
+</svg>
+

@@ -17,3 +17,6 @@ firestore-debug.log
 *-debug.log
 .vercel
 docs/Repository/generated/
+.envrc
+.mcp.json
+.playwright-mcp/

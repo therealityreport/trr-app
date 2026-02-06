@@ -6,6 +6,10 @@ import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
+import {
+  PeopleSearchMultiSelect,
+  type PersonOption,
+} from "@/components/admin/PeopleSearchMultiSelect";
 
 // ============================================================================
 // Types
@@ -70,6 +74,16 @@ interface ImportProgress {
   error?: string;
 }
 
+type ImageKind = "poster" | "backdrop" | "episode_still" | "cast" | "other";
+
+const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
+  { value: "poster", label: "Poster" },
+  { value: "backdrop", label: "Backdrop" },
+  { value: "episode_still", label: "Episode Still" },
+  { value: "cast", label: "Cast Photos" },
+  { value: "other", label: "Other" },
+];
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -102,6 +116,9 @@ export default function ScrapeImagesPage() {
   const [previewData, setPreviewData] = useState<ScrapePreviewResponse | null>(null);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [captions, setCaptions] = useState<Record<string, string>>({});
+  const [imageKinds, setImageKinds] = useState<Record<string, ImageKind>>({});
+  const [personAssignments, setPersonAssignments] = useState<Record<string, PersonOption[]>>({});
+  const [bulkPeopleSelection, setBulkPeopleSelection] = useState<PersonOption[]>([]);
 
   // Import state
   const [importing, setImporting] = useState(false);
@@ -257,6 +274,9 @@ export default function ScrapeImagesPage() {
       setPreviewData(null);
       setSelectedImages(new Set());
       setCaptions({});
+      setImageKinds({});
+      setPersonAssignments({});
+      setBulkPeopleSelection([]);
       setImportResult(null);
 
       const headers = await getAuthHeaders();
@@ -352,6 +372,8 @@ export default function ScrapeImagesPage() {
           candidate_id: img.id,
           url: img.best_url,
           caption: captions[img.id] || null,
+          kind: imageKinds[img.id] || "other",
+          person_ids: (personAssignments[img.id] ?? []).map((p) => p.id),
         }));
 
       // Build payload based on entity mode
@@ -767,6 +789,92 @@ export default function ScrapeImagesPage() {
                 </div>
               </div>
 
+              {/* Bulk assignments */}
+              {selectedImages.size > 0 && (
+                <div className="mb-4 grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                  {entityMode === "season" && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs font-semibold text-zinc-600">
+                        Set kind for all selected:
+                      </span>
+                      <select
+                        onChange={(e) => {
+                          const value = e.target.value as ImageKind;
+                          if (!value) return;
+                          setImageKinds((prev) => {
+                            const next = { ...prev };
+                            for (const imgId of selectedImages) {
+                              next[imgId] = value;
+                            }
+                            return next;
+                          });
+                          e.target.value = "";
+                        }}
+                        className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                      >
+                        <option value="">Select kind...</option>
+                        {IMAGE_KIND_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="grid gap-2">
+                    <span className="text-xs font-semibold text-zinc-600">
+                      Tag people for all selected:
+                    </span>
+                    <PeopleSearchMultiSelect
+                      value={bulkPeopleSelection}
+                      onChange={setBulkPeopleSelection}
+                      getAuthHeaders={getAuthHeaders}
+                      disabled={importing}
+                      placeholder="Search and add people..."
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPersonAssignments((prev) => {
+                            const next = { ...prev };
+                            for (const imgId of selectedImages) {
+                              if (bulkPeopleSelection.length > 0) {
+                                next[imgId] = [...bulkPeopleSelection];
+                              } else {
+                                delete next[imgId];
+                              }
+                            }
+                            return next;
+                          });
+                        }}
+                        className="rounded bg-zinc-900 px-2 py-1 text-xs font-semibold text-white hover:bg-zinc-800"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkPeopleSelection([])}
+                        className="text-xs font-medium text-zinc-600 hover:text-zinc-800"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  {Object.keys(personAssignments).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setPersonAssignments({})}
+                      className="text-xs font-medium text-red-600 hover:text-red-700"
+                    >
+                      Clear all people tags
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Image Grid */}
               <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {previewData.images.map((img) => {
@@ -824,7 +932,7 @@ export default function ScrapeImagesPage() {
 
                       {/* Caption Input */}
                       {isSelected && (
-                        <div className="p-2">
+                        <div className="space-y-2 p-2">
                           <input
                             type="text"
                             value={captions[img.id] || ""}
@@ -832,6 +940,40 @@ export default function ScrapeImagesPage() {
                             placeholder="Add caption (optional)"
                             className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                             onClick={(e) => e.stopPropagation()}
+                          />
+                          {entityMode === "season" && (
+                            <select
+                              value={imageKinds[img.id] || "other"}
+                              onChange={(e) => {
+                                const value = e.target.value as ImageKind;
+                                setImageKinds((prev) => ({ ...prev, [img.id]: value }));
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                            >
+                              {IMAGE_KIND_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <PeopleSearchMultiSelect
+                            value={personAssignments[img.id] ?? []}
+                            onChange={(nextPeople) => {
+                              setPersonAssignments((prev) => {
+                                const next = { ...prev };
+                                if (nextPeople.length > 0) {
+                                  next[img.id] = nextPeople;
+                                } else {
+                                  delete next[img.id];
+                                }
+                                return next;
+                              });
+                            }}
+                            getAuthHeaders={getAuthHeaders}
+                            disabled={importing}
+                            placeholder="Tag people..."
                           />
                         </div>
                       )}

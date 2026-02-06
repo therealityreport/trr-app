@@ -8,6 +8,7 @@ import { auth } from "@/lib/firebase";
 import { useSurveyManager } from "@/lib/surveys/manager";
 import { RHOSLC_EPISODE_ID, RHOSLC_SEASON_ID, RHOSLC_SHOW_ID } from "@/lib/surveys/config";
 import type { SurveyResponse } from "@/lib/surveys/types";
+import PartialFillIcon from "@/components/survey/PartialFillIcon";
 import "@/styles/realitease-fonts.css";
 
 const IDENTIFIERS = {
@@ -15,6 +16,8 @@ const IDENTIFIERS = {
   seasonId: RHOSLC_SEASON_ID,
   episodeId: RHOSLC_EPISODE_ID,
 };
+
+const SNOWFLAKE_ICON_SRC = "/icons/snowflake-solid-ice-7.svg";
 
 export default function RhoslcSurveyResultsPage() {
   const router = useRouter();
@@ -95,6 +98,38 @@ export default function RhoslcSurveyResultsPage() {
         </header>
 
         <section className="rounded-3xl border border-rose-100 bg-white p-8 shadow-xl">
+          {response && (
+            <div className="mb-8 rounded-2xl border border-rose-100 bg-rose-50 p-6 text-center">
+              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-rose-500">Your season rating</div>
+              {response.seasonRating !== null && response.seasonRating !== undefined ? (
+                <div className="mt-4 flex flex-col items-center gap-3">
+                  <div className="font-['NYTKarnak_Condensed'] text-5xl font-bold tabular-nums text-rose-900">
+                    {response.seasonRating.toFixed(1)}
+                  </div>
+                  <div className="flex justify-center gap-2">
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const raw = response.seasonRating! - index;
+                      const fillPercent = Math.round(Math.max(0, Math.min(1, raw)) * 100);
+                      return (
+                        <span key={`snowflake-${index}`} data-fill-percent={fillPercent}>
+                          <PartialFillIcon
+                            src={SNOWFLAKE_ICON_SRC}
+                            sizePx={34}
+                            fillPercent={fillPercent}
+                            fillColor="#0EA5E9"
+                            emptyColor="#E5E7EB"
+                          />
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-rose-700">No rating submitted.</p>
+              )}
+            </div>
+          )}
+
           {response?.ranking?.length ? (
             <ol className="space-y-3 text-left">
               {response.ranking.map((item, index) => (

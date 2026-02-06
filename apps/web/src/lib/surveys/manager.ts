@@ -81,7 +81,7 @@ class SurveyManager {
     const createdAt = existing.exists()
       ? (existing.data()?.createdAt as Timestamp | undefined) ?? serverTimestamp()
       : serverTimestamp();
-    const payload = {
+    const payload: Partial<SurveyResponse> = {
       uid,
       ...ids,
       ranking: draft.ranking,
@@ -89,7 +89,10 @@ class SurveyManager {
       completed: draft.completed,
       updatedAt: serverTimestamp(),
       createdAt,
-    } satisfies Partial<SurveyResponse>;
+    };
+    if (Object.prototype.hasOwnProperty.call(draft, "seasonRating")) {
+      payload.seasonRating = draft.seasonRating ?? null;
+    }
 
     await setDoc(responseRef, payload, { merge: true });
     await this.syncResponseToPostgres(ids, uid, draft, options);
@@ -115,6 +118,14 @@ class SurveyManager {
       throw new Error("Authenticated user mismatch while saving survey response.");
     }
     const token = await user.getIdToken();
+    const responses: Record<string, unknown> = {
+      ranking: draft.ranking ?? [],
+      completion_pct: draft.completionPct,
+      completed: draft.completed,
+    };
+    if (Object.prototype.hasOwnProperty.call(draft, "seasonRating")) {
+      responses.season_rating = draft.seasonRating ?? null;
+    }
     const payload = {
       surveyKey: options?.surveyKey ?? deriveSurveyKey(ids),
       appUserId: uid,
@@ -123,11 +134,7 @@ class SurveyManager {
       episodeNumber: parseOrdinal(ids.episodeId),
       seasonId: ids.seasonId,
       episodeId: ids.episodeId,
-      responses: {
-        ranking: draft.ranking ?? [],
-        completion_pct: draft.completionPct,
-        completed: draft.completed,
-      },
+      responses,
     };
 
     const res = await fetch("/api/surveys/show-responses", {
