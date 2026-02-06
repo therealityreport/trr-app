@@ -959,7 +959,7 @@ const isMissingColumnError = (error: string | PostgrestErrorLike | null | undefi
 
 const runSelectWithFallback = async <T>(
   selects: string[],
-  run: (select: string) => Promise<{ data: T[] | null; error: PostgrestErrorLike | null }>
+  run: (select: string) => PromiseLike<{ data: T[] | null; error: PostgrestErrorLike | null }>
 ): Promise<{ data: T[] | null; error: PostgrestErrorLike | null }> => {
   let last: { data: T[] | null; error: PostgrestErrorLike | null } = {
     data: null,
@@ -1147,7 +1147,7 @@ export async function getPhotosByPersonId(
     media_asset_id: string;
     kind: string;
     position: number | null;
-    facebank_seed: boolean | null;
+    facebank_seed?: boolean | null;
     context: Record<string, unknown> | null;
     created_at: string;
   }
@@ -1166,14 +1166,22 @@ export async function getPhotosByPersonId(
     ingest_status: string | null;
   }
 
-  // First get media_links for this person
-  const { data: mediaLinksRaw, error: linksError } = await supabase
-    .from("media_links")
-    .select("id, entity_id, media_asset_id, kind, position, facebank_seed, context, created_at")
-    .eq("entity_type", "person")
-    .eq("entity_id", personId)
-    .eq("kind", "gallery")
-    .order("position", { ascending: true, nullsFirst: false });
+  // First get media_links for this person. Retry without facebank_seed for older schemas.
+  const mediaLinkSelects = [
+    "id, entity_id, media_asset_id, kind, position, facebank_seed, context, created_at",
+    "id, entity_id, media_asset_id, kind, position, context, created_at",
+  ];
+  const { data: mediaLinksRaw, error: linksError } = await runSelectWithFallback<MediaLinkRow>(
+    mediaLinkSelects,
+    (select) =>
+      supabase
+        .from("media_links")
+        .select(select)
+        .eq("entity_type", "person")
+        .eq("entity_id", personId)
+        .eq("kind", "gallery")
+        .order("position", { ascending: true, nullsFirst: false })
+  );
 
   const mediaLinks = mediaLinksRaw as MediaLinkRow[] | null;
 
@@ -1552,6 +1560,7 @@ export async function getSeasonCastWithEpisodeCounts(
   let personIds: string[] = [];
   const episodesInSeasonMap = new Map<string, number>();
   const episodesCountKnown = new Set<string>();
+  const totalsMap = new Map<string, number>();
   let viewRangeApplied = false;
   let seasonMembersLoaded = false;
   const fallbackNames = new Map<string, string | null>();
@@ -1586,6 +1595,9 @@ export async function getSeasonCastWithEpisodeCounts(
     personIds = typed.map((row) => row.person_id);
     for (const row of typed) {
       fallbackNames.set(row.person_id, row.person_name);
+      if (typeof row.total_episodes === "number") {
+        totalsMap.set(row.person_id, row.total_episodes);
+      }
       episodesInSeasonMap.set(row.person_id, 0);
     }
     return true;
@@ -1711,6 +1723,37 @@ export async function getSeasonCastWithEpisodeCounts(
     console.error("[trr-shows-repository] getSeasonCastWithEpisodeCounts people error:", peopleError);
   }
 
+  if (personIds.length > 0) {
+    const { data: totalsData, error: totalsError } = await supabase
+      .from("v_person_show_seasons")
+      .select("person_id, total_episodes, person_name")
+      .eq("show_id", showId)
+      .in("person_id", personIds);
+
+    if (totalsError) {
+      if (!isViewUnavailableError(totalsError)) {
+        console.log(
+          "[trr-shows-repository] getSeasonCastWithEpisodeCounts totals error:",
+          totalsError.message
+        );
+      }
+    } else if (totalsData) {
+      const typedTotals = totalsData as Array<{
+        person_id: string;
+        total_episodes: number | null;
+        person_name?: string | null;
+      }>;
+      for (const row of typedTotals) {
+        if (typeof row.total_episodes === "number") {
+          totalsMap.set(row.person_id, row.total_episodes);
+        }
+        if (!fallbackNames.has(row.person_id) && row.person_name) {
+          fallbackNames.set(row.person_id, row.person_name);
+        }
+      }
+    }
+  }
+
   const pickPhotoUrl = (row: {
     display_url?: string | null;
     hosted_url?: string | null;
@@ -1795,9 +1838,7 @@ export async function getSeasonCastWithEpisodeCounts(
     person_id: personId,
     person_name: peopleMap.get(personId)?.full_name ?? fallbackNames.get(personId) ?? null,
     episodes_in_season: episodesInSeasonMap.get(personId) ?? 0,
-    total_episodes: episodesCountKnown.has(personId)
-      ? episodesInSeasonMap.get(personId) ?? 0
-      : null,
+    total_episodes: totalsMap.get(personId) ?? null,
     photo_url: photosMap.get(personId) ?? null,
   }));
 
@@ -1869,12 +1910,23 @@ export async function getAssetsByShowSeason(
   let seasonEndDate: Date | null = null;
   let showImdbId: string | null = null;
   let showName: string | null = null;
-  const { data: seasonRow, error: seasonRowError } = await supabase
-    .from("seasons")
-    .select("id, premiere_date, air_date")
-    .eq("show_id", showId)
-    .eq("season_number", seasonNumber)
-    .maybeSingle();
+  type SeasonLookupRow = {
+    id: string;
+    premiere_date?: string | null;
+    air_date?: string | null;
+  };
+  const seasonLookupSelects = ["id, premiere_date, air_date", "id, air_date"];
+  const { data: seasonRows, error: seasonRowError } = await runSelectWithFallback<SeasonLookupRow>(
+    seasonLookupSelects,
+    (select) =>
+      supabase
+        .from("seasons")
+        .select(select)
+        .eq("show_id", showId)
+        .eq("season_number", seasonNumber)
+        .limit(1)
+  );
+  const seasonRow = seasonRows && seasonRows.length > 0 ? seasonRows[0] : null;
 
   if (seasonRowError) {
     console.error("[trr-shows-repository] getAssetsByShowSeason season lookup error:", seasonRowError);
@@ -1917,17 +1969,27 @@ export async function getAssetsByShowSeason(
     }
   }
 
-  const { data: showRow, error: showRowError } = await supabase
-    .from("shows")
-    .select("name, external_ids")
-    .eq("id", showId)
-    .maybeSingle();
+  type ShowLookupRow = {
+    name?: string | null;
+    external_ids?: Record<string, unknown> | null;
+  };
+  const showLookupSelects = ["name, external_ids", "name"];
+  const { data: showRows, error: showRowError } = await runSelectWithFallback<ShowLookupRow>(
+    showLookupSelects,
+    (select) =>
+      supabase
+        .from("shows")
+        .select(select)
+        .eq("id", showId)
+        .limit(1)
+  );
+  const showRow = showRows && showRows.length > 0 ? showRows[0] : null;
 
   if (showRowError) {
     console.error("[trr-shows-repository] getAssetsByShowSeason show lookup error:", showRowError);
   } else if (showRow) {
     showName = showRow.name ?? null;
-    const externalIds = (showRow.external_ids ?? {}) as Record<string, string>;
+    const externalIds = (showRow.external_ids ?? {}) as Record<string, string | undefined>;
     showImdbId = externalIds.imdb_id ?? externalIds.imdb ?? null;
   }
 
