@@ -1641,12 +1641,11 @@ export async function getSeasonCastWithEpisodeCounts(
         }
       } else {
         const loaded = await loadSeasonMembers();
-        if (!loaded) {
-          return [];
-        }
-        seasonMembersLoaded = true;
-        if (personIds.length === 0) {
-          return [];
+        if (loaded) {
+          seasonMembersLoaded = true;
+          if (personIds.length === 0) {
+            return [];
+          }
         }
       }
     }
@@ -1667,7 +1666,7 @@ export async function getSeasonCastWithEpisodeCounts(
       if (isViewUnavailableError(episodeCastError)) {
         const loaded = await loadSeasonMembers();
         if (!loaded) {
-          return [];
+          return getSeasonCastFallbackFromShowCast(showId, options);
         }
         seasonMembersLoaded = true;
         if (personIds.length === 0) {
@@ -1686,7 +1685,7 @@ export async function getSeasonCastWithEpisodeCounts(
       if (castRows.length === 0) {
         const loaded = await loadSeasonMembers();
         if (!loaded) {
-          return [];
+          return getSeasonCastFallbackFromShowCast(showId, options);
         }
         seasonMembersLoaded = true;
         if (personIds.length === 0) {
