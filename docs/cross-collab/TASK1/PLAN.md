@@ -6,14 +6,14 @@ Goal
 Allow admins to flag person gallery images as facebank seed candidates for SCREENALYTICS.
 
 Status
-- Implementation in progress.
+- Implemented in code; pending rollout smoke.
 
 Status Matrix
 | Repo | Status | Notes |
 | --- | --- | --- |
-| TRR-Backend | In progress | Toggle endpoint + auth hardening in progress |
-| TRR-APP | In progress | Proxy route + gallery toggle in progress |
-| SCREENALYTICS | In progress | Seed-first ingestion client pending |
+| TRR-Backend | Implemented | Toggle endpoint + auth hardening merged locally |
+| TRR-APP | Implemented | Proxy route + gallery toggle merged locally |
+| SCREENALYTICS | Implemented | Seed-first ingestion + import wiring merged locally |
 
 Locked Contracts
 1. Backend toggle endpoint: `PATCH /api/v1/admin/person/{person_id}/gallery/{link_id}/facebank-seed`.
@@ -45,3 +45,4 @@ Rollout Sequence
 1. Release backend auth+tests.
 2. Release app proxy route + UI toggle.
 3. Verify app-to-backend seed toggle end-to-end before screenalytics rollout.
+4. Verify screenalytics strict fallback behavior (fallback only on successful empty `seed_only=true`).

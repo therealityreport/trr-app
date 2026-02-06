@@ -4,6 +4,7 @@ import {
   getPhotoIdsByPersonId,
   getTagsByPhotoIds,
 } from "@/lib/server/admin/cast-photo-tags-repository";
+import { dedupePhotosByHostedUrlPreferMediaLinks } from "@/lib/server/trr-api/person-photo-utils";
 
 // ============================================================================
 // Types
@@ -1288,13 +1289,9 @@ export async function getPhotosByPersonId(
   // Merge both sources, cast_photos first then media_links
   const allPhotos = [...(castPhotosWithTags ?? []) as TrrPersonPhoto[], ...mediaPhotos];
 
-  // Deduplicate by hosted_url (in case same image exists in both sources)
-  const seenUrls = new Set<string>();
-  const dedupedPhotos = allPhotos.filter(photo => {
-    if (!photo.hosted_url || seenUrls.has(photo.hosted_url)) return false;
-    seenUrls.add(photo.hosted_url);
-    return true;
-  });
+  // Deduplicate by hosted_url (in case same image exists in both sources),
+  // preferring media_links rows when the URL collides.
+  const dedupedPhotos = dedupePhotosByHostedUrlPreferMediaLinks(allPhotos);
 
   // Apply pagination
   return dedupedPhotos.slice(offset, offset + limit);
