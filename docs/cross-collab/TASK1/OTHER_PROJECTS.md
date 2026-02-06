@@ -1,23 +1,35 @@
 # Other Projects — Task 1
 
-This repo (TRR-APP) owns the admin UI and user workflow for flagging facebank seed images.
+This repo (TRR-APP) owns the admin UX and internal proxy workflow for facebank seed toggling.
 
-TRR-Backend responsibilities
-- Add `facebank_seed` boolean to `core.media_links`
-- Expose `facebank_seed` in `core.v_person_images_served_media_v2`
-- Provide allowlist-only admin endpoint to toggle `facebank_seed`
-- Provide screenalytics endpoint filter `seed_only`
+Shared Contract
+- Toggle endpoint (backend): `PATCH /api/v1/admin/person/{person_id}/gallery/{link_id}/facebank-seed`
+- Toggle payload: `{ "facebank_seed": boolean }`
+- Photos contract for screenalytics: `GET /api/v1/screenalytics/people/{person_id}/photos?seed_only={bool}`
+- Shared field: `facebank_seed` on `core.media_links`
 
-Screenalytics responsibilities
-- Prefer flagged images when seeding facebank
-- Fall back to all gallery images if no seeds are flagged
+TRR-Backend Responsibilities
+- Own schema + views exposing `facebank_seed`.
+- Enforce endpoint-scoped auth:
+  - allowlisted user JWT, or
+  - `service_role` + valid `X-TRR-Internal-Admin-Secret` header.
+- Keep endpoint path/payload stable.
 
-Touchpoints
-- Supabase view: `core.v_person_images_served_media_v2`
-- Backend admin endpoint: toggle `facebank_seed`
-- Backend screenalytics endpoint: `seed_only` filter
+SCREENALYTICS Responsibilities
+- Seed-first fetch with `seed_only=true`.
+- Fallback to `seed_only=false` when seeded results are empty.
+- Use `served_url` and preserve backend order.
 
-Ownership
-- App owns UI and interactions
-- Backend owns schema and endpoints
-- Screenalytics owns seed selection behavior
+TRR-APP Responsibilities
+- Add proxy endpoint:
+  - `PATCH /api/admin/trr-api/people/[personId]/gallery/[linkId]/facebank-seed`
+- Require Firebase admin allowlist check before proxy call.
+- Forward backend auth headers:
+  - `Authorization: Bearer ${TRR_CORE_SUPABASE_SERVICE_ROLE_KEY}`
+  - `X-TRR-Internal-Admin-Secret: ${TRR_INTERNAL_ADMIN_SHARED_SECRET}`
+- Show/toggle `facebank_seed` in person gallery for media-link-backed photos only.
+
+Dependency Order
+1. Backend auth hardening
+2. App proxy + UI
+3. Screenalytics seed-first rollout

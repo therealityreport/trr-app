@@ -548,7 +548,7 @@ export async function getCastByShowId(
       .in("person_id", personIds);
 
     if (viewError) {
-      if (isViewUnavailableError(viewError.message)) {
+      if (isViewUnavailableError(viewError)) {
         if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
           console.log(
@@ -710,7 +710,7 @@ export async function getShowCastWithStats(
       .in("person_id", personIds);
 
     if (viewError) {
-      if (isViewUnavailableError(viewError.message)) {
+      if (isViewUnavailableError(viewError)) {
         if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
           console.log(
@@ -907,15 +907,73 @@ const isLikelyImage = (
 };
 
 let vCastPhotosAvailable: boolean | null = null;
+let vSeasonCastAvailable: boolean | null = null;
 
-const isViewUnavailableError = (message: string | null | undefined): boolean => {
+type PostgrestErrorLike = { code?: string | null; message?: string | null };
+
+const getErrorMessage = (
+  error: string | PostgrestErrorLike | null | undefined
+): string | null => {
+  if (!error) return null;
+  if (typeof error === "string") return error;
+  return error.message ?? null;
+};
+
+const getErrorCode = (
+  error: string | PostgrestErrorLike | null | undefined
+): string | null => {
+  if (!error || typeof error === "string") return null;
+  return error.code ?? null;
+};
+
+const isViewUnavailableError = (error: string | PostgrestErrorLike | null | undefined): boolean => {
+  const code = getErrorCode(error);
+  if (code) {
+    const upper = code.toUpperCase();
+    if (upper === "PGRST205" || upper === "42P01") {
+      return true;
+    }
+  }
+  const message = getErrorMessage(error);
   if (!message) return false;
   const lower = message.toLowerCase();
   return (
     lower.includes("permission denied") ||
     lower.includes("does not exist") ||
-    lower.includes("not found")
+    lower.includes("not found") ||
+    lower.includes("could not find the table") ||
+    lower.includes("schema cache")
   );
+};
+
+const isMissingColumnError = (error: string | PostgrestErrorLike | null | undefined): boolean => {
+  const code = getErrorCode(error);
+  if (code && code === "42703") {
+    return true;
+  }
+  const message = getErrorMessage(error);
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return lower.includes("column") && lower.includes("does not exist");
+};
+
+const runSelectWithFallback = async <T>(
+  selects: string[],
+  run: (select: string) => PromiseLike<{ data: T[] | null; error: PostgrestErrorLike | null }>
+): Promise<{ data: T[] | null; error: PostgrestErrorLike | null }> => {
+  let last: { data: T[] | null; error: PostgrestErrorLike | null } = {
+    data: null,
+    error: null,
+  };
+  for (const select of selects) {
+    const result = await run(select);
+    if (!result.error) return result;
+    last = result;
+    if (!isMissingColumnError(result.error)) {
+      return result;
+    }
+  }
+  return last;
 };
 
 export interface TrrPersonPhoto {
@@ -946,6 +1004,7 @@ export interface TrrPersonPhoto {
   origin: "cast_photos" | "media_links";
   link_id?: string | null;
   media_asset_id?: string | null;
+  facebank_seed: boolean;
 }
 
 export interface TrrPersonCredit {
@@ -1057,6 +1116,7 @@ export async function getPhotosByPersonId(
       origin: "cast_photos" as const,
       link_id: null,
       media_asset_id: null,
+      facebank_seed: false,
     };
   });
 
@@ -1087,6 +1147,7 @@ export async function getPhotosByPersonId(
     media_asset_id: string;
     kind: string;
     position: number | null;
+    facebank_seed?: boolean | null;
     context: Record<string, unknown> | null;
     created_at: string;
   }
@@ -1105,14 +1166,22 @@ export async function getPhotosByPersonId(
     ingest_status: string | null;
   }
 
-  // First get media_links for this person
-  const { data: mediaLinksRaw, error: linksError } = await supabase
-    .from("media_links")
-    .select("id, entity_id, media_asset_id, kind, position, context, created_at")
-    .eq("entity_type", "person")
-    .eq("entity_id", personId)
-    .eq("kind", "gallery")
-    .order("position", { ascending: true, nullsFirst: false });
+  // First get media_links for this person. Retry without facebank_seed for older schemas.
+  const mediaLinkSelects = [
+    "id, entity_id, media_asset_id, kind, position, facebank_seed, context, created_at",
+    "id, entity_id, media_asset_id, kind, position, context, created_at",
+  ];
+  const { data: mediaLinksRaw, error: linksError } = await runSelectWithFallback<MediaLinkRow>(
+    mediaLinkSelects,
+    (select) =>
+      supabase
+        .from("media_links")
+        .select(select)
+        .eq("entity_type", "person")
+        .eq("entity_id", personId)
+        .eq("kind", "gallery")
+        .order("position", { ascending: true, nullsFirst: false })
+  );
 
   const mediaLinks = mediaLinksRaw as MediaLinkRow[] | null;
 
@@ -1203,6 +1272,7 @@ export async function getPhotosByPersonId(
             origin: "media_links",
             link_id: link.id,
             media_asset_id: link.media_asset_id,
+            facebank_seed: Boolean(link.facebank_seed),
           } as TrrPersonPhoto;
         })
         .filter((p): p is TrrPersonPhoto => p !== null);
@@ -1416,7 +1486,7 @@ async function getSeasonCastFallbackFromShowCast(
       .in("person_id", personIds);
 
     if (viewError) {
-      if (isViewUnavailableError(viewError.message)) {
+      if (isViewUnavailableError(viewError)) {
         if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
         }
@@ -1472,7 +1542,7 @@ async function getSeasonCastFallbackFromShowCast(
 
 /**
  * Get cast members who appeared in a specific season with per-season episode counts.
- * Uses episode_cast to count appearances and v_cast_photos for any available photo URL.
+ * Prefers v_season_cast, falls back to episode_cast, then v_person_show_seasons for membership-only.
  */
 export async function getSeasonCastWithEpisodeCounts(
   showId: string,
@@ -1482,33 +1552,166 @@ export async function getSeasonCastWithEpisodeCounts(
   const { limit, offset } = normalizePagination(options);
   const supabase = getSupabaseTrrCore();
 
-  const { data: episodeCast, error: episodeCastError } = await supabase
-    .from("episode_cast")
-    .select("person_id, episode_id")
-    .eq("show_id", showId)
-    .eq("season_number", seasonNumber);
-
-  if (episodeCastError) {
-    console.error("[trr-shows-repository] getSeasonCastWithEpisodeCounts episode_cast error:", episodeCastError);
-    throw new Error(`Failed to get season cast: ${episodeCastError.message}`);
+  const season = await getSeasonByShowAndNumber(showId, seasonNumber);
+  if (!season) {
+    return [];
   }
 
-  const castRows = (episodeCast ?? []) as Array<{ person_id: string; episode_id: string | number }>;
+  let personIds: string[] = [];
+  const episodesInSeasonMap = new Map<string, number>();
+  const episodesCountKnown = new Set<string>();
+  const totalsMap = new Map<string, number>();
+  let viewRangeApplied = false;
+  let seasonMembersLoaded = false;
+  const fallbackNames = new Map<string, string | null>();
 
-  // If episode_cast has no data (Credits V2 not populated), fall back to show_cast
-  if (castRows.length === 0) {
-    return getSeasonCastFallbackFromShowCast(showId, options);
-  }
+  const loadSeasonMembers = async (): Promise<boolean> => {
+    const { data, error } = await supabase
+      .from("v_person_show_seasons")
+      .select("person_id, person_name, total_episodes")
+      .eq("show_id", showId)
+      .contains("seasons_appeared", [seasonNumber])
+      .order("total_episodes", { ascending: false })
+      .range(offset, offset + limit - 1);
 
-  const episodeCounts = new Map<string, Set<string>>();
-  for (const row of castRows) {
-    if (!episodeCounts.has(row.person_id)) {
-      episodeCounts.set(row.person_id, new Set());
+    if (error) {
+      if (isViewUnavailableError(error)) {
+        return false;
+      }
+      throw new Error(`Failed to get season cast: ${error.message}`);
     }
-    episodeCounts.get(row.person_id)?.add(String(row.episode_id));
+
+    const typed = (data ?? []) as Array<{
+      person_id: string;
+      person_name: string | null;
+      total_episodes: number | null;
+    }>;
+
+    if (typed.length === 0) {
+      return true;
+    }
+
+    viewRangeApplied = true;
+    personIds = typed.map((row) => row.person_id);
+    for (const row of typed) {
+      fallbackNames.set(row.person_id, row.person_name);
+      if (typeof row.total_episodes === "number") {
+        totalsMap.set(row.person_id, row.total_episodes);
+      }
+      episodesInSeasonMap.set(row.person_id, 0);
+    }
+    return true;
+  };
+
+  if (vSeasonCastAvailable !== (false as boolean | null)) {
+    const { data: viewData, error: viewError } = await supabase
+      .from("v_season_cast")
+      .select("person_id, episodes_in_season")
+      .eq("show_id", showId)
+      .eq("season_id", season.id)
+      .order("episodes_in_season", { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (viewError) {
+      if (isViewUnavailableError(viewError)) {
+        vSeasonCastAvailable = false;
+        console.log(
+          "[trr-shows-repository] v_season_cast view not available:",
+          viewError.message
+        );
+      } else {
+        console.error(
+          "[trr-shows-repository] getSeasonCastWithEpisodeCounts v_season_cast error:",
+          viewError
+        );
+        throw new Error(`Failed to get season cast: ${viewError.message}`);
+      }
+    } else {
+      vSeasonCastAvailable = true;
+      const typedView = (viewData ?? []) as Array<{
+        person_id: string;
+        episodes_in_season: number | null;
+      }>;
+      if (typedView.length > 0) {
+        viewRangeApplied = true;
+        personIds = typedView.map((row) => row.person_id);
+        for (const row of typedView) {
+          episodesInSeasonMap.set(row.person_id, row.episodes_in_season ?? 0);
+          episodesCountKnown.add(row.person_id);
+        }
+      } else {
+        const loaded = await loadSeasonMembers();
+        if (loaded) {
+          seasonMembersLoaded = true;
+          if (personIds.length === 0) {
+            return [];
+          }
+        }
+      }
+    }
   }
 
-  const personIds = Array.from(episodeCounts.keys());
+  if (personIds.length === 0) {
+    const { data: episodeCast, error: episodeCastError } = await supabase
+      .from("episode_cast")
+      .select("person_id, episode_id")
+      .eq("show_id", showId)
+      .eq("season_number", seasonNumber);
+
+    if (episodeCastError) {
+      console.error(
+        "[trr-shows-repository] getSeasonCastWithEpisodeCounts episode_cast error:",
+        episodeCastError
+      );
+      if (isViewUnavailableError(episodeCastError)) {
+        const loaded = await loadSeasonMembers();
+        if (!loaded) {
+          return getSeasonCastFallbackFromShowCast(showId, options);
+        }
+        seasonMembersLoaded = true;
+        if (personIds.length === 0) {
+          return [];
+        }
+        // Skip further episode_cast handling since fallback succeeded.
+      } else {
+        throw new Error(`Failed to get season cast: ${episodeCastError.message}`);
+      }
+    }
+
+    if (!episodeCastError && !seasonMembersLoaded) {
+      const castRows = (episodeCast ?? []) as Array<{ person_id: string; episode_id: string | number }>;
+
+      // If episode_cast has no data (Credits V2 not populated), fall back to season membership view
+      if (castRows.length === 0) {
+        const loaded = await loadSeasonMembers();
+        if (!loaded) {
+          return getSeasonCastFallbackFromShowCast(showId, options);
+        }
+        seasonMembersLoaded = true;
+        if (personIds.length === 0) {
+          return [];
+        }
+        // Skip further episode_cast handling since fallback succeeded
+        // Continue to people/totals/photo loading below.
+      }
+
+      if (!seasonMembersLoaded) {
+        const episodeCounts = new Map<string, Set<string>>();
+        for (const row of castRows) {
+          if (!episodeCounts.has(row.person_id)) {
+            episodeCounts.set(row.person_id, new Set());
+          }
+          episodeCounts.get(row.person_id)?.add(String(row.episode_id));
+        }
+
+        personIds = Array.from(episodeCounts.keys());
+        for (const [personId, episodes] of episodeCounts.entries()) {
+          episodesInSeasonMap.set(personId, episodes.size);
+          episodesCountKnown.add(personId);
+        }
+      }
+    }
+  }
 
   const { data: peopleData, error: peopleError } = await supabase
     .from("people")
@@ -1519,20 +1722,33 @@ export async function getSeasonCastWithEpisodeCounts(
     console.error("[trr-shows-repository] getSeasonCastWithEpisodeCounts people error:", peopleError);
   }
 
-  const totalsMap: Map<string, number> = new Map();
-  const { data: totalsData, error: totalsError } = await supabase
-    .from("v_person_show_seasons")
-    .select("person_id, total_episodes")
-    .eq("show_id", showId)
-    .in("person_id", personIds);
+  if (personIds.length > 0) {
+    const { data: totalsData, error: totalsError } = await supabase
+      .from("v_person_show_seasons")
+      .select("person_id, total_episodes, person_name")
+      .eq("show_id", showId)
+      .in("person_id", personIds);
 
-  if (totalsError) {
-    console.error("[trr-shows-repository] getSeasonCastWithEpisodeCounts totals error:", totalsError);
-  } else if (totalsData) {
-    const typedTotals = totalsData as Array<{ person_id: string; total_episodes: number | null }>;
-    for (const row of typedTotals) {
-      if (typeof row.total_episodes === "number") {
-        totalsMap.set(row.person_id, row.total_episodes);
+    if (totalsError) {
+      if (!isViewUnavailableError(totalsError)) {
+        console.log(
+          "[trr-shows-repository] getSeasonCastWithEpisodeCounts totals error:",
+          totalsError.message
+        );
+      }
+    } else if (totalsData) {
+      const typedTotals = totalsData as Array<{
+        person_id: string;
+        total_episodes: number | null;
+        person_name?: string | null;
+      }>;
+      for (const row of typedTotals) {
+        if (typeof row.total_episodes === "number") {
+          totalsMap.set(row.person_id, row.total_episodes);
+        }
+        if (!fallbackNames.has(row.person_id) && row.person_name) {
+          fallbackNames.set(row.person_id, row.person_name);
+        }
       }
     }
   }
@@ -1563,7 +1779,7 @@ export async function getSeasonCastWithEpisodeCounts(
       .in("person_id", personIds);
 
     if (viewError) {
-      if (isViewUnavailableError(viewError.message)) {
+      if (isViewUnavailableError(viewError)) {
         if (vCastPhotosAvailable !== (false as boolean | null)) {
           vCastPhotosAvailable = false;
           console.log(
@@ -1619,14 +1835,14 @@ export async function getSeasonCastWithEpisodeCounts(
 
   const results = personIds.map((personId) => ({
     person_id: personId,
-    person_name: peopleMap.get(personId)?.full_name ?? null,
-    episodes_in_season: episodeCounts.get(personId)?.size ?? 0,
+    person_name: peopleMap.get(personId)?.full_name ?? fallbackNames.get(personId) ?? null,
+    episodes_in_season: episodesInSeasonMap.get(personId) ?? 0,
     total_episodes: totalsMap.get(personId) ?? null,
     photo_url: photosMap.get(personId) ?? null,
   }));
 
   results.sort((a, b) => b.episodes_in_season - a.episodes_in_season);
-  return results.slice(offset, offset + limit);
+  return viewRangeApplied ? results : results.slice(offset, offset + limit);
 }
 
 // ============================================================================
@@ -1669,14 +1885,132 @@ export async function getAssetsByShowSeason(
   const supabase = getSupabaseTrrCore();
   const assets: SeasonAsset[] = [];
 
+  const toDateOnly = (value?: string | null): Date | null => {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    date.setHours(0, 0, 0, 0);
+    return date;
+  };
+
+  const computeSeasonWindow = (start?: string | null, end?: string | null) => {
+    const startDate = toDateOnly(start);
+    let endDate = toDateOnly(end);
+    if (startDate && !endDate) {
+      endDate = new Date();
+      endDate.setHours(0, 0, 0, 0);
+    }
+    return { startDate, endDate };
+  };
+
+  // Fetch season record for date window and season_id
+  let seasonId: string | null = null;
+  let seasonStartDate: Date | null = null;
+  let seasonEndDate: Date | null = null;
+  let showImdbId: string | null = null;
+  let showName: string | null = null;
+  type SeasonLookupRow = {
+    id: string;
+    premiere_date?: string | null;
+    air_date?: string | null;
+  };
+  const seasonLookupSelects = ["id, premiere_date, air_date", "id, air_date"];
+  const { data: seasonRows, error: seasonRowError } = await runSelectWithFallback<SeasonLookupRow>(
+    seasonLookupSelects,
+    (select) =>
+      supabase
+        .from("seasons")
+        .select(select)
+        .eq("show_id", showId)
+        .eq("season_number", seasonNumber)
+        .limit(1)
+  );
+  const seasonRow = seasonRows && seasonRows.length > 0 ? seasonRows[0] : null;
+
+  if (seasonRowError) {
+    console.error("[trr-shows-repository] getAssetsByShowSeason season lookup error:", seasonRowError);
+  } else if (seasonRow) {
+    seasonId = seasonRow.id;
+    const initialStart = seasonRow.premiere_date ?? seasonRow.air_date ?? null;
+    if (seasonId) {
+      const { data: episodeDates, error: episodeDatesError } = await supabase
+        .from("episodes")
+        .select("air_date")
+        .eq("season_id", seasonId)
+        .not("air_date", "is", null)
+        .limit(500);
+
+      if (episodeDatesError) {
+        console.error(
+          "[trr-shows-repository] getAssetsByShowSeason episode date error:",
+          episodeDatesError
+        );
+      } else if (episodeDates) {
+        const parsedDates = (episodeDates as Array<{ air_date: string | null }>)
+          .map((row) => toDateOnly(row.air_date))
+          .filter((date): date is Date => Boolean(date));
+
+        if (parsedDates.length > 0) {
+          parsedDates.sort((a, b) => a.getTime() - b.getTime());
+          seasonStartDate = parsedDates[0];
+          seasonEndDate = parsedDates[parsedDates.length - 1];
+        }
+      }
+    }
+
+    if (!seasonStartDate) {
+      const window = computeSeasonWindow(initialStart, null);
+      seasonStartDate = window.startDate;
+      seasonEndDate = window.endDate;
+    } else if (!seasonEndDate) {
+      const window = computeSeasonWindow(seasonStartDate.toISOString(), null);
+      seasonEndDate = window.endDate;
+    }
+  }
+
+  type ShowLookupRow = {
+    name?: string | null;
+    external_ids?: Record<string, unknown> | null;
+  };
+  const showLookupSelects = ["name, external_ids", "name"];
+  const { data: showRows, error: showRowError } = await runSelectWithFallback<ShowLookupRow>(
+    showLookupSelects,
+    (select) =>
+      supabase
+        .from("shows")
+        .select(select)
+        .eq("id", showId)
+        .limit(1)
+  );
+  const showRow = showRows && showRows.length > 0 ? showRows[0] : null;
+
+  if (showRowError) {
+    console.error("[trr-shows-repository] getAssetsByShowSeason show lookup error:", showRowError);
+  } else if (showRow) {
+    showName = showRow.name ?? null;
+    const externalIds = (showRow.external_ids ?? {}) as Record<string, string | undefined>;
+    showImdbId = externalIds.imdb_id ?? externalIds.imdb ?? null;
+  }
+
   // 1. Get season images
-  const { data: seasonImages, error: seasonError } = await supabase
-    .from("season_images")
-    .select("id, source, image_type, hosted_url, width, height, created_at, ingest_status, metadata")
-    .eq("show_id", showId)
-    .eq("season_number", seasonNumber)
-    .not("hosted_url", "is", null)
-    .limit(30);
+  const seasonSelects = [
+    "id, source, kind, image_type, hosted_url, width, height, created_at, ingest_status, metadata",
+    "id, source, kind, image_type, hosted_url, width, height, created_at, metadata",
+    "id, source, kind, hosted_url, width, height, created_at, metadata",
+    "id, source, kind, hosted_url, width, height",
+    "id, source, hosted_url, width, height",
+  ];
+  const { data: seasonImages, error: seasonError } = await runSelectWithFallback(
+    seasonSelects,
+    (select) =>
+      supabase
+        .from("season_images")
+        .select(select)
+        .eq("show_id", showId)
+        .eq("season_number", seasonNumber)
+        .not("hosted_url", "is", null)
+        .limit(30)
+  );
 
   if (seasonError) {
     console.error("[trr-shows-repository] getAssetsByShowSeason season_images error:", seasonError);
@@ -1684,21 +2018,23 @@ export async function getAssetsByShowSeason(
     type SeasonImageRow = {
       id: string;
       source: string;
-      image_type: string | null;
+      kind?: string | null;
+      image_type?: string | null;
       hosted_url: string;
       width: number | null;
       height: number | null;
-      created_at: string | null;
-      ingest_status: string | null;
-      metadata: Record<string, unknown> | null;
+      created_at?: string | null;
+      ingest_status?: string | null;
+      metadata?: Record<string, unknown> | null;
     };
     const typedSeasonImages = seasonImages as SeasonImageRow[];
     for (const img of typedSeasonImages) {
+      const imageKind = img.image_type ?? img.kind ?? "poster";
       assets.push({
         id: img.id,
         type: "season",
         source: img.source,
-        kind: img.image_type ?? "poster",
+        kind: imageKind,
         hosted_url: img.hosted_url,
         width: img.width,
         height: img.height,
@@ -1712,14 +2048,25 @@ export async function getAssetsByShowSeason(
   }
 
   // 2. Get episode images
-  const { data: episodeImages, error: episodeError } = await supabase
-    .from("episode_images")
-    .select("id, source, image_type, hosted_url, width, height, episode_number, created_at, ingest_status, metadata")
-    .eq("show_id", showId)
-    .eq("season_number", seasonNumber)
-    .not("hosted_url", "is", null)
-    .order("episode_number", { ascending: true })
-    .limit(50);
+  const episodeSelects = [
+    "id, source, kind, image_type, hosted_url, width, height, episode_number, created_at, ingest_status, metadata",
+    "id, source, kind, image_type, hosted_url, width, height, episode_number, created_at, metadata",
+    "id, source, kind, hosted_url, width, height, episode_number, created_at, metadata",
+    "id, source, kind, hosted_url, width, height, episode_number",
+    "id, source, hosted_url, width, height, episode_number",
+  ];
+  const { data: episodeImages, error: episodeError } = await runSelectWithFallback(
+    episodeSelects,
+    (select) =>
+      supabase
+        .from("episode_images")
+        .select(select)
+        .eq("show_id", showId)
+        .eq("season_number", seasonNumber)
+        .not("hosted_url", "is", null)
+        .order("episode_number", { ascending: true })
+        .limit(50)
+  );
 
   if (episodeError) {
     console.error("[trr-shows-repository] getAssetsByShowSeason episode_images error:", episodeError);
@@ -1727,22 +2074,24 @@ export async function getAssetsByShowSeason(
     type EpisodeImageRow = {
       id: string;
       source: string;
-      image_type: string | null;
+      kind?: string | null;
+      image_type?: string | null;
       hosted_url: string;
       width: number | null;
       height: number | null;
       episode_number: number;
-      created_at: string | null;
-      ingest_status: string | null;
-      metadata: Record<string, unknown> | null;
+      created_at?: string | null;
+      ingest_status?: string | null;
+      metadata?: Record<string, unknown> | null;
     };
     const typedEpisodeImages = episodeImages as EpisodeImageRow[];
     for (const img of typedEpisodeImages) {
+      const imageKind = img.image_type ?? img.kind ?? "still";
       assets.push({
         id: img.id,
         type: "episode",
         source: img.source,
-        kind: img.image_type ?? "still",
+        kind: imageKind,
         hosted_url: img.hosted_url,
         width: img.width,
         height: img.height,
@@ -1774,12 +2123,22 @@ export async function getAssetsByShowSeason(
     const personNameMap = new Map(typedCast.map((c) => [c.person_id, c.person_name]));
 
     // Get photos for these people
-    const { data: castPhotos, error: photoError } = await supabase
-      .from("cast_photos")
-      .select("id, person_id, source, hosted_url, hosted_content_type, width, height, caption, context_section, context_type, season, fetched_at, created_at, metadata, ingest_status")
-      .in("person_id", personIds)
-      .not("hosted_url", "is", null)
-      .limit(100);
+    const castSelects = [
+      "id, person_id, source, hosted_url, hosted_content_type, width, height, caption, context_section, context_type, season, fetched_at, hosted_at, updated_at, title_imdb_ids, title_names, metadata, ingest_status",
+      "id, person_id, source, hosted_url, hosted_content_type, width, height, caption, context_section, context_type, season, fetched_at, hosted_at, updated_at, title_imdb_ids, title_names, metadata",
+      "id, person_id, source, hosted_url, hosted_content_type, width, height, caption, context_section, context_type, season, fetched_at, hosted_at, updated_at, title_imdb_ids, title_names",
+      "id, person_id, source, hosted_url, hosted_content_type, width, height, caption, season, fetched_at, hosted_at, updated_at, title_imdb_ids, title_names",
+    ];
+    const { data: castPhotos, error: photoError } = await runSelectWithFallback(
+      castSelects,
+      (select) =>
+        supabase
+          .from("cast_photos")
+          .select(select)
+          .in("person_id", personIds)
+          .not("hosted_url", "is", null)
+          .limit(100)
+    );
 
     if (photoError) {
       console.error("[trr-shows-repository] getAssetsByShowSeason cast_photos error:", photoError);
@@ -1796,13 +2155,45 @@ export async function getAssetsByShowSeason(
         context_section: string | null;
         context_type: string | null;
         season: number | null;
-        fetched_at: string | null;
-        created_at: string | null;
-        metadata: Record<string, unknown> | null;
-        ingest_status: string | null;
+        fetched_at?: string | null;
+        hosted_at?: string | null;
+        updated_at?: string | null;
+        created_at?: string | null;
+        title_imdb_ids?: string[] | null;
+        title_names?: string[] | null;
+        metadata?: Record<string, unknown> | null;
+        ingest_status?: string | null;
       };
       const typedPhotos = castPhotos as PhotoRow[];
       for (const photo of typedPhotos) {
+        const isSeasonTagged = photo.season === seasonNumber;
+        const photoDate =
+          photo.fetched_at ?? photo.hosted_at ?? photo.updated_at ?? photo.created_at ?? null;
+        const photoDateOnly = toDateOnly(photoDate);
+        const inSeasonWindow =
+          seasonStartDate && seasonEndDate && photoDateOnly
+            ? photoDateOnly >= seasonStartDate && photoDateOnly <= seasonEndDate
+            : false;
+
+        if (!isSeasonTagged && !inSeasonWindow) {
+          continue;
+        }
+
+        if (photo.title_imdb_ids && photo.title_imdb_ids.length > 0) {
+          if (showImdbId && !photo.title_imdb_ids.includes(showImdbId)) {
+            continue;
+          }
+          if (!showImdbId && showName) {
+            const normalizedShowName = showName.toLowerCase();
+            const matchesShow = photo.title_names?.some((title) =>
+              title.toLowerCase().includes(normalizedShowName)
+            );
+            if (!matchesShow) {
+              continue;
+            }
+          }
+        }
+
         if (!isLikelyImage(null, photo.hosted_url)) {
           continue;
         }
