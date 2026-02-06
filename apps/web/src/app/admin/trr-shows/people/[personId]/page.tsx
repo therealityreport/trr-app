@@ -11,6 +11,10 @@ import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/Ex
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import { mapPhotoToMetadata } from "@/lib/photo-metadata";
+import {
+  applyFacebankSeedUpdateToLightbox,
+  applyFacebankSeedUpdateToPhotos,
+} from "./facebank-seed-state";
 
 // Types
 interface TrrPerson {
@@ -1542,26 +1546,8 @@ export default function PersonProfilePage() {
 
   const handleFacebankSeedUpdated = useCallback(
     (payload: { linkId: string; facebankSeed: boolean }) => {
-      setPhotos((prev) =>
-        prev.map((photo) =>
-          photo.origin === "media_links" && photo.link_id === payload.linkId
-            ? { ...photo, facebank_seed: payload.facebankSeed }
-            : photo
-        )
-      );
-      setLightboxPhoto((prev) => {
-        if (!prev) return prev;
-        if (
-          prev.photo.origin === "media_links" &&
-          prev.photo.link_id === payload.linkId
-        ) {
-          return {
-            ...prev,
-            photo: { ...prev.photo, facebank_seed: payload.facebankSeed },
-          };
-        }
-        return prev;
-      });
+      setPhotos((prev) => applyFacebankSeedUpdateToPhotos(prev, payload));
+      setLightboxPhoto((prev) => applyFacebankSeedUpdateToLightbox(prev, payload));
     },
     []
   );

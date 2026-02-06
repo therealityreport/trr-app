@@ -28,6 +28,21 @@ Notes
 - The client SDK auto-connects to emulators when the flag is on; no production data is read or written.
 - Keeping a distinct emulator project ID (e.g., `demo-trr`) helps the Emulator UI display the same namespace your client uses.
 
+## TRR Backend Facebank Seed Proxy
+
+For the admin gallery facebank seed toggle proxy route
+`/api/admin/trr-api/people/[personId]/gallery/[linkId]/facebank-seed`, set:
+
+- `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY`
+- `TRR_INTERNAL_ADMIN_SHARED_SECRET`
+
+The proxy sends:
+
+- `Authorization: Bearer <TRR_CORE_SUPABASE_SERVICE_ROLE_KEY>`
+- `X-TRR-Internal-Admin-Secret: <TRR_INTERNAL_ADMIN_SHARED_SECRET>`
+
+Backend accepts this service-role path only for the facebank seed toggle endpoint and only when the shared secret matches.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

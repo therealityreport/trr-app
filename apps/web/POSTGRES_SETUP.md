@@ -69,6 +69,17 @@ ADMIN_EMAIL_ALLOWLIST=your-email@example.com,another-admin@example.com
 - Only users with these emails can access `/admin/survey-responses`
 - Leave empty to allow ANY authenticated user (not recommended for production)
 
+### 4. (Optional) TRR Backend Facebank Seed Proxy Auth
+
+If you use the admin person-gallery facebank seed toggle, also set:
+
+```bash
+TRR_CORE_SUPABASE_SERVICE_ROLE_KEY=...
+TRR_INTERNAL_ADMIN_SHARED_SECRET=...
+```
+
+The server proxy sends `X-TRR-Internal-Admin-Secret` to TRR-Backend for the facebank toggle endpoint.
+
 ---
 
 ## Setup Steps

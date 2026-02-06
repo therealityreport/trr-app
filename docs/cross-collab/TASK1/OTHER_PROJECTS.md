@@ -17,8 +17,9 @@ TRR-Backend Responsibilities
 
 SCREENALYTICS Responsibilities
 - Seed-first fetch with `seed_only=true`.
-- Fallback to `seed_only=false` when seeded results are empty.
+- Fallback to `seed_only=false` only after a successful empty `seed_only=true` response.
 - Use `served_url` and preserve backend order.
+- Persist imported rows via `import_facebank_images` into `face_bank_images`.
 
 TRR-APP Responsibilities
 - Add proxy endpoint:
