@@ -1,36 +1,49 @@
 # Other Projects — Task 1
 
-This repo (TRR-APP) owns the admin UX and internal proxy workflow for facebank seed toggling.
+Repo: TRR-APP  
+Last updated: February 6, 2026
 
-Shared Contract
-- Toggle endpoint (backend): `PATCH /api/v1/admin/person/{person_id}/gallery/{link_id}/facebank-seed`
-- Toggle payload: `{ "facebank_seed": boolean }`
-- Photos contract for screenalytics: `GET /api/v1/screenalytics/people/{person_id}/photos?seed_only={bool}`
-- Shared field: `facebank_seed` on `core.media_links`
+Cross-Repo Snapshot
+- TRR-Backend PR `#44` merged.
+- TRR-APP PRs `#18` and `#19` merged.
+- SCREENALYTICS PR `#187` merged.
+- Code/CI is complete across repos; rollout smoke is still in progress.
 
-TRR-Backend Responsibilities
-- Own schema + views exposing `facebank_seed`.
-- Enforce endpoint-scoped auth:
-  - allowlisted user JWT, or
-  - `service_role` + valid `X-TRR-Internal-Admin-Secret` header.
-- Keep endpoint path/payload stable.
+Locked Contracts (No Pending Changes)
+1. Backend toggle endpoint: `PATCH /api/v1/admin/person/{person_id}/gallery/{link_id}/facebank-seed`.
+2. Toggle payload: `{ "facebank_seed": boolean }`.
+3. Toggle response: `{ "link_id": string, "person_id": string, "facebank_seed": boolean }`.
+4. Screenalytics photos endpoint: `GET /api/v1/screenalytics/people/{person_id}/photos?seed_only={bool}`.
+5. Service auth for app proxy path: `Authorization: Bearer <service_role>` + `X-TRR-Internal-Admin-Secret`.
+6. Screenalytics must use `served_url` and strict fallback: only call `seed_only=false` after successful empty `seed_only=true`.
 
-SCREENALYTICS Responsibilities
-- Seed-first fetch with `seed_only=true`.
-- Fallback to `seed_only=false` only after a successful empty `seed_only=true` response.
-- Use `served_url` and preserve backend order.
-- Persist imported rows via `import_facebank_images` into `face_bank_images`.
+Responsibility Alignment
+- TRR-Backend
+  - Owns `core.media_links.facebank_seed` schema + view exposure.
+  - Enforces allowlist-only admin auth and scoped service-role + internal-secret auth for toggle endpoint.
+- TRR-APP
+  - Owns admin UI toggle and proxy route.
+  - Must forward `Authorization` service-role token and `X-TRR-Internal-Admin-Secret`.
+  - Must require allowlisted admin access before proxying.
+- SCREENALYTICS
+  - Owns seed-first fetch behavior and strict fallback logic.
+  - Uses `served_url` and persists rows through `import_facebank_images`.
 
-TRR-APP Responsibilities
-- Add proxy endpoint:
-  - `PATCH /api/admin/trr-api/people/[personId]/gallery/[linkId]/facebank-seed`
-- Require Firebase admin allowlist check before proxy call.
-- Forward backend auth headers:
-  - `Authorization: Bearer ${TRR_CORE_SUPABASE_SERVICE_ROLE_KEY}`
-  - `X-TRR-Internal-Admin-Secret: ${TRR_INTERNAL_ADMIN_SHARED_SECRET}`
-- Show/toggle `facebank_seed` in person gallery for media-link-backed photos only.
+Operational Findings (Completed)
+1. Targeted regression suites passed in all repos.
+2. Backend local auth guard behavior verified (`403`, `403`, `200`).
+3. Backend local `seed_only=true/false` subset behavior verified.
+4. Strict fallback request sequence observed in backend logs.
 
-Dependency Order
-1. Backend auth hardening
-2. App proxy + UI
-3. Screenalytics seed-first rollout
+Open Operational Risks / Blockers
+1. Staging + production rollout smoke has not yet been executed end-to-end.
+2. Required local/env secrets are not fully configured for full live-path proxy and ingest verification.
+3. SCREENALYTICS local persistence DB lacks required tables (`person`, `face_bank_images`) on current `DB_URL`.
+
+Dependency Order (For Final Closeout)
+1. Deploy TRR-Backend (`main`, includes PR `#44`).
+2. Deploy TRR-APP (`main`, includes PR `#18/#19`).
+3. Deploy SCREENALYTICS (`main`, includes PR `#187`).
+4. Run staging full smoke and DB side-effect checks.
+5. Roll production in same order and run minimal smoke.
+6. Mark all Task 1 docs completed only after both environments pass.
