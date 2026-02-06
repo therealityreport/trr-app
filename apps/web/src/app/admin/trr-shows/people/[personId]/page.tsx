@@ -49,6 +49,7 @@ interface TrrPersonPhoto {
   origin: "cast_photos" | "media_links";
   link_id?: string | null;
   media_asset_id?: string | null;
+  facebank_seed: boolean;
 }
 
 type GallerySortOption = "newest" | "oldest" | "source" | "season-asc" | "season-desc";
@@ -287,6 +288,11 @@ function GalleryPhoto({
           Cover
         </div>
       )}
+      {photo.facebank_seed && (
+        <div className="absolute top-2 right-2 z-10 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white shadow">
+          Seed
+        </div>
+      )}
       {/* Set as Cover button */}
       {onSetCover && !isCover && (
         <button
@@ -311,6 +317,7 @@ function TagPeoplePanel({
   getAuthHeaders,
   onTagsUpdated,
   onMirrorUpdated,
+  onFacebankSeedUpdated,
 }: {
   photo: TrrPersonPhoto;
   getAuthHeaders: () => Promise<{ Authorization: string }>;
@@ -326,6 +333,10 @@ function TagPeoplePanel({
     mediaAssetId: string | null;
     castPhotoId: string | null;
     hostedUrl: string;
+  }) => void;
+  onFacebankSeedUpdated: (payload: {
+    linkId: string;
+    facebankSeed: boolean;
   }) => void;
 }) {
   const isCastPhoto = photo.origin === "cast_photos";
@@ -347,6 +358,8 @@ function TagPeoplePanel({
   const [recountError, setRecountError] = useState<string | null>(null);
   const [mirroring, setMirroring] = useState(false);
   const [mirrorError, setMirrorError] = useState<string | null>(null);
+  const [facebankSeedSaving, setFacebankSeedSaving] = useState(false);
+  const [facebankSeedError, setFacebankSeedError] = useState<string | null>(null);
   const currentPeopleCount = parsePeopleCount(photo.people_count);
 
   useEffect(() => {
@@ -546,6 +559,7 @@ function TagPeoplePanel({
     (isCastPhoto || Boolean(photo.media_asset_id));
 
   const canMirror = isMediaLink && Boolean(photo.media_asset_id);
+  const canToggleFacebankSeed = isMediaLink && Boolean(photo.link_id);
 
   const mirrorForRecount = async () => {
     if (isMediaLink && photo.media_asset_id) {
@@ -746,6 +760,44 @@ function TagPeoplePanel({
     }
   };
 
+  const handleToggleFacebankSeed = async () => {
+    if (!canToggleFacebankSeed || !photo.link_id) return;
+    setFacebankSeedSaving(true);
+    setFacebankSeedError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const nextValue = !Boolean(photo.facebank_seed);
+      const response = await fetch(
+        `/api/admin/trr-api/people/${photo.person_id}/gallery/${photo.link_id}/facebank-seed`,
+        {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ facebank_seed: nextValue }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data.error && data.detail
+            ? `${data.error}: ${data.detail}`
+            : data.error || data.detail || "Failed to update facebank seed";
+        throw new Error(message);
+      }
+      onFacebankSeedUpdated({
+        linkId: photo.link_id,
+        facebankSeed: Boolean(
+          typeof data.facebank_seed === "boolean" ? data.facebank_seed : nextValue
+        ),
+      });
+    } catch (err) {
+      setFacebankSeedError(
+        err instanceof Error ? err.message : "Failed to update facebank seed"
+      );
+    } finally {
+      setFacebankSeedSaving(false);
+    }
+  };
+
   return (
     <div>
       <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -903,6 +955,40 @@ function TagPeoplePanel({
           </div>
         )}
       </div>
+
+      {canToggleFacebankSeed && (
+        <div className="mt-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Facebank Seed
+          </span>
+          <div className="mt-2 flex items-center gap-2">
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                photo.facebank_seed
+                  ? "bg-blue-600/80 text-white"
+                  : "bg-white/10 text-white/80"
+              }`}
+            >
+              {photo.facebank_seed ? "Seeded" : "Not seeded"}
+            </span>
+            <button
+              type="button"
+              onClick={handleToggleFacebankSeed}
+              disabled={facebankSeedSaving}
+              className="rounded-md bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {facebankSeedSaving
+                ? "Saving..."
+                : photo.facebank_seed
+                  ? "Unset Seed"
+                  : "Set as Seed"}
+            </button>
+          </div>
+          {facebankSeedError && (
+            <p className="mt-2 text-xs text-red-300">{facebankSeedError}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1446,6 +1532,32 @@ export default function PersonProfilePage() {
           return {
             ...prev,
             photo: { ...prev.photo, hosted_url: payload.hostedUrl },
+          };
+        }
+        return prev;
+      });
+    },
+    []
+  );
+
+  const handleFacebankSeedUpdated = useCallback(
+    (payload: { linkId: string; facebankSeed: boolean }) => {
+      setPhotos((prev) =>
+        prev.map((photo) =>
+          photo.origin === "media_links" && photo.link_id === payload.linkId
+            ? { ...photo, facebank_seed: payload.facebankSeed }
+            : photo
+        )
+      );
+      setLightboxPhoto((prev) => {
+        if (!prev) return prev;
+        if (
+          prev.photo.origin === "media_links" &&
+          prev.photo.link_id === payload.linkId
+        ) {
+          return {
+            ...prev,
+            photo: { ...prev.photo, facebank_seed: payload.facebankSeed },
           };
         }
         return prev;
@@ -2315,6 +2427,7 @@ export default function PersonProfilePage() {
                 getAuthHeaders={getAuthHeaders}
                 onTagsUpdated={handleTagsUpdated}
                 onMirrorUpdated={handleMirrorUpdated}
+                onFacebankSeedUpdated={handleFacebankSeedUpdated}
               />
             }
             position={{ current: lightboxPhoto.index + 1, total: filteredPhotos.length }}

@@ -1004,6 +1004,7 @@ export interface TrrPersonPhoto {
   origin: "cast_photos" | "media_links";
   link_id?: string | null;
   media_asset_id?: string | null;
+  facebank_seed: boolean;
 }
 
 export interface TrrPersonCredit {
@@ -1115,6 +1116,7 @@ export async function getPhotosByPersonId(
       origin: "cast_photos" as const,
       link_id: null,
       media_asset_id: null,
+      facebank_seed: false,
     };
   });
 
@@ -1145,6 +1147,7 @@ export async function getPhotosByPersonId(
     media_asset_id: string;
     kind: string;
     position: number | null;
+    facebank_seed: boolean | null;
     context: Record<string, unknown> | null;
     created_at: string;
   }
@@ -1166,7 +1169,7 @@ export async function getPhotosByPersonId(
   // First get media_links for this person
   const { data: mediaLinksRaw, error: linksError } = await supabase
     .from("media_links")
-    .select("id, entity_id, media_asset_id, kind, position, context, created_at")
+    .select("id, entity_id, media_asset_id, kind, position, facebank_seed, context, created_at")
     .eq("entity_type", "person")
     .eq("entity_id", personId)
     .eq("kind", "gallery")
@@ -1261,6 +1264,7 @@ export async function getPhotosByPersonId(
             origin: "media_links",
             link_id: link.id,
             media_asset_id: link.media_asset_id,
+            facebank_seed: Boolean(link.facebank_seed),
           } as TrrPersonPhoto;
         })
         .filter((p): p is TrrPersonPhoto => p !== null);
