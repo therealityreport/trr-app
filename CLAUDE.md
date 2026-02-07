@@ -14,3 +14,8 @@ Coordination rules
 
 Auth rule
 - New admin sync/flag endpoints must be allowlist-only (email in `ADMIN_EMAIL_ALLOWLIST`)
+
+## Git Workflow (This Repo)
+
+- Default: work directly on `main`
+- Only create/use a branch or `git worktree` if explicitly requested

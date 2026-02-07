@@ -14,3 +14,8 @@ Task Folders
 - /Users/thomashulihan/Projects/TRR-Backend/docs/cross-collab/TASK1
 - /Users/thomashulihan/Projects/TRR-APP/docs/cross-collab/TASK1
 - /Users/thomashulihan/Downloads/SCREENALYTICS/docs/cross-collab/TASK1
+
+## Git Workflow (This Repo)
+
+- Default: work directly on `main`
+- Only create/use a branch or `git worktree` if explicitly requested
