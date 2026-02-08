@@ -361,12 +361,37 @@ export function mapSeasonAssetToMetadata(
         : null;
 
   // Determine context type label
+  const kindLower = (asset.kind ?? "").toLowerCase();
   const contextType =
     asset.type === "episode"
       ? `Episode ${asset.episode_number ?? ""}`
       : asset.type === "season"
-        ? "Season Poster"
+        ? kindLower === "cast"
+          ? "Cast Photos"
+          : kindLower === "backdrop"
+            ? "Backdrop"
+            : kindLower === "promo"
+              ? "Promo"
+              : kindLower === "intro"
+                ? "Intro"
+                : kindLower === "reunion"
+                  ? "Reunion"
+                  : kindLower === "episode_still"
+                    ? "Episode Still"
+                    : "Season Poster"
         : asset.context_type ?? "Cast Photo";
+
+  const peopleFromMeta = Array.isArray((metadata as Record<string, unknown>).people_names)
+    ? ((metadata as Record<string, unknown>).people_names as unknown[])
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim())
+    : [];
+  const people =
+    peopleFromMeta.length > 0
+      ? [...new Set(peopleFromMeta)]
+      : asset.person_name
+        ? [asset.person_name]
+        : [];
 
   return {
     source: asset.source,
@@ -392,7 +417,7 @@ export function mapSeasonAssetToMetadata(
         : null,
     season: asset.season_number ?? seasonNumber ?? null,
     contextType,
-    people: asset.person_name ? [asset.person_name] : [],
+    people,
     titles: showName ? [showName] : [],
     fetchedAt: asset.fetched_at ? new Date(asset.fetched_at) : null,
   };
