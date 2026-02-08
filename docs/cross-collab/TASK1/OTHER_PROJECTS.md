@@ -28,6 +28,10 @@ Addendum (Admin Media Enhancements)
 - People Count auto-count falls back to source URL when `hosted_url` is missing.
 - TRR-Backend calls the people-count endpoint; ensure `/vision/people-count` is reachable at `SCREENALYTICS_API_URL` (TRR-Backend side).
 - If TRR-Backend is configured with an incompatible path, set `SCREENALYTICS_API_PATH=/vision/people-count` (TRR-Backend) rather than changing SCREENALYTICS routing.
+- Cast Photos imports (kind=`cast`) auto-fill people tags + caption from scraped per-image context text.
+- Cast Photos imports store article publish date as `metadata.source_created_at` so UI shows **Created**.
+- Season Media “Add backdrops” drawer only shows TMDb backdrops not already assigned to any season for the show.
+- Admins can delete unified media assets (`DELETE /api/v1/admin/media-assets/{asset_id}`) via TRR-APP proxy + UI actions.
 
 Responsibility Alignment
 - TRR-Backend

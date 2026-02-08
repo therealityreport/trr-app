@@ -106,10 +106,17 @@ Scope
 - Scrape preview UI shows dimensions and best-effort file size (`bytes` via Content-Length when available).
 - People Count “Auto/Recount” works even when `hosted_url` is missing (backend falls back to source URL).
 - Text overlay (“WORD”) detection errors are surfaced in UI (not silent).
+- Cast Photos imports auto-fill metadata:
+  - When kind=`cast`, the importer auto-tags people + auto-fills caption using the scraped per-image context text.
+  - When kind=`cast`, imported assets use the source article publish date as `metadata.source_created_at` so the UI shows **Created** (not just Added).
+- Season Media “Add backdrops” drawer only shows TMDb backdrops not already assigned to any season for the show.
+- Admins can delete web-scrape assets from Season Media (UI action + proxy + backend delete endpoint).
+- A one-shot admin script exists to bulk-delete web-scrape imports by show/season + source page URL (useful for re-importing with corrected metadata).
 
 Contracts
 - Backend preview: `POST /api/v1/admin/scrape/preview` may return `images[].bytes: int | null`.
 - Backend import: `images[].kind` allowlist includes `promo`, `intro`, `reunion`.
+- Backend delete (unified media_assets): `DELETE /api/v1/admin/media-assets/{asset_id}`.
 
 Dependency / Rollout Order
 1. Deploy TRR-Backend (contracts + fallbacks).
