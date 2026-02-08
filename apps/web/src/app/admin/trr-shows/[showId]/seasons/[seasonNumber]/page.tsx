@@ -425,6 +425,23 @@ export default function SeasonDetailPage() {
     setAssetLightbox(null);
   };
 
+  const deleteMediaAsset = useCallback(
+    async (asset: SeasonAsset) => {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/media-assets/${asset.id}`, {
+        method: "DELETE",
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to delete image");
+      }
+      setAssetLightbox(null);
+      await fetchAssets();
+    },
+    [getAuthHeaders, fetchAssets]
+  );
+
   const totalEpisodes = episodes.length;
   const groupedCast = useMemo(() => {
     const main: SeasonCastMember[] = [];
@@ -1096,6 +1113,14 @@ export default function SeasonDetailPage() {
             isOpen={true}
             onClose={closeAssetLightbox}
             metadata={mapSeasonAssetToMetadata(assetLightbox.asset, seasonNumber, show?.name)}
+            canManage={assetLightbox.asset.source?.toLowerCase?.().startsWith("web_scrape:")}
+            onDelete={async () => {
+              try {
+                await deleteMediaAsset(assetLightbox.asset);
+              } catch (err) {
+                alert(err instanceof Error ? err.message : "Failed to delete image");
+              }
+            }}
             position={{
               current: assetLightbox.index + 1,
               total: assetLightbox.filteredAssets.length,
