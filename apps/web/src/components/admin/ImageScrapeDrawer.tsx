@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
 import { auth } from "@/lib/firebase";
+import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
 import {
   PeopleSearchMultiSelect,
   type PersonOption,
@@ -18,6 +19,7 @@ interface ImageCandidate {
   best_url: string;
   width: number | null;
   height: number | null;
+  bytes?: number | null;
   alt_text: string | null;
   context: string | null;
   thumbnail_url: string;
@@ -81,13 +83,24 @@ export interface PersonContext {
 
 export type EntityContext = SeasonContext | PersonContext;
 
-type ImageKind = "poster" | "backdrop" | "episode_still" | "cast" | "other";
+type ImageKind =
+  | "poster"
+  | "backdrop"
+  | "episode_still"
+  | "cast"
+  | "promo"
+  | "intro"
+  | "reunion"
+  | "other";
 
 const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "poster", label: "Poster" },
   { value: "backdrop", label: "Backdrop" },
   { value: "episode_still", label: "Episode Still" },
   { value: "cast", label: "Cast Photos" },
+  { value: "promo", label: "Promo" },
+  { value: "intro", label: "Intro" },
+  { value: "reunion", label: "Reunion" },
   { value: "other", label: "Other" },
 ];
 
@@ -717,6 +730,11 @@ export function ImageScrapeDrawer({
               <div className="mb-6 grid grid-cols-3 gap-3">
                 {previewData.images.map((img) => {
                   const isSelected = selectedImages.has(img.id);
+                  const badgeText = formatImageCandidateBadgeText({
+                    width: img.width,
+                    height: img.height,
+                    bytes: img.bytes ?? null,
+                  });
                   return (
                     <div
                       key={img.id}
@@ -760,9 +778,9 @@ export function ImageScrapeDrawer({
                           )}
                         </div>
                         {/* Dimensions Badge */}
-                        {img.width && (
+                        {badgeText && (
                           <div className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                            {img.width}w
+                            {badgeText}
                           </div>
                         )}
                       </div>

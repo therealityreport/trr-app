@@ -6,6 +6,7 @@ import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
+import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
 import {
   PeopleSearchMultiSelect,
   type PersonOption,
@@ -37,6 +38,7 @@ interface ImageCandidate {
   best_url: string;
   width: number | null;
   height: number | null;
+  bytes?: number | null;
   alt_text: string | null;
   context: string | null;
   thumbnail_url: string;
@@ -74,13 +76,24 @@ interface ImportProgress {
   error?: string;
 }
 
-type ImageKind = "poster" | "backdrop" | "episode_still" | "cast" | "other";
+type ImageKind =
+  | "poster"
+  | "backdrop"
+  | "episode_still"
+  | "cast"
+  | "promo"
+  | "intro"
+  | "reunion"
+  | "other";
 
 const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "poster", label: "Poster" },
   { value: "backdrop", label: "Backdrop" },
   { value: "episode_still", label: "Episode Still" },
   { value: "cast", label: "Cast Photos" },
+  { value: "promo", label: "Promo" },
+  { value: "intro", label: "Intro" },
+  { value: "reunion", label: "Reunion" },
   { value: "other", label: "Other" },
 ];
 
@@ -922,12 +935,20 @@ export default function ScrapeImagesPage() {
                             </svg>
                           )}
                         </div>
-                        {/* Dimensions Badge */}
-                        {img.width && (
-                          <div className="absolute bottom-2 right-2 rounded bg-black/60 px-2 py-0.5 text-xs font-semibold text-white">
-                            {img.width}w
-                          </div>
-                        )}
+                        {/* Dimensions/Size Badge */}
+                        {(() => {
+                          const badgeText = formatImageCandidateBadgeText({
+                            width: img.width,
+                            height: img.height,
+                            bytes: img.bytes ?? null,
+                          });
+                          if (!badgeText) return null;
+                          return (
+                            <div className="absolute bottom-2 right-2 rounded bg-black/60 px-2 py-0.5 text-xs font-semibold text-white">
+                              {badgeText}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Caption Input */}
