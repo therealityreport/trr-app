@@ -92,8 +92,15 @@ export function matchesContentTypesForSeasonAsset(
   const label = (meta.sectionLabel ?? "").toLowerCase();
   const caption = (meta.caption ?? "").toLowerCase();
   const text = `${sectionTag} ${label} ${caption}`;
+  const kind = (asset.kind ?? "").toLowerCase().trim();
 
   return contentTypes.some((ct) => {
+    // Fallback: for assets imported via admin scraping, "kind" is often the most reliable signal.
+    if (ct === "promo" && kind === "promo") return true;
+    if (ct === "intro" && kind === "intro") return true;
+    if (ct === "reunion" && kind === "reunion") return true;
+    if (ct === "episode_still" && (kind === "episode_still" || kind === "episode still")) return true;
+
     switch (ct) {
       case "confessional":
         return sectionTag.includes("confessional");
@@ -112,4 +119,3 @@ export function matchesContentTypesForSeasonAsset(
     }
   });
 }
-

@@ -1080,6 +1080,7 @@ export default function PersonProfilePage() {
   // Image scrape drawer state
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [textOverlayDetectError, setTextOverlayDetectError] = useState<string | null>(null);
 
   // Refresh images state
   const [refreshingImages, setRefreshingImages] = useState(false);
@@ -1488,26 +1489,50 @@ export default function PersonProfilePage() {
       .slice(0, 25);
     if (targets.length === 0) return;
 
+    setTextOverlayDetectError(null);
     const headers = await getAuthHeaders();
     for (const photo of targets) {
       try {
         if (photo.origin === "media_links") {
           const assetId = photo.media_asset_id;
           if (!assetId) continue;
-          await fetch(`/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`, {
+          const response = await fetch(`/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`, {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
             body: JSON.stringify({ force: false }),
           });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const errorText =
+              typeof data.error === "string" ? data.error : "Detect text overlay failed";
+            const detailText = typeof data.detail === "string" ? data.detail : null;
+            setTextOverlayDetectError(detailText ? `${errorText}: ${detailText}` : errorText);
+            if (response.status === 401 || response.status === 403 || response.status === 503) {
+              break;
+            }
+          }
         } else {
-          await fetch(`/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`, {
+          const response = await fetch(`/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`, {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
             body: JSON.stringify({ force: false }),
           });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const errorText =
+              typeof data.error === "string" ? data.error : "Detect text overlay failed";
+            const detailText = typeof data.detail === "string" ? data.detail : null;
+            setTextOverlayDetectError(detailText ? `${errorText}: ${detailText}` : errorText);
+            if (response.status === 401 || response.status === 403 || response.status === 503) {
+              break;
+            }
+          }
         }
       } catch (err) {
-        console.warn("Text overlay detect failed:", err);
+        setTextOverlayDetectError(
+          err instanceof Error ? err.message : "Detect text overlay failed"
+        );
+        break;
       }
     }
 
@@ -2558,6 +2583,7 @@ export default function PersonProfilePage() {
           defaults={{ sort: "newest" }}
           unknownTextCount={isTextFilterActive ? unknownTextCount : undefined}
           onDetectTextForVisible={isTextFilterActive ? detectTextOverlayForUnknown : undefined}
+          textOverlayDetectError={textOverlayDetectError}
         />
       </div>
     </ClientOnly>

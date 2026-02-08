@@ -1,7 +1,7 @@
 # Other Projects — Task 1
 
 Repo: TRR-APP  
-Last updated: February 6, 2026
+Last updated: February 8, 2026
 
 Cross-Repo Snapshot
 - TRR-Backend PR `#44` merged.
@@ -21,6 +21,11 @@ Locked Contracts (No Pending Changes)
 4. Screenalytics photos endpoint: `GET /api/v1/screenalytics/people/{person_id}/photos?seed_only={bool}`.
 5. Service auth for app proxy path: `Authorization: Bearer <service_role>` + `X-TRR-Internal-Admin-Secret`.
 6. Screenalytics must use `served_url` and strict fallback: only call `seed_only=false` after successful empty `seed_only=true`.
+
+Addendum (Admin Media Enhancements)
+- Backend preview (`POST /api/v1/admin/scrape/preview`) may include `images[].bytes` for UI display (best-effort).
+- Backend import kind allowlist includes `promo`, `intro`, `reunion` in addition to existing kinds.
+- People Count auto-count falls back to source URL when `hosted_url` is missing.
 
 Responsibility Alignment
 - TRR-Backend

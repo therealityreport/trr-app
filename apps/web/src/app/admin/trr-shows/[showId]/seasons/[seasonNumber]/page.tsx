@@ -173,6 +173,7 @@ export default function SeasonDetailPage() {
 
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [textOverlayDetectError, setTextOverlayDetectError] = useState<string | null>(null);
   const advancedFilters = useMemo(
     () =>
       readAdvancedFilters(new URLSearchParams(searchParams.toString()), {
@@ -491,16 +492,30 @@ export default function SeasonDetailPage() {
       .slice(0, 25);
     if (targets.length === 0) return;
 
+    setTextOverlayDetectError(null);
     const headers = await getAuthHeaders();
     for (const asset of targets) {
       try {
-        await fetch(`/api/admin/trr-api/media-assets/${asset.id}/detect-text-overlay`, {
+        const response = await fetch(`/api/admin/trr-api/media-assets/${asset.id}/detect-text-overlay`, {
           method: "POST",
           headers: { ...headers, "Content-Type": "application/json" },
           body: JSON.stringify({ force: false }),
         });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const errorText =
+            typeof data.error === "string" ? data.error : "Detect text overlay failed";
+          const detailText = typeof data.detail === "string" ? data.detail : null;
+          setTextOverlayDetectError(detailText ? `${errorText}: ${detailText}` : errorText);
+          if (response.status === 401 || response.status === 403 || response.status === 503) {
+            break;
+          }
+        }
       } catch (err) {
-        console.warn("Text overlay detect failed:", err);
+        setTextOverlayDetectError(
+          err instanceof Error ? err.message : "Detect text overlay failed"
+        );
+        break;
       }
     }
 
@@ -1123,6 +1138,7 @@ export default function SeasonDetailPage() {
           defaults={{ sort: "newest" }}
           unknownTextCount={isTextFilterActive ? unknownTextCount : undefined}
           onDetectTextForVisible={isTextFilterActive ? detectTextOverlayForUnknown : undefined}
+          textOverlayDetectError={textOverlayDetectError}
         />
 
         {/* Add Backdrops drawer */}
