@@ -176,6 +176,11 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
     }
   };
 
+  const canArchive = Boolean(management?.onArchive) || Boolean(management?.onUnarchive);
+  const canReassign = Boolean(management?.onReassign);
+  const canDelete = Boolean(management?.onDelete);
+  const hasAnyActions = canArchive || canReassign || canDelete;
+
   return (
     <div
       data-expanded={isExpanded ? "true" : "false"}
@@ -422,51 +427,56 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
         )}
 
       {/* Management Actions */}
-      {management?.canManage && (
+      {management?.canManage && hasAnyActions && (
         <div className="mt-6 pt-4 border-t border-white/10">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
             Actions
           </span>
           <div className="mt-2 space-y-2">
-            {management.isArchived ? (
+            {canArchive &&
+              (management.isArchived ? (
+                <button
+                  onClick={() => handleAction("unarchive", management.onUnarchive)}
+                  disabled={actionLoading !== null}
+                  className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
+                >
+                  {actionLoading === "unarchive" ? "Unarchiving..." : "📦 Unarchive"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleAction("archive", management.onArchive)}
+                  disabled={actionLoading !== null}
+                  className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
+                >
+                  {actionLoading === "archive" ? "Archiving..." : "📦 Archive"}
+                </button>
+              ))}
+            {canReassign && (
               <button
-                onClick={() => handleAction("unarchive", management.onUnarchive)}
+                onClick={() => management.onReassign?.()}
                 disabled={actionLoading !== null}
                 className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
               >
-                {actionLoading === "unarchive" ? "Unarchiving..." : "📦 Unarchive"}
-              </button>
-            ) : (
-              <button
-                onClick={() => handleAction("archive", management.onArchive)}
-                disabled={actionLoading !== null}
-                className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
-              >
-                {actionLoading === "archive" ? "Archiving..." : "📦 Archive"}
+                📁 Re-assign
               </button>
             )}
-            <button
-              onClick={() => management.onReassign?.()}
-              disabled={actionLoading !== null}
-              className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
-            >
-              📁 Re-assign
-            </button>
-            <button
-              onClick={async () => {
-                if (
-                  confirm(
-                    "Are you sure you want to permanently delete this image? This action cannot be undone."
-                  )
-                ) {
-                  await handleAction("delete", management.onDelete);
-                }
-              }}
-              disabled={actionLoading !== null}
-              className="w-full rounded bg-red-500/20 px-3 py-2 text-sm text-red-300 hover:bg-red-500/30 text-left disabled:opacity-50"
-            >
-              {actionLoading === "delete" ? "Deleting..." : "🗑️ Delete"}
-            </button>
+            {canDelete && (
+              <button
+                onClick={async () => {
+                  if (
+                    confirm(
+                      "Are you sure you want to permanently delete this image? This action cannot be undone."
+                    )
+                  ) {
+                    await handleAction("delete", management.onDelete);
+                  }
+                }}
+                disabled={actionLoading !== null}
+                className="w-full rounded bg-red-500/20 px-3 py-2 text-sm text-red-300 hover:bg-red-500/30 text-left disabled:opacity-50"
+              >
+                {actionLoading === "delete" ? "Deleting..." : "🗑️ Delete"}
+              </button>
+            )}
           </div>
         </div>
       )}
