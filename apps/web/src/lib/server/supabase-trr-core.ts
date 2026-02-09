@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
  * Server-only Supabase client for TRR Core API (core schema).
  *
  * Uses service role key for admin-only access to core.shows, core.seasons,
- * core.episodes, core.show_cast, core.people, etc.
+ * core.episodes, core.v_show_cast, core.v_episode_cast, core.people, etc.
  *
  * NEVER import this in client components - it contains privileged credentials.
  *

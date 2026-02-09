@@ -71,10 +71,13 @@ export default React.forwardRef<HTMLDivElement, IconRatingInputProps>(function I
       if (icons.length === 0) return null;
 
       let bestIndex = 0;
-      let bestRect: DOMRect | null = null;
+      // Use DOMRectReadOnly to avoid TS lib variance across environments.
+      let bestRect: DOMRectReadOnly | null = null;
       let bestDistance = Number.POSITIVE_INFINITY;
 
-      icons.forEach((icon, idx) => {
+      // Use a plain loop so TypeScript control flow can see `bestRect` assignments.
+      for (let idx = 0; idx < icons.length; idx += 1) {
+        const icon = icons[idx];
         const rect = icon.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
@@ -84,7 +87,7 @@ export default React.forwardRef<HTMLDivElement, IconRatingInputProps>(function I
           bestIndex = idx;
           bestRect = rect;
         }
-      });
+      }
 
       if (!bestRect) return null;
 

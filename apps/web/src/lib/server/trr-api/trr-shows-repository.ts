@@ -505,7 +505,7 @@ export async function getCastByShowId(
 
   // First get cast with basic info
   const { data: castData, error: castError } = await supabase
-    .from("show_cast")
+    .from("v_show_cast")
     .select("*")
     .eq("show_id", showId)
     .order("billing_order", { ascending: true, nullsFirst: false })
@@ -632,7 +632,7 @@ export async function getShowCastWithStats(
   const supabase = getSupabaseTrrCore();
 
   const { data: castData, error: castError } = await supabase
-    .from("show_cast")
+    .from("v_show_cast")
     .select("*")
     .eq("show_id", showId)
     .order("billing_order", { ascending: true, nullsFirst: false })
@@ -1319,7 +1319,7 @@ export async function getCreditsByPersonId(
   const supabase = getSupabaseTrrCore();
 
   const { data, error } = await supabase
-    .from("show_cast")
+    .from("v_show_cast")
     .select("id, show_id, person_id, show_name, role, billing_order, credit_category")
     .eq("person_id", personId)
     .order("billing_order", { ascending: true, nullsFirst: false })
@@ -1427,8 +1427,8 @@ export async function getCastByShowSeason(
 }
 
 /**
- * Fallback function when episode_cast (Credits V2) has no data.
- * Returns show-level cast from show_cast table without per-season episode counts.
+ * Fallback function when season/episode-level cast views are unavailable.
+ * Returns show-level cast from core.v_show_cast without per-season episode counts.
  */
 async function getSeasonCastFallbackFromShowCast(
   showId: string,
@@ -1437,9 +1437,9 @@ async function getSeasonCastFallbackFromShowCast(
   const { limit, offset } = normalizePagination(options);
   const supabase = getSupabaseTrrCore();
 
-  // Query show_cast for all cast members of this show
+  // Query v_show_cast (credits-backed view) for all cast members of this show
   const { data: showCastData, error: showCastError } = await supabase
-    .from("show_cast")
+    .from("v_show_cast")
     .select("person_id, cast_member_name, billing_order")
     .eq("show_id", showId)
     .order("billing_order", { ascending: true, nullsFirst: false });
@@ -1550,7 +1550,7 @@ async function getSeasonCastFallbackFromShowCast(
 
 /**
  * Get cast members who appeared in a specific season with per-season episode counts.
- * Prefers v_season_cast, falls back to episode_cast, then v_person_show_seasons for membership-only.
+ * Prefers v_season_cast, falls back to v_episode_cast, then v_person_show_seasons for membership-only.
  */
 export async function getSeasonCastWithEpisodeCounts(
   showId: string,
@@ -1660,37 +1660,44 @@ export async function getSeasonCastWithEpisodeCounts(
   }
 
   if (personIds.length === 0) {
-    const { data: episodeCast, error: episodeCastError } = await supabase
-      .from("episode_cast")
-      .select("person_id, episode_id")
-      .eq("show_id", showId)
-      .eq("season_number", seasonNumber);
+    // Fallback: derive per-season episode counts from credits-backed view core.v_episode_cast.
+    // We first enumerate episode IDs for the season, then group v_episode_cast rows by person.
+    const { data: episodeRows, error: episodeRowsError } = await supabase
+      .from("episodes")
+      .select("id")
+      .eq("season_id", season.id)
+      .limit(1000);
 
-    if (episodeCastError) {
+    if (episodeRowsError) {
       console.error(
-        "[trr-shows-repository] getSeasonCastWithEpisodeCounts episode_cast error:",
-        episodeCastError
+        "[trr-shows-repository] getSeasonCastWithEpisodeCounts episodes lookup error:",
+        episodeRowsError
       );
-      if (isViewUnavailableError(episodeCastError)) {
-        const loaded = await loadSeasonMembers();
-        if (!loaded) {
-          return getSeasonCastFallbackFromShowCast(showId, options);
-        }
-        seasonMembersLoaded = true;
-        if (personIds.length === 0) {
-          return [];
-        }
-        // Skip further episode_cast handling since fallback succeeded.
-      } else {
-        throw new Error(`Failed to get season cast: ${episodeCastError.message}`);
-      }
     }
 
-    if (!episodeCastError && !seasonMembersLoaded) {
-      const castRows = (episodeCast ?? []) as Array<{ person_id: string; episode_id: string | number }>;
+    const episodeIds = ((episodeRows ?? []) as Array<{ id: string }>).map((r) => r.id).filter(Boolean);
 
-      // If episode_cast has no data (Credits V2 not populated), fall back to season membership view
-      if (castRows.length === 0) {
+    if (episodeIds.length === 0) {
+      const loaded = await loadSeasonMembers();
+      if (!loaded) {
+        return getSeasonCastFallbackFromShowCast(showId, options);
+      }
+      seasonMembersLoaded = true;
+      if (personIds.length === 0) {
+        return [];
+      }
+    } else {
+      const { data: episodeCast, error: episodeCastError } = await supabase
+        .from("v_episode_cast")
+        .select("person_id, episode_id")
+        .eq("show_id", showId)
+        .in("episode_id", episodeIds);
+
+      if (episodeCastError) {
+        console.error(
+          "[trr-shows-repository] getSeasonCastWithEpisodeCounts v_episode_cast error:",
+          episodeCastError
+        );
         const loaded = await loadSeasonMembers();
         if (!loaded) {
           return getSeasonCastFallbackFromShowCast(showId, options);
@@ -1699,23 +1706,34 @@ export async function getSeasonCastWithEpisodeCounts(
         if (personIds.length === 0) {
           return [];
         }
-        // Skip further episode_cast handling since fallback succeeded
-        // Continue to people/totals/photo loading below.
-      }
+      } else {
+        const castRows = (episodeCast ?? []) as Array<{ person_id: string; episode_id: string | number }>;
 
-      if (!seasonMembersLoaded) {
-        const episodeCounts = new Map<string, Set<string>>();
-        for (const row of castRows) {
-          if (!episodeCounts.has(row.person_id)) {
-            episodeCounts.set(row.person_id, new Set());
+        if (castRows.length === 0) {
+          const loaded = await loadSeasonMembers();
+          if (!loaded) {
+            return getSeasonCastFallbackFromShowCast(showId, options);
           }
-          episodeCounts.get(row.person_id)?.add(String(row.episode_id));
+          seasonMembersLoaded = true;
+          if (personIds.length === 0) {
+            return [];
+          }
         }
 
-        personIds = Array.from(episodeCounts.keys());
-        for (const [personId, episodes] of episodeCounts.entries()) {
-          episodesInSeasonMap.set(personId, episodes.size);
-          episodesCountKnown.add(personId);
+        if (!seasonMembersLoaded) {
+          const episodeCounts = new Map<string, Set<string>>();
+          for (const row of castRows) {
+            if (!episodeCounts.has(row.person_id)) {
+              episodeCounts.set(row.person_id, new Set());
+            }
+            episodeCounts.get(row.person_id)?.add(String(row.episode_id));
+          }
+
+          personIds = Array.from(episodeCounts.keys());
+          for (const [personId, episodes] of episodeCounts.entries()) {
+            episodesInSeasonMap.set(personId, episodes.size);
+            episodesCountKnown.add(personId);
+          }
         }
       }
     }
