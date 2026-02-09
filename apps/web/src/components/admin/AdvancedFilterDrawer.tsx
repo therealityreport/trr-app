@@ -33,6 +33,7 @@ export function AdvancedFilterDrawer({
   defaults,
   unknownTextCount,
   onDetectTextForVisible,
+  textOverlayDetectError,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -44,6 +45,7 @@ export function AdvancedFilterDrawer({
   defaults?: Partial<AdvancedFilterState>;
   unknownTextCount?: number;
   onDetectTextForVisible?: () => Promise<void> | void;
+  textOverlayDetectError?: string | null;
 }) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -164,6 +166,12 @@ export function AdvancedFilterDrawer({
                   </button>
                 </div>
               )}
+
+            {textOverlayDetectError && (
+              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                <p className="text-xs text-red-700">{textOverlayDetectError}</p>
+              </div>
+            )}
           </section>
 
           <section>
@@ -287,4 +295,3 @@ export function AdvancedFilterDrawer({
     </>
   );
 }
-

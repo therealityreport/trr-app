@@ -1,7 +1,7 @@
 # Facebank Seed Flagging — Task 1 Plan
 
 Repo: TRR-APP  
-Last updated: February 6, 2026
+Last updated: February 8, 2026
 
 Goal
 Allow admins to flag person gallery images as facebank seed candidates for SCREENALYTICS and keep downstream ingestion contract-safe.
@@ -96,3 +96,29 @@ Acceptance Criteria (Final Gate)
 4. Screenalytics strict fallback behavior is observed in live logs.
 5. `face_bank_images` side effects are correct and deduped.
 6. Task 1 docs are synchronized and marked completed across all repos.
+
+---
+
+## Addendum — Admin Media Workflow Enhancements (Import Kinds + Preview Size + Detector Robustness)
+
+Scope
+- Import Images kind picker for season/show imports supports additional content-type-like kinds: `promo`, `intro`, `reunion` (alongside existing kinds).
+- Scrape preview UI shows dimensions and best-effort file size (`bytes` via Content-Length when available).
+- People Count “Auto/Recount” works even when `hosted_url` is missing (backend falls back to source URL).
+- Text overlay (“WORD”) detection errors are surfaced in UI (not silent).
+- Cast Photos imports auto-fill metadata:
+  - When kind=`cast`, the importer auto-tags people + auto-fills caption using the scraped per-image context text.
+  - When kind=`cast`, imported assets use the source article publish date as `metadata.source_created_at` so the UI shows **Created** (not just Added).
+- Season Media “Add backdrops” drawer only shows TMDb backdrops not already assigned to any season for the show.
+- Admins can delete web-scrape assets from Season Media (UI action + proxy + backend delete endpoint).
+- A one-shot admin script exists to bulk-delete web-scrape imports by show/season + source page URL (useful for re-importing with corrected metadata).
+
+Contracts
+- Backend preview: `POST /api/v1/admin/scrape/preview` may return `images[].bytes: int | null`.
+- Backend import: `images[].kind` allowlist includes `promo`, `intro`, `reunion`.
+- Backend delete (unified media_assets): `DELETE /api/v1/admin/media-assets/{asset_id}`.
+
+Dependency / Rollout Order
+1. Deploy TRR-Backend (contracts + fallbacks).
+2. Deploy TRR-APP (UI + error surfacing).
+3. SCREENALYTICS: no code changes required; ensure `/vision/people-count` is reachable from TRR-Backend.

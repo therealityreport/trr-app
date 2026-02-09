@@ -71,7 +71,8 @@ describe('/auth/register two-stage flow', () => {
 
     fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Alex' } });
     fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: 'Smith' } });
-    fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    const [editBtn] = screen.getAllByRole('button', { name: /edit/i });
+    fireEvent.click(editBtn);
 
     expect(push).toHaveBeenCalledWith('/');
   });

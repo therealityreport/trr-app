@@ -33,9 +33,59 @@ interface TrrPerson {
   full_name: string;
   known_for: string | null;
   external_ids: Record<string, unknown>;
+  // Canonical multi-source fields (jsonb, keyed by source: tmdb/fandom/manual)
+  birthday?: Record<string, unknown>;
+  gender?: Record<string, unknown>;
+  biography?: Record<string, unknown>;
+  place_of_birth?: Record<string, unknown>;
+  homepage?: Record<string, unknown>;
+  profile_image_url?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
+
+type MultiSourceField = Record<string, unknown> | null | undefined;
+type ResolvedField = {
+  value: string | null;
+  source: string | null;
+  sources: Array<{ source: string; value: string }>;
+};
+
+const CANONICAL_SOURCE_ORDER = ["tmdb", "fandom", "manual"] as const;
+
+const resolveMultiSourceField = (field: MultiSourceField): ResolvedField => {
+  if (!field || typeof field !== "object") {
+    return { value: null, source: null, sources: [] };
+  }
+
+  const entries = Object.entries(field)
+    .map(([source, value]) => {
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        return trimmed ? { source, value: trimmed } : null;
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return { source, value: String(value) };
+      }
+      return null;
+    })
+    .filter((row): row is { source: string; value: string } => Boolean(row));
+
+  if (entries.length === 0) {
+    return { value: null, source: null, sources: [] };
+  }
+
+  for (const preferred of CANONICAL_SOURCE_ORDER) {
+    const hit = entries.find((e) => e.source === preferred);
+    if (hit) {
+      return { value: hit.value, source: hit.source, sources: entries };
+    }
+  }
+
+  // Fallback to first available source (stable order by source name).
+  const stable = [...entries].sort((a, b) => a.source.localeCompare(b.source));
+  return { value: stable[0].value, source: stable[0].source, sources: stable };
+};
 
 interface TrrPersonPhoto {
   id: string;
@@ -1080,6 +1130,7 @@ export default function PersonProfilePage() {
   // Image scrape drawer state
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [textOverlayDetectError, setTextOverlayDetectError] = useState<string | null>(null);
 
   // Refresh images state
   const [refreshingImages, setRefreshingImages] = useState(false);
@@ -1488,26 +1539,50 @@ export default function PersonProfilePage() {
       .slice(0, 25);
     if (targets.length === 0) return;
 
+    setTextOverlayDetectError(null);
     const headers = await getAuthHeaders();
     for (const photo of targets) {
       try {
         if (photo.origin === "media_links") {
           const assetId = photo.media_asset_id;
           if (!assetId) continue;
-          await fetch(`/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`, {
+          const response = await fetch(`/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`, {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
             body: JSON.stringify({ force: false }),
           });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const errorText =
+              typeof data.error === "string" ? data.error : "Detect text overlay failed";
+            const detailText = typeof data.detail === "string" ? data.detail : null;
+            setTextOverlayDetectError(detailText ? `${errorText}: ${detailText}` : errorText);
+            if (response.status === 401 || response.status === 403 || response.status === 503) {
+              break;
+            }
+          }
         } else {
-          await fetch(`/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`, {
+          const response = await fetch(`/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`, {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
             body: JSON.stringify({ force: false }),
           });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const errorText =
+              typeof data.error === "string" ? data.error : "Detect text overlay failed";
+            const detailText = typeof data.detail === "string" ? data.detail : null;
+            setTextOverlayDetectError(detailText ? `${errorText}: ${detailText}` : errorText);
+            if (response.status === 401 || response.status === 403 || response.status === 503) {
+              break;
+            }
+          }
         }
       } catch (err) {
-        console.warn("Text overlay detect failed:", err);
+        setTextOverlayDetectError(
+          err instanceof Error ? err.message : "Detect text overlay failed"
+        );
+        break;
       }
     }
 
@@ -1921,6 +1996,17 @@ export default function PersonProfilePage() {
     tvdb_id: rawExternalIds.tvdb,
   } : undefined;
 
+  const canonical = useMemo(() => {
+    return {
+      birthday: resolveMultiSourceField(person?.birthday),
+      gender: resolveMultiSourceField(person?.gender),
+      biography: resolveMultiSourceField(person?.biography),
+      placeOfBirth: resolveMultiSourceField(person?.place_of_birth),
+      homepage: resolveMultiSourceField(person?.homepage),
+      profileImageUrl: resolveMultiSourceField(person?.profile_image_url),
+    };
+  }, [person]);
+
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -2119,6 +2205,120 @@ export default function PersonProfilePage() {
                 {photos.length === 0 && (
                   <p className="text-sm text-zinc-500">No photos available.</p>
                 )}
+              </div>
+
+              {/* Canonical Profile (multi-source fields on core.people) */}
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
+                <div className="mb-4 flex items-center justify-between gap-4">
+                  <h3 className="text-lg font-bold text-zinc-900">Canonical Profile</h3>
+                  <span className="text-xs text-zinc-400">
+                    Source order: tmdb → fandom → manual
+                  </span>
+                </div>
+
+                {(() => {
+                  const rows: Array<{ label: string; field: ResolvedField; isLink: boolean }> = [
+                    { label: "Birthday", field: canonical.birthday, isLink: false },
+                    { label: "Gender", field: canonical.gender, isLink: false },
+                    { label: "Place of Birth", field: canonical.placeOfBirth, isLink: false },
+                    { label: "Homepage", field: canonical.homepage, isLink: true },
+                    { label: "Profile Image URL", field: canonical.profileImageUrl, isLink: true },
+                  ];
+
+                  const hasAny =
+                    rows.some((r) => Boolean(r.field.value)) ||
+                    Boolean(canonical.biography.value);
+
+                  if (!hasAny) {
+                    return (
+                      <p className="text-sm text-zinc-500">
+                        No canonical fields available yet.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {rows.map(({ label, field, isLink }) => (
+                          <div
+                            key={label}
+                            className="rounded-xl border border-zinc-100 bg-zinc-50 p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+                                  {label}
+                                </p>
+                                {field.value ? (
+                                  isLink ? (
+                                    <a
+                                      href={field.value}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="mt-1 block break-words text-sm font-medium text-blue-700 hover:text-blue-900"
+                                    >
+                                      {field.value}
+                                    </a>
+                                  ) : (
+                                    <p className="mt-1 break-words text-sm text-zinc-900">
+                                      {field.value}
+                                    </p>
+                                  )
+                                ) : (
+                                  <p className="mt-1 text-sm text-zinc-500">—</p>
+                                )}
+                              </div>
+                              {field.source && (
+                                <span className="flex-shrink-0 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                                  {field.source}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {canonical.biography.value && (
+                        <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4">
+                          <div className="mb-2 flex items-start justify-between gap-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+                              Biography
+                            </p>
+                            {canonical.biography.source && (
+                              <span className="flex-shrink-0 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                                {canonical.biography.source}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-zinc-800 leading-relaxed whitespace-pre-wrap">
+                            {canonical.biography.value}
+                          </p>
+                        </div>
+                      )}
+
+                      <details className="rounded-xl border border-zinc-200 bg-white p-4">
+                        <summary className="cursor-pointer text-sm font-semibold text-zinc-700">
+                          Raw Sources
+                        </summary>
+                        <pre className="mt-3 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
+                          {JSON.stringify(
+                            {
+                              birthday: person.birthday ?? {},
+                              gender: person.gender ?? {},
+                              biography: person.biography ?? {},
+                              place_of_birth: person.place_of_birth ?? {},
+                              homepage: person.homepage ?? {},
+                              profile_image_url: person.profile_image_url ?? {},
+                            },
+                            null,
+                            2
+                          )}
+                        </pre>
+                      </details>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Credits Preview */}
@@ -2558,6 +2758,7 @@ export default function PersonProfilePage() {
           defaults={{ sort: "newest" }}
           unknownTextCount={isTextFilterActive ? unknownTextCount : undefined}
           onDetectTextForVisible={isTextFilterActive ? detectTextOverlayForUnknown : undefined}
+          textOverlayDetectError={textOverlayDetectError}
         />
       </div>
     </ClientOnly>

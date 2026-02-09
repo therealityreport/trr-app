@@ -1,16 +1,43 @@
-## Cross-Repo Collaboration — Task 1 (Facebank Seed Flagging)
+# TRR-APP — Claude/Codex Quickstart
 
-Canonical task folder
-- /Users/thomashulihan/Projects/TRR-APP/docs/cross-collab/TASK1
+Repo operational rules: `AGENTS.md` in this repo.
+Workspace coordination rules: `/Users/thomashulihan/Projects/TRR/AGENTS.md`.
 
-Related task folders
-- /Users/thomashulihan/Projects/TRR-Backend/docs/cross-collab/TASK1
-- /Users/thomashulihan/Downloads/SCREENALYTICS/docs/cross-collab/TASK1
+## Quickstart
+```bash
+pnpm install
+cp apps/web/.env.example apps/web/.env.local
+pnpm -C apps/web exec next dev --webpack -p 3000
+```
 
-Coordination rules
-- Update cross-collab docs before implementing code changes
-- Keep plan docs aligned across all three repos
-- Implementation order: backend schema + endpoints, then app UI, then Screenalytics consumption
+Workspace dev (recommended for cross-repo work):
+```bash
+cd /Users/thomashulihan/Projects/TRR
+make dev
+```
 
-Auth rule
-- New admin sync/flag endpoints must be allowlist-only (email in `ADMIN_EMAIL_ALLOWLIST`)
+## Key Directories
+- `apps/web/src/app/`: Next.js App Router routes
+- `apps/web/src/components/`: React components
+- `apps/web/src/lib/server/`: server-only utilities
+- `apps/web/src/lib/server/trr-api/`: TRR-Backend API client + repositories
+- `apps/web/tests/`: Vitest tests
+
+## Environment
+Local env template:
+- `apps/web/.env.example`
+
+Key server-side vars:
+- `TRR_API_URL` (TRR-Backend base; normalized to `/api/v1`)
+- `SCREENALYTICS_API_URL` (screenalytics base for admin tooling)
+- `TRR_INTERNAL_ADMIN_SHARED_SECRET` (internal admin proxy to TRR-Backend)
+
+## Fast Validation
+```bash
+pnpm -C apps/web run lint
+pnpm -C apps/web exec next build --webpack
+pnpm -C apps/web run test:ci
+```
+
+## Session Continuity
+Update `docs/ai/HANDOFF.md` before ending a session if you touched this repo.

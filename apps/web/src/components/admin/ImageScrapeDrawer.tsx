@@ -3,10 +3,79 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
 import { auth } from "@/lib/firebase";
+import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
 import {
   PeopleSearchMultiSelect,
   type PersonOption,
 } from "@/components/admin/PeopleSearchMultiSelect";
+
+function normalizePersonName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/['’]/g, "") // collapse apostrophes so "O'Connor" matches "OConnor"
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseCastContext(input: { context: string | null; alt_text: string | null }): {
+  name: string | null;
+  caption: string | null;
+} {
+  const raw = (input.context ?? "").trim() || (input.alt_text ?? "").trim();
+  if (!raw) return { name: null, caption: null };
+
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length >= 2) {
+    const name = lines[0] || null;
+    const caption = lines.slice(1).join("\n").trim() || null;
+    return { name, caption };
+  }
+
+  // Fallback heuristics for single-line contexts.
+  const single = lines[0] ?? raw;
+  const colonIdx = single.indexOf(":");
+  if (colonIdx > 0 && colonIdx < 80) {
+    const name = single.slice(0, colonIdx).trim() || null;
+    const caption = single.slice(colonIdx + 1).trim() || null;
+    return { name, caption };
+  }
+
+  return { name: null, caption: single.trim() || null };
+}
+
+function bestNameMatch(
+  name: string,
+  candidates: Array<{ normalized: string; person: PersonOption }>
+): PersonOption | null {
+  const normalized = normalizePersonName(name);
+  if (!normalized) return null;
+
+  const direct = candidates.find((c) => c.normalized === normalized);
+  if (direct) return direct.person;
+
+  const nameTokens = new Set(normalized.split(" ").filter(Boolean));
+  if (nameTokens.size === 0) return null;
+
+  let best: { score: number; person: PersonOption } | null = null;
+  for (const candidate of candidates) {
+    const candidateTokens = candidate.normalized.split(" ").filter(Boolean);
+    if (candidateTokens.length === 0) continue;
+
+    let common = 0;
+    for (const token of candidateTokens) {
+      if (nameTokens.has(token)) common += 1;
+    }
+    const score = common / Math.max(nameTokens.size, candidateTokens.length);
+    if (!best || score > best.score) best = { score, person: candidate.person };
+  }
+
+  return best && best.score >= 0.8 ? best.person : null;
+}
 
 // ============================================================================
 // Types
@@ -18,6 +87,7 @@ interface ImageCandidate {
   best_url: string;
   width: number | null;
   height: number | null;
+  bytes?: number | null;
   alt_text: string | null;
   context: string | null;
   thumbnail_url: string;
@@ -81,13 +151,24 @@ export interface PersonContext {
 
 export type EntityContext = SeasonContext | PersonContext;
 
-type ImageKind = "poster" | "backdrop" | "episode_still" | "cast" | "other";
+type ImageKind =
+  | "poster"
+  | "backdrop"
+  | "episode_still"
+  | "cast"
+  | "promo"
+  | "intro"
+  | "reunion"
+  | "other";
 
 const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "poster", label: "Poster" },
   { value: "backdrop", label: "Backdrop" },
   { value: "episode_still", label: "Episode Still" },
   { value: "cast", label: "Cast Photos" },
+  { value: "promo", label: "Promo" },
+  { value: "intro", label: "Intro" },
+  { value: "reunion", label: "Reunion" },
   { value: "other", label: "Other" },
 ];
 
@@ -129,6 +210,12 @@ export function ImageScrapeDrawer({
   onImportComplete,
 }: ImageScrapeDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
+  const seasonCastIndexRef = useRef<Array<{ normalized: string; person: PersonOption }> | null>(
+    null
+  );
+  const seasonCastLoadingRef = useRef<Promise<
+    Array<{ normalized: string; person: PersonOption }> | null
+  > | null>(null);
 
   // Form state
   const [url, setUrl] = useState("");
@@ -163,6 +250,101 @@ export function ImageScrapeDrawer({
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  const ensureSeasonCastIndex = useCallback(async () => {
+    if (entityContext.type !== "season") return null;
+    if (seasonCastIndexRef.current) return seasonCastIndexRef.current;
+    if (seasonCastLoadingRef.current) return seasonCastLoadingRef.current;
+
+    seasonCastLoadingRef.current = (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/shows/${entityContext.showId}/seasons/${entityContext.seasonNumber}/cast?limit=500`,
+          { headers }
+        );
+        if (!response.ok) return null;
+        const data = (await response.json().catch(() => ({}))) as {
+          cast?: Array<{ person_id?: string; person_name?: string | null }>;
+        };
+        const cast = Array.isArray(data.cast) ? data.cast : [];
+        const index = cast
+          .map((row) => {
+            const id = typeof row.person_id === "string" ? row.person_id : null;
+            const name = typeof row.person_name === "string" ? row.person_name : null;
+            if (!id || !name) return null;
+            return {
+              normalized: normalizePersonName(name),
+              person: { id, name },
+            };
+          })
+          .filter(
+            (row): row is { normalized: string; person: PersonOption } =>
+              Boolean(row?.normalized && row.person.id && row.person.name)
+          );
+        seasonCastIndexRef.current = index;
+        return index;
+      } catch {
+        return null;
+      } finally {
+        seasonCastLoadingRef.current = null;
+      }
+    })();
+
+    return seasonCastLoadingRef.current;
+  }, [entityContext, getAuthHeaders]);
+
+  const autoFillCastFromContext = useCallback(
+    async (imageIds: Iterable<string>) => {
+      if (!previewData) return;
+      if (entityContext.type !== "season") return;
+
+      const castIndex = await ensureSeasonCastIndex();
+      if (!castIndex || castIndex.length === 0) return;
+
+      const imagesById = new Map(previewData.images.map((img) => [img.id, img]));
+      const captionUpdates: Record<string, string> = {};
+      const assignmentUpdates: Record<string, PersonOption[]> = {};
+
+      for (const id of imageIds) {
+        const img = imagesById.get(id);
+        if (!img) continue;
+        const parsed = parseCastContext({ context: img.context, alt_text: img.alt_text });
+        if (parsed.caption) {
+          captionUpdates[id] = parsed.caption;
+        }
+        if (parsed.name) {
+          const match = bestNameMatch(parsed.name, castIndex);
+          if (match) {
+            assignmentUpdates[id] = [match];
+          }
+        }
+      }
+
+      if (Object.keys(captionUpdates).length > 0) {
+        setCaptions((prev) => {
+          const next = { ...prev };
+          for (const [id, caption] of Object.entries(captionUpdates)) {
+            if (next[id] === undefined) next[id] = caption;
+          }
+          return next;
+        });
+      }
+
+      if (Object.keys(assignmentUpdates).length > 0) {
+        setPersonAssignments((prev) => {
+          const next = { ...prev };
+          for (const [id, people] of Object.entries(assignmentUpdates)) {
+            if (!next[id] || next[id].length === 0) {
+              next[id] = people;
+            }
+          }
+          return next;
+        });
+      }
+    },
+    [previewData, entityContext.type, ensureSeasonCastIndex]
+  );
 
   // Link a duplicate image to the current entity
   const linkDuplicate = useCallback(
@@ -646,6 +828,9 @@ export function ImageScrapeDrawer({
                             }
                             return next;
                           });
+                          if (value === "cast") {
+                            void autoFillCastFromContext(selectedImages);
+                          }
                           e.target.value = "";
                         }}
                         className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
@@ -717,6 +902,11 @@ export function ImageScrapeDrawer({
               <div className="mb-6 grid grid-cols-3 gap-3">
                 {previewData.images.map((img) => {
                   const isSelected = selectedImages.has(img.id);
+                  const badgeText = formatImageCandidateBadgeText({
+                    width: img.width,
+                    height: img.height,
+                    bytes: img.bytes ?? null,
+                  });
                   return (
                     <div
                       key={img.id}
@@ -760,9 +950,9 @@ export function ImageScrapeDrawer({
                           )}
                         </div>
                         {/* Dimensions Badge */}
-                        {img.width && (
+                        {badgeText && (
                           <div className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                            {img.width}w
+                            {badgeText}
                           </div>
                         )}
                       </div>
@@ -783,6 +973,9 @@ export function ImageScrapeDrawer({
                             onChange={(e) => {
                               const value = e.target.value as ImageKind;
                               setImageKinds((prev) => ({ ...prev, [img.id]: value }));
+                              if (value === "cast") {
+                                void autoFillCastFromContext([img.id]);
+                              }
                             }}
                             onClick={(e) => e.stopPropagation()}
                             className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
