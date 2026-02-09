@@ -1,7 +1,7 @@
 # Other Projects — Task 1
 
 Repo: TRR-APP  
-Last updated: February 8, 2026
+Last updated: February 9, 2026
 
 Cross-Repo Snapshot
 - TRR-Backend PR `#44` merged.
@@ -23,6 +23,8 @@ Locked Contracts (No Pending Changes)
 6. Screenalytics must use `served_url` and strict fallback: only call `seed_only=false` after successful empty `seed_only=true`.
 
 Addendum (Admin Media Enhancements)
+- TRR-Backend calls the people-count endpoint; ensure `/vision/people-count` is reachable at `SCREENALYTICS_API_URL` (TRR-Backend side).
+- If TRR-Backend is configured with an incompatible path, set `SCREENALYTICS_API_PATH=/vision/people-count` (TRR-Backend) rather than changing SCREENALYTICS routing.
 - Backend preview (`POST /api/v1/admin/scrape/preview`) may include `images[].bytes` for UI display (best-effort).
 - Backend import kind allowlist includes `promo`, `intro`, `reunion` in addition to existing kinds.
 - People Count auto-count falls back to source URL when `hosted_url` is missing.
