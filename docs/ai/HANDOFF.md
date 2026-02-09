@@ -18,7 +18,8 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
   - `pnpm -C apps/web run test:ci` (all tests passing)
 
 Pending / not executed:
-- Requires TRR-Backend migrations/views (TASK4) applied in Supabase for runtime parity.
+- Requires TRR-Backend migrations/views (TASK4) applied in each target environment for runtime parity.
+  - Staging Supabase was updated via `supabase db push --linked` in this session; prod not updated.
 
 ## Notes / Constraints
 
@@ -29,7 +30,7 @@ Pending / not executed:
 
 ## Next Steps
 
-1. Apply TRR-Backend Supabase migrations (views + people enrichment) in staging/prod; deploy app changes alongside.
+1. (Prod) Apply TRR-Backend Supabase migrations (views + people enrichment); deploy app changes alongside.
 2. Spot-check admin people page renders canonical fields correctly once `core.people` enrichment migration is live.
 
 ## Verification Commands
