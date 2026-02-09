@@ -1,13 +1,13 @@
 # Other Projects — Task 4 (Supabase Schema Cleanup)
 
 Repo: TRR-APP
-Last updated: February 8, 2026
+Last updated: February 9, 2026
 
 ## Cross-Repo Snapshot
 
-- TRR-Backend: Not yet started. Owns all migrations, data migration scripts, replacement views, and its own code changes. See TRR-Backend TASK4.
-- TRR-APP: Not yet started. Owns code changes for Phase 6c (cast queries) and Phase 6e (people enrichment display).
-- screenalytics: Not yet started. Must also update cast reads (separate TASK5).
+- TRR-Backend: Complete. Merged via PR #48; staging Supabase up to migrations 0102-0115. See TRR-Backend TASK4.
+- TRR-APP: Complete. Merged via PR #23; Vercel preview deployed. Owns Phase 6c + 6e consumer code changes.
+- screenalytics: Complete. Pushed to `main`; cast reads migrated. See screenalytics TASK5.
 
 ## Responsibility Alignment
 

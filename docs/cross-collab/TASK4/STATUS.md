@@ -18,3 +18,4 @@ None (code updated; requires TRR-Backend migrations/views applied in Supabase at
 
 - February 8, 2026: Task folder created.
 - February 9, 2026: Implemented Phase 6c + 6e code changes; `lint`/`build`/`test:ci` passing.
+- February 9, 2026: PR #23 merged to `main`; Vercel preview deployed.
