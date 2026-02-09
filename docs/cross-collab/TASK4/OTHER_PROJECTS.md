@@ -1,4 +1,4 @@
-# Other Projects — Task 3 (Supabase Schema Cleanup)
+# Other Projects — Task 4 (Supabase Schema Cleanup)
 
 Repo: TRR-APP
 Last updated: February 8, 2026

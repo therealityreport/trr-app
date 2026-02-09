@@ -11,7 +11,7 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 - Updated cast query sites to use credits-backed views (`core.v_show_cast`, `core.v_episode_cast`) instead of legacy cast tables.
 - Added admin person detail UI for enriched `core.people` multi-source fields with source attribution.
 - Fixed a TS narrowing issue in `IconRatingInput` and updated a register flow test selector to keep `test:ci` passing.
-- Cross-collab task docs updated: `docs/cross-collab/TASK3/*`.
+- Cross-collab task docs updated: `docs/cross-collab/TASK4/*`.
 - Fast checks:
   - `pnpm -C apps/web run lint`
   - `pnpm -C apps/web exec next build --webpack`

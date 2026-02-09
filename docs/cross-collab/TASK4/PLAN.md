@@ -1,4 +1,4 @@
-# Supabase Schema Cleanup — Task 3 Plan
+# Supabase Schema Cleanup — Task 4 Plan
 
 Repo: TRR-APP
 Last updated: February 8, 2026
