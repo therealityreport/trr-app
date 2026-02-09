@@ -1,7 +1,7 @@
 # Supabase Schema Cleanup — Task 4 Plan
 
 Repo: TRR-APP
-Last updated: February 8, 2026
+Last updated: February 9, 2026
 
 ## Goal
 
@@ -9,7 +9,7 @@ Update frontend queries and types to consume the new credits model and enriched 
 
 ## Status Snapshot
 
-Not yet started. Depends on TRR-Backend TASK4 (replacement views and migrations must exist before code changes).
+Complete. Merged via PR #23; Vercel preview deployed.
 
 ## Scope
 
@@ -64,4 +64,4 @@ Each field stores values keyed by source. Resolution order: tmdb > fandom > manu
 3. Person detail pages display enriched canonical fields with source attribution.
 4. Frontend build passes with no TypeScript errors.
 5. Existing tests pass with no regressions.
-6. Task 3 docs are synchronized across repos.
+6. Task 4 docs are synchronized across repos.
