@@ -43,6 +43,7 @@ Fast checks (this session):
 - Workspace dev runner (`/Users/thomashulihan/Projects/TRR/make dev`) provides:
   - `TRR_API_URL` (default `http://127.0.0.1:8000`)
   - `SCREENALYTICS_API_URL` (default `http://127.0.0.1:8001`)
+- In the multi-repo workspace, `make dev/stop/logs` from this repo delegates to the workspace root (`../Makefile`).
 - TRR-Backend routes are under `/api/v1/*` and TRR-APP normalizes the base automatically.
 - `apps/web/next.config.ts` changes require a Next dev server restart to take effect (restart `make dev` if you still see `/_next/image` behavior).
 

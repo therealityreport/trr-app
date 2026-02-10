@@ -1,6 +1,16 @@
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
+WORKSPACE_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
-.PHONY: repo-map repo-map-check
+.PHONY: dev stop logs repo-map repo-map-check
+
+dev:
+	@$(MAKE) -C $(WORKSPACE_ROOT) dev
+
+stop:
+	@$(MAKE) -C $(WORKSPACE_ROOT) stop
+
+logs:
+	@$(MAKE) -C $(WORKSPACE_ROOT) logs
 
 repo-map:
 	@$(PYTHON) scripts/generate_repo_mermaid.py
