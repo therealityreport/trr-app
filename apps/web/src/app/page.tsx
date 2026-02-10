@@ -58,7 +58,11 @@ export default function Page() {
   const handleGoogle = async () => {
     try {
       AuthDebugger.log("Main page: Starting Google sign-in");
-      await signInWithGoogle();
+      const ok = await signInWithGoogle();
+      if (!ok) {
+        AuthDebugger.log("Main page: Google sign-in not completed (cancelled/blocked/in-flight)");
+        return;
+      }
       AuthDebugger.log("Main page: Google sign-in successful, redirecting to complete");
       router.replace("/auth/complete");
     } catch (error) {

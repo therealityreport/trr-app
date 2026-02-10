@@ -70,6 +70,22 @@ interface SeasonCastMember {
 
 type TabId = "episodes" | "media" | "cast";
 
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const formatFixed1 = (value: unknown): string | null => {
+  const parsed = toFiniteNumber(value);
+  return parsed === null ? null : parsed.toFixed(1);
+};
+
 function GalleryImage({
   src,
   alt,
@@ -667,77 +683,82 @@ export default function SeasonDetailPage() {
               </div>
 
               <div className="space-y-3">
-                {episodes.map((episode) => (
-                  <div
-                    key={episode.id}
-                    className="flex items-start gap-4 rounded-lg border border-zinc-100 bg-zinc-50/50 p-4"
-                  >
-                    {episode.url_original_still && (
-                      <button
-                        onClick={(e) => {
-                          const episodesWithStills = episodes.filter((ep) => ep.url_original_still);
-                          const idx = episodesWithStills.findIndex((ep) => ep.id === episode.id);
-                          openEpisodeLightbox(episode, idx, episodesWithStills, e.currentTarget);
-                        }}
-                        className="relative h-16 w-28 flex-shrink-0 overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <GalleryImage
-                          src={episode.url_original_still}
-                          alt={episode.title || `Episode ${episode.episode_number}`}
-                          sizes="112px"
-                        />
-                      </button>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs font-semibold text-zinc-500">
-                              Episode {episode.episode_number}
-                            </p>
-                            {show.tmdb_id && episode.tmdb_episode_id && (
-                              <TmdbLinkIcon
-                                showTmdbId={show.tmdb_id}
-                                seasonNumber={episode.season_number}
-                                episodeNumber={episode.episode_number}
-                                type="episode"
-                              />
-                            )}
-                            {episode.imdb_episode_id && (
-                              <ImdbLinkIcon imdbId={episode.imdb_episode_id} type="title" />
-                            )}
-                          </div>
-                          <p className="font-semibold text-zinc-900">
-                            {episode.title || "Untitled"}
-                          </p>
-                        </div>
-                        {episode.imdb_rating && (
-                          <span className="flex items-center gap-1 text-sm text-zinc-600">
-                            <span className="text-yellow-500">★</span>
-                            {episode.imdb_rating.toFixed(1)}
-                          </span>
-                        )}
-                      </div>
-                      {(episode.synopsis || episode.overview) && (
-                        <p className="mt-1 text-sm text-zinc-600 line-clamp-2">
-                          {episode.synopsis || episode.overview}
-                        </p>
+                {episodes.map((episode) => {
+                  const imdbRatingText = formatFixed1(episode.imdb_rating);
+                  const tmdbVoteAverageText = formatFixed1(episode.tmdb_vote_average);
+
+                  return (
+                    <div
+                      key={episode.id}
+                      className="flex items-start gap-4 rounded-lg border border-zinc-100 bg-zinc-50/50 p-4"
+                    >
+                      {episode.url_original_still && (
+                        <button
+                          onClick={(e) => {
+                            const episodesWithStills = episodes.filter((ep) => ep.url_original_still);
+                            const idx = episodesWithStills.findIndex((ep) => ep.id === episode.id);
+                            openEpisodeLightbox(episode, idx, episodesWithStills, e.currentTarget);
+                          }}
+                          className="relative h-16 w-28 flex-shrink-0 overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <GalleryImage
+                            src={episode.url_original_still}
+                            alt={episode.title || `Episode ${episode.episode_number}`}
+                            sizes="112px"
+                          />
+                        </button>
                       )}
-                      <div className="mt-2 flex flex-wrap gap-3 text-xs text-zinc-500">
-                        {episode.air_date && (
-                          <span>{new Date(episode.air_date).toLocaleDateString()}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-semibold text-zinc-500">
+                                Episode {episode.episode_number}
+                              </p>
+                              {show.tmdb_id && episode.tmdb_episode_id && (
+                                <TmdbLinkIcon
+                                  showTmdbId={show.tmdb_id}
+                                  seasonNumber={episode.season_number}
+                                  episodeNumber={episode.episode_number}
+                                  type="episode"
+                                />
+                              )}
+                              {episode.imdb_episode_id && (
+                                <ImdbLinkIcon imdbId={episode.imdb_episode_id} type="title" />
+                              )}
+                            </div>
+                            <p className="font-semibold text-zinc-900">
+                              {episode.title || "Untitled"}
+                            </p>
+                          </div>
+                          {imdbRatingText && (
+                            <span className="flex items-center gap-1 text-sm text-zinc-600">
+                              <span className="text-yellow-500">★</span>
+                              {imdbRatingText}
+                            </span>
+                          )}
+                        </div>
+                        {(episode.synopsis || episode.overview) && (
+                          <p className="mt-1 text-sm text-zinc-600 line-clamp-2">
+                            {episode.synopsis || episode.overview}
+                          </p>
                         )}
-                        {episode.runtime && <span>{episode.runtime} min</span>}
-                        {episode.tmdb_vote_average && (
-                          <span>TMDB {episode.tmdb_vote_average.toFixed(1)}</span>
-                        )}
-                        {episode.imdb_vote_count && (
-                          <span>IMDB votes {episode.imdb_vote_count}</span>
-                        )}
+                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-zinc-500">
+                          {episode.air_date && (
+                            <span>{new Date(episode.air_date).toLocaleDateString()}</span>
+                          )}
+                          {episode.runtime && <span>{episode.runtime} min</span>}
+                          {tmdbVoteAverageText && (
+                            <span>TMDB {tmdbVoteAverageText}</span>
+                          )}
+                          {episode.imdb_vote_count && (
+                            <span>IMDB votes {episode.imdb_vote_count}</span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {episodes.length === 0 && (
                   <p className="text-sm text-zinc-500">No episodes found for this season.</p>
                 )}

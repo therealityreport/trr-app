@@ -1,12 +1,20 @@
 import "server-only";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg";
+import { Pool, types, type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 
 type SslConfig = {
   rejectUnauthorized: boolean;
   ca?: string;
 };
+
+// By default, `pg` returns NUMERIC/DECIMAL columns as strings.
+// Most of our app expects JavaScript numbers (e.g. `.toFixed()` in admin UIs),
+// so parse NUMERIC values into numbers globally.
+types.setTypeParser(types.builtins.NUMERIC, (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : value;
+});
 
 const parseSslMode = (connectionString: string): string | null => {
   try {

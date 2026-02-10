@@ -18,7 +18,7 @@ export class AuthDebugger {
     }
     
     // Also try to send to a simple endpoint for production debugging
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+    if (typeof window !== 'undefined' && !isLocalHostname(window.location.hostname)) {
       try {
         fetch('/api/debug-log', {
           method: 'POST',
@@ -46,10 +46,14 @@ export class AuthDebugger {
   }
 }
 
+function isLocalHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
 // Environment detection utility
 export const EnvUtils = {
-  isProduction: () => typeof window !== 'undefined' && window.location.hostname !== 'localhost',
-  isLocal: () => typeof window !== 'undefined' && window.location.hostname === 'localhost',
+  isProduction: () => typeof window !== "undefined" && !isLocalHostname(window.location.hostname),
+  isLocal: () => typeof window !== "undefined" && isLocalHostname(window.location.hostname),
   getEnvironmentInfo: () => ({
     hostname: typeof window !== 'undefined' ? window.location.hostname : 'server',
     userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'server',

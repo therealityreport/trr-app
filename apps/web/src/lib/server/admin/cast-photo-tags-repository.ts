@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getSupabaseTrrCore } from "@/lib/server/supabase-trr-core";
+import { query } from "@/lib/server/postgres";
 
 export interface CastPhotoTags {
   cast_photo_id: string;
@@ -18,21 +18,23 @@ export interface CastPhotoTags {
 const TAG_FIELDS =
   "cast_photo_id, people_names, people_ids, people_count, people_count_source, detector, created_at, updated_at, created_by_firebase_uid, updated_by_firebase_uid";
 
-const ADMIN_SCHEMA = "admin";
+// In the Supabase/PostgREST world, schemas must be "exposed" to be queryable.
+// In TRR-APP we prefer direct Postgres for admin tooling (no PostgREST), but we
+// still treat missing schema/table as "unavailable" so callers can degrade.
 let adminSchemaAvailable: boolean | null = null;
 
-const isInvalidSchemaError = (message: string | null | undefined): boolean =>
-  typeof message === "string" &&
-  message.toLowerCase().includes("invalid schema") &&
-  message.includes(ADMIN_SCHEMA);
+type PgErrorLike = { code?: string };
 
-const markAdminSchemaUnavailable = (message: string) => {
+const isMissingAdminSchemaOrTable = (error: unknown): boolean => {
+  const code = (error as PgErrorLike | null)?.code;
+  // 3F000 = invalid_schema_name, 42P01 = undefined_table
+  return code === "3F000" || code === "42P01";
+};
+
+const markAdminSchemaUnavailable = (error: unknown) => {
   if (adminSchemaAvailable === false) return;
   adminSchemaAvailable = false;
-  console.warn(
-    `[cast-photo-tags] Admin schema not exposed. Add "admin" to Supabase API exposed schemas.`,
-    message
-  );
+  console.warn("[cast-photo-tags] Admin tags table unavailable", error);
 };
 
 export async function getTagsByPhotoIds(
@@ -43,30 +45,20 @@ export async function getTagsByPhotoIds(
   if (adminSchemaAvailable === false) return tags;
 
   try {
-    const supabase = getSupabaseTrrCore();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any)
-      .schema(ADMIN_SCHEMA)
-      .from("cast_photo_people_tags")
-      .select(TAG_FIELDS)
-      .in("cast_photo_id", photoIds);
-
-    if (error) {
-      if (isInvalidSchemaError(error.message)) {
-        markAdminSchemaUnavailable(error.message);
-        return tags;
-      }
-      console.warn(
-        "[cast-photo-tags] Failed to fetch tags (admin.cast_photo_people_tags)",
-        error.message
-      );
-      return tags;
-    }
-
-    for (const row of (data ?? []) as CastPhotoTags[]) {
+    const result = await query<CastPhotoTags>(
+      `SELECT ${TAG_FIELDS}
+       FROM admin.cast_photo_people_tags
+       WHERE cast_photo_id = ANY($1::uuid[])`,
+      [photoIds]
+    );
+    for (const row of result.rows) {
       tags.set(row.cast_photo_id, row);
     }
   } catch (error) {
+    if (isMissingAdminSchemaOrTable(error)) {
+      markAdminSchemaUnavailable(error);
+      return tags;
+    }
     console.warn("[cast-photo-tags] Failed to fetch tags", error);
   }
 
@@ -78,28 +70,18 @@ export async function getPhotoIdsByPersonId(personId: string): Promise<string[]>
   if (adminSchemaAvailable === false) return [];
 
   try {
-    const supabase = getSupabaseTrrCore();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any)
-      .schema(ADMIN_SCHEMA)
-      .from("cast_photo_people_tags")
-      .select("cast_photo_id")
-      .contains("people_ids", [personId]);
-
-    if (error) {
-      if (isInvalidSchemaError(error.message)) {
-        markAdminSchemaUnavailable(error.message);
-        return [];
-      }
-      console.warn(
-        "[cast-photo-tags] Failed to fetch tag photo IDs",
-        error.message
-      );
+    const result = await query<{ cast_photo_id: string }>(
+      `SELECT cast_photo_id
+       FROM admin.cast_photo_people_tags
+       WHERE people_ids @> ARRAY[$1]::text[]`,
+      [personId]
+    );
+    return result.rows.map((row) => row.cast_photo_id);
+  } catch (error) {
+    if (isMissingAdminSchemaOrTable(error)) {
+      markAdminSchemaUnavailable(error);
       return [];
     }
-
-    return (data ?? []).map((row: { cast_photo_id: string }) => row.cast_photo_id);
-  } catch (error) {
     console.warn("[cast-photo-tags] Failed to fetch tag photo IDs", error);
     return [];
   }
@@ -119,39 +101,58 @@ export async function upsertCastPhotoTags(
 ): Promise<CastPhotoTags | null> {
   if (adminSchemaAvailable === false) return null;
   try {
-    const supabase = getSupabaseTrrCore();
     const now = new Date().toISOString();
-    const row = {
-      cast_photo_id: payload.cast_photo_id,
-      people_names: payload.people_names,
-      people_ids: payload.people_ids,
-      people_count: payload.people_count,
-      people_count_source: payload.people_count_source,
-      detector: payload.detector ?? null,
-      updated_at: now,
-      updated_by_firebase_uid: payload.updated_by_firebase_uid ?? null,
-      created_by_firebase_uid: payload.created_by_firebase_uid ?? null,
-    };
+    const result = await query<CastPhotoTags>(
+      `INSERT INTO admin.cast_photo_people_tags (
+        cast_photo_id,
+        people_names,
+        people_ids,
+        people_count,
+        people_count_source,
+        detector,
+        created_by_firebase_uid,
+        updated_by_firebase_uid,
+        updated_at
+      ) VALUES (
+        $1::uuid,
+        $2::text[],
+        $3::text[],
+        $4::int,
+        $5::text,
+        $6::text,
+        $7::text,
+        $8::text,
+        $9::timestamptz
+      )
+      ON CONFLICT (cast_photo_id) DO UPDATE SET
+        people_names = EXCLUDED.people_names,
+        people_ids = EXCLUDED.people_ids,
+        people_count = EXCLUDED.people_count,
+        people_count_source = EXCLUDED.people_count_source,
+        detector = EXCLUDED.detector,
+        updated_by_firebase_uid = EXCLUDED.updated_by_firebase_uid,
+        updated_at = EXCLUDED.updated_at,
+        created_by_firebase_uid = COALESCE(admin.cast_photo_people_tags.created_by_firebase_uid, EXCLUDED.created_by_firebase_uid)
+      RETURNING ${TAG_FIELDS}`,
+      [
+        payload.cast_photo_id,
+        payload.people_names,
+        payload.people_ids,
+        payload.people_count,
+        payload.people_count_source,
+        payload.detector ?? null,
+        payload.created_by_firebase_uid ?? null,
+        payload.updated_by_firebase_uid ?? null,
+        now,
+      ]
+    );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any)
-      .schema(ADMIN_SCHEMA)
-      .from("cast_photo_people_tags")
-      .upsert(row, { onConflict: "cast_photo_id", defaultToNull: false })
-      .select(TAG_FIELDS)
-      .single();
-
-    if (error) {
-      if (isInvalidSchemaError(error.message)) {
-        markAdminSchemaUnavailable(error.message);
-        return null;
-      }
-      console.warn("[cast-photo-tags] Failed to upsert tags", error.message);
+    return result.rows[0] ?? null;
+  } catch (error) {
+    if (isMissingAdminSchemaOrTable(error)) {
+      markAdminSchemaUnavailable(error);
       return null;
     }
-
-    return data as CastPhotoTags;
-  } catch (error) {
     console.warn("[cast-photo-tags] Failed to upsert tags", error);
     return null;
   }

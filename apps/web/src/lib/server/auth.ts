@@ -3,6 +3,8 @@ import { Buffer } from "node:buffer";
 import type { NextRequest } from "next/server";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { adminAuth } from "@/lib/firebaseAdmin";
+import { DEFAULT_ADMIN_DISPLAY_NAMES, DEFAULT_ADMIN_UIDS } from "@/lib/admin/constants";
+import { normalizeDisplayNameKey } from "@/lib/admin/display-names";
 
 export interface AuthenticatedUser {
   uid: string;
@@ -138,12 +140,37 @@ function parseAllowlist(raw: string | undefined, lowercase = true): Set<string> 
   );
 }
 
-const allowedEmails = parseAllowlist(process.env.ADMIN_EMAIL_ALLOWLIST, true);
+const allowedEmails = new Set<string>([
+  ...parseAllowlist(process.env.ADMIN_EMAIL_ALLOWLIST, true),
+  // Keep server + client allowlists aligned in dev/prod; this reduces misconfig footguns.
+  ...parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_EMAILS, true),
+]);
+
+const allowedUids = new Set<string>([
+  ...DEFAULT_ADMIN_UIDS,
+  ...parseAllowlist(process.env.ADMIN_UID_ALLOWLIST, false),
+  ...parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_UIDS, false),
+]);
+
+const allowedDisplayNameKeys = new Set<string>(
+  [
+    ...DEFAULT_ADMIN_DISPLAY_NAMES,
+    ...parseAllowlist(process.env.ADMIN_DISPLAYNAME_ALLOWLIST, false),
+    ...parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_DISPLAY_NAMES, false),
+  ]
+    .map((value) => normalizeDisplayNameKey(value))
+    .filter((value): value is string => Boolean(value)),
+);
 
 export async function requireAdmin(request: NextRequest): Promise<AuthenticatedUser> {
   const user = await requireUser(request);
   const email = user.email?.toLowerCase();
-  const isAllowed = Boolean(email && allowedEmails.has(email));
+  const emailAllowed = Boolean(email && allowedEmails.has(email));
+  const uidAllowed = Boolean(user.uid && allowedUids.has(user.uid));
+  const displayName = typeof user.token.name === "string" ? user.token.name : undefined;
+  const displayNameKey = normalizeDisplayNameKey(displayName);
+  const displayNameAllowed = Boolean(displayNameKey && allowedDisplayNameKeys.has(displayNameKey));
+  const isAllowed = emailAllowed || uidAllowed || displayNameAllowed;
   if (!isAllowed) {
     throw new Error("forbidden");
   }

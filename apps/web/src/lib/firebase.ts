@@ -53,10 +53,47 @@ export function onUser(cb: (u: User | null) => void) {
   return onAuthStateChanged(auth, cb);
 }
 
+type NormalizedAuthError = {
+  code?: string;
+  message?: string;
+  name?: string;
+};
+
+function normalizeAuthError(err: unknown): NormalizedAuthError {
+  if (typeof err === "string") return { message: err };
+  if (typeof err !== "object" || err === null) return {};
+
+  const anyErr = err as { code?: unknown; message?: unknown; name?: unknown };
+  return {
+    code: typeof anyErr.code === "string" ? anyErr.code : undefined,
+    message: typeof anyErr.message === "string" ? anyErr.message : undefined,
+    name: typeof anyErr.name === "string" ? anyErr.name : undefined,
+  };
+}
+
+function isBenignPopupAuthError(code?: string, message?: string): boolean {
+  return (
+    code === "auth/cancelled-popup-request" ||
+    code === "auth/popup-closed-by-user" ||
+    code === "auth/popup-blocked" ||
+    (typeof message === "string" && message.includes("Cross-Origin-Opener-Policy"))
+  );
+}
+
+class AuthFlowError extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "AuthFlowError";
+    this.code = code;
+  }
+}
+
 // Guard against duplicate sign-in popups and ignore benign cancellation errors
 let signinInFlight = false;
-export async function signInWithGoogle(): Promise<void> {
-  if (signinInFlight) return;
+export async function signInWithGoogle(): Promise<boolean> {
+  if (signinInFlight) return false;
   signinInFlight = true;
   try {
     const provider = new GoogleAuthProvider();
@@ -65,19 +102,15 @@ export async function signInWithGoogle(): Promise<void> {
     // Don't request birthday scope to avoid 403 errors
     // provider.addScope("https://www.googleapis.com/auth/user.birthday.read");
     
-    console.log("Starting Google sign-in popup...");
     const result = await signInWithPopup(auth, provider);
-    console.log("Google sign-in successful, user:", result.user.email);
-    
+
     // Skip Google People API call since it's causing 403 errors
     // The birthday field will be filled in the finish form instead
     
     // Establish a server session cookie for SSR guards
-    const idToken = await auth.currentUser?.getIdToken();
-    console.log("Got ID token, length:", idToken?.length);
+    const idToken = await result.user.getIdToken();
     
     if (idToken) {
-      console.log("Calling session login API...");
       const response = await fetch("/api/session/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -86,30 +119,39 @@ export async function signInWithGoogle(): Promise<void> {
       });
       
       if (!response.ok) {
-        console.error("Session login failed:", response.status, await response.text());
-      } else {
-        console.log("Session login successful");
+        // Avoid console.error here; in dev Next treats console.error as an overlay-level error.
+        console.warn("Session login failed:", response.status, await response.text());
       }
     } else {
       console.warn("No ID token available");
     }
+
+    return true;
   } catch (err: unknown) {
-    const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
-    const message = typeof err === "object" && err !== null && "message" in err ? (err as { message?: unknown }).message : undefined;
-    
-    console.error("Google sign-in error:", { code, message });
-    
-    // Handle CORS-related errors more gracefully
+    const { code, message } = normalizeAuthError(err);
+
+    // Common local-dev footgun: Firebase auth authorizes "localhost" by default, but not "127.0.0.1".
+    // If we detect that case, redirect to localhost so popup auth can proceed without a Firebase console change.
     if (
-      code === "auth/cancelled-popup-request" || 
-      code === "auth/popup-closed-by-user" ||
-      (typeof message === "string" && message.includes("Cross-Origin-Opener-Policy"))
+      code === "auth/unauthorized-domain" &&
+      typeof window !== "undefined" &&
+      process.env.NODE_ENV === "development" &&
+      window.location.hostname === "127.0.0.1"
     ) {
-      console.log("Sign-in cancelled or blocked by CORS policy");
-      return; // Don't throw error for these cases
+      const url = new URL(window.location.href);
+      url.hostname = "localhost";
+      window.location.replace(url.toString());
+      return false;
     }
-    
-    throw err;
+
+    // Handle cancellation/popup blockers/COOP noise without throwing (callers should not redirect).
+    if (isBenignPopupAuthError(code, message)) {
+      console.log("Google sign-in cancelled/blocked", { code, message });
+      return false;
+    }
+
+    const msg = message && message.trim().length > 0 ? message : "Google sign-in failed.";
+    throw new AuthFlowError(msg, code);
   } finally {
     signinInFlight = false;
   }

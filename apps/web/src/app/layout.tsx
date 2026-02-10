@@ -18,12 +18,14 @@ const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
   display: "swap",
+  preload: false,
 });
 
 const playfair = Playfair_Display({
   variable: "--font-playfair",
   subsets: ["latin"],
   display: "swap",
+  preload: false,
 });
 
 const gloucesterOS = localFont({
@@ -58,6 +60,7 @@ const plymouthSerial = localFont({
   ],
   variable: "--font-plymouth-serial",
   display: "swap",
+  preload: false,
 });
 
 const rudeSlabCondensed = localFont({
@@ -79,6 +82,7 @@ const rudeSlabCondensed = localFont({
   ],
   variable: "--font-rude-slab",
   display: "swap",
+  preload: false,
 });
 
 const gloucesterGoodall = localFont({
@@ -96,6 +100,7 @@ const gloucesterGoodall = localFont({
   ],
   variable: "--font-goodall",
   display: "swap",
+  preload: false,
 });
 
 export const metadata: Metadata = {

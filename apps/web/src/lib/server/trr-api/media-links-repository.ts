@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getSupabaseTrrCore } from "@/lib/server/supabase-trr-core";
+import { query } from "@/lib/server/postgres";
 
 export interface MediaLinkRow {
   id: string;
@@ -22,41 +22,28 @@ const MEDIA_LINK_FIELDS =
   "id, entity_type, entity_id, media_asset_id, kind, position, context, created_at";
 
 export async function getMediaLinkById(linkId: string): Promise<MediaLinkRow | null> {
-  const supabase = getSupabaseTrrCore();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any)
-    .from("media_links")
-    .select(MEDIA_LINK_FIELDS)
-    .eq("id", linkId)
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") {
-      return null;
-    }
-    throw new Error(`Failed to get media link: ${error.message}`);
-  }
-
-  return data as MediaLinkRow;
+  const result = await query<MediaLinkRow>(
+    `SELECT ${MEDIA_LINK_FIELDS}
+     FROM core.media_links
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [linkId]
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function getMediaLinksByAssetId(
   mediaAssetId: string
 ): Promise<MediaLinkRow[]> {
-  const supabase = getSupabaseTrrCore();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any)
-    .from("media_links")
-    .select(MEDIA_LINK_FIELDS)
-    .eq("media_asset_id", mediaAssetId)
-    .eq("entity_type", "person")
-    .eq("kind", "gallery");
-
-  if (error) {
-    throw new Error(`Failed to get media links: ${error.message}`);
-  }
-
-  return (data ?? []) as MediaLinkRow[];
+  const result = await query<MediaLinkRow>(
+    `SELECT ${MEDIA_LINK_FIELDS}
+     FROM core.media_links
+     WHERE media_asset_id = $1::uuid
+       AND entity_type = 'person'
+       AND kind = 'gallery'`,
+    [mediaAssetId]
+  );
+  return result.rows;
 }
 
 export async function ensureMediaLinksForPeople(
@@ -67,7 +54,6 @@ export async function ensureMediaLinksForPeople(
   const peopleWithIds = people.filter((person) => Boolean(person.id));
   if (peopleWithIds.length === 0) return;
 
-  const supabase = getSupabaseTrrCore();
   const existing = await getMediaLinksByAssetId(mediaAssetId);
   const existingIds = new Set(existing.map((link) => link.entity_id));
 
@@ -84,29 +70,42 @@ export async function ensureMediaLinksForPeople(
 
   if (rows.length === 0) return;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase as any).from("media_links").insert(rows);
-  if (error) {
-    throw new Error(`Failed to insert media links: ${error.message}`);
+  const values: unknown[] = [];
+  const tuples: string[] = [];
+  let idx = 1;
+  for (const row of rows) {
+    tuples.push(
+      `($${idx++}::text, $${idx++}::uuid, $${idx++}::uuid, $${idx++}::text, $${idx++}::int, $${idx++}::jsonb)`
+    );
+    values.push(
+      row.entity_type,
+      row.entity_id,
+      row.media_asset_id,
+      row.kind,
+      row.position,
+      JSON.stringify(row.context ?? {})
+    );
   }
+
+  await query(
+    `INSERT INTO core.media_links (entity_type, entity_id, media_asset_id, kind, position, context)
+     VALUES ${tuples.join(", ")}`,
+    values
+  );
 }
 
 export async function updateMediaLinksContext(
   mediaAssetId: string,
   context: Record<string, unknown>
 ): Promise<void> {
-  const supabase = getSupabaseTrrCore();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase as any)
-    .from("media_links")
-    .update({ context })
-    .eq("media_asset_id", mediaAssetId)
-    .eq("entity_type", "person")
-    .eq("kind", "gallery");
-
-  if (error) {
-    throw new Error(`Failed to update media links context: ${error.message}`);
-  }
+  await query(
+    `UPDATE core.media_links
+     SET context = $2::jsonb
+     WHERE media_asset_id = $1::uuid
+       AND entity_type = 'person'
+       AND kind = 'gallery'`,
+    [mediaAssetId, JSON.stringify(context)]
+  );
 }
 
 export interface CreateMediaLinkParams {
@@ -129,48 +128,34 @@ export interface CreateMediaLinkResult {
 export async function createMediaLink(
   params: CreateMediaLinkParams
 ): Promise<CreateMediaLinkResult> {
-  const supabase = getSupabaseTrrCore();
   const { media_asset_id, entity_type, entity_id, kind = "gallery", context = {} } = params;
 
   // Check if link already exists
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: existing, error: checkError } = await (supabase as any)
-    .from("media_links")
-    .select(MEDIA_LINK_FIELDS)
-    .eq("media_asset_id", media_asset_id)
-    .eq("entity_type", entity_type)
-    .eq("entity_id", entity_id)
-    .eq("kind", kind)
-    .maybeSingle();
-
-  if (checkError) {
-    throw new Error(`Failed to check existing link: ${checkError.message}`);
-  }
-
-  if (existing) {
-    return { link: existing as MediaLinkRow, already_exists: true };
+  const existing = await query<MediaLinkRow>(
+    `SELECT ${MEDIA_LINK_FIELDS}
+     FROM core.media_links
+     WHERE media_asset_id = $1::uuid
+       AND entity_type = $2::text
+       AND entity_id = $3::uuid
+       AND kind = $4::text
+     LIMIT 1`,
+    [media_asset_id, entity_type, entity_id, kind]
+  );
+  if (existing.rows[0]) {
+    return { link: existing.rows[0], already_exists: true };
   }
 
   // Create new link
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: newLink, error: insertError } = await (supabase as any)
-    .from("media_links")
-    .insert({
-      media_asset_id,
-      entity_type,
-      entity_id,
-      kind,
-      position: null,
-      context,
-    })
-    .select(MEDIA_LINK_FIELDS)
-    .single();
+  const inserted = await query<MediaLinkRow>(
+    `INSERT INTO core.media_links (media_asset_id, entity_type, entity_id, kind, position, context)
+     VALUES ($1::uuid, $2::text, $3::uuid, $4::text, NULL, $5::jsonb)
+     RETURNING ${MEDIA_LINK_FIELDS}`,
+    [media_asset_id, entity_type, entity_id, kind, JSON.stringify(context)]
+  );
 
-  if (insertError) {
-    throw new Error(`Failed to create media link: ${insertError.message}`);
-  }
-
-  return { link: newLink as MediaLinkRow, already_exists: false };
+  const link = inserted.rows[0];
+  if (!link) throw new Error("Failed to create media link");
+  return { link, already_exists: false };
 }
 
 /**
@@ -179,15 +164,11 @@ export async function createMediaLink(
 export async function getAllLinksForAsset(
   mediaAssetId: string
 ): Promise<MediaLinkRow[]> {
-  const supabase = getSupabaseTrrCore();
-  const { data, error } = await supabase
-    .from("media_links")
-    .select(MEDIA_LINK_FIELDS)
-    .eq("media_asset_id", mediaAssetId);
-
-  if (error) {
-    throw new Error(`Failed to get media links: ${error.message}`);
-  }
-
-  return (data ?? []) as MediaLinkRow[];
+  const result = await query<MediaLinkRow>(
+    `SELECT ${MEDIA_LINK_FIELDS}
+     FROM core.media_links
+     WHERE media_asset_id = $1::uuid`,
+    [mediaAssetId]
+  );
+  return result.rows;
 }

@@ -38,6 +38,22 @@ interface SearchResult {
   };
 }
 
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const formatFixed1 = (value: unknown): string | null => {
+  const parsed = toFiniteNumber(value);
+  return parsed === null ? null : parsed.toFixed(1);
+};
+
 export default function TrrShowsPage() {
   const { user, checking, hasAccess } = useAdminGuard();
   const [query, setQuery] = useState("");
@@ -336,6 +352,7 @@ export default function TrrShowsPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   {results.shows.map((show) => {
                     const isCovered = coveredShowIds.has(show.id);
+                    const tmdbVoteAverageText = formatFixed1(show.tmdb_vote_average);
                     return (
                       <div
                         key={show.id}
@@ -361,9 +378,9 @@ export default function TrrShowsPage() {
                                 {show.show_total_seasons} seasons
                               </span>
                             )}
-                            {show.tmdb_vote_average && (
+                            {tmdbVoteAverageText && (
                               <span className="text-xs text-zinc-500">
-                                ★ {show.tmdb_vote_average.toFixed(1)}
+                                ★ {tmdbVoteAverageText}
                               </span>
                             )}
                           </div>

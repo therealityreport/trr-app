@@ -1,6 +1,5 @@
 import "server-only";
 
-import { getSupabaseTrrCore } from "@/lib/server/supabase-trr-core";
 import { query } from "@/lib/server/postgres";
 
 // ============================================================================
@@ -50,12 +49,20 @@ async function logAudit(
   adminUid: string,
   details?: Record<string, unknown>
 ): Promise<void> {
-  await query(
-    `INSERT INTO admin.image_audit_log
-     (image_type, image_id, action, performed_by_firebase_uid, details)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [imageType, imageId, action, adminUid, details ? JSON.stringify(details) : null]
-  );
+  try {
+    await query(
+      `INSERT INTO admin.image_audit_log
+       (image_type, image_id, action, performed_by_firebase_uid, details)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [imageType, imageId, action, adminUid, details ? JSON.stringify(details) : null]
+    );
+  } catch (error) {
+    // Best-effort. Some environments don't have this table yet.
+    const code = (error as { code?: string } | null)?.code;
+    if (code !== "42P01" && code !== "3F000") {
+      console.warn("[images] Failed to write audit log", error);
+    }
+  }
 }
 
 // ============================================================================
@@ -68,19 +75,22 @@ async function logAudit(
  */
 export async function archiveImage(params: ArchiveParams): Promise<void> {
   const { imageType, imageId, adminUid, reason } = params;
-  const supabase = getSupabaseTrrCore();
   const table = TABLE_MAP[imageType];
+  const now = new Date().toISOString();
+  const patch = {
+    archived: true,
+    archived_at: now,
+    archived_by_firebase_uid: adminUid,
+    archived_reason: reason ?? null,
+  };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase.from(table) as any)
-    .update({
-      archived_at: new Date().toISOString(),
-      archived_by_firebase_uid: adminUid,
-      archived_reason: reason ?? null,
-    })
-    .eq("id", imageId);
-
-  if (error) throw new Error(`Failed to archive image: ${error.message}`);
+  await query(
+    `UPDATE core.${table}
+     SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb,
+         updated_at = NOW()
+     WHERE id = $1::uuid`,
+    [imageId, JSON.stringify(patch)]
+  );
 
   await logAudit(imageType, imageId, "archive", adminUid, { reason });
 }
@@ -92,19 +102,21 @@ export async function unarchiveImage(
   params: Omit<ArchiveParams, "reason">
 ): Promise<void> {
   const { imageType, imageId, adminUid } = params;
-  const supabase = getSupabaseTrrCore();
   const table = TABLE_MAP[imageType];
+  const patch = {
+    archived: false,
+    archived_at: null,
+    archived_by_firebase_uid: null,
+    archived_reason: null,
+  };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase.from(table) as any)
-    .update({
-      archived_at: null,
-      archived_by_firebase_uid: null,
-      archived_reason: null,
-    })
-    .eq("id", imageId);
-
-  if (error) throw new Error(`Failed to unarchive image: ${error.message}`);
+  await query(
+    `UPDATE core.${table}
+     SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb,
+         updated_at = NOW()
+     WHERE id = $1::uuid`,
+    [imageId, JSON.stringify(patch)]
+  );
 
   await logAudit(imageType, imageId, "unarchive", adminUid);
 }
@@ -119,20 +131,23 @@ export async function deleteImage(params: {
   adminUid: string;
 }): Promise<void> {
   const { imageType, imageId, adminUid } = params;
-  const supabase = getSupabaseTrrCore();
   const table = TABLE_MAP[imageType];
 
   // Get image details before deletion for audit
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: image } = await (supabase.from(table) as any)
-    .select("*")
-    .eq("id", imageId)
-    .single();
+  const imageResult = await query<Record<string, unknown>>(
+    `SELECT *
+     FROM core.${table}
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [imageId]
+  );
+  const image = imageResult.rows[0] ?? null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase.from(table) as any).delete().eq("id", imageId);
-
-  if (error) throw new Error(`Failed to delete image: ${error.message}`);
+  await query(
+    `DELETE FROM core.${table}
+     WHERE id = $1::uuid`,
+    [imageId]
+  );
 
   await logAudit(imageType, imageId, "delete", adminUid, {
     deletedImage: image,
@@ -149,21 +164,20 @@ export async function deleteImage(params: {
  */
 export async function reassignImage(params: ReassignParams): Promise<void> {
   const { imageType, imageId, toType, toEntityId, adminUid } = params;
-  const supabase = getSupabaseTrrCore();
   const sourceTable = TABLE_MAP[imageType];
   const destType = toType ?? imageType;
   const destTable = TABLE_MAP[destType];
 
   // Get the source image
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: sourceImage, error: fetchError } = await (supabase.from(sourceTable) as any)
-    .select("*")
-    .eq("id", imageId)
-    .single();
-
-  if (fetchError || !sourceImage) {
-    throw new Error("Source image not found");
-  }
+  const sourceResult = await query<Record<string, unknown>>(
+    `SELECT *
+     FROM core.${sourceTable}
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [imageId]
+  );
+  const sourceImage = sourceResult.rows[0];
+  if (!sourceImage) throw new Error("Source image not found");
 
   const sourceEntityIdColumn = getEntityIdColumn(imageType);
   const fromEntityId = sourceImage[sourceEntityIdColumn];
@@ -193,12 +207,21 @@ export async function reassignImage(params: ReassignParams): Promise<void> {
     }
     newImage[destEntityIdColumn] = toEntityId;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: insertError } = await (supabase.from(destTable) as any)
-      .insert(newImage);
-
-    if (insertError)
-      throw new Error(`Failed to copy image: ${insertError.message}`);
+    await query(
+      `INSERT INTO core.${destTable}
+       (source, url, hosted_url, caption, width, height, metadata, ${destEntityIdColumn})
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::uuid)`,
+      [
+        newImage.source ?? null,
+        newImage.url ?? null,
+        newImage.hosted_url ?? null,
+        newImage.caption ?? null,
+        newImage.width ?? null,
+        newImage.height ?? null,
+        JSON.stringify((newImage.metadata as Record<string, unknown> | null | undefined) ?? null),
+        newImage[destEntityIdColumn],
+      ]
+    );
 
     // Archive the original
     await archiveImage({
@@ -218,13 +241,13 @@ export async function reassignImage(params: ReassignParams): Promise<void> {
     // Same type, just update the entity ID
     const entityIdColumn = getEntityIdColumn(imageType);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: updateError } = await (supabase.from(sourceTable) as any)
-      .update({ [entityIdColumn]: toEntityId })
-      .eq("id", imageId);
-
-    if (updateError)
-      throw new Error(`Failed to reassign image: ${updateError.message}`);
+    await query(
+      `UPDATE core.${sourceTable}
+       SET ${entityIdColumn} = $2::uuid,
+           updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [imageId, toEntityId]
+    );
 
     await logAudit(imageType, imageId, "reassign", adminUid, {
       fromEntityId,
@@ -255,15 +278,14 @@ export async function getImage(
   imageType: ImageType,
   imageId: string
 ): Promise<Record<string, unknown> | null> {
-  const supabase = getSupabaseTrrCore();
   const table = TABLE_MAP[imageType];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase.from(table) as any)
-    .select("*")
-    .eq("id", imageId)
-    .single();
-
-  if (error) return null;
-  return data;
+  const result = await query<Record<string, unknown>>(
+    `SELECT *
+     FROM core.${table}
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [imageId]
+  );
+  return result.rows[0] ?? null;
 }
