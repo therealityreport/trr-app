@@ -53,15 +53,31 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const { showKey } = await params;
 
     const body = await request.json();
-    const { title, shortTitle, network, status, logline, palette, iconUrl, wordmarkUrl, heroUrl, tags, isActive } = body;
-
-    const show = await updateShowByKey(showKey, {
+    const {
       title,
+      trrShowId,
       shortTitle,
       network,
       status,
       logline,
       palette,
+      fonts,
+      iconUrl,
+      wordmarkUrl,
+      heroUrl,
+      tags,
+      isActive,
+    } = body;
+
+    const show = await updateShowByKey(showKey, {
+      title,
+      trrShowId,
+      shortTitle,
+      network,
+      status,
+      logline,
+      palette,
+      fonts,
       iconUrl,
       wordmarkUrl,
       heroUrl,

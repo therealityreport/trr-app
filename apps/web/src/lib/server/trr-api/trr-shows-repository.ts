@@ -4,7 +4,7 @@ import {
   getPhotoIdsByPersonId,
   getTagsByPhotoIds,
 } from "@/lib/server/admin/cast-photo-tags-repository";
-import { dedupePhotosByHostedUrlPreferMediaLinks } from "@/lib/server/trr-api/person-photo-utils";
+import { dedupePhotosByCanonicalKeysPreferMediaLinks } from "@/lib/server/trr-api/person-photo-utils";
 
 // ============================================================================
 // Types
@@ -701,8 +701,11 @@ export interface TrrPersonPhoto {
   id: string;
   person_id: string;
   source: string;
+  source_image_id?: string | null;
+  source_asset_id?: string | null;
   url: string | null;
   hosted_url: string | null;
+  hosted_sha256?: string | null;
   hosted_content_type?: string | null;
   caption: string | null;
   width: number | null;
@@ -760,8 +763,10 @@ export async function getPhotosByPersonId(
       | "id"
       | "person_id"
       | "source"
+      | "source_image_id"
       | "url"
       | "hosted_url"
+      | "hosted_sha256"
       | "hosted_content_type"
       | "caption"
       | "width"
@@ -780,8 +785,10 @@ export async function getPhotosByPersonId(
        id,
        person_id,
        source,
+       source_image_id,
        url,
        hosted_url,
+       hosted_sha256,
        hosted_content_type,
        caption,
        width,
@@ -810,8 +817,10 @@ export async function getPhotosByPersonId(
           | "id"
           | "person_id"
           | "source"
+          | "source_image_id"
           | "url"
           | "hosted_url"
+          | "hosted_sha256"
           | "hosted_content_type"
           | "caption"
           | "width"
@@ -830,8 +839,10 @@ export async function getPhotosByPersonId(
            id,
            person_id,
            source,
+           source_image_id,
            url,
            hosted_url,
+           hosted_sha256,
            hosted_content_type,
            caption,
            width,
@@ -865,8 +876,10 @@ export async function getPhotosByPersonId(
           | "id"
           | "person_id"
           | "source"
+          | "source_image_id"
           | "url"
           | "hosted_url"
+          | "hosted_sha256"
           | "hosted_content_type"
           | "caption"
           | "width"
@@ -885,8 +898,10 @@ export async function getPhotosByPersonId(
            id,
            person_id,
            source,
+           source_image_id,
            url,
            hosted_url,
+           hosted_sha256,
            hosted_content_type,
            caption,
            width,
@@ -991,8 +1006,10 @@ export async function getPhotosByPersonId(
       context: Record<string, unknown> | null;
       link_created_at: string;
       source: string | null;
+      source_asset_id: string | null;
       source_url: string | null;
       hosted_url: string | null;
+      hosted_sha256: string | null;
       hosted_content_type: string | null;
       caption: string | null;
       width: number | null;
@@ -1009,8 +1026,10 @@ export async function getPhotosByPersonId(
          ml.context,
          ml.created_at AS link_created_at,
          ma.source,
+         ma.source_asset_id,
          ma.source_url,
          ma.hosted_url,
+         ma.hosted_sha256,
          ma.hosted_content_type,
          ma.caption,
          ma.width,
@@ -1062,8 +1081,10 @@ export async function getPhotosByPersonId(
           id: row.link_id,
           person_id: personId,
           source: normalizedFandom.source,
+          source_asset_id: row.source_asset_id ?? null,
           url: row.source_url,
           hosted_url: row.hosted_url,
+          hosted_sha256: row.hosted_sha256 ?? null,
           hosted_content_type: row.hosted_content_type ?? null,
           caption: row.caption,
           width: row.width,
@@ -1100,9 +1121,9 @@ export async function getPhotosByPersonId(
   // Merge both sources, cast_photos first then media_links
   const allPhotos = [...(castPhotosWithTags ?? []) as TrrPersonPhoto[], ...mediaPhotos];
 
-  // Deduplicate by hosted_url (in case same image exists in both sources),
-  // preferring media_links rows when the URL collides.
-  const dedupedPhotos = dedupePhotosByHostedUrlPreferMediaLinks(allPhotos);
+  // Deduplicate by canonical identity (source IDs / sha / hosted_url),
+  // preferring media_links rows when collisions occur.
+  const dedupedPhotos = dedupePhotosByCanonicalKeysPreferMediaLinks(allPhotos);
 
   // Apply pagination
   return dedupedPhotos.slice(offset, offset + limit);

@@ -24,17 +24,20 @@ export interface CastAsset {
   role?: string;
   instagram?: string;
   status?: "main" | "friend" | "new" | "alum";
+  trrPersonId?: string;
 }
 
 export interface ShowRecord {
   id: string;
   key: string;
+  trr_show_id: string | null;
   title: string;
   short_title: string | null;
   network: string | null;
   status: string | null;
   logline: string | null;
   palette: ShowPalette | null;
+  fonts: Record<string, unknown>;
   icon_url: string | null;
   wordmark_url: string | null;
   hero_url: string | null;
@@ -66,11 +69,13 @@ export interface ShowSeasonRecord {
 export interface CreateShowInput {
   key: string;
   title: string;
+  trrShowId?: string | null;
   shortTitle?: string | null;
   network?: string | null;
   status?: string | null;
   logline?: string | null;
   palette?: ShowPalette | null;
+  fonts?: Record<string, unknown> | null;
   iconUrl?: string | null;
   wordmarkUrl?: string | null;
   heroUrl?: string | null;
@@ -79,11 +84,13 @@ export interface CreateShowInput {
 
 export interface UpdateShowInput {
   title?: string;
+  trrShowId?: string | null;
   shortTitle?: string | null;
   network?: string | null;
   status?: string | null;
   logline?: string | null;
   palette?: ShowPalette | null;
+  fonts?: Record<string, unknown> | null;
   iconUrl?: string | null;
   wordmarkUrl?: string | null;
   heroUrl?: string | null;
@@ -126,8 +133,8 @@ export interface UpdateSeasonInput {
 export async function getAllShows(): Promise<ShowRecord[]> {
   const result = await query<ShowRecord>(
     `SELECT
-      id, key, title, short_title, network, status, logline,
-      palette, icon_url, wordmark_url, hero_url, tags, is_active,
+      id, key, trr_show_id, title, short_title, network, status, logline,
+      palette, fonts, icon_url, wordmark_url, hero_url, tags, is_active,
       created_at, updated_at
     FROM survey_shows
     ORDER BY title ASC`
@@ -138,8 +145,8 @@ export async function getAllShows(): Promise<ShowRecord[]> {
 export async function getActiveShows(): Promise<ShowRecord[]> {
   const result = await query<ShowRecord>(
     `SELECT
-      id, key, title, short_title, network, status, logline,
-      palette, icon_url, wordmark_url, hero_url, tags, is_active,
+      id, key, trr_show_id, title, short_title, network, status, logline,
+      palette, fonts, icon_url, wordmark_url, hero_url, tags, is_active,
       created_at, updated_at
     FROM survey_shows
     WHERE is_active = true
@@ -151,8 +158,8 @@ export async function getActiveShows(): Promise<ShowRecord[]> {
 export async function getShowByKey(key: string): Promise<ShowRecord | null> {
   const result = await query<ShowRecord>(
     `SELECT
-      id, key, title, short_title, network, status, logline,
-      palette, icon_url, wordmark_url, hero_url, tags, is_active,
+      id, key, trr_show_id, title, short_title, network, status, logline,
+      palette, fonts, icon_url, wordmark_url, hero_url, tags, is_active,
       created_at, updated_at
     FROM survey_shows
     WHERE key = $1`,
@@ -165,8 +172,8 @@ export async function getShowByKey(key: string): Promise<ShowRecord | null> {
 export async function getShowById(id: string): Promise<ShowRecord | null> {
   const result = await query<ShowRecord>(
     `SELECT
-      id, key, title, short_title, network, status, logline,
-      palette, icon_url, wordmark_url, hero_url, tags, is_active,
+      id, key, trr_show_id, title, short_title, network, status, logline,
+      palette, fonts, icon_url, wordmark_url, hero_url, tags, is_active,
       created_at, updated_at
     FROM survey_shows
     WHERE id = $1`,
@@ -176,15 +183,29 @@ export async function getShowById(id: string): Promise<ShowRecord | null> {
   return row ? parseShowJsonFields(row) : null;
 }
 
+export async function getShowByTrrShowId(trrShowId: string): Promise<ShowRecord | null> {
+  const result = await query<ShowRecord>(
+    `SELECT
+      id, key, trr_show_id, title, short_title, network, status, logline,
+      palette, fonts, icon_url, wordmark_url, hero_url, tags, is_active,
+      created_at, updated_at
+    FROM survey_shows
+    WHERE trr_show_id = $1`,
+    [trrShowId]
+  );
+  const row = result.rows[0];
+  return row ? parseShowJsonFields(row) : null;
+}
+
 export async function createShow(input: CreateShowInput): Promise<ShowRecord> {
   const result = await query<ShowRecord>(
     `INSERT INTO survey_shows (
       key, title, short_title, network, status, logline,
-      palette, icon_url, wordmark_url, hero_url, tags
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      trr_show_id, palette, fonts, icon_url, wordmark_url, hero_url, tags
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     RETURNING
-      id, key, title, short_title, network, status, logline,
-      palette, icon_url, wordmark_url, hero_url, tags, is_active,
+      id, key, trr_show_id, title, short_title, network, status, logline,
+      palette, fonts, icon_url, wordmark_url, hero_url, tags, is_active,
       created_at, updated_at`,
     [
       input.key,
@@ -193,7 +214,9 @@ export async function createShow(input: CreateShowInput): Promise<ShowRecord> {
       input.network ?? null,
       input.status ?? null,
       input.logline ?? null,
+      input.trrShowId ?? null,
       input.palette ? JSON.stringify(input.palette) : null,
+      JSON.stringify(input.fonts ?? {}),
       input.iconUrl ?? null,
       input.wordmarkUrl ?? null,
       input.heroUrl ?? null,
@@ -215,6 +238,10 @@ export async function updateShowByKey(
     updates.push(`title = $${paramIndex++}`);
     values.push(input.title);
   }
+  if (input.trrShowId !== undefined) {
+    updates.push(`trr_show_id = $${paramIndex++}`);
+    values.push(input.trrShowId);
+  }
   if (input.shortTitle !== undefined) {
     updates.push(`short_title = $${paramIndex++}`);
     values.push(input.shortTitle);
@@ -234,6 +261,10 @@ export async function updateShowByKey(
   if (input.palette !== undefined) {
     updates.push(`palette = $${paramIndex++}`);
     values.push(input.palette ? JSON.stringify(input.palette) : null);
+  }
+  if (input.fonts !== undefined) {
+    updates.push(`fonts = $${paramIndex++}`);
+    values.push(JSON.stringify(input.fonts ?? {}));
   }
   if (input.iconUrl !== undefined) {
     updates.push(`icon_url = $${paramIndex++}`);
@@ -266,8 +297,8 @@ export async function updateShowByKey(
     SET ${updates.join(", ")}
     WHERE key = $${paramIndex}
     RETURNING
-      id, key, title, short_title, network, status, logline,
-      palette, icon_url, wordmark_url, hero_url, tags, is_active,
+      id, key, trr_show_id, title, short_title, network, status, logline,
+      palette, fonts, icon_url, wordmark_url, hero_url, tags, is_active,
       created_at, updated_at`,
     values
   );
@@ -468,9 +499,15 @@ export async function deleteSeason(id: string): Promise<boolean> {
 // ============================================================================
 
 function parseShowJsonFields(row: ShowRecord): ShowRecord {
+  const nextFontsRaw = (row as unknown as { fonts?: unknown }).fonts;
+
   return {
     ...row,
     palette: typeof row.palette === "string" ? JSON.parse(row.palette) : row.palette,
+    fonts:
+      typeof nextFontsRaw === "string"
+        ? JSON.parse(nextFontsRaw)
+        : (nextFontsRaw as Record<string, unknown> | null) ?? {},
   };
 }
 

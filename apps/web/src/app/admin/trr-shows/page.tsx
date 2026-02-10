@@ -9,6 +9,7 @@ import { auth } from "@/lib/firebase";
 interface TrrShow {
   id: string;
   name: string;
+  alternative_names?: string[] | null;
   imdb_id: string | null;
   tmdb_id: number | null;
   show_total_seasons: number | null;
@@ -37,6 +38,82 @@ interface SearchResult {
     count: number;
   };
 }
+
+const sanitizeAcronym = (value: string) => value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+
+const getHousewivesAcronymFromAlternativeNames = (
+  alternativeNames: unknown,
+): string | null => {
+  if (!Array.isArray(alternativeNames)) return null;
+
+  const candidates = alternativeNames
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => sanitizeAcronym(name.trim()))
+    .filter(Boolean)
+    .filter((name) => /^RH[A-Z0-9]{2,}$/.test(name));
+
+  if (candidates.length === 0) return null;
+
+  const rho = candidates.filter((name) => name.startsWith("RHO"));
+  const pool = rho.length > 0 ? rho : candidates;
+  pool.sort((a, b) => b.length - a.length);
+  return pool[0] ?? null;
+};
+
+const getHousewivesAcronymFromTitle = (title: string): string | null => {
+  const normalized = title.trim().replace(/^the\s+/i, "");
+  const match = normalized.match(/real housewives of (.+)$/i);
+  if (!match) return null;
+
+  const remainder = match[1]
+    .replace(/[()]/g, " ")
+    .replace(/[^A-Za-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!remainder) return null;
+
+  const stop = new Set(["of", "the", "and"]);
+  const letters = remainder
+    .split(" ")
+    .filter((word) => word.length > 0 && !stop.has(word.toLowerCase()))
+    .map((word) => word[0]?.toUpperCase())
+    .filter((value): value is string => Boolean(value));
+
+  if (letters.length === 0) return null;
+
+  return `RHO${letters.join("")}`;
+};
+
+const getShowDisplayName = (show: { name: string; alternative_names?: string[] | null }) => {
+  const acronym =
+    getHousewivesAcronymFromAlternativeNames(show.alternative_names) ??
+    getHousewivesAcronymFromTitle(show.name);
+
+  if (!acronym) {
+    return { primary: show.name, secondary: null as string | null };
+  }
+
+  const normalizedName = sanitizeAcronym(show.name);
+  if (normalizedName === acronym) {
+    return { primary: show.name, secondary: null as string | null };
+  }
+
+  // Only apply acronym display for Real Housewives-family shows.
+  if (!/real housewives/i.test(show.name) && !acronym.startsWith("RH")) {
+    return { primary: show.name, secondary: null as string | null };
+  }
+
+  return { primary: acronym, secondary: show.name };
+};
+
+const getCoveredShowDisplayName = (name: string) => {
+  const acronym = getHousewivesAcronymFromTitle(name);
+  if (!acronym) return { primary: name, secondary: null as string | null };
+  const normalizedName = sanitizeAcronym(name);
+  if (normalizedName === acronym) return { primary: name, secondary: null as string | null };
+  return { primary: acronym, secondary: name };
+};
 
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -243,7 +320,7 @@ export default function TrrShowsPage() {
         </header>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
-          {/* Covered Shows Section */}
+          {/* Added Shows Section */}
           <section className="mb-8 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
               <div>
@@ -251,7 +328,7 @@ export default function TrrShowsPage() {
                   Editorial Coverage
                 </p>
                 <h2 className="text-xl font-bold text-zinc-900">
-                  Covered Shows
+                  Added Shows
                 </h2>
               </div>
               <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
@@ -270,28 +347,36 @@ export default function TrrShowsPage() {
               </p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {coveredShows.map((show) => (
-                  <div
-                    key={show.id}
-                    className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                  >
-                    <Link
-                      href={`/admin/trr-shows/${show.trr_show_id}`}
-                      className="flex-1 min-w-0 hover:underline"
+                {coveredShows.map((show) => {
+                  const label = getCoveredShowDisplayName(show.show_name);
+                  return (
+                    <div
+                      key={show.id}
+                      className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 p-3"
                     >
-                      <span className="text-sm font-medium text-zinc-900 truncate block">
-                        {show.show_name}
-                      </span>
-                    </Link>
-                    <button
-                      onClick={() => removeFromCoveredShows(show.trr_show_id)}
-                      disabled={removingShowId === show.trr_show_id}
-                      className="ml-2 flex-shrink-0 rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-                    >
-                      {removingShowId === show.trr_show_id ? "..." : "Remove"}
-                    </button>
-                  </div>
-                ))}
+                      <Link
+                        href={`/admin/trr-shows/${show.trr_show_id}`}
+                        className="flex-1 min-w-0 hover:underline"
+                      >
+                        <span className="block truncate text-sm font-medium text-zinc-900">
+                          {label.primary}
+                        </span>
+                        {label.secondary && (
+                          <span className="mt-0.5 block truncate text-xs text-zinc-500">
+                            {label.secondary}
+                          </span>
+                        )}
+                      </Link>
+                      <button
+                        onClick={() => removeFromCoveredShows(show.trr_show_id)}
+                        disabled={removingShowId === show.trr_show_id}
+                        className="ml-2 flex-shrink-0 rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {removingShowId === show.trr_show_id ? "..." : "Remove"}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -353,6 +438,7 @@ export default function TrrShowsPage() {
                   {results.shows.map((show) => {
                     const isCovered = coveredShowIds.has(show.id);
                     const tmdbVoteAverageText = formatFixed1(show.tmdb_vote_average);
+                    const displayName = getShowDisplayName(show);
                     return (
                       <div
                         key={show.id}
@@ -364,8 +450,13 @@ export default function TrrShowsPage() {
                             className="flex-1 min-w-0"
                           >
                             <h3 className="text-lg font-semibold text-zinc-900 truncate hover:underline">
-                              {show.name}
+                              {displayName.primary}
                             </h3>
+                            {displayName.secondary && (
+                              <p className="mt-1 text-xs text-zinc-500 line-clamp-1">
+                                {displayName.secondary}
+                              </p>
+                            )}
                             {show.networks.length > 0 && (
                               <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                                 {show.networks.slice(0, 2).join(" · ")}
@@ -454,7 +545,7 @@ export default function TrrShowsPage() {
                                   d="M5 13l4 4L19 7"
                                 />
                               </svg>
-                              Covered
+                              Added
                             </span>
                           ) : (
                             <button

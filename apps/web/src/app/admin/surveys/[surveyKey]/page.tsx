@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, use } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
@@ -73,7 +74,48 @@ interface Asset {
   person_id?: string;
 }
 
-type TabId = "settings" | "theme" | "cast" | "episodes" | "assets";
+interface RunWithCount {
+  id: string;
+  survey_id: string;
+  run_key: string;
+  title: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  max_submissions_per_user: number;
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  response_count: number;
+}
+
+interface SurveyResponseRow {
+  id: string;
+  survey_run_id: string;
+  user_id: string;
+  submission_number: number;
+  completed_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SurveyAnswerRow {
+  id: string;
+  response_id: string;
+  question_id: string;
+  option_id: string | null;
+  text_value: string | null;
+  numeric_value: number | null;
+  json_value: unknown;
+  created_at: string;
+}
+
+interface ResponseWithAnswers extends SurveyResponseRow {
+  answers: SurveyAnswerRow[];
+}
+
+type TabId = "settings" | "theme" | "cast" | "episodes" | "responses" | "assets";
 
 // ============================================================================
 // Main Component
@@ -86,6 +128,7 @@ export default function SurveyEditorPage({
 }) {
   const { surveyKey } = use(params);
   const { user, checking, hasAccess } = useAdminGuard();
+  const searchParams = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<TabId>("settings");
   const [survey, setSurvey] = useState<SurveyConfig | null>(null);
@@ -97,6 +140,28 @@ export default function SurveyEditorPage({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "responses") {
+      setActiveTab("responses");
+    }
+  }, [searchParams]);
+
+  // Responses (normalized runs + responses)
+  const [runs, setRuns] = useState<RunWithCount[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [selectedRunId, setSelectedRunId] = useState<string>("");
+  const [responses, setResponses] = useState<SurveyResponseRow[]>([]);
+  const [responsesLoading, setResponsesLoading] = useState(false);
+  const [responsesPage, setResponsesPage] = useState(0);
+  const [responsesError, setResponsesError] = useState<string | null>(null);
+  const [exportingResponses, setExportingResponses] = useState(false);
+
+  // Response detail modal
+  const [responseModalOpen, setResponseModalOpen] = useState(false);
+  const [responseDetailLoading, setResponseDetailLoading] = useState(false);
+  const [responseDetail, setResponseDetail] = useState<ResponseWithAnswers | null>(null);
 
   // Form state for settings
   const [editTitle, setEditTitle] = useState("");
@@ -139,6 +204,12 @@ export default function SurveyEditorPage({
     opens_at: "",
     closes_at: "",
   });
+
+  const getAuthHeaders = useCallback(async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error("Not authenticated");
+    return { Authorization: `Bearer ${token}` };
+  }, []);
 
   const fetchSurvey = useCallback(async () => {
     if (!user) return;
@@ -198,6 +269,153 @@ export default function SurveyEditorPage({
       fetchSurvey();
     }
   }, [hasAccess, user, fetchSurvey]);
+
+  const fetchRunsForResponses = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      setRunsLoading(true);
+      setResponsesError(null);
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/normalized-surveys/${surveyKey}/runs`, { headers });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error((data as { error?: string }).error ?? "Failed to fetch runs");
+      }
+
+      const nextRuns = (data as { runs?: RunWithCount[] }).runs ?? [];
+      setRuns(nextRuns);
+
+      // Select the most recent run by default.
+      if (!selectedRunId && nextRuns.length > 0) {
+        setSelectedRunId(nextRuns[0].id);
+      }
+    } catch (err) {
+      setResponsesError(err instanceof Error ? err.message : "Failed to fetch runs");
+    } finally {
+      setRunsLoading(false);
+    }
+  }, [getAuthHeaders, surveyKey, selectedRunId, user]);
+
+  const fetchResponsesForRun = useCallback(
+    async (runId: string) => {
+      if (!user) return;
+
+      try {
+        setResponsesLoading(true);
+        setResponsesError(null);
+        setResponsesPage(0);
+        setResponseDetail(null);
+
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/normalized-surveys/${surveyKey}/runs/${runId}/responses`,
+          { headers }
+        );
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error((data as { error?: string }).error ?? "Failed to fetch responses");
+        }
+
+        setResponses((data as { responses?: SurveyResponseRow[] }).responses ?? []);
+      } catch (err) {
+        setResponsesError(err instanceof Error ? err.message : "Failed to fetch responses");
+      } finally {
+        setResponsesLoading(false);
+      }
+    },
+    [getAuthHeaders, surveyKey, user]
+  );
+
+  const openResponseDetail = useCallback(
+    async (runId: string, responseId: string) => {
+      if (!user) return;
+
+      setResponseModalOpen(true);
+      setResponseDetail(null);
+      setResponseDetailLoading(true);
+      setResponsesError(null);
+
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/normalized-surveys/${surveyKey}/runs/${runId}/responses?responseId=${encodeURIComponent(
+            responseId
+          )}`,
+          { headers }
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error((data as { error?: string }).error ?? "Failed to fetch response");
+        }
+
+        setResponseDetail((data as { response: ResponseWithAnswers }).response);
+      } catch (err) {
+        setResponsesError(err instanceof Error ? err.message : "Failed to fetch response");
+      } finally {
+        setResponseDetailLoading(false);
+      }
+    },
+    [getAuthHeaders, surveyKey, user]
+  );
+
+  const exportResponsesCsv = useCallback(async () => {
+    if (!user || !selectedRunId) return;
+
+    setExportingResponses(true);
+    setResponsesError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/normalized-surveys/${surveyKey}/runs/${selectedRunId}/export`,
+        { headers }
+      );
+
+      const bodyText = await response.text();
+      if (!response.ok) {
+        try {
+          const parsed = JSON.parse(bodyText) as { error?: string };
+          throw new Error(parsed.error ?? "Failed to export responses");
+        } catch {
+          throw new Error(bodyText || "Failed to export responses");
+        }
+      }
+
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const match = /filename=\"?([^\";]+)\"?/i.exec(disposition);
+      const filename = match?.[1] ?? `${surveyKey}-responses.csv`;
+
+      const blob = new Blob([bodyText], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setResponsesError(err instanceof Error ? err.message : "Failed to export responses");
+    } finally {
+      setExportingResponses(false);
+    }
+  }, [getAuthHeaders, selectedRunId, surveyKey, user]);
+
+  useEffect(() => {
+    if (!hasAccess || !user) return;
+    if (activeTab !== "responses") return;
+    fetchRunsForResponses();
+  }, [activeTab, fetchRunsForResponses, hasAccess, user]);
+
+  useEffect(() => {
+    if (!hasAccess || !user) return;
+    if (activeTab !== "responses") return;
+    if (!selectedRunId) return;
+    fetchResponsesForRun(selectedRunId);
+  }, [activeTab, fetchResponsesForRun, hasAccess, selectedRunId, user]);
 
   const saveSettings = async () => {
     if (!user || !survey) return;
@@ -588,6 +806,7 @@ export default function SurveyEditorPage({
     { id: "theme", label: "Theme" },
     { id: "cast", label: `Cast (${cast.length})` },
     { id: "episodes", label: `Episodes (${episodes.length})` },
+    { id: "responses", label: "Responses" },
     { id: "assets", label: `Assets (${assets.length})` },
   ];
 
@@ -1100,6 +1319,171 @@ export default function SurveyEditorPage({
             </div>
           )}
 
+          {/* Responses Tab */}
+          {activeTab === "responses" && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-900">Survey Responses</h2>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Browse responses from normalized survey runs. Select a run to view submissions.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={fetchRunsForResponses}
+                    disabled={runsLoading}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                  >
+                    {runsLoading ? "Refreshing…" : "Refresh Runs"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportResponsesCsv}
+                    disabled={exportingResponses || !selectedRunId}
+                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {exportingResponses ? "Exporting…" : "Export CSV"}
+                  </button>
+                </div>
+              </div>
+
+              {responsesError && (
+                <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                  {responsesError}
+                </div>
+              )}
+
+              <div className="mt-6 grid gap-4 md:grid-cols-[1fr,auto] md:items-end">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700">Run</label>
+                  <select
+                    value={selectedRunId}
+                    onChange={(e) => setSelectedRunId(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                    disabled={runsLoading || runs.length === 0}
+                  >
+                    {runs.length === 0 ? (
+                      <option value="">No runs found</option>
+                    ) : (
+                      runs.map((run) => {
+                        const start = new Date(run.starts_at).toLocaleDateString();
+                        const end = run.ends_at ? new Date(run.ends_at).toLocaleDateString() : "Open";
+                        return (
+                          <option key={run.id} value={run.id}>
+                            {run.run_key} · {start} – {end} · {run.response_count} responses
+                          </option>
+                        );
+                      })
+                    )}
+                  </select>
+                </div>
+
+                <div className="text-sm text-zinc-500">
+                  {responses.length} response{responses.length === 1 ? "" : "s"}
+                </div>
+              </div>
+
+              <div className="mt-6">
+                {!selectedRunId ? (
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-8 text-center text-zinc-500">
+                    Select a run to view responses.
+                  </div>
+                ) : responsesLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
+                  </div>
+                ) : responses.length === 0 ? (
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-8 text-center text-zinc-500">
+                    No responses yet for this run.
+                  </div>
+                ) : (
+                  (() => {
+                    const PAGE_SIZE = 50;
+                    const pageCount = Math.ceil(responses.length / PAGE_SIZE) || 1;
+                    const pageIndex = Math.min(responsesPage, pageCount - 1);
+                    const pageItems = responses.slice(
+                      pageIndex * PAGE_SIZE,
+                      (pageIndex + 1) * PAGE_SIZE
+                    );
+
+                    return (
+                      <div className="overflow-hidden rounded-xl border border-zinc-200">
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-zinc-200 text-sm">
+                            <thead className="bg-zinc-50">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">
+                                  Created
+                                </th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">
+                                  User ID
+                                </th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">
+                                  Submission
+                                </th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">
+                                  Completed
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-100 bg-white">
+                              {pageItems.map((row) => (
+                                <tr
+                                  key={row.id}
+                                  className="cursor-pointer hover:bg-zinc-50"
+                                  onClick={() => openResponseDetail(selectedRunId, row.id)}
+                                >
+                                  <td className="px-4 py-3 text-zinc-900">
+                                    {new Date(row.created_at).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 font-mono text-xs text-zinc-700">
+                                    {row.user_id}
+                                  </td>
+                                  <td className="px-4 py-3 text-zinc-700">
+                                    {row.submission_number}
+                                  </td>
+                                  <td className="px-4 py-3 text-zinc-700">
+                                    {row.completed_at ? new Date(row.completed_at).toLocaleString() : "—"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50 px-4 py-3">
+                          <span className="text-xs text-zinc-500">
+                            Page {pageIndex + 1} of {pageCount}
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setResponsesPage((p) => Math.max(0, p - 1))}
+                              disabled={pageIndex === 0}
+                              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:opacity-50"
+                            >
+                              Prev
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setResponsesPage((p) => p + 1)}
+                              disabled={pageIndex >= pageCount - 1}
+                              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:opacity-50"
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Assets Tab */}
           {activeTab === "assets" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
@@ -1396,6 +1780,100 @@ export default function SurveyEditorPage({
                 {saving ? "Saving..." : editingEpisode ? "Update" : "Add"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Response Detail Modal */}
+      {responseModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-900">Response Detail</h2>
+                {responseDetail?.id && (
+                  <p className="mt-1 font-mono text-xs text-zinc-500">{responseDetail.id}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setResponseModalOpen(false);
+                  setResponseDetail(null);
+                }}
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                Close
+              </button>
+            </div>
+
+            {responseDetailLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
+              </div>
+            ) : !responseDetail ? (
+              <div className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-8 text-center text-zinc-500">
+                No response loaded.
+              </div>
+            ) : (
+              <div className="mt-6 space-y-6">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Created</p>
+                    <p className="mt-1 text-sm text-zinc-900">
+                      {new Date(responseDetail.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">User ID</p>
+                    <p className="mt-1 font-mono text-xs text-zinc-700">{responseDetail.user_id}</p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Submission</p>
+                    <p className="mt-1 text-sm text-zinc-900">{responseDetail.submission_number}</p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Completed</p>
+                    <p className="mt-1 text-sm text-zinc-900">
+                      {responseDetail.completed_at ? new Date(responseDetail.completed_at).toLocaleString() : "—"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">
+                    Answers
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {responseDetail.answers.map((answer) => {
+                      const value =
+                        answer.text_value ??
+                        (typeof answer.numeric_value === "number" ? String(answer.numeric_value) : null) ??
+                        answer.option_id ??
+                        (answer.json_value === null || answer.json_value === undefined
+                          ? null
+                          : Array.isArray(answer.json_value)
+                            ? answer.json_value.join(" | ")
+                            : JSON.stringify(answer.json_value)) ??
+                        "";
+
+                      return (
+                        <div key={answer.id} className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+                          <p className="font-mono text-xs text-zinc-500">{answer.question_id}</p>
+                          <p className="mt-1 text-sm text-zinc-900">{value || "—"}</p>
+                        </div>
+                      );
+                    })}
+
+                    {responseDetail.answers.length === 0 && (
+                      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-6 text-center text-sm text-zinc-500">
+                        No answers found for this response.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
