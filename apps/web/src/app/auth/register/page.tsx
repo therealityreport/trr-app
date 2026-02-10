@@ -516,8 +516,8 @@ function RegisterContent() {
                   setPending(true); 
                   setFormError(null); 
                   try { 
-                    await signInWithGoogle(); 
-                    router.replace("/auth/complete"); 
+                    const ok = await signInWithGoogle(); 
+                    if (ok) router.replace("/auth/complete"); 
                   } catch (e) { 
                     setFormError(getFriendlyError(e)); 
                   } finally { 

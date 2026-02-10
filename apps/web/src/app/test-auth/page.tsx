@@ -28,8 +28,8 @@ export default function AuthPage() {
     setPending(true);
     setErr(null);
     try {
-      await signInWithGoogle();
-      router.replace("/auth/complete");
+      const ok = await signInWithGoogle();
+      if (ok) router.replace("/auth/complete");
     } catch (err: unknown) {
       // Only “real” errors reach here (cancellations are ignored in the lib)
       const getMessage = (e: unknown): string => {

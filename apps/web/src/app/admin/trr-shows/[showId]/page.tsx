@@ -75,6 +75,22 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const looksLikeUuid = (value: string) => UUID_RE.test(value);
 
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const formatFixed1 = (value: unknown): string | null => {
+  const parsed = toFiniteNumber(value);
+  return parsed === null ? null : parsed.toFixed(1);
+};
+
 // Generic gallery image with error handling - falls back to placeholder on broken images
 function GalleryImage({
   src,
@@ -348,14 +364,24 @@ export default function TrrShowDetailPage() {
         `/api/admin/trr-api/shows/${showId}/seasons?limit=50`,
         { headers }
       );
-      if (!response.ok) throw new Error("Failed to fetch seasons");
-      const data = await response.json();
-      setSeasons(data.seasons);
-      if (data.seasons.length > 0 && !openSeasonId) {
-        setOpenSeasonId(data.seasons[0].id);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          typeof (data as { error?: unknown }).error === "string"
+            ? (data as { error: string }).error
+            : `Failed to fetch seasons (HTTP ${response.status})`;
+        throw new Error(message);
+      }
+      const seasons = (data as { seasons?: unknown }).seasons;
+      const nextSeasons = Array.isArray(seasons) ? (seasons as TrrSeason[]) : [];
+      setSeasons(nextSeasons);
+      if (nextSeasons.length > 0 && !openSeasonId) {
+        setOpenSeasonId(nextSeasons[0].id);
       }
     } catch (err) {
-      console.error("Failed to fetch seasons:", err);
+      const message = err instanceof Error ? err.message : "Failed to fetch seasons";
+      console.warn("Failed to fetch seasons:", message);
+      setError(message);
     }
   }, [showId, openSeasonId, getAuthHeaders]);
 
@@ -431,11 +457,20 @@ export default function TrrShowDetailPage() {
         `/api/admin/trr-api/shows/${showId}/cast?limit=500`,
         { headers }
       );
-      if (!response.ok) throw new Error("Failed to fetch cast");
-      const data = await response.json();
-      setCast(data.cast);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          typeof (data as { error?: unknown }).error === "string"
+            ? (data as { error: string }).error
+            : `Failed to fetch cast (HTTP ${response.status})`;
+        throw new Error(message);
+      }
+      const cast = (data as { cast?: unknown }).cast;
+      setCast(Array.isArray(cast) ? (cast as TrrCastMember[]) : []);
     } catch (err) {
-      console.error("Failed to fetch cast:", err);
+      const message = err instanceof Error ? err.message : "Failed to fetch cast";
+      console.warn("Failed to fetch cast:", message);
+      setError(message);
     }
   }, [showId, getAuthHeaders]);
 
@@ -854,6 +889,9 @@ export default function TrrShowDetailPage() {
     );
   }
 
+  const tmdbVoteAverageText = formatFixed1(show.tmdb_vote_average);
+  const imdbRatingText = formatFixed1(show.imdb_rating_value);
+
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
@@ -964,20 +1002,20 @@ export default function TrrShowDetailPage() {
                 )}
 
                 {/* Ratings */}
-                {show.tmdb_vote_average && (
+                {tmdbVoteAverageText && (
                   <div className="flex items-center gap-1 text-sm">
                     <span className="text-yellow-500">★</span>
                     <span className="font-semibold">
-                      {show.tmdb_vote_average.toFixed(1)}
+                      {tmdbVoteAverageText}
                     </span>
                     <span className="text-zinc-500">TMDB</span>
                   </div>
                 )}
-                {show.imdb_rating_value && (
+                {imdbRatingText && (
                   <div className="flex items-center gap-1 text-sm">
                     <span className="text-yellow-500">★</span>
                     <span className="font-semibold">
-                      {show.imdb_rating_value.toFixed(1)}
+                      {imdbRatingText}
                     </span>
                     <span className="text-zinc-500">IMDB</span>
                   </div>

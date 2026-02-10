@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
@@ -7,6 +9,10 @@ const nextConfig: NextConfig = {
     root: __dirname, // ensure Turbopack uses this app as root
   },
   images: {
+    // Next.js 16.1.x image optimization has been observed to hang in this workspace
+    // (requests to `/_next/image` never return), which makes the app appear to
+    // "load forever" in dev. Disable optimization only in development.
+    unoptimized: IS_DEV,
     remotePatterns: [
       {
         protocol: "https",
