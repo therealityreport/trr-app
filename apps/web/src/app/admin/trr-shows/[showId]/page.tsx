@@ -9,6 +9,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import SurveysSection from "@/components/admin/surveys-section";
+import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer, type SeasonContext } from "@/components/admin/ImageScrapeDrawer";
@@ -69,7 +70,7 @@ interface TrrCastMember {
   total_episodes?: number | null;
 }
 
-type TabId = "seasons" | "gallery" | "cast" | "surveys" | "social" | "details";
+type TabId = "seasons" | "assets" | "cast" | "surveys" | "social" | "details";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -199,10 +200,12 @@ export default function TrrShowDetailPage() {
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
   const [cast, setCast] = useState<TrrCastMember[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("seasons");
+  const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
   const [openSeasonId, setOpenSeasonId] = useState<string | null>(null);
   const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<
     Record<string, { count: number; premiereDate: string | null; finaleDate: string | null }>
   >({});
+  const [seasonSummariesLoading, setSeasonSummariesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -271,8 +274,17 @@ export default function TrrShowDetailPage() {
 
   const tabParam = searchParams.get("tab");
   useEffect(() => {
-    const allowedTabs: TabId[] = ["seasons", "gallery", "cast", "surveys", "social", "details"];
-    if (tabParam && allowedTabs.includes(tabParam as TabId)) {
+    const allowedTabs: TabId[] = ["seasons", "assets", "cast", "surveys", "social", "details"];
+    if (!tabParam) return;
+
+    // Back-compat alias: ?tab=gallery -> ASSETS (Media)
+    if (tabParam === "gallery") {
+      setActiveTab("assets");
+      setAssetsView("media");
+      return;
+    }
+
+    if (allowedTabs.includes(tabParam as TabId)) {
       setActiveTab(tabParam as TabId);
     }
   }, [tabParam]);
@@ -389,8 +401,10 @@ export default function TrrShowDetailPage() {
     async (seasonList: TrrSeason[]) => {
       if (seasonList.length === 0) {
         setSeasonEpisodeSummaries({});
+        setSeasonSummariesLoading(false);
         return;
       }
+      setSeasonSummariesLoading(true);
       try {
         const headers = await getAuthHeaders();
         const results = await Promise.all(
@@ -443,6 +457,8 @@ export default function TrrShowDetailPage() {
         setSeasonEpisodeSummaries(nextSummaries);
       } catch (error) {
         console.error("Failed to compute season episode summaries:", error);
+      } finally {
+        setSeasonSummariesLoading(false);
       }
     },
     [getAuthHeaders]
@@ -597,9 +613,21 @@ export default function TrrShowDetailPage() {
   const isSeasonAired = useCallback(
     (season: TrrSeason) => {
       const summary = seasonEpisodeSummaries[season.id];
+      const episodeCount = summary?.count ?? null;
+
+      // Hide placeholder seasons (e.g. "1 episode") once we know the episode count.
+      if (typeof episodeCount === "number" && episodeCount <= 1) return false;
+
       const premiereDate = summary?.premiereDate ?? season.air_date;
-      if (!premiereDate) return true;
-      const airDate = new Date(premiereDate);
+      const finaleDate = summary?.finaleDate ?? season.air_date;
+
+      // Hide seasons that don't have any dates available yet.
+      if (!premiereDate && !finaleDate) return false;
+
+      const dateToCheck = premiereDate ?? finaleDate;
+      if (!dateToCheck) return false;
+
+      const airDate = new Date(dateToCheck);
       if (Number.isNaN(airDate.getTime())) return true;
       airDate.setHours(0, 0, 0, 0);
       return airDate <= today;
@@ -697,17 +725,17 @@ export default function TrrShowDetailPage() {
       }
     }
 
-    if (activeTab === "gallery") {
+    if (activeTab === "assets" && assetsView === "media") {
       await loadGalleryAssets(selectedGallerySeason);
     }
-  }, [galleryAssets, getAuthHeaders, activeTab, loadGalleryAssets, selectedGallerySeason]);
+  }, [galleryAssets, getAuthHeaders, activeTab, assetsView, loadGalleryAssets, selectedGallerySeason]);
 
   // Load gallery when tab becomes active or season filter changes
   useEffect(() => {
-    if (activeTab === "gallery" && visibleSeasons.length > 0) {
+    if (activeTab === "assets" && assetsView === "media" && visibleSeasons.length > 0) {
       loadGalleryAssets(selectedGallerySeason);
     }
-  }, [activeTab, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
+  }, [activeTab, assetsView, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
 
   const refreshCastImages = useCallback(async () => {
     if (refreshingCastImages) return;
@@ -746,13 +774,13 @@ export default function TrrShowDetailPage() {
 
     if (successCount > 0) {
       await fetchCast();
-      if (activeTab === "gallery") {
+      if (activeTab === "assets" && assetsView === "media") {
         await loadGalleryAssets(selectedGallerySeason);
       }
     }
 
     let autoCountSummary: string | null = null;
-    if (activeTab === "gallery") {
+    if (activeTab === "assets" && assetsView === "media") {
       try {
         const autoCount = await autoCountShowImages(selectedGallerySeason);
         if (autoCount && typeof autoCount === "object") {
@@ -782,6 +810,7 @@ export default function TrrShowDetailPage() {
     refreshingCastImages,
     fetchCast,
     activeTab,
+    assetsView,
     loadGalleryAssets,
     selectedGallerySeason,
     autoCountShowImages,
@@ -927,9 +956,9 @@ export default function TrrShowDetailPage() {
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-3">
-                  {show.show_total_seasons && (
+                  {visibleSeasons.length > 0 && (
                     <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                      {show.show_total_seasons} seasons
+                      {visibleSeasons.length} seasons
                     </span>
                   )}
                   {show.show_total_episodes && (
@@ -961,7 +990,7 @@ export default function TrrShowDetailPage() {
                     <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
-                    {coverageLoading ? "..." : "Covered"}
+                    {coverageLoading ? "..." : "Added"}
                   </button>
                 ) : (
                   <button
@@ -1028,24 +1057,24 @@ export default function TrrShowDetailPage() {
         {/* Tabs */}
         <div className="border-b border-zinc-200 bg-white">
           <div className="mx-auto max-w-6xl px-6">
-            <nav className="flex gap-6">
+            <nav className="flex flex-wrap gap-2 py-4">
               {(
                 [
                   { id: "seasons", label: "Seasons & Episodes" },
-                  { id: "gallery", label: "Gallery" },
+                  { id: "assets", label: "Assets" },
                   { id: "cast", label: "Cast" },
                   { id: "surveys", label: "Surveys" },
-                  { id: "social", label: "Social Posts" },
+                  { id: "social", label: "Social Media" },
                   { id: "details", label: "Details" },
                 ] as const
               ).map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`border-b-2 py-4 text-sm font-semibold transition ${
+                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                     activeTab === tab.id
-                      ? "border-zinc-900 text-zinc-900"
-                      : "border-transparent text-zinc-500 hover:text-zinc-700"
+                      ? "border-zinc-900 bg-zinc-900 text-white"
+                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                   }`}
                 >
                   {tab.label}
@@ -1066,303 +1095,327 @@ export default function TrrShowDetailPage() {
                 </p>
                 <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
               </div>
-              <div className="space-y-3">
-                {visibleSeasons.map((season) => {
-                  const summary = seasonEpisodeSummaries[season.id];
-                  const isOpen = openSeasonId === season.id;
-                  const countLabel = summary
-                    ? `${summary.count} episodes`
-                    : "Episodes: —";
-                  const dateRange = summary
-                    ? formatDateRange(summary.premiereDate, summary.finaleDate)
-                    : "Dates unavailable";
-                  return (
-                    <div
-                      key={season.id}
-                      className="rounded-xl border border-zinc-200 bg-white shadow-sm"
-                    >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setOpenSeasonId((prev) => (prev === season.id ? null : season.id))
-                        }
-                        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
+              {seasonSummariesLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-zinc-900" />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {visibleSeasons.map((season) => {
+                    const summary = seasonEpisodeSummaries[season.id];
+                    const isOpen = openSeasonId === season.id;
+                    const countLabel = summary
+                      ? `${summary.count} episodes`
+                      : "Episodes: —";
+                    const premiereDate = summary?.premiereDate ?? season.air_date;
+                    const finaleDate = summary?.finaleDate ?? season.air_date;
+                    const dateRange = formatDateRange(premiereDate, finaleDate);
+                    return (
+                      <div
+                        key={season.id}
+                        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
                       >
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <p className="text-lg font-semibold text-zinc-900">
-                              Season {season.season_number}
-                            </p>
-                            {season.tmdb_season_id && show.tmdb_id && (
-                              <TmdbLinkIcon
-                                showTmdbId={show.tmdb_id}
-                                seasonNumber={season.season_number}
-                                type="season"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenSeasonId((prev) => (prev === season.id ? null : season.id))
+                          }
+                          className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
+                        >
+                          <div>
+                            <div className="flex items-center gap-3">
+                              <p className="text-lg font-semibold text-zinc-900">
+                                Season {season.season_number}
+                              </p>
+                              {season.tmdb_season_id && show.tmdb_id && (
+                                <TmdbLinkIcon
+                                  showTmdbId={show.tmdb_id}
+                                  seasonNumber={season.season_number}
+                                  type="season"
+                                />
+                              )}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-3 text-xs text-zinc-500">
+                              <span>{countLabel}</span>
+                              <span>{dateRange}</span>
+                            </div>
+                          </div>
+                          <span
+                            className={`text-zinc-400 transition-transform ${
+                              isOpen ? "rotate-180" : ""
+                            }`}
+                          >
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M6 9l6 6 6-6"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
                               />
+                            </svg>
+                          </span>
+                        </button>
+                        {isOpen && (
+                          <div className="border-t border-zinc-100 px-4 py-4">
+                            {season.overview && (
+                              <p className="text-sm text-zinc-600">
+                                {season.overview}
+                              </p>
                             )}
                           </div>
-                          <div className="mt-1 flex flex-wrap gap-3 text-xs text-zinc-500">
-                            <span>{countLabel}</span>
-                            <span>{dateRange}</span>
-                          </div>
-                        </div>
-                        <span
-                          className={`text-zinc-400 transition-transform ${
-                            isOpen ? "rotate-180" : ""
-                          }`}
-                        >
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                            <path
-                              d="M6 9l6 6 6-6"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        </span>
-                      </button>
-                      {isOpen && (
-                        <div className="border-t border-zinc-100 px-4 py-4">
-                          {season.overview && (
-                            <p className="text-sm text-zinc-600">
-                              {season.overview}
-                            </p>
-                          )}
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <Link
-                              href={`/admin/trr-shows/${show.id}/seasons/${season.season_number}?tab=episodes`}
-                              className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              EPISODES
-                            </Link>
-                            <Link
-                              href={`/admin/trr-shows/${show.id}/seasons/${season.season_number}?tab=media`}
-                              className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              MEDIA
-                            </Link>
-                            <Link
-                              href={`/admin/trr-shows/${show.id}/seasons/${season.season_number}?tab=cast`}
-                              className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              CAST MEMBERS
-                            </Link>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {visibleSeasons.length === 0 && (
-                  <p className="text-sm text-zinc-500">No seasons found</p>
-                )}
-              </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {visibleSeasons.length === 0 && (
+                    <p className="text-sm text-zinc-500">No seasons found</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Gallery Tab */}
-          {activeTab === "gallery" && (
+          {/* ASSETS Tab */}
+          {activeTab === "assets" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6">
+              <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Season Gallery
+                  {assetsView === "media" ? "Season Gallery" : "Brand"}
                 </p>
                 <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
-              </div>
-
-              {/* Season filter and Import button */}
-              <div className="mb-6 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <label className="text-sm font-medium text-zinc-700">
-                    Filter by season:
-                  </label>
-                  <select
-                    value={selectedGallerySeason}
-                    onChange={(e) =>
-                      setSelectedGallerySeason(
-                        e.target.value === "all" ? "all" : parseInt(e.target.value)
-                      )
-                    }
-                    className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
-                  >
-                    <option value="all">All Seasons</option>
-                    {visibleSeasons.map((s) => (
-                      <option key={s.id} value={s.season_number}>
-                        Season {s.season_number}
-                      </option>
-                    ))}
-                  </select>
                 </div>
-                <div className="flex items-center gap-2">
+
+                <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
                   <button
-                    onClick={() => setAdvancedFiltersOpen(true)}
-                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                    type="button"
+                    onClick={() => setAssetsView("media")}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                      assetsView === "media"
+                        ? "bg-white text-zinc-900 shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700"
+                    }`}
                   >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
-                    </svg>
-                    Filters
+                    Media
                   </button>
-
-                  {/* Import Images button - only show when a specific season is selected */}
-                  {selectedGallerySeason !== "all" && (
-                    <button
-                      onClick={() => {
-                        const selectedSeason = visibleSeasons.find(
-                          (season) => season.season_number === selectedGallerySeason
-                        );
-                        setScrapeDrawerContext({
-                          type: "season",
-                          showId: showId,
-                          showName: show.name,
-                          seasonNumber: selectedGallerySeason,
-                          seasonId: selectedSeason?.id,
-                        });
-                        setScrapeDrawerOpen(true);
-                      }}
-                      className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                      Import Images
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAssetsView("brand")}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                      assetsView === "brand"
+                        ? "bg-white text-zinc-900 shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700"
+                    }`}
+                  >
+                    Brand
+                  </button>
                 </div>
               </div>
 
-              {galleryLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-blue-500" />
-                </div>
-              ) : filteredGalleryAssets.length === 0 ? (
-                <p className="py-8 text-center text-zinc-500">
-                  No images found for this selection.
-                </p>
+              {assetsView === "media" ? (
+                <>
+                  {/* Season filter and Import button */}
+                  <div className="mb-6 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <label className="text-sm font-medium text-zinc-700">
+                        Filter by season:
+                      </label>
+                      <select
+                        value={selectedGallerySeason}
+                        onChange={(e) =>
+                          setSelectedGallerySeason(
+                            e.target.value === "all" ? "all" : parseInt(e.target.value)
+                          )
+                        }
+                        className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
+                      >
+                        <option value="all">All Seasons</option>
+                        {visibleSeasons.map((s) => (
+                          <option key={s.id} value={s.season_number}>
+                            Season {s.season_number}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setAdvancedFiltersOpen(true)}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
+                        </svg>
+                        Filters
+                      </button>
+
+                      {/* Import Images button - only show when a specific season is selected */}
+                      {selectedGallerySeason !== "all" && (
+                        <button
+                          onClick={() => {
+                            const selectedSeason = visibleSeasons.find(
+                              (season) => season.season_number === selectedGallerySeason
+                            );
+                            setScrapeDrawerContext({
+                              type: "season",
+                              showId: showId,
+                              showName: show.name,
+                              seasonNumber: selectedGallerySeason,
+                              seasonId: selectedSeason?.id,
+                            });
+                            setScrapeDrawerOpen(true);
+                          }}
+                          className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          Import Images
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {galleryLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-blue-500" />
+                    </div>
+                  ) : filteredGalleryAssets.length === 0 ? (
+                    <p className="py-8 text-center text-zinc-500">
+                      No images found for this selection.
+                    </p>
+                  ) : (
+                    <div className="space-y-8">
+                      {/* Season Posters */}
+                      {filteredGalleryAssets.filter((a) => a.type === "season" && isSeasonBackdrop(a))
+                        .length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Backdrops
+                          </h4>
+                          <div className="grid grid-cols-3 gap-4">
+                            {filteredGalleryAssets
+                              .filter((a) => a.type === "season" && isSeasonBackdrop(a))
+                              .map((asset, i, arr) => (
+                                <button
+                                  key={`${asset.id}-${i}`}
+                                  onClick={(e) =>
+                                    openAssetLightbox(asset, i, arr, e.currentTarget)
+                                  }
+                                  className="relative aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                  <GalleryImage
+                                    src={asset.hosted_url}
+                                    alt={asset.caption || "Season backdrop"}
+                                    sizes="300px"
+                                    className="object-cover"
+                                  />
+                                </button>
+                              ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {filteredGalleryAssets.filter((a) => a.type === "season" && !isSeasonBackdrop(a)).length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Season Posters
+                          </h4>
+                          <div className="grid grid-cols-4 gap-4">
+                            {filteredGalleryAssets
+                              .filter((a) => a.type === "season" && !isSeasonBackdrop(a))
+                              .map((asset, i, arr) => (
+                                <button
+                                  key={`${asset.id}-${i}`}
+                                  onClick={(e) =>
+                                    openAssetLightbox(asset, i, arr, e.currentTarget)
+                                  }
+                                  className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                  <GalleryImage
+                                    src={asset.hosted_url}
+                                    alt={asset.caption || "Season poster"}
+                                    sizes="200px"
+                                  />
+                                </button>
+                              ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {/* Episode Stills */}
+                      {filteredGalleryAssets.filter((a) => a.type === "episode").length >
+                        0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Episode Stills
+                          </h4>
+                          <div className="grid grid-cols-6 gap-3">
+                            {filteredGalleryAssets
+                              .filter((a) => a.type === "episode")
+                              .map((asset, i, arr) => (
+                                <button
+                                  key={`${asset.id}-${i}`}
+                                  onClick={(e) =>
+                                    openAssetLightbox(asset, i, arr, e.currentTarget)
+                                  }
+                                  className="relative aspect-video overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                  <GalleryImage
+                                    src={asset.hosted_url}
+                                    alt={asset.caption || "Episode still"}
+                                    sizes="150px"
+                                  />
+                                </button>
+                              ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {/* Cast Photos */}
+                      {filteredGalleryAssets.filter((a) => a.type === "cast").length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Cast Photos
+                          </h4>
+                          <div className="grid grid-cols-5 gap-4">
+                            {filteredGalleryAssets
+                              .filter((a) => a.type === "cast")
+                              .map((asset, i, arr) => (
+                                <button
+                                  key={`${asset.id}-${i}`}
+                                  onClick={(e) =>
+                                    openAssetLightbox(asset, i, arr, e.currentTarget)
+                                  }
+                                  className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                  <GalleryImage
+                                    src={asset.hosted_url}
+                                    alt={asset.caption || "Cast photo"}
+                                    sizes="180px"
+                                  />
+                                  {asset.person_name && (
+                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                                      <p className="truncate text-xs text-white">
+                                        {asset.person_name}
+                                      </p>
+                                    </div>
+                                  )}
+                                </button>
+                              ))}
+                          </div>
+                        </section>
+                      )}
+                    </div>
+                  )}
+                </>
               ) : (
-                <div className="space-y-8">
-                  {/* Season Posters */}
-                  {filteredGalleryAssets.filter((a) => a.type === "season" && isSeasonBackdrop(a))
-                    .length > 0 && (
-                    <section>
-                      <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                        Backdrops
-                      </h4>
-                      <div className="grid grid-cols-3 gap-4">
-                        {filteredGalleryAssets
-                          .filter((a) => a.type === "season" && isSeasonBackdrop(a))
-                          .map((asset, i, arr) => (
-                            <button
-                              key={`${asset.id}-${i}`}
-                              onClick={(e) =>
-                                openAssetLightbox(asset, i, arr, e.currentTarget)
-                              }
-                              className="relative aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <GalleryImage
-                                src={asset.hosted_url}
-                                alt={asset.caption || "Season backdrop"}
-                                sizes="300px"
-                                className="object-cover"
-                              />
-                            </button>
-                          ))}
-                      </div>
-                    </section>
-                  )}
-
-                  {filteredGalleryAssets.filter((a) => a.type === "season" && !isSeasonBackdrop(a)).length > 0 && (
-                    <section>
-                      <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                        Season Posters
-                      </h4>
-                      <div className="grid grid-cols-4 gap-4">
-                        {filteredGalleryAssets
-                          .filter((a) => a.type === "season" && !isSeasonBackdrop(a))
-                          .map((asset, i, arr) => (
-                            <button
-                              key={`${asset.id}-${i}`}
-                              onClick={(e) =>
-                                openAssetLightbox(asset, i, arr, e.currentTarget)
-                              }
-                              className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <GalleryImage
-                                src={asset.hosted_url}
-                                alt={asset.caption || "Season poster"}
-                                sizes="200px"
-                              />
-                            </button>
-                          ))}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Episode Stills */}
-                  {filteredGalleryAssets.filter((a) => a.type === "episode").length >
-                    0 && (
-                    <section>
-                      <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                        Episode Stills
-                      </h4>
-                      <div className="grid grid-cols-6 gap-3">
-                        {filteredGalleryAssets
-                          .filter((a) => a.type === "episode")
-                          .map((asset, i, arr) => (
-                            <button
-                              key={`${asset.id}-${i}`}
-                              onClick={(e) =>
-                                openAssetLightbox(asset, i, arr, e.currentTarget)
-                              }
-                              className="relative aspect-video overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <GalleryImage
-                                src={asset.hosted_url}
-                                alt={asset.caption || "Episode still"}
-                                sizes="150px"
-                              />
-                            </button>
-                          ))}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Cast Photos */}
-                  {filteredGalleryAssets.filter((a) => a.type === "cast").length > 0 && (
-                    <section>
-                      <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                        Cast Photos
-                      </h4>
-                      <div className="grid grid-cols-5 gap-4">
-                        {filteredGalleryAssets
-                          .filter((a) => a.type === "cast")
-                          .map((asset, i, arr) => (
-                            <button
-                              key={`${asset.id}-${i}`}
-                              onClick={(e) =>
-                                openAssetLightbox(asset, i, arr, e.currentTarget)
-                              }
-                              className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <GalleryImage
-                                src={asset.hosted_url}
-                                alt={asset.caption || "Cast photo"}
-                                sizes="180px"
-                              />
-                              {asset.person_name && (
-                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                                  <p className="truncate text-xs text-white">
-                                    {asset.person_name}
-                                  </p>
-                                </div>
-                              )}
-                            </button>
-                          ))}
-                      </div>
-                    </section>
-                  )}
-                </div>
+                <ShowBrandEditor
+                  trrShowId={showId}
+                  trrShowName={show.name}
+                  trrSeasons={seasons}
+                  trrCast={cast}
+                />
               )}
             </div>
           )}
@@ -1483,11 +1536,11 @@ export default function TrrShowDetailPage() {
             <SurveysSection
               showId={showId}
               showName={show.name}
-              totalSeasons={show.show_total_seasons}
+              totalSeasons={visibleSeasons.length || show.show_total_seasons}
             />
           )}
 
-          {/* Social Posts Tab */}
+          {/* Social Media Tab */}
           {activeTab === "social" && (
             <SocialPostsSection showId={showId} showName={show.name} />
           )}
@@ -1655,7 +1708,7 @@ export default function TrrShowDetailPage() {
             entityContext={scrapeDrawerContext}
             onImportComplete={() => {
               // Refresh gallery after import
-              if (activeTab === "gallery") {
+              if (activeTab === "assets" && assetsView === "media") {
                 loadGalleryAssets(selectedGallerySeason);
               }
             }}

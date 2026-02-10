@@ -50,7 +50,21 @@ export async function POST(request: NextRequest) {
     await requireAdmin(request);
 
     const body = await request.json();
-    const { key, title, shortTitle, network, status, logline, palette, iconUrl, wordmarkUrl, heroUrl, tags } = body;
+    const {
+      key,
+      title,
+      trrShowId,
+      shortTitle,
+      network,
+      status,
+      logline,
+      palette,
+      fonts,
+      iconUrl,
+      wordmarkUrl,
+      heroUrl,
+      tags,
+    } = body;
 
     if (!key || !title) {
       return NextResponse.json({ error: "key and title are required" }, { status: 400 });
@@ -59,11 +73,13 @@ export async function POST(request: NextRequest) {
     const show = await createShow({
       key,
       title,
+      trrShowId,
       shortTitle,
       network,
       status,
       logline,
       palette,
+      fonts,
       iconUrl,
       wordmarkUrl,
       heroUrl,

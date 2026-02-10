@@ -381,6 +381,12 @@ export default function SurveysSection({
                       Manage
                     </Link>
                     <Link
+                      href={`/admin/surveys/${survey.slug}?tab=responses`}
+                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                    >
+                      Responses
+                    </Link>
+                    <Link
                       href={`/surveys/n/${survey.slug}/play`}
                       target="_blank"
                       className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"

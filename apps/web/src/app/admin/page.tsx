@@ -6,25 +6,53 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const ADMIN_TOOLS = [
   {
+    key: "dev-dashboard",
+    title: "Dev Dashboard",
+    description: "Git status, branches, PRs, commits, and outstanding tasks across all TRR workspace repos.",
+    href: "/admin/dev-dashboard" as const,
+    badge: "Dev",
+  },
+  {
     key: "trr-shows",
-    title: "TRR Shows",
+    title: "Shows",
     description: "Browse the TRR metadata database. View shows, seasons, cast, and create linked surveys.",
     href: "/admin/trr-shows" as const,
     badge: "API",
   },
   {
-    key: "scrape-images",
-    title: "Scrape Images",
-    description: "Import images from URLs (like Deadline articles) into show/season galleries on S3.",
-    href: "/admin/scrape-images" as const,
-    badge: "Media",
+    key: "users",
+    title: "Users",
+    description: "Manage users, roles, and admin access controls.",
+    href: "/admin/users" as const,
+    badge: "Admin",
   },
   {
-    key: "survey-responses",
-    title: "Survey Responses",
-    description: "Browse, filter, and export every survey captured in the TRR Postgres database.",
-    href: "/admin/survey-responses" as const,
-    badge: "Data",
+    key: "games",
+    title: "Games",
+    description: "Manage games and interactive experiences.",
+    href: "/admin/games" as const,
+    badge: "Games",
+  },
+  {
+    key: "social-media",
+    title: "Social Media",
+    description: "Manage social media pipelines, templates, and publishing workflows.",
+    href: "/admin/social-media" as const,
+    badge: "Social",
+  },
+  {
+    key: "groups",
+    title: "Groups",
+    description: "Manage user groups and community segmentation.",
+    href: "/admin/groups" as const,
+    badge: "Groups",
+  },
+  {
+    key: "settings",
+    title: "Settings",
+    description: "Configure environment and application settings.",
+    href: "/admin/settings" as const,
+    badge: "Settings",
   },
   {
     key: "font-library",
@@ -32,13 +60,6 @@ const ADMIN_TOOLS = [
     description: "Reference every licensed font family, weight, and usage guidance loaded in the app.",
     href: "/admin/fonts" as const,
     badge: "Design",
-  },
-  {
-    key: "shows",
-    title: "Shows & Assets",
-    description: "Manage show palettes, icons, and cast portraits for featured franchises.",
-    href: "/admin/shows" as const,
-    badge: "Brand",
   },
 ] as const;
 

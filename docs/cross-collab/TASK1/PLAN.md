@@ -1,7 +1,7 @@
 # Facebank Seed Flagging — Task 1 Plan
 
 Repo: TRR-APP  
-Last updated: February 8, 2026
+Last updated: February 10, 2026
 
 Goal
 Allow admins to flag person gallery images as facebank seed candidates for SCREENALYTICS and keep downstream ingestion contract-safe.
@@ -18,6 +18,8 @@ Task 2 (tracked separately; show-level SYNC)
 - Note: show-level SYNC is not implemented by Task 1 and should not be inferred from Task 1 completion.
 
 Status Snapshot (As of February 6, 2026)
+Complete.
+
 - TRR-Backend PR `#44` merged.
 - TRR-APP PRs `#18` and `#19` merged.
 - SCREENALYTICS PR `#187` merged.

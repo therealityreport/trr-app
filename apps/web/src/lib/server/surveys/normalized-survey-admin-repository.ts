@@ -561,6 +561,38 @@ export async function getResponseWithAnswers(
   });
 }
 
+export async function listResponsesWithAnswers(
+  authContext: AuthContext,
+  runId: string,
+): Promise<ResponseWithAnswers[]> {
+  return withAuthTransaction(authContext, async (client) => {
+    const responseResult = await client.query<SurveyResponse>(
+      `SELECT * FROM ${t("responses")} WHERE survey_run_id = $1 ORDER BY created_at DESC`,
+      [runId],
+    );
+    const responses = responseResult.rows;
+    if (responses.length === 0) return [];
+
+    const responseIds = responses.map((r) => r.id);
+    const answersResult = await client.query<SurveyAnswer>(
+      `SELECT * FROM ${t("answers")} WHERE response_id = ANY($1::uuid[]) ORDER BY created_at ASC`,
+      [responseIds],
+    );
+
+    const answersByResponseId = new Map<string, SurveyAnswer[]>();
+    for (const answer of answersResult.rows) {
+      const list = answersByResponseId.get(answer.response_id) ?? [];
+      list.push(answer);
+      answersByResponseId.set(answer.response_id, list);
+    }
+
+    return responses.map((response) => ({
+      ...response,
+      answers: answersByResponseId.get(response.id) ?? [],
+    }));
+  });
+}
+
 export async function getResponseCount(runId: string): Promise<number> {
   const result = await query<{ count: string }>(
     `SELECT COUNT(*)::text as count FROM ${t("responses")} WHERE survey_run_id = $1`,
