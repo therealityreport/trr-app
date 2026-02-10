@@ -193,12 +193,57 @@ function parseLocalBranchDates(output: string): Array<{ name: string; lastCommit
   return results;
 }
 
-function chooseBaseBranch(localBranches: Array<{ name: string }>, currentBranch: string) {
-  const names = new Set(localBranches.map((b) => b.name));
-  if (names.has("main")) return "main";
-  if (names.has("master")) return "master";
-  if (currentBranch && names.has(currentBranch)) return currentBranch;
-  return "main";
+function chooseBaseRef(
+  forEachRefOutput: string,
+  localBranches: Array<{ name: string }>,
+  currentBranch: string,
+) {
+  // `git cherry` takes `<upstream>` and `<head>` revs. In some single-branch/worktree setups,
+  // there is no local `main`, but `origin/main` exists. Prefer an available remote base ref
+  // instead of hardcoding `main` and getting `fatal: unknown commit main`.
+  const localNames = new Set(localBranches.map((b) => b.name));
+  const remoteNames = new Set<string>(); // e.g. "origin/main"
+
+  for (const rawLine of forEachRefOutput.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const sepIndex = line.indexOf("|");
+    const refname = (sepIndex === -1 ? line : line.slice(0, sepIndex)).trim();
+
+    if (!refname.startsWith("refs/remotes/")) continue;
+    const rest = refname.slice("refs/remotes/".length); // "<remote>/<branch>"
+    const slashIndex = rest.indexOf("/");
+    if (slashIndex === -1) continue;
+    const remote = rest.slice(0, slashIndex);
+    const branch = rest.slice(slashIndex + 1);
+
+    if (!remote || !branch) continue;
+    if (branch === "HEAD" || /\/HEAD$/.test(refname)) continue;
+    remoteNames.add(`${remote}/${branch}`);
+  }
+
+  if (localNames.has("main")) return "main";
+  if (localNames.has("master")) return "master";
+
+  if (remoteNames.has("origin/main")) return "origin/main";
+  if (remoteNames.has("origin/master")) return "origin/master";
+
+  for (const candidate of remoteNames) {
+    if (candidate.endsWith("/main")) return candidate;
+  }
+  for (const candidate of remoteNames) {
+    if (candidate.endsWith("/master")) return candidate;
+  }
+
+  if (currentBranch && localNames.has(currentBranch)) return currentBranch;
+
+  // Last-resort fallback: pick an existing ref name if possible (avoid hardcoding `main`).
+  const anyLocal = Array.from(localNames).sort()[0];
+  if (anyLocal) return anyLocal;
+  const anyRemote = Array.from(remoteNames).sort()[0];
+  if (anyRemote) return anyRemote;
+
+  return currentBranch || "main";
 }
 
 function parseCherryOutput(output: string): {
@@ -661,7 +706,8 @@ async function collectRepoStatus(repo: RepoConfig): Promise<RepoStatus> {
   else errors.push(`git rev-parse failed: ${clipError(currentBranchRes.stderr || currentBranchRes.stdout)}`);
 
   const localBranchDates = branchesRes.exitCode === 0 ? parseLocalBranchDates(branchesRes.stdout) : [];
-  const baseBranch = chooseBaseBranch(localBranchDates, empty.currentBranch);
+  const baseBranch =
+    branchesRes.exitCode === 0 ? chooseBaseRef(branchesRes.stdout, localBranchDates, empty.currentBranch) : "main";
 
   if (branchesRes.exitCode === 0) {
     empty.branches = parseBranchRefs(branchesRes.stdout, empty.currentBranch);
