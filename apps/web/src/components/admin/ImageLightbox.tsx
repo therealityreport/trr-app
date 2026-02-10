@@ -111,9 +111,11 @@ interface ImageManagementProps {
   imageType?: ImageType;
   imageId?: string;
   isArchived?: boolean;
+  isStarred?: boolean;
   canManage?: boolean;
   onArchive?: () => Promise<void>;
   onUnarchive?: () => Promise<void>;
+  onToggleStar?: (starred: boolean) => Promise<void>;
   onDelete?: () => Promise<void>;
   onReassign?: () => void;
 }
@@ -139,9 +141,11 @@ interface MetadataPanelProps {
   isExpanded: boolean;
   management?: {
     isArchived?: boolean;
+    isStarred?: boolean;
     canManage?: boolean;
     onArchive?: () => Promise<void>;
     onUnarchive?: () => Promise<void>;
+    onToggleStar?: (starred: boolean) => Promise<void>;
     onDelete?: () => Promise<void>;
     onReassign?: () => void;
   };
@@ -151,6 +155,7 @@ interface MetadataPanelProps {
 function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPanelProps) {
   const [showFullCaption, setShowFullCaption] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [starLoading, setStarLoading] = useState(false);
   const captionTruncateLength = 200;
   const needsTruncation =
     metadata.caption && metadata.caption.length > captionTruncateLength;
@@ -179,6 +184,7 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
   const canArchive = Boolean(management?.onArchive) || Boolean(management?.onUnarchive);
   const canReassign = Boolean(management?.onReassign);
   const canDelete = Boolean(management?.onDelete);
+  const canStar = Boolean(management?.onToggleStar);
   const hasAnyActions = canArchive || canReassign || canDelete;
 
   return (
@@ -186,6 +192,51 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
       data-expanded={isExpanded ? "true" : "false"}
       className="h-full w-full overflow-y-auto bg-black/50 backdrop-blur-xl p-4"
     >
+      {/* Quick Actions (requested placement: above Source) */}
+      {management?.canManage && (canArchive || canStar) && (
+        <div className="mb-4 flex items-center gap-2">
+          {canArchive &&
+            (management.isArchived ? (
+              <button
+                type="button"
+                onClick={() => handleAction("unarchive", management.onUnarchive)}
+                disabled={actionLoading !== null || starLoading}
+                className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+              >
+                {actionLoading === "unarchive" ? "Unarchiving..." : "Unarchive"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleAction("archive", management.onArchive)}
+                disabled={actionLoading !== null || starLoading}
+                className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+              >
+                {actionLoading === "archive" ? "Archiving..." : "Archive"}
+              </button>
+            ))}
+
+          {canStar && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!management.onToggleStar || starLoading || actionLoading) return;
+                setStarLoading(true);
+                try {
+                  await management.onToggleStar(!Boolean(management.isStarred));
+                } finally {
+                  setStarLoading(false);
+                }
+              }}
+              disabled={actionLoading !== null || starLoading}
+              className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {starLoading ? "Saving..." : management.isStarred ? "Unstar" : "Star"}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Source Badge */}
       <div className="mb-4">
         <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -237,6 +288,24 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
           </div>
         )}
 
+        {metadata.sourceLogo && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Source Logo
+            </span>
+            <p className="mt-1 text-sm text-white/90">{metadata.sourceLogo}</p>
+          </div>
+        )}
+
+        {metadata.assetName && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Name
+            </span>
+            <p className="mt-1 text-sm text-white/90 break-all">{metadata.assetName}</p>
+          </div>
+        )}
+
         {metadata.sectionTag && (
           <div className="mb-4">
             <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -285,7 +354,7 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
         {metadata.createdAt && (
           <div className="mb-4">
             <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Created
+              CREATED
             </span>
             <p className="mt-1 text-sm text-white/90">
               {metadata.createdAt.toLocaleDateString()}
@@ -300,6 +369,17 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
             </span>
             <p className="mt-1 text-sm text-white/90">
               {metadata.addedAt.toLocaleDateString()}
+            </p>
+          </div>
+        )}
+
+        {metadata.hasTextOverlay !== undefined && metadata.hasTextOverlay !== null && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              WORD ID
+            </span>
+            <p className="mt-1 text-sm font-semibold text-white/90">
+              {metadata.hasTextOverlay ? "WORDS" : "NO WORDS"}
             </p>
           </div>
         )}
@@ -517,9 +597,11 @@ export function ImageLightbox({
   triggerRef,
   // Management props (imageType/imageId used by parent to construct handlers)
   isArchived,
+  isStarred,
   canManage,
   onArchive,
   onUnarchive,
+  onToggleStar,
   onDelete,
   onReassign,
 }: ImageLightboxProps) {
@@ -765,9 +847,11 @@ export function ImageLightbox({
                   canManage
                     ? {
                         isArchived,
+                        isStarred,
                         canManage,
                         onArchive,
                         onUnarchive,
+                        onToggleStar,
                         onDelete,
                         onReassign,
                       }

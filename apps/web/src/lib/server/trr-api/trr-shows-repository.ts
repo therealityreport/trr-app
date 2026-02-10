@@ -1609,6 +1609,8 @@ export async function getSeasonCastWithEpisodeCounts(
 export interface SeasonAsset {
   id: string;
   type: "season" | "episode" | "cast" | "show";
+  // Where the row came from (used for admin actions like archive/star).
+  origin_table?: "show_images" | "season_images" | "episode_images" | "cast_photos" | "media_assets";
   source: string;
   kind: string;
   hosted_url: string;
@@ -1638,7 +1640,11 @@ export async function getAssetsByShowSeason(
   seasonNumber: number,
   options?: PaginationOptions
 ): Promise<SeasonAsset[]> {
-  const { limit } = normalizePagination(options);
+  // Admin gallery should return "everything" by default (up to MAX_LIMIT).
+  const { limit } = normalizePagination({
+    ...options,
+    limit: options?.limit ?? MAX_LIMIT,
+  });
   const assets: SeasonAsset[] = [];
   const hostedUrlSeen = new Set<string>();
 
@@ -1805,6 +1811,7 @@ export async function getAssetsByShowSeason(
         assets.push({
           id: row.asset_id ?? row.media_asset_id,
           type: "season",
+          origin_table: "media_assets",
           source: row.source ?? "unknown",
           kind: row.link_kind ?? "other",
           hosted_url: hostedUrl,
@@ -1845,7 +1852,7 @@ export async function getAssetsByShowSeason(
        WHERE show_id = $1::uuid
          AND season_number = $2::int
          AND hosted_url IS NOT NULL
-       LIMIT 30`,
+       LIMIT 500`,
       [showId, seasonNumber]
     );
 
@@ -1856,6 +1863,7 @@ export async function getAssetsByShowSeason(
       assets.push({
         id: img.id,
         type: "season",
+        origin_table: "season_images",
         source: img.source,
         kind: imageKind,
         hosted_url: img.hosted_url,
@@ -1893,7 +1901,7 @@ export async function getAssetsByShowSeason(
          AND season_number = $2::int
          AND hosted_url IS NOT NULL
        ORDER BY episode_number ASC
-       LIMIT 50`,
+       LIMIT 500`,
       [showId, seasonNumber]
     );
 
@@ -1904,6 +1912,7 @@ export async function getAssetsByShowSeason(
       assets.push({
         id: img.id,
         type: "episode",
+        origin_table: "episode_images",
         source: img.source,
         kind: imageKind,
         hosted_url: img.hosted_url,
@@ -1929,7 +1938,7 @@ export async function getAssetsByShowSeason(
        FROM core.v_person_show_seasons
        WHERE show_id = $1::uuid
          AND seasons_appeared @> ARRAY[$2]::int[]
-       LIMIT 30`,
+       LIMIT 500`,
       [showId, seasonNumber]
     );
 
@@ -1977,7 +1986,7 @@ export async function getAssetsByShowSeason(
          FROM core.cast_photos
          WHERE person_id = ANY($1::uuid[])
            AND hosted_url IS NOT NULL
-         LIMIT 100`,
+         LIMIT 500`,
         [personIds]
       );
 
@@ -2010,6 +2019,7 @@ export async function getAssetsByShowSeason(
         assets.push({
           id: photo.id,
           type: "cast",
+          origin_table: "cast_photos",
           source: photo.source,
           kind: "profile",
           hosted_url: photo.hosted_url,
@@ -2045,6 +2055,163 @@ export async function getAssetsByShowSeason(
     }
     return 0;
   });
+
+  return assets.slice(0, limit);
+}
+
+/**
+ * Get show-level media assets (posters, backdrops, logos) for a show.
+ *
+ * This is used by the admin "Assets" tab so show images appear alongside season/episode/cast media.
+ */
+export async function getAssetsByShowId(
+  showId: string,
+  options?: PaginationOptions
+): Promise<SeasonAsset[]> {
+  const { limit } = normalizePagination({
+    ...options,
+    limit: options?.limit ?? MAX_LIMIT,
+  });
+
+  const assets: SeasonAsset[] = [];
+  const hostedUrlSeen = new Set<string>();
+
+  // 0) media_links/media_assets (show)
+  try {
+    const linkResult = await pgQuery<{
+      link_id: string;
+      link_kind: string | null;
+      context: Record<string, unknown> | null;
+      media_asset_id: string;
+      asset_id: string | null;
+      source: string | null;
+      hosted_url: string | null;
+      hosted_content_type: string | null;
+      width: number | null;
+      height: number | null;
+      caption: string | null;
+      metadata: Record<string, unknown> | null;
+      ingest_status: string | null;
+      fetched_at: string | null;
+      created_at: string | null;
+    }>(
+      `SELECT
+         ml.id AS link_id,
+         ml.kind AS link_kind,
+         ml.context,
+         ml.media_asset_id,
+         ma.id AS asset_id,
+         ma.source,
+         ma.hosted_url,
+         ma.hosted_content_type,
+         ma.width,
+         ma.height,
+         ma.caption,
+         ma.metadata,
+         ma.ingest_status,
+         ma.fetched_at,
+         ma.created_at
+       FROM core.media_links AS ml
+       LEFT JOIN core.media_assets AS ma
+         ON ma.id = ml.media_asset_id
+       WHERE ml.entity_type = 'show'
+         AND ml.entity_id = $1::uuid
+       LIMIT 500`,
+      [showId]
+    );
+
+    for (const row of linkResult.rows) {
+      const hostedUrl = row.hosted_url ?? null;
+      if (!hostedUrl) continue;
+      if (!isLikelyImage(null, hostedUrl)) continue;
+      if (hostedUrlSeen.has(hostedUrl)) continue;
+
+      const ctx = row.context && typeof row.context === "object" ? row.context : {};
+      const mergedMetadata =
+        row.metadata && typeof row.metadata === "object"
+          ? ({
+              ...(row.metadata as Record<string, unknown>),
+              ...(ctx as Record<string, unknown>),
+            } as Record<string, unknown>)
+          : ({ ...(ctx as Record<string, unknown>) } as Record<string, unknown>);
+
+      const ctxSection =
+        typeof (ctx as Record<string, unknown>).context_section === "string"
+          ? ((ctx as Record<string, unknown>).context_section as string)
+          : null;
+      const ctxType =
+        typeof (ctx as Record<string, unknown>).context_type === "string"
+          ? ((ctx as Record<string, unknown>).context_type as string)
+          : null;
+
+      assets.push({
+        id: row.asset_id ?? row.media_asset_id,
+        type: "show",
+        origin_table: "media_assets",
+        source: row.source ?? "unknown",
+        kind: row.link_kind ?? "other",
+        hosted_url: hostedUrl,
+        width: row.width ?? null,
+        height: row.height ?? null,
+        caption: row.caption ?? null,
+        context_section: ctxSection,
+        context_type: ctxType,
+        fetched_at: row.fetched_at ?? null,
+        created_at: row.created_at ?? null,
+        metadata: mergedMetadata,
+        ingest_status: row.ingest_status ?? null,
+        hosted_content_type: row.hosted_content_type ?? null,
+      });
+      hostedUrlSeen.add(hostedUrl);
+    }
+  } catch (error) {
+    console.warn("[trr-shows-repository] getAssetsByShowId media_links lookup failed", error);
+  }
+
+  // 1) show_images
+  try {
+    const showImages = await pgQuery<{
+      id: string;
+      source: string;
+      kind: string;
+      image_type: string | null;
+      hosted_url: string | null;
+      width: number | null;
+      height: number | null;
+      created_at: string | null;
+      metadata: Record<string, unknown> | null;
+    }>(
+      `SELECT id, source, kind, image_type, hosted_url, width, height, created_at, metadata
+       FROM core.show_images
+       WHERE show_id = $1::uuid
+         AND hosted_url IS NOT NULL
+       LIMIT 500`,
+      [showId]
+    );
+
+    for (const img of showImages.rows) {
+      if (!img.hosted_url) continue;
+      if (hostedUrlSeen.has(img.hosted_url)) continue;
+      const imageKind = img.image_type ?? img.kind ?? "poster";
+      assets.push({
+        id: img.id,
+        type: "show",
+        origin_table: "show_images",
+        source: img.source,
+        kind: imageKind,
+        hosted_url: img.hosted_url,
+        width: img.width,
+        height: img.height,
+        caption: null,
+        created_at: img.created_at,
+        ingest_status: null,
+        metadata: img.metadata,
+      });
+      hostedUrlSeen.add(img.hosted_url);
+    }
+  } catch (error) {
+    console.warn("[trr-shows-repository] getAssetsByShowId show_images lookup failed", error);
+  }
 
   return assets.slice(0, limit);
 }

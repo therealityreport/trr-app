@@ -35,6 +35,7 @@ interface SurveysSectionProps {
   showId: string;
   showName: string;
   totalSeasons: number | null;
+  seasonNumber?: number | null;
 }
 
 // ============================================================================
@@ -67,6 +68,7 @@ export default function SurveysSection({
   showId,
   showName,
   totalSeasons,
+  seasonNumber,
 }: SurveysSectionProps) {
   const [surveys, setSurveys] = useState<LinkedSurvey[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,9 +110,19 @@ export default function SurveysSection({
     fetchSurveys();
   }, [fetchSurveys]);
 
+  useEffect(() => {
+    if (typeof seasonNumber === "number" && Number.isFinite(seasonNumber)) {
+      setFormSeasonNumber(seasonNumber);
+    }
+  }, [seasonNumber]);
+
   // Reset form
   const resetForm = () => {
-    setFormSeasonNumber(1);
+    setFormSeasonNumber(
+      typeof seasonNumber === "number" && Number.isFinite(seasonNumber)
+        ? seasonNumber
+        : 1
+    );
     setFormTemplate("cast_ranking");
     setFormTitle("");
     setFormCreateRun(false);
@@ -154,6 +166,11 @@ export default function SurveysSection({
   const usedSeasons = new Set(
     surveys.map((s) => s.trr_link.season_number).filter((n): n is number => n !== null)
   );
+
+  const visibleSurveys =
+    typeof seasonNumber === "number" && Number.isFinite(seasonNumber)
+      ? surveys.filter((s) => s.trr_link.season_number === seasonNumber)
+      : surveys;
 
   // Generate available seasons
   const availableSeasons = totalSeasons
@@ -220,22 +237,31 @@ export default function SurveysSection({
               <label className="mb-1 block text-sm font-semibold text-zinc-700">
                 Season <span className="text-red-500">*</span>
               </label>
-              <select
-                value={formSeasonNumber}
-                onChange={(e) => setFormSeasonNumber(parseInt(e.target.value, 10))}
-                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
-              >
-                {availableSeasons.map((num) => (
-                  <option
-                    key={num}
-                    value={num}
-                    disabled={usedSeasons.has(num)}
-                  >
-                    Season {num}
-                    {usedSeasons.has(num) ? " (already has survey)" : ""}
-                  </option>
-                ))}
-              </select>
+              {typeof seasonNumber === "number" && Number.isFinite(seasonNumber) ? (
+                <input
+                  type="text"
+                  value={`Season ${seasonNumber}`}
+                  disabled
+                  className="w-full cursor-not-allowed rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+                />
+              ) : (
+                <select
+                  value={formSeasonNumber}
+                  onChange={(e) => setFormSeasonNumber(parseInt(e.target.value, 10))}
+                  className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                >
+                  {availableSeasons.map((num) => (
+                    <option
+                      key={num}
+                      value={num}
+                      disabled={usedSeasons.has(num)}
+                    >
+                      Season {num}
+                      {usedSeasons.has(num) ? " (already has survey)" : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {/* Template */}
@@ -320,15 +346,15 @@ export default function SurveysSection({
       )}
 
       {/* Surveys List */}
-      {surveys.length > 0 ? (
+      {visibleSurveys.length > 0 ? (
         <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
             <span className="text-sm font-semibold text-zinc-500">
-              {surveys.length} survey{surveys.length !== 1 ? "s" : ""}
+              {visibleSurveys.length} survey{visibleSurveys.length !== 1 ? "s" : ""}
             </span>
           </div>
           <div className="space-y-3">
-            {surveys.map((survey) => {
+            {visibleSurveys.map((survey) => {
               const metadata = survey.metadata as {
                 template?: string;
                 showName?: string;
@@ -427,10 +453,15 @@ export default function SurveysSection({
               />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-zinc-900">No Surveys Yet</h3>
+          <h3 className="text-lg font-semibold text-zinc-900">
+            {typeof seasonNumber === "number" && Number.isFinite(seasonNumber)
+              ? `No Surveys Yet (Season ${seasonNumber})`
+              : "No Surveys Yet"}
+          </h3>
           <p className="mt-2 text-sm text-zinc-500">
-            Create a survey linked to this show. Cast members will be automatically
-            imported from the TRR database.
+            {typeof seasonNumber === "number" && Number.isFinite(seasonNumber)
+              ? "Create a survey linked to this season. Cast members will be automatically imported from the TRR database."
+              : "Create a survey linked to this show. Cast members will be automatically imported from the TRR database."}
           </p>
           <button
             onClick={() => setShowForm(true)}

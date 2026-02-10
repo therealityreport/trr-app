@@ -10,7 +10,10 @@ import { auth } from "@/lib/firebase";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
-import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
+import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
+import SocialPostsSection from "@/components/admin/social-posts-section";
+import SurveysSection from "@/components/admin/surveys-section";
+import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { mapSeasonAssetToMetadata, type PhotoMetadata } from "@/lib/photo-metadata";
 import {
   readAdvancedFilters,
@@ -68,7 +71,17 @@ interface SeasonCastMember {
   photo_url: string | null;
 }
 
-type TabId = "episodes" | "media" | "cast";
+interface TrrShowCastMember {
+  person_id: string;
+  full_name: string | null;
+  cast_member_name: string | null;
+  role: string | null;
+  credit_category: string;
+  photo_url: string | null;
+  cover_photo_url: string | null;
+}
+
+type TabId = "episodes" | "assets" | "cast" | "surveys" | "social" | "details";
 
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -165,13 +178,19 @@ export default function SeasonDetailPage() {
 
   const [show, setShow] = useState<TrrShow | null>(null);
   const [season, setSeason] = useState<TrrSeason | null>(null);
+  const [showSeasons, setShowSeasons] = useState<TrrSeason[]>([]);
   const [episodes, setEpisodes] = useState<TrrEpisode[]>([]);
   const [assets, setAssets] = useState<SeasonAsset[]>([]);
   const [cast, setCast] = useState<SeasonCastMember[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("episodes");
+  const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshingAssets, setRefreshingAssets] = useState(false);
+  const [trrShowCast, setTrrShowCast] = useState<TrrShowCastMember[]>([]);
+  const [trrShowCastLoading, setTrrShowCastLoading] = useState(false);
+  const [trrShowCastError, setTrrShowCastError] = useState<string | null>(null);
+  const showCastFetchAttemptedRef = useRef(false);
 
   const [episodeLightbox, setEpisodeLightbox] = useState<{
     episode: TrrEpisode;
@@ -209,11 +228,24 @@ export default function SeasonDetailPage() {
     },
     [router, searchParams]
   );
+
+  const setTab = useCallback(
+    (tab: TabId) => {
+      setActiveTab(tab);
+      const next = new URLSearchParams(searchParams.toString());
+      next.set("tab", tab);
+      router.replace(`?${next.toString()}`, { scroll: false });
+    },
+    [router, searchParams]
+  );
+
   const [addBackdropsOpen, setAddBackdropsOpen] = useState(false);
   const [unassignedBackdrops, setUnassignedBackdrops] = useState<
     Array<{
       media_asset_id: string;
-      hosted_url: string;
+      hosted_url: string | null;
+      source_url: string | null;
+      display_url: string;
       width: number | null;
       height: number | null;
       caption: string | null;
@@ -228,8 +260,17 @@ export default function SeasonDetailPage() {
 
   const tabParam = searchParams.get("tab");
   useEffect(() => {
-    const allowedTabs: TabId[] = ["episodes", "media", "cast"];
-    if (tabParam && allowedTabs.includes(tabParam as TabId)) {
+    const allowedTabs: TabId[] = ["episodes", "assets", "cast", "surveys", "social", "details"];
+    if (!tabParam) return;
+
+    // Back-compat alias: ?tab=media -> assets (media view)
+    if (tabParam === "media") {
+      setActiveTab("assets");
+      setAssetsView("media");
+      return;
+    }
+
+    if (allowedTabs.includes(tabParam as TabId)) {
       setActiveTab(tabParam as TabId);
     }
   }, [tabParam]);
@@ -239,6 +280,31 @@ export default function SeasonDetailPage() {
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  const fetchShowCastForBrand = useCallback(async () => {
+    setTrrShowCastError(null);
+    setTrrShowCastLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/cast?limit=500`, {
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error((data as { error?: string }).error || "Failed to fetch show cast");
+      }
+      const nextCast = Array.isArray((data as { cast?: unknown }).cast)
+        ? ((data as { cast: unknown[] }).cast as TrrShowCastMember[])
+        : [];
+      setTrrShowCast(nextCast);
+    } catch (err) {
+      setTrrShowCastError(err instanceof Error ? err.message : "Failed to fetch show cast");
+      setTrrShowCast([]);
+    } finally {
+      showCastFetchAttemptedRef.current = true;
+      setTrrShowCastLoading(false);
+    }
+  }, [getAuthHeaders, showId]);
 
   const loadSeasonData = useCallback(async () => {
     if (!Number.isFinite(seasonNumber)) {
@@ -263,7 +329,12 @@ export default function SeasonDetailPage() {
       const seasonsData = await seasonsResponse.json();
       setShow(showData.show);
 
-      const foundSeason = (seasonsData.seasons as TrrSeason[]).find(
+      const seasonList = Array.isArray(seasonsData.seasons)
+        ? (seasonsData.seasons as TrrSeason[])
+        : [];
+      setShowSeasons(seasonList);
+
+      const foundSeason = seasonList.find(
         (s) => s.season_number === seasonNumber
       );
 
@@ -308,6 +379,13 @@ export default function SeasonDetailPage() {
     if (!hasAccess) return;
     loadSeasonData();
   }, [hasAccess, loadSeasonData]);
+
+  useEffect(() => {
+    if (!hasAccess) return;
+    if (activeTab !== "assets" || assetsView !== "brand") return;
+    if (showCastFetchAttemptedRef.current) return;
+    fetchShowCastForBrand();
+  }, [hasAccess, activeTab, assetsView, fetchShowCastForBrand]);
 
   const fetchAssets = useCallback(async () => {
     const headers = await getAuthHeaders();
@@ -377,7 +455,16 @@ export default function SeasonDetailPage() {
       if (!response.ok) {
         throw new Error(data.error || "Failed to assign backdrops");
       }
-      setAddBackdropsOpen(false);
+      const failedIds = Array.isArray(data.mirrored_failed_ids)
+        ? (data.mirrored_failed_ids.filter((v: unknown) => typeof v === "string") as string[])
+        : [];
+      if (failedIds.length > 0) {
+        setBackdropsError(
+          `Assigned, but failed to mirror ${failedIds.length} image(s). Try again in a moment.`
+        );
+      } else {
+        setAddBackdropsOpen(false);
+      }
       setSelectedBackdropIds(new Set());
       await fetchAssets();
     } catch (err) {
@@ -458,6 +545,61 @@ export default function SeasonDetailPage() {
     [getAuthHeaders, fetchAssets]
   );
 
+  const archiveGalleryAsset = useCallback(
+    async (asset: SeasonAsset) => {
+      const origin = asset.origin_table ?? null;
+      if (!origin) throw new Error("Cannot archive: missing origin_table");
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/archive", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: asset.id }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail ? `${data.error}: ${data.detail}` : data?.detail || data?.error || "Archive failed";
+        throw new Error(message);
+      }
+      setAssets((prev) => prev.filter((a) => a.hosted_url !== asset.hosted_url));
+      setAssetLightbox(null);
+    },
+    [getAuthHeaders]
+  );
+
+  const toggleStarGalleryAsset = useCallback(
+    async (asset: SeasonAsset, starred: boolean) => {
+      const origin = asset.origin_table ?? null;
+      if (!origin) throw new Error("Cannot star: missing origin_table");
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/star", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: asset.id, starred }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail ? `${data.error}: ${data.detail}` : data?.detail || data?.error || "Star failed";
+        throw new Error(message);
+      }
+      setAssets((prev) =>
+        prev.map((a) => {
+          if (a.hosted_url !== asset.hosted_url) return a;
+          const meta =
+            a.metadata && typeof a.metadata === "object"
+              ? { ...(a.metadata as Record<string, unknown>) }
+              : {};
+          meta.starred = starred;
+          if (starred) meta.starred_at = new Date().toISOString();
+          else delete meta.starred_at;
+          return { ...a, metadata: meta };
+        })
+      );
+    },
+    [getAuthHeaders]
+  );
+
   const totalEpisodes = episodes.length;
   const groupedCast = useMemo(() => {
     const main: SeasonCastMember[] = [];
@@ -489,13 +631,9 @@ export default function SeasonDetailPage() {
     count > 0 ? `${count} episodes this season` : "Appeared this season";
 
   const isSeasonBackdrop = (asset: SeasonAsset) => {
-    if (asset.kind === "backdrop") return true;
-    const metadata = asset.metadata;
-    if (!metadata || typeof metadata !== "object") return false;
-    const meta = metadata as Record<string, unknown>;
-    if (meta.season_backdrop === true) return true;
-    const roles = meta.image_roles;
-    return Array.isArray(roles) && roles.includes("backdrop");
+    // Only trust the normalized "kind" field. Some historical metadata flags were incorrect
+    // (e.g. season posters tagged as backdrops). Kind is the source-of-truth for grouping.
+    return (asset.kind ?? "").toLowerCase().trim() === "backdrop";
   };
 
   const filteredMediaAssets = useMemo(() => {
@@ -589,7 +727,7 @@ export default function SeasonDetailPage() {
             {error || "Season not found"}
           </p>
           <Link
-            href={`/admin/trr-shows/${showId}?tab=seasons`}
+            href={`/admin/trr-shows/${showId}`}
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
             ← Back to Show
@@ -606,7 +744,7 @@ export default function SeasonDetailPage() {
           <div className="mx-auto max-w-6xl">
             <div className="mb-4">
               <Link
-                href={`/admin/trr-shows/${showId}?tab=seasons`}
+                href={`/admin/trr-shows/${showId}`}
                 className="text-sm text-zinc-500 hover:text-zinc-900"
               >
                 ← Back to Show
@@ -641,21 +779,24 @@ export default function SeasonDetailPage() {
 
         <div className="border-b border-zinc-200 bg-white">
           <div className="mx-auto max-w-6xl px-6">
-            <nav className="flex gap-6">
+            <nav className="flex flex-wrap gap-2 py-4">
               {(
                 [
-                  { id: "episodes", label: "Episodes" },
-                  { id: "media", label: "Media" },
+                  { id: "episodes", label: "Seasons & Episodes" },
+                  { id: "assets", label: "Assets" },
                   { id: "cast", label: "Cast" },
+                  { id: "surveys", label: "Surveys" },
+                  { id: "social", label: "Social Media" },
+                  { id: "details", label: "Details" },
                 ] as const
               ).map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`border-b-2 py-4 text-sm font-semibold transition ${
+                  onClick={() => setTab(tab.id)}
+                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                     activeTab === tab.id
-                      ? "border-zinc-900 text-zinc-900"
-                      : "border-transparent text-zinc-500 hover:text-zinc-700"
+                      ? "border-zinc-900 bg-zinc-900 text-white"
+                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                   }`}
                 >
                   {tab.label}
@@ -766,65 +907,105 @@ export default function SeasonDetailPage() {
             </div>
           )}
 
-          {activeTab === "media" && (
+          {activeTab === "assets" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between">
+              <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Season Media
+                    {assetsView === "media" ? "Season Media" : "Brand"}
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
                     {show.name} · Season {season.season_number}
                   </h3>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={handleRefreshImages}
-                    disabled={refreshingAssets}
-                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
-                    </svg>
-                    {refreshingAssets ? "Refreshing..." : "Refresh Images"}
-                  </button>
-                  <button
-                    onClick={() => setAdvancedFiltersOpen(true)}
-                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
-                    </svg>
-                    Filters
-                  </button>
-                  <button
-                    onClick={openAddBackdrops}
-                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Add Backdrops
-                  </button>
-                  <button
-                    onClick={() => setScrapeDrawerOpen(true)}
-                    className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    Import Images
-                  </button>
+                <div className="flex flex-col gap-3 sm:items-end">
+                  <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setAssetsView("media")}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                        assetsView === "media"
+                          ? "bg-white text-zinc-900 shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700"
+                      }`}
+                    >
+                      Media
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssetsView("brand")}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                        assetsView === "brand"
+                          ? "bg-white text-zinc-900 shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700"
+                      }`}
+                    >
+                      Brand
+                    </button>
+                  </div>
+
+                  {assetsView === "media" && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={handleRefreshImages}
+                        disabled={refreshingAssets}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
+                        </svg>
+                        {refreshingAssets ? "Refreshing..." : "Refresh Images"}
+                      </button>
+                      <button
+                        onClick={() => setAdvancedFiltersOpen(true)}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
+                        </svg>
+                        Filters
+                      </button>
+                      <button
+                        onClick={openAddBackdrops}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Assign TMDb Backdrops
+                      </button>
+                      <button
+                        onClick={() => setScrapeDrawerOpen(true)}
+                        className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Import Images
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="space-y-8">
-                {filteredMediaAssets.filter((a) => a.type === "season" && isSeasonBackdrop(a)).length > 0 && (
+              {assetsView === "media" ? (
+                <div className="space-y-8">
+                {filteredMediaAssets.filter(
+                  (a) =>
+                    a.type === "season" &&
+                    isSeasonBackdrop(a) &&
+                    (a.source ?? "").toLowerCase() === "tmdb"
+                ).length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Backdrops</h4>
                     <div className="grid grid-cols-3 gap-4">
                       {filteredMediaAssets
-                        .filter((a) => a.type === "season" && isSeasonBackdrop(a))
+                        .filter(
+                          (a) =>
+                            a.type === "season" &&
+                            isSeasonBackdrop(a) &&
+                            (a.source ?? "").toLowerCase() === "tmdb"
+                        )
                         .map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
@@ -921,6 +1102,36 @@ export default function SeasonDetailPage() {
                   <p className="text-sm text-zinc-500">No media found for this season.</p>
                 )}
               </div>
+              ) : (
+                <div className="space-y-4">
+                  {trrShowCastLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
+                    </div>
+                  ) : trrShowCastError ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                      <p className="text-sm text-red-700">{trrShowCastError}</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          showCastFetchAttemptedRef.current = false;
+                          fetchShowCastForBrand();
+                        }}
+                        className="mt-2 text-xs font-semibold text-red-600 hover:underline"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : (
+                    <ShowBrandEditor
+                      trrShowId={showId}
+                      trrShowName={show.name}
+                      trrSeasons={showSeasons}
+                      trrCast={trrShowCast}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -948,7 +1159,7 @@ export default function SeasonDetailPage() {
                       {cast.map((member) => (
                         <Link
                           key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
                           <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
@@ -987,7 +1198,7 @@ export default function SeasonDetailPage() {
                       {groupedCast.main.map((member) => (
                         <Link
                           key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
                           <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
@@ -1026,7 +1237,7 @@ export default function SeasonDetailPage() {
                       {groupedCast.recurring.map((member) => (
                         <Link
                           key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
                           <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
@@ -1065,7 +1276,7 @@ export default function SeasonDetailPage() {
                       {groupedCast.guest.map((member) => (
                         <Link
                           key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
                           <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
@@ -1103,6 +1314,78 @@ export default function SeasonDetailPage() {
               </div>
             </div>
           )}
+
+          {activeTab === "surveys" && (
+            <SurveysSection
+              showId={showId}
+              showName={show.name}
+              totalSeasons={showSeasons.length > 0 ? showSeasons.length : null}
+              seasonNumber={Number.isFinite(seasonNumber) ? seasonNumber : null}
+            />
+          )}
+
+          {activeTab === "social" && (
+            <SocialPostsSection showId={showId} showName={show.name} />
+          )}
+
+          {activeTab === "details" && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Details
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">
+                    {show.name} · Season {season.season_number}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  {show.tmdb_id && (
+                    <TmdbLinkIcon
+                      showTmdbId={show.tmdb_id}
+                      seasonNumber={season.season_number}
+                      type="season"
+                    />
+                  )}
+                  {show.imdb_id && <ImdbLinkIcon imdbId={show.imdb_id} type="title" />}
+                </div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="space-y-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-zinc-500">TRR Show ID:</span>
+                    <code className="rounded bg-zinc-100 px-2 py-0.5 text-xs">{showId}</code>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-zinc-500">TRR Season ID:</span>
+                    <code className="rounded bg-zinc-100 px-2 py-0.5 text-xs">{season.id}</code>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-zinc-500">Season Number:</span>
+                    <span className="font-semibold text-zinc-900">{season.season_number}</span>
+                  </div>
+                  {season.air_date && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-zinc-500">First Air Date:</span>
+                      <span className="text-zinc-900">
+                        {new Date(season.air_date).toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <ExternalLinks
+                    externalIds={null}
+                    tmdbId={show.tmdb_id}
+                    imdbId={show.imdb_id}
+                    type="show"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         {episodeLightbox && (
@@ -1134,14 +1417,21 @@ export default function SeasonDetailPage() {
             isOpen={true}
             onClose={closeAssetLightbox}
             metadata={mapSeasonAssetToMetadata(assetLightbox.asset, seasonNumber, show?.name)}
-            canManage={assetLightbox.asset.source?.toLowerCase?.().startsWith("web_scrape:")}
-            onDelete={async () => {
-              try {
-                await deleteMediaAsset(assetLightbox.asset);
-              } catch (err) {
-                alert(err instanceof Error ? err.message : "Failed to delete image");
-              }
-            }}
+            canManage={true}
+            isStarred={Boolean((assetLightbox.asset.metadata as Record<string, unknown> | null)?.starred)}
+            onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
+            onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
+            onDelete={
+              assetLightbox.asset.source?.toLowerCase?.().startsWith("web_scrape:")
+                ? async () => {
+                    try {
+                      await deleteMediaAsset(assetLightbox.asset);
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : "Failed to delete image");
+                    }
+                  }
+                : undefined
+            }
             position={{
               current: assetLightbox.index + 1,
               total: assetLightbox.filteredAssets.length,
@@ -1206,7 +1496,7 @@ export default function SeasonDetailPage() {
                       Backdrops
                     </p>
                     <h3 className="text-lg font-bold text-zinc-900">
-                      Add TMDb Backdrops
+                      Assign TMDb Backdrops
                     </h3>
                     <p className="mt-1 text-xs text-zinc-500">
                       {selectedBackdropIds.size} selected
@@ -1283,7 +1573,7 @@ export default function SeasonDetailPage() {
                           }`}
                         >
                           <GalleryImage
-                            src={b.hosted_url}
+                            src={b.display_url ?? b.hosted_url ?? b.source_url ?? ""}
                             alt={b.caption || "Backdrop"}
                             sizes="420px"
                             className="object-cover"

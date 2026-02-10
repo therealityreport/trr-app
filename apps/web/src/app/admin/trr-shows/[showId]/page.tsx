@@ -71,6 +71,16 @@ interface TrrCastMember {
 }
 
 type TabId = "seasons" | "assets" | "cast" | "surveys" | "social" | "details";
+type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
+
+const SEASON_PAGE_TABS = [
+  { tab: "episodes", label: "Seasons & Episodes" },
+  { tab: "assets", label: "Assets" },
+  { tab: "cast", label: "Cast" },
+  { tab: "surveys", label: "Surveys" },
+  { tab: "social", label: "Social Media" },
+  { tab: "details", label: "Details" },
+] as const;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -150,40 +160,67 @@ function CastPhoto({ src, alt }: { src: string; alt: string }) {
 
 function RefreshProgressBar({
   show,
+  stage,
+  message,
   current,
   total,
 }: {
   show: boolean;
+  stage?: string | null;
+  message?: string | null;
   current?: number | null;
   total?: number | null;
 }) {
   if (!show) return null;
-  const hasProgress =
+  const hasCounts =
     typeof current === "number" &&
+    Number.isFinite(current) &&
     typeof total === "number" &&
-    total > 0 &&
+    Number.isFinite(total) &&
+    total >= 0 &&
     current >= 0;
-  const percent = hasProgress
-    ? Math.min(100, Math.round((current / total) * 100))
+  const safeTotal = hasCounts ? Math.max(0, Math.floor(total)) : null;
+  const safeCurrent = hasCounts
+    ? Math.max(
+        0,
+        Math.floor(
+          safeTotal !== null && safeTotal > 0 ? Math.min(current, safeTotal) : current
+        )
+      )
+    : null;
+  const hasProgressBar = safeCurrent !== null && safeTotal !== null && safeTotal > 0;
+  const percent = hasProgressBar
+    ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100))
     : 0;
+  const stageLabel =
+    typeof stage === "string" && stage.trim()
+      ? stage.replace(/[_-]+/g, " ").trim()
+      : null;
 
   return (
     <div className="mt-2 w-full">
+      {(message || stageLabel || hasCounts) && (
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
+            {message || stageLabel || "Working..."}
+          </p>
+          {hasProgressBar && safeCurrent !== null && safeTotal !== null && (
+            <p className="text-[11px] tabular-nums text-zinc-500">
+              {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} ({percent}%)
+            </p>
+          )}
+        </div>
+      )}
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
-        {hasProgress ? (
+        {hasProgressBar ? (
           <div
             className="h-full rounded-full bg-zinc-700 transition-all"
             style={{ width: `${percent}%` }}
           />
-        ) : (
+        ) : safeTotal === 0 ? null : (
           <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-zinc-700/70" />
         )}
       </div>
-      {hasProgress && (
-        <p className="mt-1 text-[11px] text-zinc-500">
-          {current}/{total}
-        </p>
-      )}
     </div>
   );
 }
@@ -202,6 +239,7 @@ export default function TrrShowDetailPage() {
   const [activeTab, setActiveTab] = useState<TabId>("seasons");
   const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
   const [openSeasonId, setOpenSeasonId] = useState<string | null>(null);
+  const hasAutoOpenedSeasonRef = useRef(false);
   const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<
     Record<string, { count: number; premiereDate: string | null; finaleDate: string | null }>
   >({});
@@ -258,16 +296,38 @@ export default function TrrShowDetailPage() {
   const [isCovered, setIsCovered] = useState(false);
   const [coverageLoading, setCoverageLoading] = useState(false);
 
+  // Refresh show sync state (uses TRR-Backend scripts, proxied via Next API routes)
+  const [refreshingTargets, setRefreshingTargets] = useState<Record<ShowRefreshTarget, boolean>>({
+    details: false,
+    seasons_episodes: false,
+    photos: false,
+    cast_credits: false,
+  });
+  const [refreshTargetNotice, setRefreshTargetNotice] = useState<
+    Partial<Record<ShowRefreshTarget, string>>
+  >({});
+  const [refreshTargetError, setRefreshTargetError] = useState<
+    Partial<Record<ShowRefreshTarget, string>>
+  >({});
+  const [refreshTargetProgress, setRefreshTargetProgress] = useState<
+    Partial<
+      Record<
+        ShowRefreshTarget,
+        {
+          stage?: string | null;
+          message?: string | null;
+          current: number | null;
+          total: number | null;
+        }
+      >
+    >
+  >({});
+
   // Image scrape drawer state
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
   const [scrapeDrawerContext, setScrapeDrawerContext] = useState<SeasonContext | null>(null);
 
   // Refresh images state
-  const [refreshingCastImages, setRefreshingCastImages] = useState(false);
-  const [refreshCastProgress, setRefreshCastProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshingPersonIds, setRefreshingPersonIds] = useState<Record<string, boolean>>({});
@@ -304,7 +364,7 @@ export default function TrrShowDetailPage() {
       {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ skip_mirror: false }),
+        body: JSON.stringify({ skip_mirror: false, show_id: showId }),
       }
     );
 
@@ -318,42 +378,7 @@ export default function TrrShowDetailPage() {
     }
 
     return data;
-  }, [getAuthHeaders]);
-
-  const autoCountShowImages = useCallback(
-    async (seasonNumber: number | "all") => {
-      const headers = await getAuthHeaders();
-      const payload: Record<string, unknown> = {};
-      if (seasonNumber !== "all") {
-        payload.season_number = seasonNumber;
-      }
-
-      const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/auto-count-images`,
-        {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message =
-          data.error && data.detail
-            ? `${data.error}: ${data.detail}`
-            : data.error || data.detail || "Failed to auto-count images";
-        throw new Error(message);
-      }
-      return data as {
-        assets_total?: number;
-        assets_counted?: number;
-        assets_skipped?: number;
-        assets_failed?: number;
-      };
-    },
-    [getAuthHeaders, showId]
-  );
+  }, [getAuthHeaders, showId]);
 
   // Fetch show details
   const fetchShow = useCallback(async () => {
@@ -387,15 +412,12 @@ export default function TrrShowDetailPage() {
       const seasons = (data as { seasons?: unknown }).seasons;
       const nextSeasons = Array.isArray(seasons) ? (seasons as TrrSeason[]) : [];
       setSeasons(nextSeasons);
-      if (nextSeasons.length > 0 && !openSeasonId) {
-        setOpenSeasonId(nextSeasons[0].id);
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch seasons";
       console.warn("Failed to fetch seasons:", message);
       setError(message);
     }
-  }, [showId, openSeasonId, getAuthHeaders]);
+  }, [showId, getAuthHeaders]);
 
   const fetchSeasonEpisodeSummaries = useCallback(
     async (seasonList: TrrSeason[]) => {
@@ -570,13 +592,7 @@ export default function TrrShowDetailPage() {
   };
 
   const isSeasonBackdrop = (asset: SeasonAsset) => {
-    if (asset.kind === "backdrop") return true;
-    const metadata = asset.metadata;
-    if (!metadata || typeof metadata !== "object") return false;
-    const meta = metadata as Record<string, unknown>;
-    if (meta.season_backdrop === true) return true;
-    const roles = meta.image_roles;
-    return Array.isArray(roles) && roles.includes("backdrop");
+    return (asset.kind ?? "").toLowerCase().trim() === "backdrop";
   };
 
   const filteredGalleryAssets = useMemo(() => {
@@ -642,8 +658,18 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (visibleSeasons.length === 0) return;
-    if (!openSeasonId || !visibleSeasons.some((season) => season.id === openSeasonId)) {
+
+    // If the open season disappears (filtered out), fall back to the newest visible.
+    if (openSeasonId && !visibleSeasons.some((season) => season.id === openSeasonId)) {
       setOpenSeasonId(visibleSeasons[0].id);
+      hasAutoOpenedSeasonRef.current = true;
+      return;
+    }
+
+    // Auto-open one season once (initial load), but allow the user to close all afterwards.
+    if (!hasAutoOpenedSeasonRef.current && !openSeasonId) {
+      setOpenSeasonId(visibleSeasons[0].id);
+      hasAutoOpenedSeasonRef.current = true;
     }
   }, [visibleSeasons, openSeasonId]);
 
@@ -660,35 +686,378 @@ export default function TrrShowDetailPage() {
       setGalleryLoading(true);
       try {
         const headers = await getAuthHeaders();
+        const dedupe = (rows: SeasonAsset[]) => {
+          const seen = new Set<string>();
+          const out: SeasonAsset[] = [];
+          for (const row of rows) {
+            const key = (row.hosted_url ?? "").trim();
+            if (!key) continue;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(row);
+          }
+          return out;
+        };
+
+        const fetchShowAssets = async (): Promise<SeasonAsset[]> => {
+          const res = await fetch(`/api/admin/trr-api/shows/${showId}/assets`, { headers });
+          if (!res.ok) return [];
+          const data = await res.json().catch(() => ({}));
+          const assets = (data as { assets?: unknown }).assets;
+          return Array.isArray(assets) ? (assets as SeasonAsset[]) : [];
+        };
+
         if (seasonNumber === "all") {
-          // Fetch for all seasons
-          const allAssets: SeasonAsset[] = [];
-          for (const season of visibleSeasons) {
-            const res = await fetch(
-              `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets`,
-              { headers }
-            );
-            if (res.ok) {
-              const data = await res.json();
-              allAssets.push(...(data.assets || []));
-            }
-          }
-          setGalleryAssets(allAssets);
+          // Fetch show-level assets once + season assets for all seasons.
+          const [showAssets, ...seasonResults] = await Promise.all([
+            fetchShowAssets(),
+            ...visibleSeasons.map(async (season) => {
+              const res = await fetch(
+                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets`,
+                { headers }
+              );
+              if (!res.ok) return [];
+              const data = await res.json().catch(() => ({}));
+              const assets = (data as { assets?: unknown }).assets;
+              return Array.isArray(assets) ? (assets as SeasonAsset[]) : [];
+            }),
+          ]);
+          setGalleryAssets(dedupe([...(showAssets ?? []), ...seasonResults.flat()]));
         } else {
-          const res = await fetch(
-            `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`,
-            { headers }
-          );
-          if (res.ok) {
-            const data = await res.json();
-            setGalleryAssets(data.assets || []);
-          }
+          const [showAssets, seasonAssets] = await Promise.all([
+            fetchShowAssets(),
+            (async () => {
+              const res = await fetch(
+                `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`,
+                { headers }
+              );
+              if (!res.ok) return [];
+              const data = await res.json().catch(() => ({}));
+              const assets = (data as { assets?: unknown }).assets;
+              return Array.isArray(assets) ? (assets as SeasonAsset[]) : [];
+            })(),
+          ]);
+          setGalleryAssets(dedupe([...(showAssets ?? []), ...(seasonAssets ?? [])]));
         }
       } finally {
         setGalleryLoading(false);
       }
     },
     [showId, visibleSeasons, getAuthHeaders]
+  );
+
+  const refreshShow = useCallback(
+    async (target: ShowRefreshTarget) => {
+      const label = (() => {
+        switch (target) {
+          case "details":
+            return "Show Details";
+          case "seasons_episodes":
+            return "Seasons & Episodes";
+          case "photos":
+            return "Photos";
+          case "cast_credits":
+            return "Cast/Credits";
+          default:
+            return target;
+        }
+      })();
+
+      setRefreshingTargets((prev) => ({ ...prev, [target]: true }));
+      setRefreshTargetProgress((prev) => ({
+        ...prev,
+        [target]: {
+          stage: "starting",
+          message: `Refreshing ${label}...`,
+          current: 0,
+          total: null,
+        },
+      }));
+      setRefreshTargetNotice((prev) => {
+        const next = { ...prev };
+        delete next[target];
+        return next;
+      });
+      setRefreshTargetError((prev) => {
+        const next = { ...prev };
+        delete next[target];
+        return next;
+      });
+
+      try {
+        let streamFailed = false;
+        let sawComplete = false;
+
+        try {
+          const headers = await getAuthHeaders();
+          const streamUrl =
+            target === "photos"
+              ? `/api/admin/trr-api/shows/${showId}/refresh-photos/stream`
+              : `/api/admin/trr-api/shows/${showId}/refresh/stream`;
+          const streamBody =
+            target === "photos" ? {} : { targets: [target] };
+          const response = await fetch(streamUrl, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify(streamBody),
+          });
+
+          if (!response.ok || !response.body) {
+            const data = await response.json().catch(() => ({}));
+            const message =
+              data.error && data.detail
+                ? `${data.error}: ${data.detail}`
+                : data.error || data.detail || "Refresh failed";
+            throw new Error(message);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            // Some environments send SSE with CRLF delimiters. Normalize to LF so our
+            // "\n\n" boundary detection works reliably and progress updates stream live.
+            buffer = buffer.replace(/\r\n/g, "\n");
+
+            let boundaryIndex = buffer.indexOf("\n\n");
+            while (boundaryIndex !== -1) {
+              const rawEvent = buffer.slice(0, boundaryIndex);
+              buffer = buffer.slice(boundaryIndex + 2);
+
+              const lines = rawEvent.split("\n").filter(Boolean);
+              let eventType = "message";
+              const dataLines: string[] = [];
+              for (const line of lines) {
+                if (line.startsWith("event:")) {
+                  eventType = line.slice(6).trim();
+                } else if (line.startsWith("data:")) {
+                  dataLines.push(line.slice(5).trim());
+                }
+              }
+
+              const dataStr = dataLines.join("\n");
+              let payload: Record<string, unknown> | string = dataStr;
+              try {
+                payload = JSON.parse(dataStr) as Record<string, unknown>;
+              } catch {
+                payload = dataStr;
+              }
+
+              if (eventType === "progress" && payload && typeof payload === "object") {
+                const stageRaw = (payload as { stage?: unknown; step?: unknown; target?: unknown }).stage
+                  ?? (payload as { stage?: unknown; step?: unknown; target?: unknown }).step
+                  ?? (payload as { stage?: unknown; step?: unknown; target?: unknown }).target;
+                const messageRaw = (payload as { message?: unknown }).message;
+                const currentRaw = (payload as { current?: unknown }).current;
+                const totalRaw = (payload as { total?: unknown }).total;
+                const current =
+                  typeof currentRaw === "number"
+                    ? currentRaw
+                    : typeof currentRaw === "string"
+                      ? Number.parseInt(currentRaw, 10)
+                      : null;
+                const total =
+                  typeof totalRaw === "number"
+                    ? totalRaw
+                  : typeof totalRaw === "string"
+                      ? Number.parseInt(totalRaw, 10)
+                      : null;
+
+                setRefreshTargetProgress((prev) => ({
+                  ...prev,
+                  [target]: {
+                    stage: typeof stageRaw === "string" ? stageRaw : prev[target]?.stage ?? null,
+                    message: typeof messageRaw === "string" ? messageRaw : prev[target]?.message ?? null,
+                    current: typeof current === "number" && Number.isFinite(current) ? current : null,
+                    total: typeof total === "number" && Number.isFinite(total) ? total : null,
+                  },
+                }));
+              } else if (eventType === "complete") {
+                sawComplete = true;
+
+                if (
+                  target === "photos" &&
+                  payload &&
+                  typeof payload === "object" &&
+                  ("cast_photos_upserted" in payload || "cast_photos_fetched" in payload)
+                ) {
+                  const asNum = (value: unknown): number | null =>
+                    typeof value === "number" && Number.isFinite(value) ? value : null;
+                  const durationMs = asNum((payload as { duration_ms?: unknown }).duration_ms);
+                  const castFetched = asNum((payload as { cast_photos_fetched?: unknown }).cast_photos_fetched);
+                  const castUpserted = asNum((payload as { cast_photos_upserted?: unknown }).cast_photos_upserted);
+                  const castMirrored = asNum((payload as { cast_photos_mirrored?: unknown }).cast_photos_mirrored);
+                  const castFailed = asNum((payload as { cast_photos_failed?: unknown }).cast_photos_failed);
+                  const castPruned = asNum((payload as { cast_photos_pruned?: unknown }).cast_photos_pruned);
+                  const autoAttempted = asNum((payload as { auto_counts_attempted?: unknown }).auto_counts_attempted);
+                  const autoSucceeded = asNum((payload as { auto_counts_succeeded?: unknown }).auto_counts_succeeded);
+                  const autoFailed = asNum((payload as { auto_counts_failed?: unknown }).auto_counts_failed);
+                  const wordAttempted = asNum((payload as { text_overlay_attempted?: unknown }).text_overlay_attempted);
+                  const wordSucceeded = asNum((payload as { text_overlay_succeeded?: unknown }).text_overlay_succeeded);
+                  const wordFailed = asNum((payload as { text_overlay_failed?: unknown }).text_overlay_failed);
+
+                  if (activeTab === "assets" && assetsView === "media") {
+                    await loadGalleryAssets(selectedGallerySeason);
+                  }
+
+                  setRefreshTargetNotice((prev) => ({
+                    ...prev,
+                    photos: [
+                      `Photos refreshed${durationMs !== null ? ` (${durationMs}ms)` : ""}.`,
+                      castFetched !== null ? `photos fetched: ${castFetched}` : null,
+                      castUpserted !== null ? `photos upserted: ${castUpserted}` : null,
+                      castMirrored !== null ? `photos mirrored: ${castMirrored}` : null,
+                      castFailed !== null ? `photos failed: ${castFailed}` : null,
+                      castPruned !== null ? `photos pruned: ${castPruned}` : null,
+                      autoAttempted !== null ? `auto counts attempted: ${autoAttempted}` : null,
+                      autoSucceeded !== null ? `auto counts succeeded: ${autoSucceeded}` : null,
+                      autoFailed !== null ? `auto counts failed: ${autoFailed}` : null,
+                      wordAttempted !== null ? `word id attempted: ${wordAttempted}` : null,
+                      wordSucceeded !== null ? `word id succeeded: ${wordSucceeded}` : null,
+                      wordFailed !== null ? `word id failed: ${wordFailed}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(", "),
+                  }));
+                } else {
+                  const resultsRaw = (payload as { results?: unknown }).results;
+                  const results =
+                    resultsRaw && typeof resultsRaw === "object"
+                      ? (resultsRaw as Record<string, unknown>)
+                      : null;
+                  const stepRaw = results ? results[target] : null;
+                  const step =
+                    stepRaw && typeof stepRaw === "object"
+                      ? (stepRaw as { status?: unknown; duration_ms?: unknown; error?: unknown })
+                      : null;
+                  if (step?.status === "failed") {
+                    const stepError =
+                      typeof step.error === "string" && step.error
+                        ? step.error
+                        : "Refresh failed";
+                    throw new Error(stepError);
+                  }
+
+                  if (target === "details") {
+                    await fetchShow();
+                  } else if (target === "seasons_episodes") {
+                    await Promise.all([fetchShow(), fetchSeasons()]);
+                  } else if (target === "photos") {
+                    if (activeTab === "assets" && assetsView === "media") {
+                      await loadGalleryAssets(selectedGallerySeason);
+                    }
+                  } else if (target === "cast_credits") {
+                    await fetchCast();
+                  }
+
+                  const durationMs =
+                    typeof step?.duration_ms === "number" ? step.duration_ms : null;
+                  setRefreshTargetNotice((prev) => ({
+                    ...prev,
+                    [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}.`,
+                  }));
+                }
+              } else if (eventType === "error") {
+                const message =
+                  payload && typeof payload === "object"
+                    ? (payload as { error?: string; detail?: string })
+                    : null;
+                const errorText =
+                  message?.error && message?.detail
+                    ? `${message.error}: ${message.detail}`
+                    : message?.error || "Refresh failed";
+                throw new Error(errorText);
+              }
+
+              boundaryIndex = buffer.indexOf("\n\n");
+            }
+          }
+        } catch (streamErr) {
+          streamFailed = true;
+          console.warn("Show refresh stream failed, falling back to non-stream.", streamErr);
+        }
+
+        if (streamFailed) {
+          if (target === "photos") {
+            throw new Error("Photo refresh stream failed.");
+          }
+          const headers = await getAuthHeaders();
+          const response = await fetch(`/api/admin/trr-api/shows/${showId}/refresh`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ targets: [target] }),
+          });
+          const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+          if (!response.ok) {
+            const message =
+              typeof data.error === "string" && typeof data.detail === "string"
+                ? `${data.error}: ${data.detail}`
+                : (typeof data.error === "string" && data.error) ||
+                  (typeof data.detail === "string" && data.detail) ||
+                  "Refresh failed";
+            throw new Error(message);
+          }
+
+          const resultsRaw = (data as { results?: unknown }).results;
+          const results =
+            resultsRaw && typeof resultsRaw === "object"
+              ? (resultsRaw as Record<string, unknown>)
+              : null;
+          const stepRaw = results ? results[target] : null;
+          const step =
+            stepRaw && typeof stepRaw === "object"
+              ? (stepRaw as { status?: unknown; duration_ms?: unknown; error?: unknown })
+              : null;
+          if (step?.status === "failed") {
+            const stepError =
+              typeof step.error === "string" && step.error ? step.error : "Refresh failed";
+            throw new Error(stepError);
+          }
+
+          if (target === "details") {
+            await fetchShow();
+          } else if (target === "seasons_episodes") {
+            await Promise.all([fetchShow(), fetchSeasons()]);
+          } else if (target === "cast_credits") {
+            await fetchCast();
+          }
+
+          const durationMs = typeof step?.duration_ms === "number" ? step.duration_ms : null;
+          setRefreshTargetNotice((prev) => ({
+            ...prev,
+            [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}.`,
+          }));
+        } else if (!sawComplete) {
+          setRefreshTargetNotice((prev) => ({ ...prev, [target]: `Refreshed ${label}.` }));
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Refresh failed";
+        setRefreshTargetError((prev) => ({ ...prev, [target]: message }));
+      } finally {
+        setRefreshingTargets((prev) => ({ ...prev, [target]: false }));
+        setRefreshTargetProgress((prev) => {
+          const next = { ...prev };
+          delete next[target];
+          return next;
+        });
+      }
+    },
+    [
+      activeTab,
+      assetsView,
+      fetchCast,
+      fetchSeasons,
+      fetchShow,
+      getAuthHeaders,
+      loadGalleryAssets,
+      selectedGallerySeason,
+      showId,
+    ]
   );
 
   const detectTextOverlayForUnknown = useCallback(async () => {
@@ -737,85 +1106,6 @@ export default function TrrShowDetailPage() {
     }
   }, [activeTab, assetsView, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
 
-  const refreshCastImages = useCallback(async () => {
-    if (refreshingCastImages) return;
-
-    const personIds = Array.from(
-      new Set(cast.map((member) => member.person_id).filter(Boolean))
-    );
-
-    if (personIds.length === 0) {
-      setRefreshError("No cast members available to refresh.");
-      return;
-    }
-
-    setRefreshingCastImages(true);
-    setRefreshCastProgress({ current: 0, total: personIds.length });
-    setRefreshNotice(null);
-    setRefreshError(null);
-
-    let successCount = 0;
-    let failureCount = 0;
-
-    for (let i = 0; i < personIds.length; i += 1) {
-      const personId = personIds[i];
-      setRefreshCastProgress({ current: i + 1, total: personIds.length });
-      try {
-        await refreshPersonImages(personId);
-        successCount += 1;
-      } catch (err) {
-        failureCount += 1;
-        console.error("Failed to refresh cast member images:", err);
-      }
-    }
-
-    setRefreshingCastImages(false);
-    setRefreshCastProgress(null);
-
-    if (successCount > 0) {
-      await fetchCast();
-      if (activeTab === "assets" && assetsView === "media") {
-        await loadGalleryAssets(selectedGallerySeason);
-      }
-    }
-
-    let autoCountSummary: string | null = null;
-    if (activeTab === "assets" && assetsView === "media") {
-      try {
-        const autoCount = await autoCountShowImages(selectedGallerySeason);
-        if (autoCount && typeof autoCount === "object") {
-          const total = typeof autoCount.assets_total === "number" ? autoCount.assets_total : null;
-          const counted =
-            typeof autoCount.assets_counted === "number" ? autoCount.assets_counted : null;
-          if (total !== null && counted !== null) {
-            autoCountSummary = `People counts: ${counted}/${total}`;
-          }
-        }
-      } catch (err) {
-        console.error("Failed to auto-count show images:", err);
-        setRefreshError(
-          err instanceof Error ? err.message : "Failed to auto-count show images"
-        );
-      }
-    }
-
-    setRefreshNotice(
-      `Refreshed ${successCount}/${personIds.length} cast members${
-        failureCount ? ` (${failureCount} failed)` : ""
-      }.${autoCountSummary ? ` ${autoCountSummary}.` : ""}`
-    );
-  }, [
-    cast,
-    refreshPersonImages,
-    refreshingCastImages,
-    fetchCast,
-    activeTab,
-    assetsView,
-    loadGalleryAssets,
-    selectedGallerySeason,
-    autoCountShowImages,
-  ]);
-
   const handleRefreshCastMember = useCallback(
     async (personId: string, label: string) => {
       if (!personId) return;
@@ -827,7 +1117,7 @@ export default function TrrShowDetailPage() {
       try {
         await refreshPersonImages(personId);
         await fetchCast();
-        setRefreshNotice(`Refreshed images for ${label}.`);
+        setRefreshNotice(`Refreshed person for ${label}.`);
       } catch (err) {
         console.error("Failed to refresh person images:", err);
         setRefreshError(
@@ -873,6 +1163,61 @@ export default function TrrShowDetailPage() {
   const closeAssetLightbox = () => {
     setAssetLightbox(null);
   };
+
+  const archiveGalleryAsset = useCallback(
+    async (asset: SeasonAsset) => {
+      const origin = asset.origin_table ?? null;
+      if (!origin) throw new Error("Cannot archive: missing origin_table");
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/archive", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: asset.id }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail ? `${data.error}: ${data.detail}` : data?.detail || data?.error || "Archive failed";
+        throw new Error(message);
+      }
+
+      // Clear from UI immediately (hosted_url will also be cleared server-side).
+      setGalleryAssets((prev) => prev.filter((a) => a.hosted_url !== asset.hosted_url));
+      closeAssetLightbox();
+    },
+    [getAuthHeaders]
+  );
+
+  const toggleStarGalleryAsset = useCallback(
+    async (asset: SeasonAsset, starred: boolean) => {
+      const origin = asset.origin_table ?? null;
+      if (!origin) throw new Error("Cannot star: missing origin_table");
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/star", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: asset.id, starred }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail ? `${data.error}: ${data.detail}` : data?.detail || data?.error || "Star failed";
+        throw new Error(message);
+      }
+
+      setGalleryAssets((prev) =>
+        prev.map((a) => {
+          if (a.hosted_url !== asset.hosted_url) return a;
+          const meta = (a.metadata && typeof a.metadata === "object") ? { ...(a.metadata as Record<string, unknown>) } : {};
+          meta.starred = starred;
+          if (starred) meta.starred_at = new Date().toISOString();
+          else delete meta.starred_at;
+          return { ...a, metadata: meta };
+        })
+      );
+    },
+    [getAuthHeaders]
+  );
 
   if (checking) {
     return (
@@ -990,7 +1335,7 @@ export default function TrrShowDetailPage() {
                     <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
-                    {coverageLoading ? "..." : "Added"}
+                    {coverageLoading ? "..." : "In Shows"}
                   </button>
                 ) : (
                   <button
@@ -1003,31 +1348,6 @@ export default function TrrShowDetailPage() {
                     </svg>
                     {coverageLoading ? "..." : "Add to Shows"}
                   </button>
-                )}
-
-                <button
-                  onClick={refreshCastImages}
-                  disabled={refreshingCastImages || cast.length === 0}
-                  className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
-                  </svg>
-                  {refreshingCastImages
-                    ? refreshCastProgress
-                      ? `Refreshing ${refreshCastProgress.current}/${refreshCastProgress.total}`
-                      : "Refreshing..."
-                    : "Refresh Cast Images"}
-                </button>
-                <RefreshProgressBar
-                  show={refreshingCastImages}
-                  current={refreshCastProgress?.current}
-                  total={refreshCastProgress?.total}
-                />
-                {(refreshNotice || refreshError) && (
-                  <p className={`text-xs ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
-                    {refreshError || refreshNotice}
-                  </p>
                 )}
 
                 {/* Ratings */}
@@ -1055,7 +1375,7 @@ export default function TrrShowDetailPage() {
         </header>
 
         {/* Tabs */}
-        <div className="border-b border-zinc-200 bg-white">
+        <div className="hidden">
           <div className="mx-auto max-w-6xl px-6">
             <nav className="flex flex-wrap gap-2 py-4">
               {(
@@ -1089,12 +1409,43 @@ export default function TrrShowDetailPage() {
           {/* Seasons Tab */}
           {activeTab === "seasons" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Seasons
-                </p>
-                <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Seasons
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refreshShow("seasons_episodes")}
+                  disabled={refreshingTargets.seasons_episodes}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {refreshingTargets.seasons_episodes
+                    ? "Refreshing..."
+                    : "Refresh Seasons & Episodes"}
+                </button>
               </div>
+
+              {(refreshTargetNotice.seasons_episodes ||
+                refreshTargetError.seasons_episodes) && (
+                <p
+                  className={`mb-4 text-sm ${
+                    refreshTargetError.seasons_episodes ? "text-red-600" : "text-zinc-500"
+                  }`}
+                >
+                  {refreshTargetError.seasons_episodes ||
+                    refreshTargetNotice.seasons_episodes}
+                </p>
+              )}
+              <RefreshProgressBar
+                show={refreshingTargets.seasons_episodes}
+                stage={refreshTargetProgress.seasons_episodes?.stage}
+                message={refreshTargetProgress.seasons_episodes?.message}
+                current={refreshTargetProgress.seasons_episodes?.current}
+                total={refreshTargetProgress.seasons_episodes?.total}
+              />
               {seasonSummariesLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-zinc-900" />
@@ -1115,24 +1466,38 @@ export default function TrrShowDetailPage() {
                         key={season.id}
                         className="rounded-xl border border-zinc-200 bg-white shadow-sm"
                       >
-                        <button
-                          type="button"
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={isOpen}
                           onClick={() =>
                             setOpenSeasonId((prev) => (prev === season.id ? null : season.id))
                           }
-                          className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
+                          onKeyDown={(event) => {
+                            if (event.currentTarget !== event.target) return;
+                            if (event.key !== "Enter" && event.key !== " ") return;
+                            event.preventDefault();
+                            setOpenSeasonId((prev) => (prev === season.id ? null : season.id));
+                          }}
+                          className="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left"
                         >
                           <div>
                             <div className="flex items-center gap-3">
-                              <p className="text-lg font-semibold text-zinc-900">
+                              <Link
+                                href={`/admin/trr-shows/${showId}/seasons/${season.season_number}?tab=episodes`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-lg font-semibold text-zinc-900 hover:underline"
+                              >
                                 Season {season.season_number}
-                              </p>
+                              </Link>
                               {season.tmdb_season_id && show.tmdb_id && (
-                                <TmdbLinkIcon
-                                  showTmdbId={show.tmdb_id}
-                                  seasonNumber={season.season_number}
-                                  type="season"
-                                />
+                                <span onClick={(e) => e.stopPropagation()} className="inline-flex">
+                                  <TmdbLinkIcon
+                                    showTmdbId={show.tmdb_id}
+                                    seasonNumber={season.season_number}
+                                    type="season"
+                                  />
+                                </span>
                               )}
                             </div>
                             <div className="mt-1 flex flex-wrap gap-3 text-xs text-zinc-500">
@@ -1155,16 +1520,25 @@ export default function TrrShowDetailPage() {
                               />
                             </svg>
                           </span>
-                        </button>
-                        {isOpen && (
-                          <div className="border-t border-zinc-100 px-4 py-4">
-                            {season.overview && (
-                              <p className="text-sm text-zinc-600">
-                                {season.overview}
-                              </p>
-                            )}
+                        </div>
+                        <div className="border-t border-zinc-100 px-4 py-4">
+                          <div className="flex flex-wrap gap-2">
+                            {SEASON_PAGE_TABS.map((tab) => (
+                              <Link
+                                key={tab.tab}
+                                href={`/admin/trr-shows/${showId}/seasons/${season.season_number}?tab=${tab.tab}`}
+                                className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                              >
+                                {tab.label}
+                              </Link>
+                            ))}
                           </div>
-                        )}
+                          {isOpen && season.overview && (
+                            <p className="mt-4 text-sm text-zinc-600">
+                              {season.overview}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -1240,6 +1614,23 @@ export default function TrrShowDetailPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
+                        onClick={() => refreshShow("photos")}
+                        disabled={refreshingTargets.photos}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4"
+                          />
+                        </svg>
+                        {refreshingTargets.photos ? "Refreshing..." : "Refresh Photos"}
+                      </button>
+
+                      <button
                         onClick={() => setAdvancedFiltersOpen(true)}
                         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                       >
@@ -1276,6 +1667,23 @@ export default function TrrShowDetailPage() {
                     </div>
                   </div>
 
+                  {(refreshTargetNotice.photos || refreshTargetError.photos) && (
+                    <p
+                      className={`mb-4 text-sm ${
+                        refreshTargetError.photos ? "text-red-600" : "text-zinc-500"
+                      }`}
+                    >
+                      {refreshTargetError.photos || refreshTargetNotice.photos}
+                    </p>
+                  )}
+                  <RefreshProgressBar
+                    show={refreshingTargets.photos}
+                    stage={refreshTargetProgress.photos?.stage}
+                    message={refreshTargetProgress.photos?.message}
+                    current={refreshTargetProgress.photos?.current}
+                    total={refreshTargetProgress.photos?.total}
+                  />
+
                   {galleryLoading ? (
                     <div className="flex items-center justify-center py-12">
                       <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-blue-500" />
@@ -1286,16 +1694,23 @@ export default function TrrShowDetailPage() {
                     </p>
                   ) : (
                     <div className="space-y-8">
-                      {/* Season Posters */}
-                      {filteredGalleryAssets.filter((a) => a.type === "season" && isSeasonBackdrop(a))
-                        .length > 0 && (
+                  {/* Show Backdrops (TMDb backdrops) */}
+                  {filteredGalleryAssets.filter(
+                    (a) => a.type === "show" && isSeasonBackdrop(a) && (a.source ?? "").toLowerCase() === "tmdb"
+                  )
+                    .length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Backdrops
                           </h4>
                           <div className="grid grid-cols-3 gap-4">
                             {filteredGalleryAssets
-                              .filter((a) => a.type === "season" && isSeasonBackdrop(a))
+                              .filter(
+                                (a) =>
+                                  a.type === "show" &&
+                                  isSeasonBackdrop(a) &&
+                                  (a.source ?? "").toLowerCase() === "tmdb"
+                              )
                               .map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
@@ -1316,14 +1731,86 @@ export default function TrrShowDetailPage() {
                         </section>
                       )}
 
-                      {filteredGalleryAssets.filter((a) => a.type === "season" && !isSeasonBackdrop(a)).length > 0 && (
+                      {/* Show Posters */}
+                      {filteredGalleryAssets.filter(
+                        (a) =>
+                          a.type === "show" && !isSeasonBackdrop(a) && (a.kind ?? "").toLowerCase().trim() === "poster"
+                      ).length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Show Posters
+                          </h4>
+                          <div className="grid grid-cols-4 gap-4">
+                            {filteredGalleryAssets
+                              .filter(
+                                (a) =>
+                                  a.type === "show" &&
+                                  !isSeasonBackdrop(a) &&
+                                  (a.kind ?? "").toLowerCase().trim() === "poster"
+                              )
+                              .map((asset, i, arr) => (
+                                <button
+                                  key={`${asset.id}-${i}`}
+                                  onClick={(e) =>
+                                    openAssetLightbox(asset, i, arr, e.currentTarget)
+                                  }
+                                  className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                  <GalleryImage
+                                    src={asset.hosted_url}
+                                    alt={asset.caption || "Show poster"}
+                                    sizes="200px"
+                                  />
+                                </button>
+                              ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {/* Show Logos */}
+                      {filteredGalleryAssets.filter(
+                        (a) => a.type === "show" && (a.kind ?? "").toLowerCase().trim() === "logo"
+                      ).length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Logos
+                          </h4>
+                          <div className="grid grid-cols-4 gap-4">
+                            {filteredGalleryAssets
+                              .filter(
+                                (a) =>
+                                  a.type === "show" &&
+                                  (a.kind ?? "").toLowerCase().trim() === "logo"
+                              )
+                              .map((asset, i, arr) => (
+                                <button
+                                  key={`${asset.id}-${i}`}
+                                  onClick={(e) =>
+                                    openAssetLightbox(asset, i, arr, e.currentTarget)
+                                  }
+                                  className="relative aspect-[2/1] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                  <GalleryImage
+                                    src={asset.hosted_url}
+                                    alt={asset.caption || "Show logo"}
+                                    sizes="250px"
+                                    className="object-contain"
+                                  />
+                                </button>
+                              ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {/* Season Posters */}
+                      {filteredGalleryAssets.filter((a) => a.type === "season").length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Season Posters
                           </h4>
                           <div className="grid grid-cols-4 gap-4">
                             {filteredGalleryAssets
-                              .filter((a) => a.type === "season" && !isSeasonBackdrop(a))
+                              .filter((a) => a.type === "season")
                               .map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
@@ -1437,26 +1924,41 @@ export default function TrrShowDetailPage() {
                     {cast.length} members
                   </span>
                   <button
-                    onClick={refreshCastImages}
-                    disabled={refreshingCastImages || cast.length === 0}
+                    type="button"
+                    onClick={() => refreshShow("cast_credits")}
+                    disabled={refreshingTargets.cast_credits}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {refreshingCastImages ? "Refreshing..." : "Refresh Cast Images"}
+                    {refreshingTargets.cast_credits ? "Refreshing..." : "Refresh Cast/Credits"}
                   </button>
                 </div>
               </div>
+              {(refreshTargetNotice.cast_credits ||
+                refreshTargetError.cast_credits) && (
+                <p
+                  className={`mb-4 text-sm ${
+                    refreshTargetError.cast_credits ? "text-red-600" : "text-zinc-500"
+                  }`}
+                >
+                  {refreshTargetError.cast_credits ||
+                    refreshTargetNotice.cast_credits}
+                </p>
+              )}
               <RefreshProgressBar
-                show={refreshingCastImages}
-                current={refreshCastProgress?.current}
-                total={refreshCastProgress?.total}
+                show={refreshingTargets.cast_credits}
+                stage={refreshTargetProgress.cast_credits?.stage}
+                message={refreshTargetProgress.cast_credits?.message}
+                current={refreshTargetProgress.cast_credits?.current}
+                total={refreshTargetProgress.cast_credits?.total}
               />
+              {(refreshNotice || refreshError) && (
+                <p className={`mb-4 text-sm ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
+                  {refreshError || refreshNotice}
+                </p>
+              )}
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {cast.map((member) => {
                   const thumbnailUrl = member.cover_photo_url || member.photo_url;
-                  const roleLabel =
-                    member.role && member.role.toLowerCase() !== "self"
-                      ? member.role
-                      : null;
                   const episodeLabel =
                     typeof member.total_episodes === "number"
                       ? `${member.total_episodes} episodes`
@@ -1489,19 +1991,6 @@ export default function TrrShowDetailPage() {
                       {episodeLabel && (
                         <p className="text-sm text-zinc-600">{episodeLabel}</p>
                       )}
-                      {roleLabel && (
-                        <p className="text-xs text-zinc-500">{roleLabel}</p>
-                      )}
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-                          {member.credit_category}
-                        </span>
-                        {member.billing_order && (
-                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
-                            #{member.billing_order}
-                          </span>
-                        )}
-                      </div>
                       <button
                         type="button"
                         onClick={(event) => {
@@ -1517,7 +2006,7 @@ export default function TrrShowDetailPage() {
                       >
                         {refreshingPersonIds[member.person_id]
                           ? "Refreshing..."
-                          : "Refresh Images"}
+                          : "Refresh Person"}
                       </button>
                     </Link>
                   );
@@ -1548,14 +2037,41 @@ export default function TrrShowDetailPage() {
           {/* Details Tab - External IDs */}
           {activeTab === "details" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Show Information
-                </p>
-                <h3 className="text-xl font-bold text-zinc-900">
-                  External IDs & Links
-                </h3>
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Show Information
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">
+                    External IDs & Links
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refreshShow("details")}
+                  disabled={refreshingTargets.details}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {refreshingTargets.details ? "Refreshing..." : "Refresh Show Details"}
+                </button>
               </div>
+
+              {(refreshTargetNotice.details || refreshTargetError.details) && (
+                <p
+                  className={`mb-4 text-sm ${
+                    refreshTargetError.details ? "text-red-600" : "text-zinc-500"
+                  }`}
+                >
+                  {refreshTargetError.details || refreshTargetNotice.details}
+                </p>
+              )}
+              <RefreshProgressBar
+                show={refreshingTargets.details}
+                stage={refreshTargetProgress.details?.stage}
+                message={refreshTargetProgress.details?.message}
+                current={refreshTargetProgress.details?.current}
+                total={refreshTargetProgress.details?.total}
+              />
 
               <div className="space-y-6">
                 {/* External IDs */}
@@ -1685,6 +2201,10 @@ export default function TrrShowDetailPage() {
             isOpen={true}
             onClose={closeAssetLightbox}
             metadata={mapSeasonAssetToMetadata(assetLightbox.asset, selectedGallerySeason !== "all" ? selectedGallerySeason : undefined, show?.name)}
+            canManage={true}
+            isStarred={Boolean((assetLightbox.asset.metadata as Record<string, unknown> | null)?.starred)}
+            onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
+            onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
             position={{
               current: assetLightbox.index + 1,
               total: assetLightbox.filteredAssets.length,

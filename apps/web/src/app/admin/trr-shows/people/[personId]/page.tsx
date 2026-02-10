@@ -296,14 +296,9 @@ function RefreshProgressBar({
           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
             {message || phaseLabel || "Working..."}
           </p>
-          {hasCounts && safeCurrent !== null && safeTotal !== null && safeTotal > 0 && (
+          {hasProgressBar && safeCurrent !== null && safeTotal !== null && (
             <p className="text-[11px] tabular-nums text-zinc-500">
-              {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} images
-            </p>
-          )}
-          {hasCounts && safeCurrent !== null && safeTotal !== null && safeTotal === 0 && (
-            <p className="text-[11px] tabular-nums text-zinc-500">
-              {safeCurrent.toLocaleString()} images
+              {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} ({percent}%)
             </p>
           )}
         </div>
@@ -318,11 +313,6 @@ function RefreshProgressBar({
           <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-zinc-700/70" />
         )}
       </div>
-      {hasProgressBar && (
-        <p className="mt-1 text-[11px] text-zinc-500">
-          {percent}% complete
-        </p>
-      )}
     </div>
   );
 }
@@ -1101,10 +1091,20 @@ export default function PersonProfilePage() {
   const searchParams = useSearchParams();
   const personId = params.personId as string;
   const showIdParam = searchParams.get("showId");
+  const seasonNumberParam = searchParams.get("seasonNumber");
+  const seasonNumberRaw = seasonNumberParam ? Number.parseInt(seasonNumberParam, 10) : Number.NaN;
+  const seasonNumber = Number.isFinite(seasonNumberRaw) ? seasonNumberRaw : null;
+
   const backHref = showIdParam
-    ? `/admin/trr-shows/${showIdParam}?tab=cast`
+    ? seasonNumber !== null
+      ? `/admin/trr-shows/${showIdParam}/seasons/${seasonNumber}?tab=cast`
+      : `/admin/trr-shows/${showIdParam}`
     : "/admin/trr-shows";
-  const backLabel = showIdParam ? "← Back to Cast" : "← Back to Shows";
+  const backLabel = showIdParam
+    ? seasonNumber !== null
+      ? "← Back to Season Cast"
+      : "← Back to Show"
+    : "← Back to Shows";
   const { user, checking, hasAccess } = useAdminGuard();
 
   const [person, setPerson] = useState<TrrPerson | null>(null);
@@ -1247,6 +1247,8 @@ export default function PersonProfilePage() {
       const showAcronym = activeShowAcronym?.toUpperCase?.() ?? null;
       result = result.filter((photo) => {
         const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+        const metaShowId = typeof metadata.show_id === "string" ? metadata.show_id : null;
+        const metaShowIdMatches = Boolean(showIdParam && metaShowId && metaShowId === showIdParam);
         const text = [
           photo.caption,
           photo.context_section,
@@ -1276,10 +1278,11 @@ export default function PersonProfilePage() {
         );
 
         if (galleryShowFilter === "this-show") {
-          return matchesShowName || matchesShowAcronym || metadataMatchesThisShow;
+          return metaShowIdMatches || matchesShowName || matchesShowAcronym || metadataMatchesThisShow;
         }
         if (galleryShowFilter === "other-shows") {
           return (
+            (!metaShowIdMatches && Boolean(metaShowId)) ||
             matchesOtherShowName ||
             matchesOtherShowAcronym ||
             metadataMatchesOtherShow
@@ -1463,7 +1466,13 @@ export default function PersonProfilePage() {
         {
           method: "POST",
           headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ limit_per_source: 200, force_mirror: true, ...options }),
+          body: JSON.stringify({
+            limit_per_source: 200,
+            force_mirror: true,
+            show_id: showIdParam ?? undefined,
+            show_name: activeShowName ?? undefined,
+            ...options,
+          }),
         }
       );
 
@@ -1489,7 +1498,7 @@ export default function PersonProfilePage() {
       }
       return data;
     },
-    [getAuthHeaders, personId]
+    [getAuthHeaders, personId, showIdParam, activeShowName]
   );
 
   // Fetch person details
@@ -1791,6 +1800,8 @@ export default function PersonProfilePage() {
               skip_mirror: false,
               force_mirror: true,
               limit_per_source: 200,
+              show_id: showIdParam ?? undefined,
+              show_name: activeShowName ?? undefined,
             }),
           }
         );
@@ -1814,6 +1825,8 @@ export default function PersonProfilePage() {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
+          // Normalize CRLF to LF so "\n\n" boundary splitting works in all runtimes.
+          buffer = buffer.replace(/\r\n/g, "\n");
 
           let boundaryIndex = buffer.indexOf("\n\n");
           while (boundaryIndex !== -1) {
@@ -1938,6 +1951,8 @@ export default function PersonProfilePage() {
     fetchCoverPhoto,
     getAuthHeaders,
     personId,
+    showIdParam,
+    activeShowName,
   ]);
 
   // Initial load
@@ -1980,6 +1995,74 @@ export default function PersonProfilePage() {
     setLightboxOpen(false);
     setLightboxPhoto(null);
   };
+
+  const archiveGalleryPhoto = useCallback(
+    async (photo: TrrPersonPhoto) => {
+      const origin = photo.origin === "cast_photos" ? "cast_photos" : "media_assets";
+      const assetId =
+        photo.origin === "cast_photos" ? photo.id : photo.media_asset_id ?? null;
+      if (!assetId) throw new Error("Cannot archive: missing asset id");
+
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/archive", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: assetId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail
+            ? `${data.error}: ${data.detail}`
+            : data?.detail || data?.error || "Archive failed";
+        throw new Error(message);
+      }
+
+      // Hide immediately; backend clears hosted_url as well.
+      setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+      closeLightbox();
+    },
+    [getAuthHeaders]
+  );
+
+  const toggleStarGalleryPhoto = useCallback(
+    async (photo: TrrPersonPhoto, starred: boolean) => {
+      const origin = photo.origin === "cast_photos" ? "cast_photos" : "media_assets";
+      const assetId =
+        photo.origin === "cast_photos" ? photo.id : photo.media_asset_id ?? null;
+      if (!assetId) throw new Error("Cannot star: missing asset id");
+
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/star", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: assetId, starred }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail
+            ? `${data.error}: ${data.detail}`
+            : data?.detail || data?.error || "Star failed";
+        throw new Error(message);
+      }
+
+      setPhotos((prev) =>
+        prev.map((p) => {
+          if (p.id !== photo.id) return p;
+          const meta =
+            p.metadata && typeof p.metadata === "object"
+              ? { ...(p.metadata as Record<string, unknown>) }
+              : {};
+          meta.starred = starred;
+          if (starred) meta.starred_at = new Date().toISOString();
+          else delete meta.starred_at;
+          return { ...p, metadata: meta };
+        })
+      );
+    },
+    [getAuthHeaders]
+  );
 
   // Get primary photo - use cover photo if set, otherwise first hosted photo
   const primaryPhotoUrl = coverPhoto?.photo_url || photos.find(p => p.hosted_url)?.hosted_url;
@@ -2096,32 +2179,12 @@ export default function PersonProfilePage() {
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
                     {credits.length} credits
                   </span>
-                  <button
-                    onClick={handleRefreshImages}
-                    disabled={refreshingImages}
-                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                  >
-                    {refreshingImages ? "Refreshing..." : "Refresh Images"}
-                  </button>
                 </div>
-                <div className="mt-2 space-y-2">
-                  <RefreshProgressBar
-                    show={refreshingImages}
-                    phase={refreshProgress?.phase}
-                    message={refreshProgress?.message}
-                    current={refreshProgress?.current}
-                    total={refreshProgress?.total}
-                  />
-                  {refreshError && (
-                    <p className="text-xs text-red-600">{refreshError}</p>
-                  )}
-                  {refreshNotice && !refreshError && (
-                    <p className="text-xs text-zinc-500">{refreshNotice}</p>
-                  )}
-                  {photosError && (
+                {photosError && (
+                  <div className="mt-2">
                     <p className="text-xs text-red-600">{photosError}</p>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2708,6 +2771,10 @@ export default function PersonProfilePage() {
             isOpen={lightboxOpen}
             onClose={closeLightbox}
             metadata={mapPhotoToMetadata(lightboxPhoto.photo)}
+            canManage={true}
+            isStarred={Boolean((lightboxPhoto.photo.metadata as Record<string, unknown> | null)?.starred)}
+            onToggleStar={(starred) => toggleStarGalleryPhoto(lightboxPhoto.photo, starred)}
+            onArchive={() => archiveGalleryPhoto(lightboxPhoto.photo)}
             metadataExtras={
               <TagPeoplePanel
                 photo={lightboxPhoto.photo}

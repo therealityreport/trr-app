@@ -127,10 +127,45 @@ export interface UpdateSeasonInput {
 }
 
 // ============================================================================
+// Schema Safety
+// ============================================================================
+
+let surveyShowsSchemaEnsured = false;
+let surveyShowsSchemaEnsuring: Promise<void> | null = null;
+
+async function ensureSurveyShowsSchema(): Promise<void> {
+  if (surveyShowsSchemaEnsured) return;
+  if (surveyShowsSchemaEnsuring) return surveyShowsSchemaEnsuring;
+
+  // Some environments may be missing later migrations (e.g. `trr_show_id`, `fonts`).
+  // These ALTERs are idempotent and keep admin Brand Assets screens functional.
+  surveyShowsSchemaEnsuring = (async () => {
+    await query(`ALTER TABLE survey_shows ADD COLUMN IF NOT EXISTS trr_show_id uuid;`);
+    await query(
+      `ALTER TABLE survey_shows ADD COLUMN IF NOT EXISTS fonts jsonb NOT NULL DEFAULT '{}'::jsonb;`
+    );
+    await query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_survey_shows_trr_show_id_unique
+       ON survey_shows (trr_show_id)
+       WHERE trr_show_id IS NOT NULL;`
+    );
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_survey_shows_trr_show_id
+       ON survey_shows (trr_show_id);`
+    );
+    surveyShowsSchemaEnsured = true;
+    surveyShowsSchemaEnsuring = null;
+  })();
+
+  return surveyShowsSchemaEnsuring;
+}
+
+// ============================================================================
 // Show Functions
 // ============================================================================
 
 export async function getAllShows(): Promise<ShowRecord[]> {
+  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -143,6 +178,7 @@ export async function getAllShows(): Promise<ShowRecord[]> {
 }
 
 export async function getActiveShows(): Promise<ShowRecord[]> {
+  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -156,6 +192,7 @@ export async function getActiveShows(): Promise<ShowRecord[]> {
 }
 
 export async function getShowByKey(key: string): Promise<ShowRecord | null> {
+  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -170,6 +207,7 @@ export async function getShowByKey(key: string): Promise<ShowRecord | null> {
 }
 
 export async function getShowById(id: string): Promise<ShowRecord | null> {
+  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -184,6 +222,7 @@ export async function getShowById(id: string): Promise<ShowRecord | null> {
 }
 
 export async function getShowByTrrShowId(trrShowId: string): Promise<ShowRecord | null> {
+  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -198,6 +237,7 @@ export async function getShowByTrrShowId(trrShowId: string): Promise<ShowRecord 
 }
 
 export async function createShow(input: CreateShowInput): Promise<ShowRecord> {
+  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `INSERT INTO survey_shows (
       key, title, short_title, network, status, logline,
@@ -230,6 +270,7 @@ export async function updateShowByKey(
   key: string,
   input: UpdateShowInput
 ): Promise<ShowRecord | null> {
+  await ensureSurveyShowsSchema();
   const updates: string[] = [];
   const values: unknown[] = [];
   let paramIndex = 1;
@@ -307,6 +348,7 @@ export async function updateShowByKey(
 }
 
 export async function deleteShow(key: string): Promise<boolean> {
+  await ensureSurveyShowsSchema();
   const result = await query(`DELETE FROM survey_shows WHERE key = $1`, [key]);
   return (result.rowCount ?? 0) > 0;
 }
@@ -316,6 +358,7 @@ export async function deleteShow(key: string): Promise<boolean> {
 // ============================================================================
 
 export async function getSeasonsByShowKey(showKey: string): Promise<ShowSeasonRecord[]> {
+  await ensureSurveyShowsSchema();
   const result = await query<ShowSeasonRecord>(
     `SELECT
       ss.id, ss.show_id, ss.season_number, ss.label, ss.year, ss.description,
@@ -362,6 +405,7 @@ export async function getSeasonById(id: string): Promise<ShowSeasonRecord | null
 }
 
 export async function getCurrentSeason(showKey: string): Promise<ShowSeasonRecord | null> {
+  await ensureSurveyShowsSchema();
   const result = await query<ShowSeasonRecord>(
     `SELECT
       ss.id, ss.show_id, ss.season_number, ss.label, ss.year, ss.description,
