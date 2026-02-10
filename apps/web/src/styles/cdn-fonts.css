@@ -1,0 +1,413 @@
+/*
+ * CDN Font Definitions
+ * ---------------------
+ * These @font-face rules replace the next/font localFont() definitions
+ * that were previously in layout.tsx. Fonts are served from CloudFront CDN.
+ *
+ * CDN base: https://d1fmdyqfafwim3.cloudfront.net/fonts/
+ */
+
+/* ===========================
+ *  Gloucester OS MT Std
+ *  CSS variable: --font-gloucester
+ * =========================== */
+
+@font-face {
+  font-family: "Gloucester OS MT Std";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/GloucesterOldStyle-5735713.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ===========================
+ *  Hamburg Serial
+ *  CSS variable: --font-hamburg
+ *  7 weights, normal style only (monotype, .otf only)
+ * =========================== */
+
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerialExtraLight-930108095.otf") format("opentype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerialLight-930108026.otf") format("opentype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerial-930108065.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerialMedium-930108040.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerialBold-930107972.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerialExtraBold-930108075.otf") format("opentype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerialHeavy-930107996.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ===========================
+ *  Plymouth Serial
+ *  CSS variable: --font-plymouth-serial
+ *  6 weights, normal style only (font book: .woff2 + .woff + .otf)
+ * =========================== */
+
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialLight-10035287.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialLight-10035287.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialLight-10035287.otf") format("opentype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerial-10035261.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerial-10035261.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerial-10035261.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialMedium-10035214.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialMedium-10035214.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialMedium-10035214.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialBold-10035269.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialBold-10035269.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialBold-10035269.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialExtraBold-10035290.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialExtraBold-10035290.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialExtraBold-10035290.otf") format("opentype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialHeavy-10035225.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialHeavy-10035225.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/plymouth-serial-book/PlymouthSerialHeavy-10035225.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ===========================
+ *  Rude Slab Condensed
+ *  CSS variable: --font-rude-slab
+ *  7 weights, normal + italic (font book: .woff2 + .woff + .otf)
+ * =========================== */
+
+/* Thin (200) */
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedThin-930861873.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedThin-930861873.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedThin-930861873.otf") format("opentype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedThinItalic-930861871.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedThinItalic-930861871.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedThinItalic-930861871.otf") format("opentype");
+  font-weight: 200;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Light (300) */
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedLight-930861870.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedLight-930861870.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedLight-930861870.otf") format("opentype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedLightItalic-930861869.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedLightItalic-930861869.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedLightItalic-930861869.otf") format("opentype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Book (400) */
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBook-930861867.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBook-930861867.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBook-930861867.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBookItalic-930861861.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBookItalic-930861861.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBookItalic-930861861.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Medium (500) */
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedMedium-930861872.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedMedium-930861872.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedMedium-930861872.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedMediumItalic-930861862.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedMediumItalic-930861862.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedMediumItalic-930861862.otf") format("opentype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Bold (700) */
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBold-930861866.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBold-930861866.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBold-930861866.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBoldItalic-930861864.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBoldItalic-930861864.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBoldItalic-930861864.otf") format("opentype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Extrabold (800) */
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedExtrabold-930861868.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedExtrabold-930861868.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedExtrabold-930861868.otf") format("opentype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedExtraboldItalic-930861860.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedExtraboldItalic-930861860.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedExtraboldItalic-930861860.otf") format("opentype");
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Black (900) */
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBlack-930861865.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBlack-930861865.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBlack-930861865.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Rude Slab Condensed";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBlackItalic-930861863.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBlackItalic-930861863.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/rude-slab-condensed-book/RudeSlabCondensedCondensedBlackItalic-930861863.otf") format("opentype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ===========================
+ *  Goodall (Gloucester Goodall)
+ *  CSS variable: --font-goodall
+ *  5 weights, normal + italic (font book: .woff2 + .woff + .otf)
+ * =========================== */
+
+/* Regular (400) */
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallRegular-930826308.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallRegular-930826308.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallRegular-930826308.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallItalic-930826312.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallItalic-930826312.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallItalic-930826312.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Medium (500) */
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallMedium-930826315.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallMedium-930826315.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallMedium-930826315.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallMediumItalic-930826316.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallMediumItalic-930826316.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallMediumItalic-930826316.otf") format("opentype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* SemiBold (600) */
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallSemiBold-930826317.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallSemiBold-930826317.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallSemiBold-930826317.otf") format("opentype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallSemiBoldItalic-930826318.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallSemiBoldItalic-930826318.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallSemiBoldItalic-930826318.otf") format("opentype");
+  font-weight: 600;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Bold (700) */
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBold-930826319.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBold-930826319.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBold-930826319.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBoldItalic-930826320.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBoldItalic-930826320.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBoldItalic-930826320.otf") format("opentype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Black (900) */
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBlack-930826321.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBlack-930826321.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBlack-930826321.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Goodall";
+  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBlackItalic-930826322.woff2") format("woff2"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBlackItalic-930826322.woff") format("woff"),
+       url("https://d1fmdyqfafwim3.cloudfront.net/fonts/gloucester-goodall/GoodallBlackItalic-930826322.otf") format("opentype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}

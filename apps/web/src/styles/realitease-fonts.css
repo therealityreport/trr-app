@@ -1,9 +1,11 @@
-/* Realitease Custom Fonts */
+/* Realitease Custom Fonts — served from CloudFront CDN */
 
 /* NYTKarnak_Condensed for the main title */
 @font-face {
   font-family: 'NYTKarnak_Condensed';
-  src: url('/fonts/realitease/NYTKarnak_Condensed.ttf') format('truetype');
+  src: url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/NYTKarnak_Condensed.woff2') format('woff2'),
+       url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/NYTKarnak_Condensed.woff') format('woff'),
+       url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/NYTKarnak_Condensed.ttf') format('truetype');
   font-weight: bold;
   font-style: normal;
   font-display: swap;
@@ -12,7 +14,9 @@
 /* KarnakPro-Book for the subtitle */
 @font-face {
   font-family: 'KarnakPro-Book';
-  src: url('/fonts/realitease/KarnakPro-Book.ttf') format('truetype');
+  src: url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/KarnakPro-Book.woff2') format('woff2'),
+       url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/KarnakPro-Book.woff') format('woff'),
+       url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/KarnakPro-Book.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -21,7 +25,9 @@
 /* NYTFranklin for the play button */
 @font-face {
   font-family: 'NYTFranklin';
-  src: url('/fonts/realitease/NYTFranklin.ttf') format('truetype');
+  src: url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/NYTFranklin.woff2') format('woff2'),
+       url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/NYTFranklin.woff') format('woff'),
+       url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/NYTFranklin.ttf') format('truetype');
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -30,7 +36,9 @@
 /* TN_Web_Use_Only for date */
 @font-face {
   font-family: 'TN_Web_Use_Only';
-  src: url('/fonts/realitease/TN_Web_Use_Only.ttf') format('truetype');
+  src: url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/TN_Web_Use_Only.woff2') format('woff2'),
+       url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/TN_Web_Use_Only.woff') format('woff'),
+       url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/TN_Web_Use_Only.ttf') format('truetype');
   font-weight: bold;
   font-style: normal;
   font-display: swap;
@@ -39,7 +47,7 @@
 /* Helvetica_Neue for general text */
 @font-face {
   font-family: 'Helvetica_Neue';
-  src: url('/fonts/realitease/Helvetica_Neue.ttf') format('truetype');
+  src: url('https://d1fmdyqfafwim3.cloudfront.net/fonts/realitease/Helvetica_Neue.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;

@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @import "../styles/components.css";
 
+/* CDN fonts defined in cdn-fonts.css — map CSS variables for Tailwind theme */
+:root {
+  --font-hamburg: "Hamburg Serial";
+  --font-gloucester: "Gloucester OS MT Std";
+  --font-plymouth-serial: "Plymouth Serial";
+  --font-rude-slab: "Rude Slab Condensed";
+  --font-goodall: "Goodall";
+}
+
 /* Tailwind v4 theme tokens */
 @theme {
   /* Colors */
@@ -10,7 +19,7 @@
   --color-ink: #111111;
   --color-line: #E6E6E6;
 
-  /* Fonts (mapped via next/font in layout.tsx) */
+  /* Fonts (CDN fonts defined in cdn-fonts.css) */
   --font-sans: var(--font-hamburg), var(--font-inter), var(--font-geist-sans);
   --font-serif: var(--font-gloucester), var(--font-playfair), var(--font-figma-serif), Georgia, "Times New Roman", serif;
   --font-display: var(--font-gloucester);
