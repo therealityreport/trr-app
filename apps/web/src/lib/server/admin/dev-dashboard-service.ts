@@ -17,7 +17,7 @@ export interface BranchSummaryCommit {
   subject: string;
 }
 
-export type BranchRecommendation = "delete" | "pr" | "wip" | "unknown";
+export type BranchRecommendation = "delete" | "pr" | "review" | "wip" | "unknown";
 
 export interface BranchSummary {
   name: string;
@@ -231,13 +231,42 @@ function parseCherryOutput(output: string): {
   return { uniqueCommits, uniquePatches, appliedPatches };
 }
 
-function recommendBranch(name: string, uniquePatches: number): { rec: BranchRecommendation; reason: string } {
+function parseShortStat(shortStat: string | null): { files: number; insertions: number; deletions: number } | null {
+  if (!shortStat) return null;
+  const filesMatch = shortStat.match(/(\d+)\s+files?\s+changed/i);
+  const insertionsMatch = shortStat.match(/(\d+)\s+insertions?\(\+\)/i);
+  const deletionsMatch = shortStat.match(/(\d+)\s+deletions?\(-\)/i);
+
+  const files = filesMatch?.[1] ? Number.parseInt(filesMatch[1], 10) : 0;
+  const insertions = insertionsMatch?.[1] ? Number.parseInt(insertionsMatch[1], 10) : 0;
+  const deletions = deletionsMatch?.[1] ? Number.parseInt(deletionsMatch[1], 10) : 0;
+
+  if (![files, insertions, deletions].every((n) => Number.isFinite(n))) return null;
+  return { files, insertions, deletions };
+}
+
+function recommendBranch(
+  name: string,
+  uniquePatches: number,
+  shortStat: string | null,
+): { rec: BranchRecommendation; reason: string } {
   if (uniquePatches <= 0) {
     return { rec: "delete", reason: "No unique patches vs base branch (already applied or empty)." };
   }
 
   if (/\bwip\b/i.test(name) || /-wip$/i.test(name)) {
     return { rec: "wip", reason: "Branch name suggests WIP; review before opening a PR." };
+  }
+
+  const stats = parseShortStat(shortStat);
+  if (stats) {
+    const { deletions, insertions } = stats;
+    if (deletions > 1000 && deletions > insertions * 3) {
+      return {
+        rec: "review",
+        reason: "Large net deletions vs base branch; likely stale/experimental. Review (and probably rebase) before PR.",
+      };
+    }
   }
 
   return { rec: "pr", reason: "Has unique patches vs base branch; open a PR if this work is still desired." };
@@ -300,7 +329,7 @@ async function collectBranchSummaries(
           summary.shortStat = diffRes.exitCode === 0 ? diffRes.stdout.trim() || null : null;
         }
 
-        const rec = recommendBranch(branch.name, summary.uniquePatches);
+        const rec = recommendBranch(branch.name, summary.uniquePatches, summary.shortStat);
         summary.recommendation = rec.rec;
         summary.recommendationReason = rec.reason;
         return summary;

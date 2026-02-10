@@ -24,7 +24,7 @@ interface BranchSummaryCommit {
   subject: string;
 }
 
-type BranchRecommendation = "delete" | "pr" | "wip" | "unknown";
+type BranchRecommendation = "delete" | "pr" | "review" | "wip" | "unknown";
 
 interface BranchSummary {
   name: string;
@@ -393,6 +393,9 @@ function ErrorsSection({ errors }: { errors: string[] }) {
 function getBranchRecommendationBadge(rec: BranchRecommendation) {
   if (rec === "pr") {
     return { label: "Commit/PR", className: "border border-blue-200 bg-blue-50 text-blue-800" };
+  }
+  if (rec === "review") {
+    return { label: "Review", className: "border border-indigo-200 bg-indigo-50 text-indigo-800" };
   }
   if (rec === "wip") {
     return { label: "WIP", className: "border border-amber-200 bg-amber-50 text-amber-800" };
