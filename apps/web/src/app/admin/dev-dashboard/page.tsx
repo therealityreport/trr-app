@@ -19,6 +19,26 @@ interface BranchInfo {
   lastCommitDate: string | null;
 }
 
+interface BranchSummaryCommit {
+  hash: string;
+  subject: string;
+}
+
+type BranchRecommendation = "delete" | "pr" | "review" | "wip" | "unknown";
+
+interface BranchSummary {
+  name: string;
+  baseBranch: string;
+  lastCommitDate: string | null;
+  uniquePatches: number;
+  appliedPatches: number;
+  uniqueCommits: BranchSummaryCommit[];
+  shortStat: string | null;
+  recommendation: BranchRecommendation;
+  recommendationReason: string;
+  error: string | null;
+}
+
 interface CommitInfo {
   hash: string;
   message: string;
@@ -54,6 +74,7 @@ interface RepoStatus {
   githubRemote: string;
   currentBranch: string;
   branches: BranchInfo[];
+  branchSummaries: BranchSummary[];
   commits: CommitInfo[];
   changes: FileChange[];
   pullRequests: PullRequest[];
@@ -299,7 +320,7 @@ export default function DevDashboardPage() {
 
                   <ErrorsSection errors={activeRepoData.errors} />
 
-                  <BranchesSection branches={activeRepoData.branches} />
+                  <BranchesSection branches={activeRepoData.branches} summaries={activeRepoData.branchSummaries} />
                   <CommitsSection commits={activeRepoData.commits} />
                   <ChangesSection changes={activeRepoData.changes} />
                   <PullRequestsSection prs={activeRepoData.pullRequests} />
@@ -369,7 +390,23 @@ function ErrorsSection({ errors }: { errors: string[] }) {
   );
 }
 
-function BranchesSection({ branches }: { branches: BranchInfo[] }) {
+function getBranchRecommendationBadge(rec: BranchRecommendation) {
+  if (rec === "pr") {
+    return { label: "Commit/PR", className: "border border-blue-200 bg-blue-50 text-blue-800" };
+  }
+  if (rec === "review") {
+    return { label: "Review", className: "border border-indigo-200 bg-indigo-50 text-indigo-800" };
+  }
+  if (rec === "wip") {
+    return { label: "WIP", className: "border border-amber-200 bg-amber-50 text-amber-800" };
+  }
+  if (rec === "delete") {
+    return { label: "Skip", className: "border border-zinc-200 bg-zinc-100 text-zinc-700" };
+  }
+  return { label: "Unknown", className: "border border-red-200 bg-red-50 text-red-800" };
+}
+
+function BranchesSection({ branches, summaries }: { branches: BranchInfo[]; summaries: BranchSummary[] }) {
   const grouped = useMemo(() => {
     const map = new Map<
       string,
@@ -386,8 +423,22 @@ function BranchesSection({ branches }: { branches: BranchInfo[] }) {
       map.set(b.name, existing);
     }
 
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+      const aMs = a.lastCommitDate ? Date.parse(a.lastCommitDate) : Number.NEGATIVE_INFINITY;
+      const bMs = b.lastCommitDate ? Date.parse(b.lastCommitDate) : Number.NEGATIVE_INFINITY;
+      if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return bMs - aMs;
+      return a.name.localeCompare(b.name);
+    });
   }, [branches]);
+
+  const summaryMap = useMemo(() => {
+    const map = new Map<string, BranchSummary>();
+    for (const summary of summaries ?? []) {
+      map.set(summary.name, summary);
+    }
+    return map;
+  }, [summaries]);
 
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -396,25 +447,66 @@ function BranchesSection({ branches }: { branches: BranchInfo[] }) {
         <p className="text-sm text-zinc-500 italic">No branches found.</p>
       ) : (
         <ul className="space-y-2">
-          {grouped.map((branch) => (
-            <li key={branch.name} className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate font-mono text-sm text-zinc-900">
-                  {branch.name} {branch.isCurrent ? <span className="text-zinc-500">★</span> : null}
-                </p>
-                <p className="text-xs text-zinc-500">
-                  {branch.local && branch.remote
-                    ? "local + remote"
-                    : branch.remote
-                      ? "remote only"
-                      : "local only"}
-                  {branch.lastCommitDate
-                    ? ` · ${formatRelativeTime(branch.lastCommitDate)} · ${formatAbsoluteDate(branch.lastCommitDate)}`
-                    : ""}
-                </p>
-              </div>
-            </li>
-          ))}
+          {grouped.map((branch) => {
+            const summary = summaryMap.get(branch.name) ?? null;
+            const badge = summary ? getBranchRecommendationBadge(summary.recommendation) : null;
+            return (
+              <li key={branch.name} className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-sm text-zinc-900">
+                    {branch.name} {branch.isCurrent ? <span className="text-zinc-500">★</span> : null}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {branch.local && branch.remote
+                      ? "local + remote"
+                      : branch.remote
+                        ? "remote only"
+                        : "local only"}
+                    {branch.lastCommitDate
+                      ? ` · ${formatRelativeTime(branch.lastCommitDate)} · ${formatAbsoluteDate(branch.lastCommitDate)}`
+                      : ""}
+                  </p>
+
+                  {summary ? (
+                    <div className="mt-2 space-y-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <p className="text-xs text-zinc-700">
+                        Base: <span className="font-mono">{summary.baseBranch}</span>
+                        {summary.uniquePatches > 0 ? (
+                          <span className="text-zinc-500"> · +{summary.uniquePatches} unique</span>
+                        ) : (
+                          <span className="text-zinc-500"> · 0 unique</span>
+                        )}
+                        {summary.appliedPatches > 0 ? (
+                          <span className="text-zinc-500"> · {summary.appliedPatches} already applied</span>
+                        ) : null}
+                        {summary.shortStat ? <span className="text-zinc-500"> · {summary.shortStat}</span> : null}
+                      </p>
+                      {summary.uniqueCommits?.length ? (
+                        <p className="text-xs text-zinc-600">
+                          Unique:{" "}
+                          <span className="font-mono text-zinc-700">
+                            {summary.uniqueCommits
+                              .map((c) => `${c.hash.slice(0, 7)} ${c.subject}`)
+                              .join(" | ")}
+                          </span>
+                        </p>
+                      ) : null}
+                      <p className="text-xs text-zinc-600">
+                        Recommendation: <span className="text-zinc-800">{summary.recommendationReason}</span>
+                      </p>
+                      {summary.error ? <p className="text-xs text-red-700">Error: {summary.error}</p> : null}
+                    </div>
+                  ) : null}
+                </div>
+
+                {badge ? (
+                  <span className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold ${badge.className}`}>
+                    {badge.label}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
