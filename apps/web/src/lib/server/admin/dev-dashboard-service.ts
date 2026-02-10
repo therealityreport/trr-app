@@ -12,6 +12,26 @@ export interface BranchInfo {
   lastCommitDate: string | null;
 }
 
+export interface BranchSummaryCommit {
+  hash: string;
+  subject: string;
+}
+
+export type BranchRecommendation = "delete" | "pr" | "wip" | "unknown";
+
+export interface BranchSummary {
+  name: string;
+  baseBranch: string;
+  lastCommitDate: string | null;
+  uniquePatches: number;
+  appliedPatches: number;
+  uniqueCommits: BranchSummaryCommit[];
+  shortStat: string | null;
+  recommendation: BranchRecommendation;
+  recommendationReason: string;
+  error: string | null;
+}
+
 export interface CommitInfo {
   hash: string;
   message: string;
@@ -47,6 +67,7 @@ export interface RepoStatus {
   githubRemote: string;
   currentBranch: string;
   branches: BranchInfo[];
+  branchSummaries: BranchSummary[];
   commits: CommitInfo[];
   changes: FileChange[];
   pullRequests: PullRequest[];
@@ -149,6 +170,146 @@ function parseBranchRefs(output: string, currentBranch: string): BranchInfo[] {
   }
 
   return results;
+}
+
+function parseLocalBranchDates(output: string): Array<{ name: string; lastCommitDate: string | null }> {
+  const results: Array<{ name: string; lastCommitDate: string | null }> = [];
+
+  for (const rawLine of output.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const sepIndex = line.indexOf("|");
+    if (sepIndex === -1) continue;
+    const refname = line.slice(0, sepIndex).trim();
+    const date = line.slice(sepIndex + 1).trim();
+
+    if (!refname.startsWith("refs/heads/")) continue;
+    const name = refname.slice("refs/heads/".length);
+    if (!name || name === "HEAD") continue;
+    results.push({ name, lastCommitDate: date || null });
+  }
+
+  return results;
+}
+
+function chooseBaseBranch(localBranches: Array<{ name: string }>, currentBranch: string) {
+  const names = new Set(localBranches.map((b) => b.name));
+  if (names.has("main")) return "main";
+  if (names.has("master")) return "master";
+  if (currentBranch && names.has(currentBranch)) return currentBranch;
+  return "main";
+}
+
+function parseCherryOutput(output: string): {
+  uniqueCommits: BranchSummaryCommit[];
+  uniquePatches: number;
+  appliedPatches: number;
+} {
+  const uniqueCommits: BranchSummaryCommit[] = [];
+  let uniquePatches = 0;
+  let appliedPatches = 0;
+
+  for (const rawLine of output.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) continue;
+    const match = line.match(/^([+-])\s+([0-9a-f]{7,40})\s+(.*)$/);
+    if (!match?.[1] || !match[2]) continue;
+
+    const sign = match[1];
+    const hash = match[2];
+    const subject = (match[3] || "").trim();
+
+    if (sign === "+") {
+      uniquePatches += 1;
+      if (uniqueCommits.length < 5) uniqueCommits.push({ hash, subject: subject || "(no subject)" });
+    } else {
+      appliedPatches += 1;
+    }
+  }
+
+  return { uniqueCommits, uniquePatches, appliedPatches };
+}
+
+function recommendBranch(name: string, uniquePatches: number): { rec: BranchRecommendation; reason: string } {
+  if (uniquePatches <= 0) {
+    return { rec: "delete", reason: "No unique patches vs base branch (already applied or empty)." };
+  }
+
+  if (/\bwip\b/i.test(name) || /-wip$/i.test(name)) {
+    return { rec: "wip", reason: "Branch name suggests WIP; review before opening a PR." };
+  }
+
+  return { rec: "pr", reason: "Has unique patches vs base branch; open a PR if this work is still desired." };
+}
+
+async function collectBranchSummaries(
+  repo: RepoConfig,
+  baseBranch: string,
+  localBranches: Array<{ name: string; lastCommitDate: string | null }>,
+): Promise<BranchSummary[]> {
+  // Keep this bounded; some dev machines have many local branches.
+  const candidates = localBranches
+    .filter((b) => b.name && b.name !== baseBranch)
+    .sort((a, b) => {
+      const aMs = a.lastCommitDate ? Date.parse(a.lastCommitDate) : Number.NEGATIVE_INFINITY;
+      const bMs = b.lastCommitDate ? Date.parse(b.lastCommitDate) : Number.NEGATIVE_INFINITY;
+      if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return bMs - aMs;
+      if (Number.isFinite(aMs) && !Number.isFinite(bMs)) return -1;
+      if (!Number.isFinite(aMs) && Number.isFinite(bMs)) return 1;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, 25);
+
+  const summaries: BranchSummary[] = [];
+
+  // Small concurrency to keep API latency reasonable.
+  const limit = 4;
+  for (let i = 0; i < candidates.length; i += limit) {
+    const chunk = candidates.slice(i, i + limit);
+    const chunkResults = await Promise.all(
+      chunk.map(async (branch) => {
+        const summary: BranchSummary = {
+          name: branch.name,
+          baseBranch,
+          lastCommitDate: branch.lastCommitDate,
+          uniquePatches: 0,
+          appliedPatches: 0,
+          uniqueCommits: [],
+          shortStat: null,
+          recommendation: "unknown",
+          recommendationReason: "",
+          error: null,
+        };
+
+        const cherryRes = await safeExec("git", ["cherry", "-v", baseBranch, branch.name], repo.path);
+        if (cherryRes.exitCode !== 0) {
+          summary.error = `git cherry failed: ${clipError(cherryRes.stderr || cherryRes.stdout)}`;
+          summary.recommendation = "unknown";
+          summary.recommendationReason = "Unable to evaluate branch.";
+          return summary;
+        }
+
+        const parsed = parseCherryOutput(cherryRes.stdout);
+        summary.uniquePatches = parsed.uniquePatches;
+        summary.appliedPatches = parsed.appliedPatches;
+        summary.uniqueCommits = parsed.uniqueCommits;
+
+        if (summary.uniquePatches > 0) {
+          const diffRes = await safeExec("git", ["diff", "--shortstat", `${baseBranch}...${branch.name}`], repo.path);
+          summary.shortStat = diffRes.exitCode === 0 ? diffRes.stdout.trim() || null : null;
+        }
+
+        const rec = recommendBranch(branch.name, summary.uniquePatches);
+        summary.recommendation = rec.rec;
+        summary.recommendationReason = rec.reason;
+        return summary;
+      }),
+    );
+    summaries.push(...chunkResults);
+  }
+
+  return summaries;
 }
 
 function parseCommits(output: string): CommitInfo[] {
@@ -421,6 +582,7 @@ async function collectRepoStatus(repo: RepoConfig): Promise<RepoStatus> {
     githubRemote: repo.githubRemote,
     currentBranch: "",
     branches: [],
+    branchSummaries: [],
     commits: [],
     changes: [],
     pullRequests: [],
@@ -469,7 +631,21 @@ async function collectRepoStatus(repo: RepoConfig): Promise<RepoStatus> {
   if (currentBranchRes.exitCode === 0) empty.currentBranch = currentBranchRes.stdout.trim();
   else errors.push(`git rev-parse failed: ${clipError(currentBranchRes.stderr || currentBranchRes.stdout)}`);
 
-  if (branchesRes.exitCode === 0) empty.branches = parseBranchRefs(branchesRes.stdout, empty.currentBranch);
+  const localBranchDates = branchesRes.exitCode === 0 ? parseLocalBranchDates(branchesRes.stdout) : [];
+  const baseBranch = chooseBaseBranch(localBranchDates, empty.currentBranch);
+
+  if (branchesRes.exitCode === 0) {
+    empty.branches = parseBranchRefs(branchesRes.stdout, empty.currentBranch);
+    // Best-effort: branch summaries (only for a bounded set of local branches).
+    try {
+      empty.branchSummaries = await collectBranchSummaries(repo, baseBranch, localBranchDates);
+    } catch (exc) {
+      errors.push(
+        `branch summary failed: ${exc instanceof Error ? clipError(exc.message) : clipError(String(exc))}`,
+      );
+      empty.branchSummaries = [];
+    }
+  }
   else errors.push(`git branch failed: ${clipError(branchesRes.stderr || branchesRes.stdout)}`);
 
   if (commitsRes.exitCode === 0) empty.commits = parseCommits(commitsRes.stdout);
@@ -565,6 +741,7 @@ export async function getDevDashboardData(): Promise<DevDashboardData> {
         githubRemote: repoConfig.githubRemote,
         currentBranch: "",
         branches: [],
+        branchSummaries: [],
         commits: [],
         changes: [],
         pullRequests: [],
