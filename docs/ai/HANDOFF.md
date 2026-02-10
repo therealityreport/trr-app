@@ -53,20 +53,48 @@ Admin dashboard + per-show assets + survey responses (this session):
     - `/admin/users`, `/admin/games`, `/admin/social-media`, `/admin/groups`, `/admin/settings`
   - file: `apps/web/src/app/admin/page.tsx`
 - Shows search page UX/copy updates:
-  - “Covered Shows” renamed to “Added Shows”
+  - Editorial coverage section title is now just “Shows” (no “Added” label)
   - Real Housewives shows display acronyms (prefers `alternative_names`, falls back to title-derived)
+  - Covered/added show cards include the latest season poster thumbnail (best-effort fetch)
+  - Search results covered badge is icon-only (no “Added” text)
+  - Added “Sync from Lists” button to trigger TRR-Backend list import + metadata enrichment:
+    - UI: `apps/web/src/app/admin/trr-shows/page.tsx`
+    - Proxy API: `apps/web/src/app/api/admin/trr-api/shows/sync-from-lists/route.ts` (10m timeout)
   - file: `apps/web/src/app/admin/trr-shows/page.tsx`
 - Per-show Gallery tab renamed to **ASSETS** (with alias support for `?tab=gallery`) and split into Media/Brand subviews:
   - file: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
   - Media view: existing gallery + import images unchanged
   - Brand view: new editor component (palette/fonts/assets + season overrides + cast portraits)
     - component: `apps/web/src/components/admin/ShowBrandEditor.tsx`
+  - Assets now include show-level posters/backdrops/logos alongside season/episode/cast media:
+    - New API route: `apps/web/src/app/api/admin/trr-api/shows/[showId]/assets/route.ts`
+    - New repo function: `apps/web/src/lib/server/trr-api/trr-shows-repository.ts#getAssetsByShowId`
+    - Raised asset fetch caps and default limit to `500` (previously defaulted to `20` and had low SQL `LIMIT`s, causing missing gallery items)
+  - Added per-tab “Refresh” buttons (synchronous) that run TRR-Backend sync scripts:
+    - UI: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - Proxy API: `apps/web/src/app/api/admin/trr-api/shows/[showId]/refresh/route.ts` (10m timeout)
 - Show landing page cleanup:
   - hides placeholder seasons (no dates available or <= 1 episode)
   - season badge uses the filtered season count (so placeholders aren’t “counted”)
-  - show page tabs are pill-style and “Social Media” replaces “Social Posts”
-  - season accordions are simplified (no EPISODES/MEDIA/CAST MEMBERS links inside)
+  - show page tab bar is now hidden; seasons are the primary landing experience
+  - each season row includes pill links (always visible under the row) that deep-link to the season page tabs:
+    - `Seasons & Episodes`, `Assets`, `Cast`, `Surveys`, `Social Media`, `Details`
+  - “Season #” is a link to the season page; expanding/collapsing does not refetch/reload the page
   - file: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Season page tabs expanded (and show-level tools moved here):
+  - `/admin/trr-shows/[showId]/seasons/[seasonNumber]` tabs:
+    - `Seasons & Episodes`, `Assets`, `Cast`, `Surveys`, `Social Media`, `Details`
+  - Assets tab includes Media/Brand toggle (Brand renders `ShowBrandEditor`)
+  - Season assets “Assign TMDb Backdrops” drawer:
+    - Drawer now previews unmirrored TMDb backdrops (uses `display_url = hosted_url ?? source_url`)
+    - Assign mirrors selected assets to S3 via TRR-Backend then links them to the season as `kind=backdrop`
+    - API routes moved off Supabase/PostgREST and onto direct Postgres:
+      - `apps/web/src/app/api/admin/trr-api/seasons/[seasonId]/unassigned-backdrops/route.ts`
+      - `apps/web/src/app/api/admin/trr-api/seasons/[seasonId]/assign-backdrops/route.ts`
+  - Cast member links include `seasonNumber` so the person page can route “Back” correctly
+  - file: `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+- Surveys section supports season scoping:
+  - file: `apps/web/src/components/admin/surveys-section.tsx`
 - Brand storage linked to TRR show UUID via new DB columns:
   - migration: `apps/web/db/migrations/022_link_brand_shows_to_trr.sql`
   - server repo updates: `apps/web/src/lib/server/shows/shows-repository.ts`
@@ -85,7 +113,6 @@ Admin dashboard + per-show assets + survey responses (this session):
 Fast checks (this session):
 - `pnpm -C apps/web run lint` (pass; warnings only)
 - `pnpm -C apps/web exec next build --webpack` (pass)
-- `pnpm -C apps/web exec tsc --noEmit` (pass)
 - `pnpm -C apps/web run test:ci` (pass)
 
 ## Notes / Constraints
@@ -117,3 +144,22 @@ pnpm -C apps/web run test:ci
 
 Last updated: 2026-02-10
 Updated by: Codex
+People photo gallery UX (this session):
+- Removed the header-level "Refresh Images" button on `/admin/trr-shows/people/[personId]`; refresh is now only in the Gallery tab.
+- Person refresh streams now pass show context (`showId`/`showName`) when available so “This Show” filtering works across all sources.
+- `ImageLightbox` metadata now uses label `CREATED` and displays `WORDS` / `NO WORDS` when word-id metadata is present.
+
+Admin gallery improvements (this session):
+- Fixed SSE progress parsing to handle CRLF-delimited SSE frames so refresh progress bars update live.
+  - `/admin/trr-shows/[showId]` and `/admin/trr-shows/people/[personId]`
+- Season gallery: only trust normalized `kind` for backdrop grouping (avoids Season Poster showing under Backdrops).
+- Backdrops: show/season Backdrops sections now only show TMDb backdrops.
+- Assets tab: added a `Logos` section for show-level assets (`kind=logo`).
+- Brand assets safety: `survey_shows` schema is now idempotently ensured (adds missing `trr_show_id` + `fonts`) to avoid `column trr_show_id does not exist` runtime errors.
+  - `apps/web/src/lib/server/shows/shows-repository.ts`
+- Added Archive + Star controls in `ImageLightbox`, persisted via new TRR-Backend proxy routes:
+  - `POST /api/admin/trr-api/assets/archive`
+  - `POST /api/admin/trr-api/assets/star`
+- Import Images: added Season Announcement import mode metadata fields:
+  - `Source Logo` dropdown and optional `Asset Name` per image
+  - Persists `context_section/context_type` and other fields via backend scrape importer.

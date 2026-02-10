@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
@@ -138,12 +139,20 @@ export default function TrrShowsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Sync-from-lists state
+  const [syncingLists, setSyncingLists] = useState(false);
+  const [syncListsNotice, setSyncListsNotice] = useState<string | null>(null);
+  const [syncListsError, setSyncListsError] = useState<string | null>(null);
+
   // Covered shows state
   const [coveredShows, setCoveredShows] = useState<CoveredShow[]>([]);
   const [coveredShowIds, setCoveredShowIds] = useState<Set<string>>(new Set());
   const [loadingCovered, setLoadingCovered] = useState(true);
   const [addingShowId, setAddingShowId] = useState<string | null>(null);
   const [removingShowId, setRemovingShowId] = useState<string | null>(null);
+  const [coveredShowPosterById, setCoveredShowPosterById] = useState<
+    Record<string, string | null>
+  >({});
 
   // Get auth headers helper
   const getAuthHeaders = useCallback(async () => {
@@ -177,6 +186,84 @@ export default function TrrShowsPage() {
       fetchCoveredShows();
     }
   }, [hasAccess, user, fetchCoveredShows]);
+
+  // Fetch latest season poster thumbnails for covered shows (best-effort).
+  useEffect(() => {
+    if (!hasAccess || !user) return;
+    if (loadingCovered) return;
+
+    const missing = coveredShows
+      .map((s) => s.trr_show_id)
+      .filter((id) => !(id in coveredShowPosterById));
+
+    if (missing.length === 0) return;
+
+    // Mark as "in progress" (null) so we don't refetch in a loop.
+    setCoveredShowPosterById((prev) => {
+      const next = { ...prev };
+      for (const id of missing) {
+        next[id] = null;
+      }
+      return next;
+    });
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const queue = [...missing];
+        const concurrency = Math.min(4, queue.length);
+
+        const worker = async () => {
+          while (queue.length > 0) {
+            const trrShowId = queue.shift();
+            if (!trrShowId) return;
+
+            try {
+              const response = await fetch(
+                `/api/admin/trr-api/shows/${trrShowId}/seasons?limit=50`,
+                { headers }
+              );
+              const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+              if (!response.ok) throw new Error();
+
+              const seasonsRaw = (data as { seasons?: unknown }).seasons;
+              const seasons = Array.isArray(seasonsRaw) ? (seasonsRaw as Array<Record<string, unknown>>) : [];
+
+              const best = seasons
+                .filter((s) => typeof s.season_number === "number" && s.season_number > 0)
+                .sort((a, b) => (b.season_number as number) - (a.season_number as number))
+                .find((s) => typeof s.url_original_poster === "string" && s.url_original_poster.length > 0);
+
+              const posterUrl = best?.url_original_poster as string | undefined;
+              if (cancelled) return;
+              if (posterUrl) {
+                setCoveredShowPosterById((prev) => ({ ...prev, [trrShowId]: posterUrl }));
+              }
+            } catch {
+              // Leave as null (no poster).
+            }
+          }
+        };
+
+        await Promise.all(Array.from({ length: concurrency }, worker));
+      } catch (err) {
+        console.error("Failed to load covered show posters:", err);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasAccess,
+    user,
+    loadingCovered,
+    coveredShows,
+    coveredShowPosterById,
+    getAuthHeaders,
+  ]);
 
   // Add show to covered list
   const addToCoveredShows = useCallback(
@@ -275,6 +362,54 @@ export default function TrrShowsPage() {
     }
   }, []);
 
+  const syncFromLists = useCallback(async () => {
+    if (syncingLists) return;
+
+    setSyncingLists(true);
+    setSyncListsNotice(null);
+    setSyncListsError(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/shows/sync-from-lists", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+      if (!response.ok) {
+        const message =
+          typeof data.error === "string" && typeof data.detail === "string"
+            ? `${data.error}: ${data.detail}`
+            : (typeof data.error === "string" && data.error) ||
+              (typeof data.detail === "string" && data.detail) ||
+              "Sync failed";
+        throw new Error(message);
+      }
+
+      const created = typeof data.created === "number" ? data.created : null;
+      const updated = typeof data.updated === "number" ? data.updated : null;
+      const skipped = typeof data.skipped === "number" ? data.skipped : null;
+      const candidates =
+        typeof data.candidates_collected === "number" ? data.candidates_collected : null;
+
+      setSyncListsNotice(
+        `Synced from lists: created=${created ?? "?"} updated=${updated ?? "?"} skipped=${skipped ?? "?"} (candidates=${candidates ?? "?"})`
+      );
+
+      // If the user is actively searching, re-run search to reflect updates.
+      if (query.trim() && results) {
+        await searchShows(query);
+      }
+    } catch (err) {
+      console.error("Failed to sync shows from lists:", err);
+      setSyncListsError(err instanceof Error ? err.message : "Failed to sync from lists");
+    } finally {
+      setSyncingLists(false);
+    }
+  }, [getAuthHeaders, query, results, searchShows, syncingLists]);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     searchShows(query);
@@ -310,17 +445,27 @@ export default function TrrShowsPage() {
                 manage social posts.
               </p>
             </div>
-            <Link
-              href="/admin"
-              className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-            >
-              Back to Admin
-            </Link>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={syncFromLists}
+                disabled={syncingLists}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {syncingLists ? "Syncing..." : "Sync from Lists"}
+              </button>
+              <Link
+                href="/admin"
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+              >
+                Back to Admin
+              </Link>
+            </div>
           </div>
         </header>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
-          {/* Added Shows Section */}
+          {/* Shows (editorial coverage) */}
           <section className="mb-8 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
               <div>
@@ -328,7 +473,7 @@ export default function TrrShowsPage() {
                   Editorial Coverage
                 </p>
                 <h2 className="text-xl font-bold text-zinc-900">
-                  Added Shows
+                  Shows
                 </h2>
               </div>
               <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
@@ -349,23 +494,46 @@ export default function TrrShowsPage() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {coveredShows.map((show) => {
                   const label = getCoveredShowDisplayName(show.show_name);
+                  const posterUrl = coveredShowPosterById[show.trr_show_id] ?? null;
                   return (
                     <div
                       key={show.id}
-                      className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
                     >
                       <Link
                         href={`/admin/trr-shows/${show.trr_show_id}`}
-                        className="flex-1 min-w-0 hover:underline"
+                        className="group flex min-w-0 flex-1 items-center gap-3"
                       >
-                        <span className="block truncate text-sm font-medium text-zinc-900">
-                          {label.primary}
-                        </span>
-                        {label.secondary && (
-                          <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                            {label.secondary}
+                        <div className="relative h-14 w-10 flex-shrink-0 overflow-hidden rounded-md bg-zinc-200">
+                          {posterUrl ? (
+                            <Image
+                              src={posterUrl}
+                              alt={`${label.secondary ?? label.primary} poster`}
+                              fill
+                              className="object-cover"
+                              sizes="40px"
+                              unoptimized
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-zinc-400">
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2" />
+                                <path d="M7 17l3-4 2 2 4-5 3 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-zinc-900 group-hover:underline">
+                            {label.primary}
                           </span>
-                        )}
+                          {label.secondary && (
+                            <span className="mt-0.5 block truncate text-xs text-zinc-500">
+                              {label.secondary}
+                            </span>
+                          )}
+                        </div>
                       </Link>
                       <button
                         onClick={() => removeFromCoveredShows(show.trr_show_id)}
@@ -378,8 +546,33 @@ export default function TrrShowsPage() {
                   );
                 })}
               </div>
-            )}
-          </section>
+              )}
+            </section>
+
+          {(syncListsNotice || syncListsError) && (
+            <section
+              className={`mb-8 rounded-2xl border p-6 ${
+                syncListsError
+                  ? "border-red-200 bg-red-50"
+                  : "border-green-200 bg-green-50"
+              }`}
+            >
+              <p
+                className={`text-sm font-semibold ${
+                  syncListsError ? "text-red-800" : "text-green-800"
+                }`}
+              >
+                {syncListsError ? "Sync Failed" : "Sync Complete"}
+              </p>
+              <p
+                className={`mt-1 text-sm ${
+                  syncListsError ? "text-red-700" : "text-green-700"
+                }`}
+              >
+                {syncListsError || syncListsNotice}
+              </p>
+            </section>
+          )}
 
           {/* Search Form */}
           <section className="mb-8 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -531,7 +724,10 @@ export default function TrrShowsPage() {
 
                           {/* Add/Remove from Covered Shows */}
                           {isCovered ? (
-                            <span className="flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                            <span
+                              className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700"
+                              title="In Shows"
+                            >
                               <svg
                                 className="h-3 w-3"
                                 fill="none"
@@ -545,7 +741,7 @@ export default function TrrShowsPage() {
                                   d="M5 13l4 4L19 7"
                                 />
                               </svg>
-                              Added
+                              <span className="sr-only">In Shows</span>
                             </span>
                           ) : (
                             <button

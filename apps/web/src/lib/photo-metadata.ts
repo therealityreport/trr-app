@@ -7,8 +7,11 @@ export interface PhotoMetadata {
   fileType?: string | null;
   createdAt?: Date | null;
   addedAt?: Date | null;
+  hasTextOverlay?: boolean | null;
   sectionTag?: string | null;
   sectionLabel?: string | null;
+  sourceLogo?: string | null;
+  assetName?: string | null;
   imdbType?: string | null;
   episodeLabel?: string | null;
   sourceVariant?: string | null;
@@ -58,6 +61,25 @@ const parseDateValue = (value: unknown): Date | null => {
   return null;
 };
 
+const normalizeBool = (value: unknown): boolean | null => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const raw = value.trim().toLowerCase();
+    if (raw === "true" || raw === "1" || raw === "yes") return true;
+    if (raw === "false" || raw === "0" || raw === "no") return false;
+  }
+  return null;
+};
+
+const inferHasTextOverlay = (
+  metadata: Record<string, unknown> | null | undefined
+): boolean | null => {
+  if (!metadata) return null;
+  const direct = normalizeBool((metadata as Record<string, unknown>).has_text_overlay);
+  if (direct !== null) return direct;
+  return normalizeBool((metadata as Record<string, unknown>).hasTextOverlay);
+};
+
 const inferFileType = (
   contentType: string | null | undefined,
   url: string | null | undefined
@@ -105,6 +127,17 @@ const inferFandomSectionTag = (value: string | null | undefined): string | null 
   return "OTHER";
 };
 
+const sanitizeFandomSectionLabel = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  // Fandom often renders headings like "Promotional Portraits [ ]". Keep Content Type (PROMO),
+  // but suppress the noisy Section label so the lightbox doesn't repeat redundant headings.
+  const normalized = trimmed.replace(/\s+/g, " ");
+  if (/^promotional portraits\s*\[\s*\]$/i.test(normalized)) return null;
+  return trimmed;
+};
+
 const parseSeasonNumber = (value: string | null | undefined): number | null => {
   if (!value) return null;
   const text = value.trim();
@@ -130,11 +163,11 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
       : null;
   const sectionLabel =
     typeof metadata.fandom_section_label === "string"
-      ? metadata.fandom_section_label
+      ? sanitizeFandomSectionLabel(metadata.fandom_section_label)
       : typeof metadata.context_section === "string"
-        ? metadata.context_section
+        ? sanitizeFandomSectionLabel(metadata.context_section)
         : typeof photo.context_section === "string"
-          ? photo.context_section
+          ? sanitizeFandomSectionLabel(photo.context_section)
         : null;
 
   // Fandom "content type" is primarily inferred from the section heading on the gallery page.
@@ -147,6 +180,19 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
   const sectionTag = isFandom
     ? (inferredFandomTag ?? sectionTagRaw ?? sectionLabel ?? null)
     : sectionTagRaw ?? sectionLabel ?? null;
+
+  // Web-scraped "Season Announcement" imports:
+  // - store "Cast Portraits" in context_section (Section)
+  // - store "Season Announcement" in context_type
+  // For display + filtering, treat these as PROMO content type.
+  let sectionTagOut = sectionTag;
+  if (!isFandom) {
+    const ct = (photo.context_type ?? "").toLowerCase();
+    const label = (sectionLabel ?? "").toLowerCase();
+    if (ct.includes("season announcement") || label === "cast portraits") {
+      sectionTagOut = "PROMO";
+    }
+  }
 
   const imdbTypeRaw =
     typeof metadata.imdb_image_type === "string"
@@ -218,6 +264,18 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     (typeof metadata.season_number === "number" ? metadata.season_number : null) ??
     parseSeasonNumber(sectionLabel) ??
     parseSeasonNumber(photo.caption ?? null);
+  const sourceLogo =
+    typeof metadata.source_logo === "string"
+      ? metadata.source_logo
+      : typeof metadata.sourceLogo === "string"
+        ? metadata.sourceLogo
+        : null;
+  const assetName =
+    typeof metadata.asset_name === "string"
+      ? metadata.asset_name
+      : typeof metadata.assetName === "string"
+        ? metadata.assetName
+        : null;
   return {
     source: photo.source,
     sourceBadgeColor: SOURCE_COLORS[photo.source.toLowerCase()] ?? "#6b7280",
@@ -225,8 +283,11 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
-    sectionTag,
+    hasTextOverlay: inferHasTextOverlay(metadata),
+    sectionTag: sectionTagOut,
     sectionLabel,
+    sourceLogo,
+    assetName,
     imdbType,
     episodeLabel,
     sourceVariant,
@@ -270,11 +331,11 @@ export function mapSeasonAssetToMetadata(
       : null;
   const sectionLabel =
     typeof metadata.fandom_section_label === "string"
-      ? metadata.fandom_section_label
+      ? sanitizeFandomSectionLabel(metadata.fandom_section_label)
       : typeof metadata.context_section === "string"
-        ? metadata.context_section
+        ? sanitizeFandomSectionLabel(metadata.context_section)
         : typeof asset.context_section === "string"
-          ? asset.context_section
+          ? sanitizeFandomSectionLabel(asset.context_section)
           : null;
   const fandomTagInput = [sectionTagRaw, sectionLabel, asset.context_type, asset.caption]
     .filter(Boolean)
@@ -283,6 +344,16 @@ export function mapSeasonAssetToMetadata(
   const sectionTag = isFandom
     ? (inferredFandomTag ?? sectionTagRaw ?? sectionLabel ?? null)
     : sectionTagRaw ?? sectionLabel ?? null;
+
+  let sectionTagOut = sectionTag;
+  if (!isFandom) {
+    const ct = (asset.context_type ?? "").toLowerCase();
+    const kindLower = (asset.kind ?? "").toLowerCase().trim();
+    const label = (sectionLabel ?? "").toLowerCase();
+    if (kindLower === "promo" || ct.includes("season announcement") || label === "cast portraits") {
+      sectionTagOut = "PROMO";
+    }
+  }
 
   // IMDb type handling
   const imdbTypeRaw =
@@ -360,6 +431,19 @@ export function mapSeasonAssetToMetadata(
         ? metadata.height
         : null;
 
+  const sourceLogo =
+    typeof metadata.source_logo === "string"
+      ? metadata.source_logo
+      : typeof metadata.sourceLogo === "string"
+        ? metadata.sourceLogo
+        : null;
+  const assetName =
+    typeof metadata.asset_name === "string"
+      ? metadata.asset_name
+      : typeof metadata.assetName === "string"
+        ? metadata.assetName
+        : null;
+
   // Determine context type label
   const kindLower = (asset.kind ?? "").toLowerCase();
   const contextType =
@@ -379,6 +463,14 @@ export function mapSeasonAssetToMetadata(
                   : kindLower === "episode_still"
                     ? "Episode Still"
                     : "Season Poster"
+        : asset.type === "show"
+          ? kindLower === "backdrop"
+            ? "Backdrop"
+            : kindLower === "logo"
+              ? "Logo"
+              : kindLower === "poster"
+                ? "Show Poster"
+                : "Show Image"
         : asset.context_type ?? "Cast Photo";
 
   const peopleFromMeta = Array.isArray((metadata as Record<string, unknown>).people_names)
@@ -400,8 +492,11 @@ export function mapSeasonAssetToMetadata(
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
-    sectionTag,
+    hasTextOverlay: inferHasTextOverlay(metadata),
+    sectionTag: sectionTagOut,
     sectionLabel,
+    sourceLogo,
+    assetName,
     imdbType,
     episodeLabel,
     sourceVariant,

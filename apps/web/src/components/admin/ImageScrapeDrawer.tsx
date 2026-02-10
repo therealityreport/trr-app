@@ -161,6 +161,8 @@ type ImageKind =
   | "reunion"
   | "other";
 
+type ImportMode = "standard" | "season_announcement";
+
 const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "poster", label: "Poster" },
   { value: "backdrop", label: "Backdrop" },
@@ -170,6 +172,18 @@ const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "intro", label: "Intro" },
   { value: "reunion", label: "Reunion" },
   { value: "other", label: "Other" },
+];
+
+const SOURCE_LOGO_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "None" },
+  { value: "Bravo", label: "Bravo" },
+  { value: "Peacock", label: "Peacock" },
+  { value: "NBC", label: "NBC" },
+  { value: "Netflix", label: "Netflix" },
+  { value: "Hulu", label: "Hulu" },
+  { value: "Prime Video", label: "Prime Video" },
+  { value: "Max", label: "Max" },
+  { value: "Disney+", label: "Disney+" },
 ];
 
 interface ImageScrapeDrawerProps {
@@ -219,6 +233,7 @@ export function ImageScrapeDrawer({
 
   // Form state
   const [url, setUrl] = useState("");
+  const [importMode, setImportMode] = useState<ImportMode>("standard");
 
   // Scrape state
   const [scraping, setScraping] = useState(false);
@@ -240,9 +255,40 @@ export function ImageScrapeDrawer({
   const [personAssignments, setPersonAssignments] = useState<Record<string, PersonOption[]>>({});
   // Map of image candidate ID -> image kind
   const [imageKinds, setImageKinds] = useState<Record<string, ImageKind>>({});
+  // Optional per-image import metadata (persisted into media_links.context / media_assets.metadata)
+  const [sourceLogos, setSourceLogos] = useState<Record<string, string>>({});
+  const [assetNames, setAssetNames] = useState<Record<string, string>>({});
 
   // Error state
   const [error, setError] = useState<string | null>(null);
+
+  const buildShowAcronym = useCallback((name: string): string => {
+    const words = name
+      .replace(/[^a-z0-9 ]/gi, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+    if (words.length === 0) return "SHOW";
+    const filtered = words.filter(
+      (word) => !["the", "and", "a", "an", "to", "for", "of"].includes(word.toLowerCase())
+    );
+    return (filtered.length > 0 ? filtered : words)
+      .map((word) => word[0]?.toUpperCase?.() ?? "")
+      .join("") || "SHOW";
+  }, []);
+
+  const defaultCastPortraitName = useCallback(
+    (personName: string | null, ordinal: number): string | null => {
+      if (entityContext.type !== "season") return null;
+      const showAcronym = buildShowAcronym(entityContext.showName);
+      const seasonSuffix = `${entityContext.seasonNumber}`;
+      if (!personName) {
+        return `${showAcronym}${seasonSuffix}_CastPortrait_${ordinal}`;
+      }
+      const cleanPerson = personName.replace(/[^a-z0-9]+/gi, "");
+      return `${showAcronym}${seasonSuffix}_${cleanPerson}_CastPortrait`;
+    },
+    [entityContext, buildShowAcronym]
+  );
 
   // Get auth headers
   const getAuthHeaders = useCallback(async () => {
@@ -433,11 +479,14 @@ export function ImageScrapeDrawer({
   useEffect(() => {
     if (!isOpen) {
       setUrl("");
+      setImportMode("standard");
       setPreviewData(null);
       setSelectedImages(new Set());
       setCaptions({});
       setPersonAssignments({});
       setImageKinds({});
+      setSourceLogos({});
+      setAssetNames({});
       setBulkPeopleSelection([]);
       setImportProgress(null);
       setImportResult(null);
@@ -565,6 +614,23 @@ export function ImageScrapeDrawer({
           caption: captions[img.id] || null,
           kind: imageKinds[img.id] || "other",
           person_ids: (personAssignments[img.id] ?? []).map((p) => p.id),
+          context_section:
+            entityContext.type === "season" && importMode === "season_announcement"
+              ? "Cast Portraits"
+              : null,
+          context_type:
+            entityContext.type === "season" && importMode === "season_announcement"
+              ? "Season Announcement"
+              : null,
+          source_logo: sourceLogos[img.id] || null,
+          asset_name:
+            assetNames[img.id] ||
+            (entityContext.type === "season" && importMode === "season_announcement"
+              ? defaultCastPortraitName(
+                  (personAssignments[img.id] ?? [])[0]?.name ?? null,
+                  1
+                )
+              : null),
         }));
 
       const urlToKindMap = new Map<string, ImageKind>();
@@ -815,6 +881,40 @@ export function ImageScrapeDrawer({
                   {entityContext.type === "season" && (
                     <div className="flex flex-wrap items-center gap-3">
                       <span className="text-xs font-semibold text-zinc-600">
+                        Import type:
+                      </span>
+                      <select
+                        value={importMode}
+                        onChange={(e) => {
+                          const value = e.target.value as ImportMode;
+                          setImportMode(value);
+                          if (value === "season_announcement") {
+                            // Defaults: Promo kind + Cast Portraits section + Season Announcement context.
+                            setImageKinds((prev) => {
+                              const next = { ...prev };
+                              for (const imgId of selectedImages) {
+                                next[imgId] = "promo";
+                              }
+                              return next;
+                            });
+                          }
+                        }}
+                        className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                      >
+                        <option value="standard">Standard</option>
+                        <option value="season_announcement">Season Announcement</option>
+                      </select>
+                      {importMode === "season_announcement" && (
+                        <span className="text-xs text-zinc-500">
+                          Defaults to Promo + Cast Portraits; set captions to storylines.
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {entityContext.type === "season" && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs font-semibold text-zinc-600">
                         Set kind for all selected:
                       </span>
                       <select
@@ -986,6 +1086,45 @@ export function ImageScrapeDrawer({
                               </option>
                             ))}
                           </select>
+                          {entityContext.type === "season" && importMode === "season_announcement" && (
+                            <>
+                              <select
+                                value={sourceLogos[img.id] ?? ""}
+                                onChange={(e) =>
+                                  setSourceLogos((prev) => ({
+                                    ...prev,
+                                    [img.id]: e.target.value,
+                                  }))
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                              >
+                                {SOURCE_LOGO_OPTIONS.map((opt) => (
+                                  <option key={opt.value || "none"} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="text"
+                                value={assetNames[img.id] ?? ""}
+                                onChange={(e) =>
+                                  setAssetNames((prev) => ({
+                                    ...prev,
+                                    [img.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder={
+                                  defaultCastPortraitName(
+                                    (personAssignments[img.id] ?? [])[0]?.name ?? null,
+                                    1
+                                  ) ?? "Asset name"
+                                }
+                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </>
+                          )}
                           <PeopleSearchMultiSelect
                             value={personAssignments[img.id] ?? []}
                             onChange={(nextPeople) => {
