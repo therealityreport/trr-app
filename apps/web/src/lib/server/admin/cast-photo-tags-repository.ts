@@ -73,7 +73,7 @@ export async function getPhotoIdsByPersonId(personId: string): Promise<string[]>
     const result = await query<{ cast_photo_id: string }>(
       `SELECT cast_photo_id
        FROM admin.cast_photo_people_tags
-       WHERE people_ids @> ARRAY[$1]::uuid[]`,
+       WHERE people_ids @> ARRAY[$1]::text[]`,
       [personId]
     );
     return result.rows.map((row) => row.cast_photo_id);
@@ -116,7 +116,7 @@ export async function upsertCastPhotoTags(
       ) VALUES (
         $1::uuid,
         $2::text[],
-        $3::uuid[],
+        $3::text[],
         $4::int,
         $5::text,
         $6::text,

@@ -1329,9 +1329,174 @@ export async function getSeasonCastWithEpisodeCounts(
   const season = await getSeasonByShowAndNumber(showId, seasonNumber);
   if (!season) return [];
 
-  let members: Array<{ person_id: string; person_name: string | null; total_episodes: number | null }> = [];
+  type PgErrorLike = { code?: string };
+  const isMissingRelationOrNoAccess = (error: unknown): boolean => {
+    const code = (error as PgErrorLike | null)?.code;
+    // 3F000 = invalid_schema_name, 42P01 = undefined_table, 42501 = insufficient_privilege
+    return code === "3F000" || code === "42P01" || code === "42501";
+  };
+
+  type SeasonCastCountRow = { person_id: string; episodes_in_season: number };
+  let seasonCastCounts: SeasonCastCountRow[] | null = null;
+
   try {
-    const memberResult = await pgQuery<{
+    const result = await pgQuery<SeasonCastCountRow>(
+      `SELECT person_id, episodes_in_season
+       FROM core.v_season_cast
+       WHERE show_id = $1::uuid
+         AND season_id = $2::uuid
+       ORDER BY episodes_in_season DESC, person_id ASC
+       LIMIT $3 OFFSET $4`,
+      [showId, season.id, limit, offset]
+    );
+    seasonCastCounts = result.rows;
+  } catch (error) {
+    if (!isMissingRelationOrNoAccess(error)) throw error;
+  }
+
+  if (seasonCastCounts === null) {
+    try {
+      const result = await pgQuery<SeasonCastCountRow>(
+        `SELECT vec.person_id,
+                COUNT(DISTINCT vec.episode_id)::int AS episodes_in_season
+         FROM core.v_episode_cast vec
+         JOIN core.episodes e ON e.id = vec.episode_id
+         WHERE vec.show_id = $1::uuid
+           AND e.season_id = $2::uuid
+         GROUP BY vec.person_id
+         ORDER BY episodes_in_season DESC, vec.person_id ASC
+         LIMIT $3 OFFSET $4`,
+        [showId, season.id, limit, offset]
+      );
+      seasonCastCounts = result.rows;
+    } catch (error) {
+      if (!isMissingRelationOrNoAccess(error)) throw error;
+    }
+  }
+
+  if (seasonCastCounts === null) {
+    try {
+      const result = await pgQuery<SeasonCastCountRow>(
+        `SELECT person_id,
+                COUNT(DISTINCT episode_id)::int AS episodes_in_season
+         FROM core.v_episode_credits
+         WHERE show_id = $1::uuid
+           AND season_number = $2::int
+         GROUP BY person_id
+         ORDER BY episodes_in_season DESC, person_id ASC
+         LIMIT $3 OFFSET $4`,
+        [showId, seasonNumber, limit, offset]
+      );
+      seasonCastCounts = result.rows;
+    } catch (error) {
+      if (!isMissingRelationOrNoAccess(error)) throw error;
+    }
+  }
+
+  // If the episode-level views aren't available (or we don't have access), fall back
+  // to membership-only results from v_person_show_seasons (no per-season counts).
+  if (seasonCastCounts === null) {
+    let members: Array<{ person_id: string; person_name: string | null; total_episodes: number | null }> = [];
+    try {
+      const memberResult = await pgQuery<{
+        person_id: string;
+        person_name: string | null;
+        total_episodes: number | null;
+      }>(
+        `SELECT person_id, person_name, total_episodes
+         FROM core.v_person_show_seasons
+         WHERE show_id = $1::uuid
+           AND seasons_appeared @> ARRAY[$2]::int[]
+         ORDER BY total_episodes DESC
+         LIMIT $3 OFFSET $4`,
+        [showId, seasonNumber, limit, offset]
+      );
+      members = memberResult.rows;
+    } catch (error) {
+      if (isMissingRelationOrNoAccess(error)) {
+        return getSeasonCastFallbackFromShowCast(showId, options);
+      }
+      throw error;
+    }
+
+    if (members.length === 0) return [];
+
+    const personIds = members.map((row) => row.person_id);
+    const fallbackNames = new Map(members.map((row) => [row.person_id, row.person_name]));
+    const totalsMap = new Map<string, number>();
+    for (const row of members) {
+      if (typeof row.total_episodes === "number") {
+        totalsMap.set(row.person_id, row.total_episodes);
+      }
+    }
+
+    let peopleMap = new Map<string, string | null>();
+    try {
+      const peopleResult = await pgQuery<{ id: string; full_name: string | null }>(
+        `SELECT id, full_name
+         FROM core.people
+         WHERE id = ANY($1::uuid[])`,
+        [personIds]
+      );
+      peopleMap = new Map(peopleResult.rows.map((p) => [p.id, p.full_name]));
+    } catch (error) {
+      // Optional - fallback names will be used.
+    }
+
+    const pickPhotoUrl = (row: {
+      display_url?: string | null;
+      hosted_url?: string | null;
+      url?: string | null;
+    }): string | null => {
+      const candidates = [row.display_url, row.hosted_url, row.url];
+      for (const candidate of candidates) {
+        if (candidate && isLikelyImage(null, candidate)) return candidate;
+      }
+      return null;
+    };
+
+    const photosMap: Map<string, string> = new Map();
+    try {
+      const photosResult = await pgQuery<{
+        person_id: string;
+        display_url: string | null;
+        hosted_url: string | null;
+        url: string | null;
+        gallery_index: number | null;
+      }>(
+        `SELECT person_id, display_url, hosted_url, url, gallery_index
+         FROM core.v_cast_photos
+         WHERE person_id = ANY($1::uuid[])
+         ORDER BY person_id, gallery_index ASC NULLS LAST`,
+        [personIds]
+      );
+      for (const photo of photosResult.rows) {
+        const picked = pickPhotoUrl(photo);
+        if (picked && !photosMap.has(photo.person_id)) {
+          photosMap.set(photo.person_id, picked);
+        }
+      }
+    } catch (error) {
+      // Optional - photos are not required.
+    }
+
+    return members.map((member) => ({
+      person_id: member.person_id,
+      person_name: peopleMap.get(member.person_id) ?? fallbackNames.get(member.person_id) ?? null,
+      episodes_in_season: 0,
+      total_episodes: totalsMap.get(member.person_id) ?? null,
+      photo_url: photosMap.get(member.person_id) ?? null,
+    }));
+  }
+
+  if (seasonCastCounts.length === 0) return [];
+
+  const personIds = seasonCastCounts.map((row) => row.person_id);
+
+  const fallbackNames = new Map<string, string | null>();
+  const totalsMap = new Map<string, number>();
+  try {
+    const totalsResult = await pgQuery<{
       person_id: string;
       person_name: string | null;
       total_episodes: number | null;
@@ -1339,29 +1504,22 @@ export async function getSeasonCastWithEpisodeCounts(
       `SELECT person_id, person_name, total_episodes
        FROM core.v_person_show_seasons
        WHERE show_id = $1::uuid
-         AND seasons_appeared @> ARRAY[$2]::int[]
-       ORDER BY total_episodes DESC
-       LIMIT $3 OFFSET $4`,
-      [showId, seasonNumber, limit, offset]
+         AND person_id = ANY($2::uuid[])`,
+      [showId, personIds]
     );
-    members = memberResult.rows;
+    for (const row of totalsResult.rows) {
+      if (!fallbackNames.has(row.person_id)) {
+        fallbackNames.set(row.person_id, row.person_name ?? null);
+      }
+      if (typeof row.total_episodes === "number") {
+        const existing = totalsMap.get(row.person_id);
+        if (existing === undefined || row.total_episodes > existing) {
+          totalsMap.set(row.person_id, row.total_episodes);
+        }
+      }
+    }
   } catch (error) {
-    const code = (error as { code?: string } | null)?.code;
-    if (code === "42P01") {
-      return getSeasonCastFallbackFromShowCast(showId, options);
-    }
-    throw error;
-  }
-
-  if (members.length === 0) return [];
-
-  const personIds = members.map((row) => row.person_id);
-  const fallbackNames = new Map(members.map((row) => [row.person_id, row.person_name]));
-  const totalsMap = new Map<string, number>();
-  for (const row of members) {
-    if (typeof row.total_episodes === "number") {
-      totalsMap.set(row.person_id, row.total_episodes);
-    }
+    // Optional - totals are best-effort.
   }
 
   let peopleMap = new Map<string, string | null>();
@@ -1414,10 +1572,10 @@ export async function getSeasonCastWithEpisodeCounts(
     // Optional - photos are not required.
   }
 
-  return members.map((member) => ({
+  return seasonCastCounts.map((member) => ({
     person_id: member.person_id,
     person_name: peopleMap.get(member.person_id) ?? fallbackNames.get(member.person_id) ?? null,
-    episodes_in_season: 0,
+    episodes_in_season: Number.isFinite(member.episodes_in_season) ? member.episodes_in_season : 0,
     total_episodes: totalsMap.get(member.person_id) ?? null,
     photo_url: photosMap.get(member.person_id) ?? null,
   }));
