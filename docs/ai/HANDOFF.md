@@ -23,6 +23,9 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
   - `apps/web/src/lib/server/trr-api/media-links-repository.ts`
   - `apps/web/src/lib/server/admin/cast-photo-tags-repository.ts`
   - `apps/web/src/lib/server/admin/images-repository.ts`
+- Addressed Codex review regressions in direct-Postgres admin queries:
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts` restores `episodes_in_season` for season cast via `core.v_season_cast` (with fallbacks)
+  - `apps/web/src/lib/server/admin/cast-photo-tags-repository.ts` fixes `people_ids` lookup/upsert to use `text[]` (matches `admin.cast_photo_people_tags.people_ids`)
 - Fixed runtime `toFixed` crashes caused by Postgres `NUMERIC` values coming back as strings:
   - `apps/web/src/lib/server/postgres.ts` parses NUMERIC into JS numbers globally
   - defensive formatting in admin pages:
