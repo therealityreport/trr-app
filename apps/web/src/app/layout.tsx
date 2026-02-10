@@ -38,6 +38,22 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        <link
+          rel="preload"
+          href="https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerial-930108065.otf"
+          as="font"
+          type="font/otf"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/GloucesterOldStyle-5735713.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+      </head>
       <body className={`${geistSans.variable} ${inter.variable} ${playfair.variable} font-sans antialiased`}>
         <SideMenuProvider>
           <ErrorBoundary>
