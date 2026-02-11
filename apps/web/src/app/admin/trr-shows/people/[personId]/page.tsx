@@ -2639,7 +2639,10 @@ export default function PersonProfilePage() {
                   errorPayload?.error && errorPayload?.detail
                     ? `${stage}${errorPayload.error}: ${errorPayload.detail}`
                     : `${stage}${errorPayload?.error || "Failed to refresh images"}`;
-                throw new Error(errorText);
+                // Mark as a backend error so the retry loop does NOT retry.
+                const backendErr = new Error(errorText);
+                backendErr.name = "BackendError";
+                throw backendErr;
               }
 
               boundaryIndex = buffer.indexOf("\n\n");
@@ -2661,23 +2664,30 @@ export default function PersonProfilePage() {
           streamError = null;
           break;
         } catch (streamErr) {
+          // Only retry on stream-drop conditions (EOF before complete,
+          // network read errors). Explicit backend errors (auth, config,
+          // validation) should surface immediately without a retry to
+          // avoid duplicate refresh jobs.
+          const isBackendError =
+            streamErr instanceof Error && streamErr.name === "BackendError";
           streamError = streamErr instanceof Error ? streamErr.message : String(streamErr);
-          if (attempt < 2) {
-            setRefreshProgress((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    detailMessage: `Stream disconnected, retrying... (${streamError})`,
-                    lastEventAt: Date.now(),
-                  }
-                : prev
-            );
-            continue;
+          if (isBackendError || attempt >= 2) {
+            break;
           }
+          setRefreshProgress((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  detailMessage: `Stream disconnected, retrying... (${streamError})`,
+                  lastEventAt: Date.now(),
+                }
+              : prev
+          );
+          continue;
         }
       }
       if (streamError) {
-        throw new Error(`Stream refresh failed: ${streamError}`);
+        throw new Error(streamError);
       }
 
       await Promise.all([
