@@ -276,7 +276,6 @@ export default React.forwardRef<HTMLDivElement, IconRatingInputProps>(function I
           onKeyDown={handleInputKeyDown}
           disabled={disabled}
           className="w-24 rounded-xl border border-rose-100 bg-white px-3 py-2 text-center text-3xl font-semibold tabular-nums text-rose-900 shadow-sm outline-none transition focus:border-rose-200 focus:ring-2 focus:ring-rose-200"
-          aria-label={ariaLabel}
         />
       </div>
     </div>

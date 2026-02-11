@@ -2944,10 +2944,24 @@ export default function TrrShowDetailPage() {
             isOpen={true}
             onClose={closeAssetLightbox}
             metadata={mapSeasonAssetToMetadata(assetLightbox.asset, selectedGallerySeason !== "all" ? selectedGallerySeason : undefined, show?.name)}
-            canManage={true}
+            canManage={assetLightbox.asset.source?.toLowerCase?.().startsWith("web_scrape:")}
             isStarred={Boolean((assetLightbox.asset.metadata as Record<string, unknown> | null)?.starred)}
             onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
             onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
+            onDelete={async () => {
+              const asset = assetLightbox.asset;
+              const headers = await getAuthHeaders();
+              const response = await fetch(`/api/admin/trr-api/media-assets/${asset.id}`, {
+                method: "DELETE",
+                headers,
+              });
+              if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data?.detail || "Delete failed");
+              }
+              setGalleryAssets((prev) => prev.filter((a) => a.id !== asset.id));
+              closeAssetLightbox();
+            }}
             position={{
               current: assetLightbox.index + 1,
               total: assetLightbox.filteredAssets.length,
