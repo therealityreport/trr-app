@@ -20,6 +20,7 @@ export type QuestionType =
   | "three-choice-slider"  // Keep/Fire/Demote slider (was matrix-likert for verdicts)
   | "agree-likert-scale"   // Agree/Disagree scale (was matrix-likert for statements)
   | "numeric-scale-slider" // Boring/Entertaining slider per cast member (was slider)
+  | "two-axis-grid"        // 2D perceptual map (snap-to-grid cast placement)
   | "two-choice-slider"    // Whose side feuds (was whose-side)
   | "multi-select-choice"  // Select multiple options (was multi-select)
   | "image-multiple-choice" // Single select with images
@@ -87,6 +88,18 @@ export interface NumericScaleSliderQuestion extends BaseQuestion {
   minLabel: string;
   maxLabel: string;
   step?: number;
+}
+
+/** Two-axis snap grid (perceptual map) for multiple cast members */
+export interface TwoAxisGridQuestion extends BaseQuestion {
+  type: "two-axis-grid";
+  /** Optional max absolute coordinate value (default 5). Total intersections per axis: 2*extent + 1 */
+  extent?: number;
+  xLabelLeft: string;
+  xLabelRight: string;
+  yLabelBottom: string;
+  yLabelTop: string;
+  subjects: CastMemberOption[];
 }
 
 /** Two-choice slider for feuds (whose side are you on) */
@@ -201,6 +214,7 @@ export type SurveyQuestion =
   | ThreeChoiceSliderQuestion
   | AgreeLikertScaleQuestion
   | NumericScaleSliderQuestion
+  | TwoAxisGridQuestion
   | TwoChoiceSliderQuestion
   | MultiSelectChoiceQuestion
   | ImageMultipleChoiceQuestion

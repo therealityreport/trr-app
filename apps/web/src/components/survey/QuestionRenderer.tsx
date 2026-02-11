@@ -10,6 +10,7 @@ import SliderInput from "./SliderInput";
 import RankOrderInput from "./RankOrderInput";
 import WhoseSideInput from "./WhoseSideInput";
 import MatrixLikertInput from "./MatrixLikertInput";
+import TwoAxisGridInput from "./TwoAxisGridInput";
 import MultiSelectInput from "./MultiSelectInput";
 import SingleSelectInput from "./SingleSelectInput";
 import DropdownInput from "./DropdownInput";
@@ -64,6 +65,15 @@ export default function QuestionRenderer({
         <SliderInput
           {...commonProps}
           value={value as number | null}
+          onChange={onChange}
+        />
+      );
+
+    case "two-axis-grid":
+      return (
+        <TwoAxisGridInput
+          {...commonProps}
+          value={value as Record<string, { x: number; y: number }> | null}
           onChange={onChange}
         />
       );

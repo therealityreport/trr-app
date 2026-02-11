@@ -3,18 +3,23 @@
 
 BEGIN;
 
--- Question type enum
-CREATE TYPE firebase_surveys.question_type AS ENUM (
-  'single_choice',
-  'multi_choice',
-  'free_text',
-  'likert',
-  'numeric',
-  'ranking'
-);
+-- Question type enum (idempotent; CREATE TYPE has no IF NOT EXISTS for enums)
+DO $$
+BEGIN
+  CREATE TYPE firebase_surveys.question_type AS ENUM (
+    'single_choice',
+    'multi_choice',
+    'free_text',
+    'likert',
+    'numeric',
+    'ranking'
+  );
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
 
 -- Survey definitions
-CREATE TABLE firebase_surveys.surveys (
+CREATE TABLE IF NOT EXISTS firebase_surveys.surveys (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   slug text NOT NULL,
   title text NOT NULL,
@@ -27,7 +32,7 @@ CREATE TABLE firebase_surveys.surveys (
 );
 
 -- Questions belonging to a survey
-CREATE TABLE firebase_surveys.questions (
+CREATE TABLE IF NOT EXISTS firebase_surveys.questions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   survey_id uuid NOT NULL REFERENCES firebase_surveys.surveys(id) ON DELETE CASCADE,
   question_key text NOT NULL,
@@ -42,7 +47,7 @@ CREATE TABLE firebase_surveys.questions (
 );
 
 -- Options for choice-based questions
-CREATE TABLE firebase_surveys.options (
+CREATE TABLE IF NOT EXISTS firebase_surveys.options (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   question_id uuid NOT NULL REFERENCES firebase_surveys.questions(id) ON DELETE CASCADE,
   option_key text NOT NULL,
@@ -54,7 +59,7 @@ CREATE TABLE firebase_surveys.options (
 );
 
 -- Survey runs (deployment windows)
-CREATE TABLE firebase_surveys.survey_runs (
+CREATE TABLE IF NOT EXISTS firebase_surveys.survey_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   survey_id uuid NOT NULL REFERENCES firebase_surveys.surveys(id) ON DELETE CASCADE,
   run_key text NOT NULL,
@@ -70,7 +75,7 @@ CREATE TABLE firebase_surveys.survey_runs (
 );
 
 -- Response headers (one per submission)
-CREATE TABLE firebase_surveys.responses (
+CREATE TABLE IF NOT EXISTS firebase_surveys.responses (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   survey_run_id uuid NOT NULL REFERENCES firebase_surveys.survey_runs(id) ON DELETE RESTRICT,
   user_id text NOT NULL,
@@ -84,7 +89,7 @@ CREATE TABLE firebase_surveys.responses (
 
 -- Individual answers (one per question per response)
 -- For multi_choice/ranking, use json_value to store arrays
-CREATE TABLE firebase_surveys.answers (
+CREATE TABLE IF NOT EXISTS firebase_surveys.answers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   response_id uuid NOT NULL REFERENCES firebase_surveys.responses(id) ON DELETE CASCADE,
   question_id uuid NOT NULL REFERENCES firebase_surveys.questions(id) ON DELETE RESTRICT,
@@ -97,13 +102,13 @@ CREATE TABLE firebase_surveys.answers (
 );
 
 -- Indexes for common query patterns
-CREATE INDEX idx_firebase_surveys_slug ON firebase_surveys.surveys(slug);
-CREATE INDEX idx_firebase_questions_survey_order ON firebase_surveys.questions(survey_id, display_order);
-CREATE INDEX idx_firebase_options_question_order ON firebase_surveys.options(question_id, display_order);
-CREATE INDEX idx_firebase_survey_runs_active ON firebase_surveys.survey_runs(survey_id, is_active, starts_at, ends_at);
-CREATE INDEX idx_firebase_responses_run_user ON firebase_surveys.responses(survey_run_id, user_id);
-CREATE INDEX idx_firebase_responses_user ON firebase_surveys.responses(user_id);
-CREATE INDEX idx_firebase_answers_response ON firebase_surveys.answers(response_id);
+CREATE INDEX IF NOT EXISTS idx_firebase_surveys_slug ON firebase_surveys.surveys(slug);
+CREATE INDEX IF NOT EXISTS idx_firebase_questions_survey_order ON firebase_surveys.questions(survey_id, display_order);
+CREATE INDEX IF NOT EXISTS idx_firebase_options_question_order ON firebase_surveys.options(question_id, display_order);
+CREATE INDEX IF NOT EXISTS idx_firebase_survey_runs_active ON firebase_surveys.survey_runs(survey_id, is_active, starts_at, ends_at);
+CREATE INDEX IF NOT EXISTS idx_firebase_responses_run_user ON firebase_surveys.responses(survey_run_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_firebase_responses_user ON firebase_surveys.responses(user_id);
+CREATE INDEX IF NOT EXISTS idx_firebase_answers_response ON firebase_surveys.answers(response_id);
 
 -- updated_at trigger function
 CREATE OR REPLACE FUNCTION firebase_surveys.set_updated_at()
@@ -115,18 +120,22 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Apply updated_at triggers
+DROP TRIGGER IF EXISTS trg_firebase_surveys_updated_at ON firebase_surveys.surveys;
 CREATE TRIGGER trg_firebase_surveys_updated_at
   BEFORE UPDATE ON firebase_surveys.surveys
   FOR EACH ROW EXECUTE FUNCTION firebase_surveys.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_firebase_questions_updated_at ON firebase_surveys.questions;
 CREATE TRIGGER trg_firebase_questions_updated_at
   BEFORE UPDATE ON firebase_surveys.questions
   FOR EACH ROW EXECUTE FUNCTION firebase_surveys.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_firebase_survey_runs_updated_at ON firebase_surveys.survey_runs;
 CREATE TRIGGER trg_firebase_survey_runs_updated_at
   BEFORE UPDATE ON firebase_surveys.survey_runs
   FOR EACH ROW EXECUTE FUNCTION firebase_surveys.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_firebase_responses_updated_at ON firebase_surveys.responses;
 CREATE TRIGGER trg_firebase_responses_updated_at
   BEFORE UPDATE ON firebase_surveys.responses
   FOR EACH ROW EXECUTE FUNCTION firebase_surveys.set_updated_at();

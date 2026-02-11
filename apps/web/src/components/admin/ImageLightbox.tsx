@@ -88,6 +88,8 @@ const ChevronDownIcon = ({ className }: { className?: string }) => (
 function formatContentTypeLabel(raw: string): string {
   const normalized = raw.trim().toUpperCase();
   switch (normalized) {
+    case "CAST PHOTOS":
+      return "Cast Photos";
     case "PROMO":
       return "Promo Portraits";
     case "CONFESSIONAL":
@@ -96,6 +98,10 @@ function formatContentTypeLabel(raw: string): string {
       return "Intro";
     case "REUNION":
       return "Reunion";
+    case "BACKDROP":
+      return "Backdrop";
+    case "POSTER":
+      return "Poster";
     case "EPISODE STILL":
       return "Episode Still";
     case "OTHER":

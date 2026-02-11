@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -11,6 +11,44 @@ import {
   PeopleSearchMultiSelect,
   type PersonOption,
 } from "@/components/admin/PeopleSearchMultiSelect";
+
+function normalizePersonName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseCastContext(input: { context: string | null; alt_text: string | null }): {
+  name: string | null;
+  caption: string | null;
+} {
+  const raw = (input.context ?? "").trim() || (input.alt_text ?? "").trim();
+  if (!raw) return { name: null, caption: null };
+
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length >= 2) {
+    const name = lines[0] || null;
+    const caption = lines.slice(1).join("\n").trim() || null;
+    return { name, caption };
+  }
+
+  const single = lines[0] ?? raw;
+  const colonIdx = single.indexOf(":");
+  if (colonIdx > 0 && colonIdx < 80) {
+    const name = single.slice(0, colonIdx).trim() || null;
+    const caption = single.slice(colonIdx + 1).trim() || null;
+    return { name, caption };
+  }
+
+  return { name: null, caption: single.trim() || null };
+}
 
 // ============================================================================
 // Types
@@ -47,6 +85,7 @@ interface ImageCandidate {
 interface ScrapePreviewResponse {
   url: string;
   page_title: string | null;
+  page_published_at?: string | null;
   domain: string;
   images: ImageCandidate[];
   total_found: number;
@@ -72,7 +111,7 @@ interface ImportProgress {
   current: number;
   total: number;
   url: string;
-  status: "downloading" | "success" | "duplicate" | "error";
+  status: "downloading" | "success" | "duplicate" | "excluded" | "error";
   error?: string;
 }
 
@@ -147,6 +186,109 @@ export default function ScrapeImagesPage() {
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  const peopleExactCacheRef = useRef<Map<string, PersonOption | null>>(new Map());
+
+  const resolveExactPersonByName = useCallback(
+    async (name: string): Promise<PersonOption | null> => {
+      const trimmed = name.trim();
+      const normalized = normalizePersonName(trimmed);
+      if (!trimmed || normalized.length < 2) return null;
+
+      const cacheKey = normalized;
+      if (peopleExactCacheRef.current.has(cacheKey)) {
+        return peopleExactCacheRef.current.get(cacheKey) ?? null;
+      }
+
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/people?q=${encodeURIComponent(trimmed)}&limit=25`,
+          { headers }
+        );
+        if (!response.ok) {
+          peopleExactCacheRef.current.set(cacheKey, null);
+          return null;
+        }
+        const data = (await response.json().catch(() => ({}))) as {
+          people?: Array<{ id?: string; full_name?: string | null }>;
+        };
+        const results = Array.isArray(data.people) ? data.people : [];
+        const exact = results.filter((row) => {
+          const fullName = typeof row.full_name === "string" ? row.full_name : "";
+          return normalizePersonName(fullName) === normalized;
+        });
+        if (exact.length !== 1) {
+          peopleExactCacheRef.current.set(cacheKey, null);
+          return null;
+        }
+        const match = exact[0];
+        if (!match?.id || typeof match.full_name !== "string") {
+          peopleExactCacheRef.current.set(cacheKey, null);
+          return null;
+        }
+        const person: PersonOption = { id: match.id, name: match.full_name };
+        peopleExactCacheRef.current.set(cacheKey, person);
+        return person;
+      } catch {
+        peopleExactCacheRef.current.set(cacheKey, null);
+        return null;
+      }
+    },
+    [getAuthHeaders]
+  );
+
+  const autoFillCastFromContext = useCallback(
+    async (imageIds: Iterable<string>) => {
+      if (!previewData) return;
+      if (entityMode !== "season") return;
+
+      const imagesById = new Map(previewData.images.map((img) => [img.id, img]));
+      const captionUpdates: Record<string, string> = {};
+      const assignmentUpdates: Record<string, PersonOption[]> = {};
+      const resolvedNameCache = new Map<string, PersonOption | null>();
+
+      for (const id of imageIds) {
+        const img = imagesById.get(id);
+        if (!img) continue;
+        const parsed = parseCastContext({ context: img.context, alt_text: img.alt_text });
+        if (parsed.caption) captionUpdates[id] = parsed.caption;
+        if (parsed.name) {
+          const normalized = normalizePersonName(parsed.name);
+          if (!normalized) continue;
+          let match = resolvedNameCache.get(normalized);
+          if (match === undefined) {
+            match = await resolveExactPersonByName(parsed.name);
+            resolvedNameCache.set(normalized, match);
+          }
+          if (match) assignmentUpdates[id] = [match];
+        }
+      }
+
+      if (Object.keys(captionUpdates).length > 0) {
+        setCaptions((prev) => {
+          const next = { ...prev };
+          for (const [id, caption] of Object.entries(captionUpdates)) {
+            if (next[id] === undefined) next[id] = caption;
+          }
+          return next;
+        });
+      }
+
+      if (Object.keys(assignmentUpdates).length > 0) {
+        setPersonAssignments((prev) => {
+          const next = { ...prev };
+          for (const [id, people] of Object.entries(assignmentUpdates)) {
+            if (!next[id] || next[id].length === 0) {
+              next[id] = people;
+            }
+          }
+          return next;
+        });
+      }
+    },
+    [previewData, entityMode, resolveExactPersonByName]
+  );
 
   // Search shows
   const searchShows = useCallback(
@@ -293,10 +435,23 @@ export default function ScrapeImagesPage() {
       setImportResult(null);
 
       const headers = await getAuthHeaders();
+      const previewPayload: Record<string, unknown> = { url: url.trim() };
+      if (entityMode === "season") {
+        // Let TRR-Backend resolve season_id (and apply exclusion filtering) from show_id + season_number.
+        if (showId && seasonNumber !== "") {
+          previewPayload.entity_type = "season";
+          previewPayload.show_id = showId;
+          previewPayload.season_number = Number(seasonNumber);
+        }
+      }
+      if (entityMode === "person" && selectedPerson) {
+        previewPayload.entity_type = "person";
+        previewPayload.entity_id = selectedPerson.id;
+      }
       const response = await fetch("/api/admin/scrape/preview", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify(previewPayload),
       });
 
       const data = await response.json();
@@ -457,7 +612,7 @@ export default function ScrapeImagesPage() {
 
               // Handle different event types
               if (data.status === "downloading" || data.status === "success" ||
-                  data.status === "duplicate" || data.status === "error") {
+                  data.status === "duplicate" || data.status === "excluded" || data.status === "error") {
                 setImportProgress({
                   current: data.current,
                   total: data.total,
@@ -821,6 +976,9 @@ export default function ScrapeImagesPage() {
                             }
                             return next;
                           });
+                          if (value === "cast") {
+                            void autoFillCastFromContext(selectedImages);
+                          }
                           e.target.value = "";
                         }}
                         className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
@@ -968,6 +1126,9 @@ export default function ScrapeImagesPage() {
                               onChange={(e) => {
                                 const value = e.target.value as ImageKind;
                                 setImageKinds((prev) => ({ ...prev, [img.id]: value }));
+                                if (value === "cast") {
+                                  void autoFillCastFromContext([img.id]);
+                                }
                               }}
                               onClick={(e) => e.stopPropagation()}
                               className="w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
@@ -1028,11 +1189,14 @@ export default function ScrapeImagesPage() {
                           ? "bg-green-100 text-green-700"
                           : importProgress.status === "duplicate"
                           ? "bg-amber-100 text-amber-700"
+                          : importProgress.status === "excluded"
+                          ? "bg-zinc-100 text-zinc-700"
                           : "bg-red-100 text-red-700"
                       }`}>
                         {importProgress.status === "downloading" && "Downloading..."}
                         {importProgress.status === "success" && "Imported"}
                         {importProgress.status === "duplicate" && "Duplicate"}
+                        {importProgress.status === "excluded" && "Excluded"}
                         {importProgress.status === "error" && "Error"}
                       </span>
                     </div>
@@ -1044,6 +1208,8 @@ export default function ScrapeImagesPage() {
                             ? "bg-red-500"
                             : importProgress.status === "duplicate"
                             ? "bg-amber-500"
+                            : importProgress.status === "excluded"
+                            ? "bg-zinc-500"
                             : "bg-green-500"
                         }`}
                         style={{

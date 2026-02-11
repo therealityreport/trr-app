@@ -50,7 +50,8 @@ export default function MultiSelectInput({
   );
 
   const getImagePath = (option: QuestionOption): string | undefined => {
-    return (option.metadata as { imagePath?: string })?.imagePath;
+    const metadata = option.metadata as { imagePath?: string; imageUrl?: string } | null | undefined;
+    return metadata?.imagePath ?? metadata?.imageUrl;
   };
 
   const hasImages = sortedOptions.some((opt) => getImagePath(opt));
@@ -101,6 +102,7 @@ export default function MultiSelectInput({
                     width={64}
                     height={64}
                     className="w-full h-full object-cover"
+                    unoptimized={imagePath.startsWith("http")}
                   />
                 </div>
               )}

@@ -17,16 +17,17 @@ CREATE TABLE IF NOT EXISTS firebase_surveys.survey_trr_links (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_survey_trr_links_show ON firebase_surveys.survey_trr_links(trr_show_id);
-CREATE INDEX idx_survey_trr_links_season ON firebase_surveys.survey_trr_links(trr_season_id);
+CREATE INDEX IF NOT EXISTS idx_survey_trr_links_show ON firebase_surveys.survey_trr_links(trr_show_id);
+CREATE INDEX IF NOT EXISTS idx_survey_trr_links_season ON firebase_surveys.survey_trr_links(trr_season_id);
 
 -- Unique constraint: one survey per show+season combination
 -- This prevents duplicate surveys for the same show/season
-CREATE UNIQUE INDEX idx_survey_trr_links_unique_show_season
+CREATE UNIQUE INDEX IF NOT EXISTS idx_survey_trr_links_unique_show_season
   ON firebase_surveys.survey_trr_links(trr_show_id, season_number)
   WHERE season_number IS NOT NULL;
 
 -- Trigger for updated_at (reuse existing function from firebase_surveys schema)
+DROP TRIGGER IF EXISTS set_survey_trr_links_updated_at ON firebase_surveys.survey_trr_links;
 CREATE TRIGGER set_survey_trr_links_updated_at
   BEFORE UPDATE ON firebase_surveys.survey_trr_links
   FOR EACH ROW EXECUTE FUNCTION firebase_surveys.set_updated_at();
@@ -54,8 +55,8 @@ CREATE TABLE IF NOT EXISTS admin.show_social_posts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_show_social_posts_show ON admin.show_social_posts(trr_show_id);
-CREATE INDEX idx_show_social_posts_season ON admin.show_social_posts(trr_season_id);
+CREATE INDEX IF NOT EXISTS idx_show_social_posts_show ON admin.show_social_posts(trr_show_id);
+CREATE INDEX IF NOT EXISTS idx_show_social_posts_season ON admin.show_social_posts(trr_season_id);
 
 -- Trigger for updated_at in admin schema
 CREATE OR REPLACE FUNCTION admin.set_updated_at()
@@ -66,6 +67,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS set_show_social_posts_updated_at ON admin.show_social_posts;
 CREATE TRIGGER set_show_social_posts_updated_at
   BEFORE UPDATE ON admin.show_social_posts
   FOR EACH ROW EXECUTE FUNCTION admin.set_updated_at();

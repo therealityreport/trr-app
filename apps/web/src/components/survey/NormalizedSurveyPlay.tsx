@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { useNormalizedSurvey } from "@/hooks/useNormalizedSurvey";
 import QuestionRenderer from "./QuestionRenderer";
 import type { AnswerInput } from "@/lib/surveys/normalized-types";
+import { isQuestionComplete } from "./isQuestionComplete";
+import { resolveSingleChoiceOptionId } from "./answerMapping";
+import { groupBySection } from "@/lib/surveys/section-grouping";
 
 export interface NormalizedSurveyPlayProps {
   surveySlug: string;
@@ -44,31 +47,47 @@ export default function NormalizedSurveyPlay({
   // Track which questions have been answered
   const answeredCount = React.useMemo(() => {
     if (!survey) return 0;
-    return Object.keys(answers).filter((qId) => {
-      const value = answers[qId];
-      if (value === null || value === undefined) return false;
-      if (typeof value === "string" && value.trim() === "") return false;
-      if (Array.isArray(value) && value.length === 0) return false;
-      if (typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).length === 0) return false;
-      return true;
-    }).length;
+    return survey.questions.filter((q) => isQuestionComplete(q, answers[q.id])).length;
   }, [survey, answers]);
 
   const totalQuestions = survey?.questions.length ?? 0;
   const completionPct = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
 
+  const questionsForRender = React.useMemo(() => {
+    if (!survey) return [];
+    const groups = groupBySection(survey.questions, (q) => {
+      const cfg = q.config as { section?: unknown } | null | undefined;
+      return typeof cfg?.section === "string" ? cfg.section : "";
+    });
+
+    const out: Array<{
+      question: (typeof survey.questions)[number];
+      index: number;
+      section: string;
+      showSectionHeader: boolean;
+    }> = [];
+
+    let displayIndex = 0;
+    for (const group of groups) {
+      for (const [i, { item: question }] of group.items.entries()) {
+        out.push({
+          question,
+          index: displayIndex,
+          section: group.label,
+          showSectionHeader: group.key !== "~~ungrouped" && i === 0,
+        });
+        displayIndex += 1;
+      }
+    }
+
+    return out;
+  }, [survey]);
+
   // Check if all required questions are answered
   const requiredComplete = React.useMemo(() => {
     if (!survey) return false;
     const required = survey.questions.filter((q) => q.is_required);
-    return required.every((q) => {
-      const value = answers[q.id];
-      if (value === null || value === undefined) return false;
-      if (typeof value === "string" && value.trim() === "") return false;
-      if (Array.isArray(value) && value.length === 0) return false;
-      if (typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).length === 0) return false;
-      return true;
-    });
+    return required.every((q) => isQuestionComplete(q, answers[q.id]));
   }, [survey, answers]);
 
   const handleAnswerChange = React.useCallback((questionId: string, value: unknown) => {
@@ -87,19 +106,19 @@ export default function NormalizedSurveyPlay({
 
       switch (question.question_type) {
         case "single_choice":
-          input.optionId = value as string | undefined;
+          input.optionId = resolveSingleChoiceOptionId(
+            question.options ?? [],
+            value as string | null | undefined,
+          );
           break;
         case "multi_choice":
         case "ranking":
           input.jsonValue = value;
           break;
         case "likert": {
-          const config = question.config as { uiVariant?: string };
-          if (config.uiVariant === "matrix-likert") {
-            input.jsonValue = value;
-          } else {
-            input.optionId = value as string | undefined;
-          }
+          // All current likert UI variants in this app are matrix-style and
+          // emit an object map of rowId -> optionKey.
+          input.jsonValue = value;
           break;
         }
         case "numeric":
@@ -242,12 +261,17 @@ export default function NormalizedSurveyPlay({
 
         {/* Questions */}
         <div className="space-y-12">
-          {survey.questions.map((question, index) => (
+          {questionsForRender.map(({ question, index, section, showSectionHeader }) => (
             <div
               key={question.id}
               className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
             >
               <div className="mb-4">
+                {showSectionHeader && (
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.3em] text-gray-500">
+                    {section}
+                  </p>
+                )}
                 <span className="text-sm font-medium text-indigo-600">
                   Question {index + 1} of {totalQuestions}
                   {question.is_required && <span className="ml-1 text-red-500">*</span>}

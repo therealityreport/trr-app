@@ -8,6 +8,10 @@ import {
 import type { NormalizedSurvey } from "@/lib/surveys/normalized-types";
 import { getLinkBySurveyId } from "@/lib/server/surveys/survey-trr-links-repository";
 import { getCastByShowSeason, getEpisodesByShowAndSeason, getAssetsByShowSeason } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  listSeasonCastSurveyRoles,
+  replaceSeasonCastSurveyRoles,
+} from "@/lib/server/admin/season-cast-survey-roles-repository";
 
 export const dynamic = "force-dynamic";
 interface RouteParams {
@@ -40,6 +44,35 @@ function transformSurveyForAdmin(survey: NormalizedSurvey) {
   };
 }
 
+
+type CastTitle = "main" | "friend" | "new" | "alum";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeCastTitle(value: unknown): CastTitle | null {
+  if (value === "main" || value === "friend" || value === "new" || value === "alum") {
+    return value;
+  }
+  return null;
+}
+
+function parseCastTitlesByPersonId(
+  metadata: Record<string, unknown> | null | undefined,
+): Record<string, CastTitle> {
+  if (!isRecord(metadata)) return {};
+  const raw = metadata.castTitlesByPersonId;
+  if (!isRecord(raw)) return {};
+
+  const out: Record<string, CastTitle> = {};
+  for (const [personId, title] of Object.entries(raw)) {
+    const normalized = normalizeCastTitle(title);
+    if (normalized) out[personId] = normalized;
+  }
+  return out;
+}
+
 /**
  * GET /api/admin/surveys/[surveyKey]
  * Get full survey configuration including cast and episodes
@@ -62,32 +95,50 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const response: Record<string, unknown> = { survey: transformSurveyForAdmin(survey) };
 
-    // Check if survey is linked to a TRR show/season
-    const trrLink = (includeCast || includeEpisodes || includeAssets)
-      ? await getLinkBySurveyId(survey.id)
-      : null;
+    const trrLink = await getLinkBySurveyId(survey.id);
+    response.trrLink = trrLink;
+
+    const castTitlesByPersonId = parseCastTitlesByPersonId(survey.metadata);
 
     // Fetch cast from TRR core for this show/season
     if (includeCast) {
       if (trrLink && trrLink.season_number) {
-        const seasonCast = await getCastByShowSeason(
-          trrLink.trr_show_id,
-          trrLink.season_number,
-          { limit: 50 }
+        const [seasonCast, seasonRoles] = await Promise.all([
+          getCastByShowSeason(
+            trrLink.trr_show_id,
+            trrLink.season_number,
+            { limit: 50 },
+          ),
+          listSeasonCastSurveyRoles(trrLink.trr_show_id, trrLink.season_number),
+        ]);
+
+        const roleMap = new Map<string, "main" | "friend_of">(
+          seasonRoles.map((row) => [row.person_id, row.role]),
         );
         // Transform to the format expected by the admin UI
-        response.cast = seasonCast.map((member, index) => ({
-          id: member.person_id,
-          name: member.person_name,
-          slug: member.person_name.toLowerCase().replace(/\s+/g, "-"),
-          image_url: member.photo_url,
-          role: "Self",
-          status: "main",
-          instagram: null,
-          display_order: index,
-          is_alumni: false,
-          alumni_verdict_enabled: false,
-        }));
+        response.cast = seasonCast.map((member, index) => {
+          const name = member.person_name ?? "Unknown";
+          const role = roleMap.get(member.person_id) ?? null;
+          // Prefer admin-maintained season roles. Fall back to legacy per-survey metadata if present.
+          const status: CastTitle | null =
+            role === "main"
+              ? "main"
+              : role === "friend_of"
+                ? "friend"
+                : (castTitlesByPersonId[member.person_id] ?? null);
+          return {
+            id: member.person_id,
+            name,
+            slug: name.toLowerCase().replace(/\s+/g, "-"),
+            image_url: member.photo_url,
+            role: "Self",
+            status,
+            instagram: null,
+            display_order: index,
+            is_alumni: false,
+            alumni_verdict_enabled: false,
+          };
+        });
       } else {
         response.cast = [];
       }
@@ -169,6 +220,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       theme,
       airSchedule,
       currentEpisodeId,
+      castTitlesByPersonId,
     } = body;
 
     // Build metadata object from fields
@@ -180,6 +232,54 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (theme !== undefined) metadata.theme = theme;
     if (airSchedule !== undefined) metadata.airSchedule = airSchedule;
     if (currentEpisodeId !== undefined) metadata.currentEpisodeId = currentEpisodeId;
+
+    if (castTitlesByPersonId !== undefined) {
+      const trrLink = await getLinkBySurveyId(survey.id);
+
+      if (castTitlesByPersonId === null) {
+        // Clear legacy metadata + clear season roles if we have a show/season link.
+        delete metadata.castTitlesByPersonId;
+        if (trrLink && trrLink.season_number) {
+          await replaceSeasonCastSurveyRoles(
+            authContext,
+            trrLink.trr_show_id,
+            trrLink.season_number,
+            [],
+          );
+        }
+      } else if (!isRecord(castTitlesByPersonId)) {
+        return NextResponse.json(
+          { error: "castTitlesByPersonId must be an object" },
+          { status: 400 },
+        );
+      } else {
+        // Sanitize values before persisting.
+        const sanitized: Record<string, CastTitle> = {};
+        for (const [personId, title] of Object.entries(castTitlesByPersonId)) {
+          const normalized = normalizeCastTitle(title);
+          if (normalized) sanitized[personId] = normalized;
+        }
+
+        // Prefer persisting to the admin season cast roles table when possible.
+        // This is the source of truth for auto-filled "Rank Cast Members" style questions.
+        if (trrLink && trrLink.season_number) {
+          await replaceSeasonCastSurveyRoles(
+            authContext,
+            trrLink.trr_show_id,
+            trrLink.season_number,
+            Object.entries(sanitized)
+              .filter(([, title]) => title === "main" || title === "friend")
+              .map(([personId, title]) => ({
+                personId,
+                role: title === "main" ? "main" : "friend_of",
+              })),
+          );
+        } else {
+          // If we don't have a TRR season link, fall back to legacy per-survey metadata.
+          metadata.castTitlesByPersonId = sanitized;
+        }
+      }
+    }
 
     const updated = await updateSurvey(authContext, survey.id, {
       title,

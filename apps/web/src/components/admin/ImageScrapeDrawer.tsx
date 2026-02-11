@@ -48,35 +48,6 @@ function parseCastContext(input: { context: string | null; alt_text: string | nu
   return { name: null, caption: single.trim() || null };
 }
 
-function bestNameMatch(
-  name: string,
-  candidates: Array<{ normalized: string; person: PersonOption }>
-): PersonOption | null {
-  const normalized = normalizePersonName(name);
-  if (!normalized) return null;
-
-  const direct = candidates.find((c) => c.normalized === normalized);
-  if (direct) return direct.person;
-
-  const nameTokens = new Set(normalized.split(" ").filter(Boolean));
-  if (nameTokens.size === 0) return null;
-
-  let best: { score: number; person: PersonOption } | null = null;
-  for (const candidate of candidates) {
-    const candidateTokens = candidate.normalized.split(" ").filter(Boolean);
-    if (candidateTokens.length === 0) continue;
-
-    let common = 0;
-    for (const token of candidateTokens) {
-      if (nameTokens.has(token)) common += 1;
-    }
-    const score = common / Math.max(nameTokens.size, candidateTokens.length);
-    if (!best || score > best.score) best = { score, person: candidate.person };
-  }
-
-  return best && best.score >= 0.8 ? best.person : null;
-}
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -96,6 +67,7 @@ interface ImageCandidate {
 interface ScrapePreviewResponse {
   url: string;
   page_title: string | null;
+  page_published_at?: string | null;
   domain: string;
   images: ImageCandidate[];
   total_found: number;
@@ -121,7 +93,7 @@ interface ImportProgress {
   current: number;
   total: number;
   url: string;
-  status: "downloading" | "success" | "duplicate" | "error";
+  status: "downloading" | "success" | "duplicate" | "excluded" | "error";
   error?: string;
   media_asset_id?: string; // Present for duplicates if backend provides it
 }
@@ -224,12 +196,7 @@ export function ImageScrapeDrawer({
   onImportComplete,
 }: ImageScrapeDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
-  const seasonCastIndexRef = useRef<Array<{ normalized: string; person: PersonOption }> | null>(
-    null
-  );
-  const seasonCastLoadingRef = useRef<Promise<
-    Array<{ normalized: string; person: PersonOption }> | null
-  > | null>(null);
+  const peopleExactCacheRef = useRef<Map<string, PersonOption | null>>(new Map());
 
   // Form state
   const [url, setUrl] = useState("");
@@ -297,60 +264,64 @@ export function ImageScrapeDrawer({
     return { Authorization: `Bearer ${token}` };
   }, []);
 
-  const ensureSeasonCastIndex = useCallback(async () => {
-    if (entityContext.type !== "season") return null;
-    if (seasonCastIndexRef.current) return seasonCastIndexRef.current;
-    if (seasonCastLoadingRef.current) return seasonCastLoadingRef.current;
+  const resolveExactPersonByName = useCallback(
+    async (name: string): Promise<PersonOption | null> => {
+      const trimmed = name.trim();
+      const normalized = normalizePersonName(trimmed);
+      if (!trimmed || normalized.length < 2) return null;
 
-    seasonCastLoadingRef.current = (async () => {
+      const cacheKey = normalized;
+      if (peopleExactCacheRef.current.has(cacheKey)) {
+        return peopleExactCacheRef.current.get(cacheKey) ?? null;
+      }
+
       try {
         const headers = await getAuthHeaders();
         const response = await fetch(
-          `/api/admin/trr-api/shows/${entityContext.showId}/seasons/${entityContext.seasonNumber}/cast?limit=500`,
+          `/api/admin/trr-api/people?q=${encodeURIComponent(trimmed)}&limit=25`,
           { headers }
         );
-        if (!response.ok) return null;
+        if (!response.ok) {
+          peopleExactCacheRef.current.set(cacheKey, null);
+          return null;
+        }
         const data = (await response.json().catch(() => ({}))) as {
-          cast?: Array<{ person_id?: string; person_name?: string | null }>;
+          people?: Array<{ id?: string; full_name?: string | null }>;
         };
-        const cast = Array.isArray(data.cast) ? data.cast : [];
-        const index = cast
-          .map((row) => {
-            const id = typeof row.person_id === "string" ? row.person_id : null;
-            const name = typeof row.person_name === "string" ? row.person_name : null;
-            if (!id || !name) return null;
-            return {
-              normalized: normalizePersonName(name),
-              person: { id, name },
-            };
-          })
-          .filter(
-            (row): row is { normalized: string; person: PersonOption } =>
-              Boolean(row?.normalized && row.person.id && row.person.name)
-          );
-        seasonCastIndexRef.current = index;
-        return index;
+        const results = Array.isArray(data.people) ? data.people : [];
+        const exact = results.filter((row) => {
+          const fullName = typeof row.full_name === "string" ? row.full_name : "";
+          return normalizePersonName(fullName) === normalized;
+        });
+        if (exact.length !== 1) {
+          peopleExactCacheRef.current.set(cacheKey, null);
+          return null;
+        }
+        const match = exact[0];
+        if (!match?.id || typeof match.full_name !== "string") {
+          peopleExactCacheRef.current.set(cacheKey, null);
+          return null;
+        }
+        const person: PersonOption = { id: match.id, name: match.full_name };
+        peopleExactCacheRef.current.set(cacheKey, person);
+        return person;
       } catch {
+        peopleExactCacheRef.current.set(cacheKey, null);
         return null;
-      } finally {
-        seasonCastLoadingRef.current = null;
       }
-    })();
-
-    return seasonCastLoadingRef.current;
-  }, [entityContext, getAuthHeaders]);
+    },
+    [getAuthHeaders]
+  );
 
   const autoFillCastFromContext = useCallback(
     async (imageIds: Iterable<string>) => {
       if (!previewData) return;
       if (entityContext.type !== "season") return;
 
-      const castIndex = await ensureSeasonCastIndex();
-      if (!castIndex || castIndex.length === 0) return;
-
       const imagesById = new Map(previewData.images.map((img) => [img.id, img]));
       const captionUpdates: Record<string, string> = {};
       const assignmentUpdates: Record<string, PersonOption[]> = {};
+      const resolvedNameCache = new Map<string, PersonOption | null>();
 
       for (const id of imageIds) {
         const img = imagesById.get(id);
@@ -360,10 +331,14 @@ export function ImageScrapeDrawer({
           captionUpdates[id] = parsed.caption;
         }
         if (parsed.name) {
-          const match = bestNameMatch(parsed.name, castIndex);
-          if (match) {
-            assignmentUpdates[id] = [match];
+          const normalized = normalizePersonName(parsed.name);
+          if (!normalized) continue;
+          let match = resolvedNameCache.get(normalized);
+          if (match === undefined) {
+            match = await resolveExactPersonByName(parsed.name);
+            resolvedNameCache.set(normalized, match);
           }
+          if (match) assignmentUpdates[id] = [match];
         }
       }
 
@@ -389,7 +364,7 @@ export function ImageScrapeDrawer({
         });
       }
     },
-    [previewData, entityContext.type, ensureSeasonCastIndex]
+    [previewData, entityContext.type, resolveExactPersonByName]
   );
 
   // Link a duplicate image to the current entity
@@ -537,10 +512,19 @@ export function ImageScrapeDrawer({
       setImportResult(null);
 
       const headers = await getAuthHeaders();
+      const previewPayload: Record<string, unknown> = { url: url.trim() };
+      if (entityContext.type === "season" && entityContext.seasonId) {
+        previewPayload.entity_type = "season";
+        previewPayload.entity_id = entityContext.seasonId;
+      }
+      if (entityContext.type === "person") {
+        previewPayload.entity_type = "person";
+        previewPayload.entity_id = entityContext.personId;
+      }
       const response = await fetch("/api/admin/scrape/preview", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify(previewPayload),
       });
 
       const data = await response.json();
@@ -705,26 +689,31 @@ export function ImageScrapeDrawer({
                 data.status === "downloading" ||
                 data.status === "success" ||
                 data.status === "duplicate" ||
+                data.status === "excluded" ||
                 data.status === "error"
               ) {
+                const mediaAssetId =
+                  (typeof data.media_asset_id === "string" && data.media_asset_id) ||
+                  (typeof data.asset_id === "string" && data.asset_id) ||
+                  undefined;
                 setImportProgress({
                   current: data.current,
                   total: data.total,
                   url: data.url,
                   status: data.status,
                   error: data.error,
-                  media_asset_id: data.media_asset_id,
+                  media_asset_id: mediaAssetId,
                 });
 
                 // Track duplicates that have asset IDs for potential linking
-                if (data.status === "duplicate" && data.media_asset_id) {
+                if (data.status === "duplicate" && mediaAssetId) {
                   const duplicateKind =
                     urlToKindMap.get(data.url) ?? "other";
                   setDuplicates((prev) => [
                     ...prev,
                     {
                       url: data.url,
-                      media_asset_id: data.media_asset_id,
+                      media_asset_id: mediaAssetId,
                       kind: duplicateKind,
                       linked: false,
                       linking: false,
@@ -1164,12 +1153,15 @@ export function ImageScrapeDrawer({
                           ? "bg-green-100 text-green-700"
                           : importProgress.status === "duplicate"
                           ? "bg-amber-100 text-amber-700"
+                          : importProgress.status === "excluded"
+                          ? "bg-zinc-100 text-zinc-700"
                           : "bg-red-100 text-red-700"
                       }`}
                     >
                       {importProgress.status === "downloading" && "Downloading..."}
                       {importProgress.status === "success" && "Imported"}
                       {importProgress.status === "duplicate" && "Duplicate"}
+                      {importProgress.status === "excluded" && "Excluded"}
                       {importProgress.status === "error" && "Error"}
                     </span>
                   </div>
@@ -1180,6 +1172,8 @@ export function ImageScrapeDrawer({
                           ? "bg-red-500"
                           : importProgress.status === "duplicate"
                           ? "bg-amber-500"
+                          : importProgress.status === "excluded"
+                          ? "bg-zinc-500"
                           : "bg-green-500"
                       }`}
                       style={{

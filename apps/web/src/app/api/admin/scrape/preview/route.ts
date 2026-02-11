@@ -15,7 +15,19 @@ export async function POST(request: NextRequest) {
     await requireAdmin(request);
 
     const body = await request.json();
-    const { url, min_width = 200, limit = 50 } = body;
+    const {
+      url,
+      min_width = 200,
+      limit = 50,
+      entity_type,
+      entity_id,
+      // Optional entity context fields supported by TRR-Backend preview to enable exclusion filtering.
+      // Forward them as-is so the backend can resolve season_id/person_id when entity_id isn't known.
+      show_id,
+      season_number,
+      season_id,
+      person_id,
+    } = body;
 
     if (!url) {
       return NextResponse.json(
@@ -51,7 +63,17 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${serviceRoleKey}`,
       },
-      body: JSON.stringify({ url, min_width, limit }),
+      body: JSON.stringify({
+        url,
+        min_width,
+        limit,
+        ...(entity_type ? { entity_type } : {}),
+        ...(entity_id ? { entity_id } : {}),
+        ...(show_id ? { show_id } : {}),
+        ...(season_number !== undefined && season_number !== null ? { season_number } : {}),
+        ...(season_id ? { season_id } : {}),
+        ...(person_id ? { person_id } : {}),
+      }),
     });
 
     const data = await backendResponse.json();

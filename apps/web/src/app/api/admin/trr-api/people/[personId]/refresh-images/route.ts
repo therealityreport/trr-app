@@ -67,6 +67,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           Authorization: `Bearer ${serviceRoleKey}`,
         },
         body: JSON.stringify(body ?? {}),
+        signal: AbortSignal.timeout(5 * 60 * 1000), // 5 min
       });
       data = (await backendResponse.json().catch(() => ({}))) as Record<
         string,
