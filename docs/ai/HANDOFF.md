@@ -143,7 +143,18 @@ pnpm -C apps/web run test:ci
 ---
 
 Last updated: 2026-02-10
-Updated by: Codex
+Updated by: Claude Opus 4.6
+
+Workspace integration (this session):
+- Integrated all unmerged branches and stashes onto main:
+  - Font page restructured into CDN/Google/Font Stacks categories with live preview (`apps/web/src/app/admin/fonts/page.tsx`)
+  - Survey builder: new `SurveyQuestionsEditor` component, `TwoAxisGridInput`, answer mapping, question completion logic, section grouping, UI templates
+  - Admin media: season cast survey roles migration, scrape image enhancements, image lightbox/scrape drawer updates
+  - API routes: survey-cast endpoint, scrape preview, media asset updates
+  - Tests: 7 new test files (surveys, two-axis grid, gallery delete, question completion)
+  - Idempotent migrations for survey tables (014, 019, 020, 022)
+- Cleaned up: 5 stashes dropped (all redundant), 4 local branches deleted (all squash-merged or obsolete)
+- Note: survey `[surveyKey]/page.tsx` "Questions" tab not yet wired — `SurveyQuestionsEditor` component exists but isn't connected to the tab navigation (main has "Responses" tab only)
 People photo gallery UX (this session):
 - Removed the header-level "Refresh Images" button on `/admin/trr-shows/people/[personId]`; refresh is now only in the Gallery tab.
 - Person refresh streams now pass show context (`showId`/`showName`) when available so “This Show” filtering works across all sources.
