@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
+import type { UiVariant } from "@/lib/surveys/question-config-types";
 
 // ============================================================================
 // Types
@@ -42,23 +43,143 @@ interface SurveysSectionProps {
 // Template Config
 // ============================================================================
 
-const TEMPLATES: { id: SurveyTemplate; label: string; description: string }[] = [
+type TemplateUiFormat = UiVariant;
+
+const TEMPLATES: {
+  id: SurveyTemplate;
+  label: string;
+  description: string;
+  formats: TemplateUiFormat[];
+}[] = [
   {
     id: "cast_ranking",
     label: "Cast Ranking",
     description: "Rank cast members from favorite to least favorite",
+    formats: ["circle-ranking"],
   },
   {
     id: "weekly_poll",
     label: "Weekly Poll",
     description: "Episode rating, highlight, and MVP questions",
+    formats: ["numeric-ranking", "text-entry", "image-multiple-choice"],
   },
   {
     id: "episode_rating",
     label: "Episode Rating",
     description: "Rate episodes on various dimensions",
+    formats: ["numeric-ranking", "numeric-scale-slider", "text-entry"],
   },
 ];
+
+const formatName = (format: TemplateUiFormat): string => {
+  switch (format) {
+    case "numeric-ranking":
+      return "Star rating";
+    case "numeric-scale-slider":
+      return "Numeric slider";
+    case "two-axis-grid":
+      return "Two-axis grid";
+    case "circle-ranking":
+      return "Circle ranking";
+    case "rectangle-ranking":
+      return "List ranking";
+    case "three-choice-slider":
+      return "3-choice matrix";
+    case "agree-likert-scale":
+      return "Likert matrix";
+    case "two-choice-slider":
+      return "2-choice slider";
+    case "multi-select-choice":
+      return "Multi-select";
+    case "text-multiple-choice":
+      return "Single-select";
+    case "image-multiple-choice":
+      return "Image select";
+    case "dropdown":
+      return "Dropdown";
+    case "text-entry":
+      return "Text entry";
+    default:
+      return format;
+  }
+};
+
+function FormatThumbnail({ format }: { format: TemplateUiFormat }) {
+  const base = "h-8 w-full rounded-md border border-zinc-200 bg-white shadow-sm";
+  const line = "h-1 rounded-full bg-zinc-200";
+
+  switch (format) {
+    case "numeric-ranking":
+      return (
+        <div className={`${base} flex items-center justify-center gap-1 px-2`}>
+          {Array.from({ length: 5 }, (_, idx) => (
+            <svg
+              key={idx}
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill={idx < 3 ? "currentColor" : "none"}
+              className={idx < 3 ? "text-amber-500" : "text-zinc-300"}
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+          ))}
+        </div>
+      );
+    case "numeric-scale-slider":
+      return (
+        <div className={`${base} flex items-center px-3`}>
+          <div className="w-full">
+            <div className={`${line} relative`}>
+              <div className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-500 shadow" />
+              <div className="h-full w-1/2 rounded-full bg-indigo-300" />
+            </div>
+          </div>
+        </div>
+      );
+    case "circle-ranking":
+      return (
+        <div className={`${base} flex items-center justify-center`}>
+          <div className="grid grid-cols-3 gap-1.5">
+            {Array.from({ length: 6 }, (_, idx) => (
+              <div
+                key={idx}
+                className={`h-3 w-3 rounded-full ${idx < 2 ? "bg-indigo-400" : "bg-zinc-200"}`}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    case "image-multiple-choice":
+      return (
+        <div className={`${base} flex items-center justify-center`}>
+          <div className="grid grid-cols-3 gap-1.5">
+            {Array.from({ length: 6 }, (_, idx) => (
+              <div
+                key={idx}
+                className={`h-3.5 w-3.5 rounded ${idx === 1 ? "bg-indigo-300" : "bg-zinc-200"}`}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    case "text-entry":
+      return (
+        <div className={`${base} flex flex-col justify-center gap-1.5 px-3`}>
+          <div className="h-2 w-16 rounded bg-zinc-200" />
+          <div className={`${line}`} />
+        </div>
+      );
+    default:
+      return (
+        <div className={`${base} flex items-center justify-center px-2`}>
+          <div className="h-2 w-10 rounded bg-zinc-200" />
+        </div>
+      );
+  }
+}
 
 // ============================================================================
 // Component
@@ -264,25 +385,90 @@ export default function SurveysSection({
               )}
             </div>
 
-            {/* Template */}
-            <div>
+            {/* Template (gallery) */}
+            <div className="md:col-span-2">
               <label className="mb-1 block text-sm font-semibold text-zinc-700">
                 Template <span className="text-red-500">*</span>
               </label>
-              <select
-                value={formTemplate}
-                onChange={(e) => setFormTemplate(e.target.value as SurveyTemplate)}
-                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
-              >
-                {TEMPLATES.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.label}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-zinc-500">
-                {TEMPLATES.find((t) => t.id === formTemplate)?.description}
-              </p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {TEMPLATES.map((template) => {
+                  const isSelected = template.id === formTemplate;
+                  return (
+                    <label
+                      key={template.id}
+                      className={`cursor-pointer rounded-xl border p-4 shadow-sm transition ${
+                        isSelected
+                          ? "border-zinc-900 bg-zinc-50"
+                          : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50/50"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="template"
+                        value={template.id}
+                        checked={isSelected}
+                        onChange={() => setFormTemplate(template.id)}
+                        className="sr-only"
+                      />
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-zinc-900">
+                            {template.label}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-600">
+                            {template.description}
+                          </p>
+                        </div>
+                        <div
+                          className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border ${
+                            isSelected
+                              ? "border-zinc-900 bg-zinc-900"
+                              : "border-zinc-300 bg-white"
+                          }`}
+                          aria-hidden="true"
+                        >
+                          {isSelected && (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M20 6L9 17l-5-5"
+                                stroke="white"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {(() => {
+                const active = TEMPLATES.find((t) => t.id === formTemplate);
+                if (!active) return null;
+                return (
+                  <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                      Included Question Formats
+                    </p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {active.formats.map((format) => (
+                        <div
+                          key={format}
+                          className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm"
+                        >
+                          <div className="mb-2 text-xs font-semibold text-zinc-700">
+                            {formatName(format)}
+                          </div>
+                          <FormatThumbnail format={format} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Custom Title */}

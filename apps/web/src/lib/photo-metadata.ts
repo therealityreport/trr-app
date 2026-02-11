@@ -462,6 +462,10 @@ export function mapSeasonAssetToMetadata(
                   ? "Reunion"
                   : kindLower === "episode_still"
                     ? "Episode Still"
+                    : kindLower === "other"
+                      ? sourceLower.startsWith("web_scrape:")
+                        ? "Other"
+                        : "Season Poster"
                     : "Season Poster"
         : asset.type === "show"
           ? kindLower === "backdrop"

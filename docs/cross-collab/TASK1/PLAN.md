@@ -104,21 +104,27 @@ Acceptance Criteria (Final Gate)
 ## Addendum — Admin Media Workflow Enhancements (Import Kinds + Preview Size + Detector Robustness)
 
 Scope
-- Import Images kind picker for season/show imports supports additional content-type-like kinds: `promo`, `intro`, `reunion` (alongside existing kinds).
-- Scrape preview UI shows dimensions and best-effort file size (`bytes` via Content-Length when available).
+- Import Images kind picker for season imports supports: `poster`, `backdrop`, `episode_still`, `cast`, `promo`, `intro`, `reunion`, `other`.
+- Scrape preview UI shows dimensions (`{w}x{h}` or `{w}w`) and best-effort file size (`bytes` via Content-Length when available).
 - People Count “Auto/Recount” works even when `hosted_url` is missing (backend falls back to source URL).
 - Text overlay (“WORD”) detection errors are surfaced in UI (not silent).
+- Deleted web-scrape assets can be excluded from future scrapes/imports via a “don’t sync / don’t re-scrape” list (per entity).
 - Cast Photos imports auto-fill metadata:
-  - When kind=`cast`, the importer auto-tags people + auto-fills caption using the scraped per-image context text.
+  - When kind=`cast`, the importer auto-tags people + auto-fills caption using the scraped per-image context text (backend also enforces on import).
   - When kind=`cast`, imported assets use the source article publish date as `metadata.source_created_at` so the UI shows **Created** (not just Added).
-- Season Media “Add backdrops” drawer only shows TMDb backdrops not already assigned to any season for the show.
-- Admins can delete web-scrape assets from Season Media (UI action + proxy + backend delete endpoint).
-- A one-shot admin script exists to bulk-delete web-scrape imports by show/season + source page URL (useful for re-importing with corrected metadata).
+- Season Media “Add backdrops” drawer only shows TMDb backdrops not already assigned via either unified `core.media_links` or legacy `season_images`.
+- Admins can delete web-scrape assets from Season Media and Show Gallery (UI action + proxy + backend delete endpoint).
+- A one-shot admin script exists to bulk-delete web-scrape imports by show/season + source page URL (useful for re-importing with corrected metadata without exclusions): TRR-Backend `scripts/purge_web_scrape_season_assets.py` (default dry-run; run with `--execute`).
 
 Contracts
-- Backend preview: `POST /api/v1/admin/scrape/preview` may return `images[].bytes: int | null`.
-- Backend import: `images[].kind` allowlist includes `promo`, `intro`, `reunion`.
-- Backend delete (unified media_assets): `DELETE /api/v1/admin/media-assets/{asset_id}`.
+- Backend preview: `POST /api/v1/admin/scrape/preview`
+  - Request may include optional `{ entity_type, entity_id }` to filter excluded candidates for that entity.
+  - Response may return `page_published_at: string | null`, and candidates may return `images[].bytes: int | null` and `images[].height: int | null`.
+- Backend import: `POST /api/v1/admin/scrape/import` and `/import/stream`
+  - `images[].kind` allowlist includes `promo`, `intro`, `reunion` (plus existing kinds).
+  - SSE per-image `status` may be `excluded` when blocked by the exclusion list; duplicate/success events include `media_asset_id`.
+- Backend delete (unified media_assets): `DELETE /api/v1/admin/media-assets/{asset_id}?exclude=true|false`
+  - When `exclude=true`, backend writes `core.media_scrape_exclusions` so subsequent scrapes/imports skip the image for that entity.
 
 Dependency / Rollout Order
 1. Deploy TRR-Backend (contracts + fallbacks).

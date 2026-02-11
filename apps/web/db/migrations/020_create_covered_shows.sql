@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS admin.covered_shows (
   created_by_firebase_uid TEXT NOT NULL
 );
 
-CREATE INDEX idx_covered_shows_trr_show ON admin.covered_shows(trr_show_id);
+CREATE INDEX IF NOT EXISTS idx_covered_shows_trr_show ON admin.covered_shows(trr_show_id);
 
 -- ============================================================================
 -- Grants for app role

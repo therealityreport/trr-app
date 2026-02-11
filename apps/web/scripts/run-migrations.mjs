@@ -22,21 +22,29 @@ if (!connectionString) {
 // Configure SSL if enabled
 let ssl = undefined;
 if (process.env.DATABASE_SSL === "true") {
+  // Supabase poolers sometimes present cert chains that fail strict verification.
+  // Align this script with the app's default: only reject unauthorized certs when
+  // explicitly requested via DATABASE_SSL_REJECT_UNAUTHORIZED.
+  const rejectEnv = (process.env.DATABASE_SSL_REJECT_UNAUTHORIZED ?? "").toLowerCase().trim();
+  const rejectUnauthorized = rejectEnv.length
+    ? !["false", "0", "no", "off"].includes(rejectEnv)
+    : false;
+
   const inlineCa = process.env.DATABASE_SSL_CA;
   const caPath = process.env.DATABASE_SSL_CA_PATH;
 
   if (inlineCa) {
     console.log("[migrations] Using inline SSL CA certificate");
-    ssl = { rejectUnauthorized: true, ca: inlineCa };
+    ssl = { rejectUnauthorized, ca: inlineCa };
   } else if (caPath) {
     const resolved = path.resolve(path.join(__dirname, ".."), caPath);
     console.log(`[migrations] Loading SSL CA from file: ${resolved}`);
     const ca = readFileSync(resolved, "utf8");
     console.log(`[migrations] Successfully loaded SSL CA (${ca.length} bytes)`);
-    ssl = { rejectUnauthorized: true, ca };
+    ssl = { rejectUnauthorized, ca };
   } else {
     console.log("[migrations] DATABASE_SSL=true but no CA provided, using default SSL");
-    ssl = { rejectUnauthorized: true };
+    ssl = { rejectUnauthorized };
   }
 }
 

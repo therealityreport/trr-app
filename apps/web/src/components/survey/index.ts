@@ -14,6 +14,9 @@ export type { StarRatingInputProps } from "./StarRatingInput";
 export { default as SliderInput } from "./SliderInput";
 export type { SliderInputProps } from "./SliderInput";
 
+export { default as TwoAxisGridInput } from "./TwoAxisGridInput";
+export type { TwoAxisGridInputProps } from "./TwoAxisGridInput";
+
 export { default as RankOrderInput } from "./RankOrderInput";
 export type { RankOrderInputProps } from "./RankOrderInput";
 

@@ -8,6 +8,7 @@ import {
   type UpdateSurveyInput,
 } from "@/lib/server/surveys/normalized-survey-admin-repository";
 import { getSurveyWithQuestions } from "@/lib/server/surveys/survey-run-repository";
+import { getLinkBySurveyId } from "@/lib/server/surveys/survey-trr-links-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,9 @@ export async function GET(
       return NextResponse.json({ error: "Survey not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ survey });
+    const trrLink = await getLinkBySurveyId(survey.id);
+
+    return NextResponse.json({ survey, trrLink });
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
     if (message === "unauthorized") {

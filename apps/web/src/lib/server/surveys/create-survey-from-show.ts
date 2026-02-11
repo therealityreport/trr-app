@@ -4,8 +4,10 @@ import type { AuthContext } from "@/lib/server/postgres";
 import {
   getShowById,
   getSeasonByShowAndNumber,
-  getCastByShowId,
+  getEpisodesByShowAndSeason,
+  getSeasonCastWithEpisodeCounts,
 } from "@/lib/server/trr-api/trr-shows-repository";
+import { listSeasonCastSurveyRoles } from "@/lib/server/admin/season-cast-survey-roles-repository";
 import {
   createSurvey,
   createQuestion,
@@ -46,9 +48,10 @@ export interface CreateSurveyFromShowResult {
  * These must be consistent across renderers, templates, and importers.
  */
 export interface OptionMetadata {
-  imageUrl?: string; // Cast photo URL from TRR core
+  imagePath?: string; // Cast photo URL from TRR core (compatible with survey renderers)
   trrPersonId?: string; // UUID from core.people.id (for resync)
   role?: string; // Role/character name
+  castRole?: "main" | "friend_of"; // Survey-eligible role (for resync/templates)
 }
 
 /**
@@ -177,9 +180,9 @@ export async function createSurveyFromShow(
 
   // 6. Create questions based on template
   if (template === "cast_ranking") {
-    await createCastRankingQuestions(authContext, survey.id, trrShowId);
+    await createCastRankingQuestions(authContext, survey.id, trrShowId, seasonNumber);
   } else if (template === "weekly_poll") {
-    await createWeeklyPollQuestions(authContext, survey.id);
+    await createWeeklyPollQuestions(authContext, survey.id, trrShowId, seasonNumber);
   } else if (template === "episode_rating") {
     await createEpisodeRatingQuestions(authContext, survey.id);
   }
@@ -215,18 +218,102 @@ export async function createSurveyFromShow(
 // ============================================================================
 
 /**
- * Create a cast ranking question with options from TRR cast data.
+ * Cast members eligible for cast-based templates (Main + Friend-of).
+ */
+type EligibleSeasonCastMember = {
+  person_id: string;
+  person_name: string | null;
+  photo_url: string | null;
+  episodes_in_season: number;
+  castRole: "main" | "friend_of";
+};
+
+async function getSurveyEligibleSeasonCast(
+  trrShowId: string,
+  seasonNumber: number,
+): Promise<EligibleSeasonCastMember[]> {
+  const [cast, selectedRoles] = await Promise.all([
+    getSeasonCastWithEpisodeCounts(trrShowId, seasonNumber, { limit: 500, offset: 0 }),
+    listSeasonCastSurveyRoles(trrShowId, seasonNumber),
+  ]);
+
+  if (cast.length === 0) return [];
+
+  const roleMap = new Map(selectedRoles.map((r) => [r.person_id, r.role] as const));
+
+  let eligible: EligibleSeasonCastMember[] = [];
+
+  if (selectedRoles.length > 0) {
+    eligible = cast
+      .map((m) => {
+        const role = roleMap.get(m.person_id);
+        if (role !== "main" && role !== "friend_of") return null;
+        return {
+          person_id: m.person_id,
+          person_name: m.person_name ?? null,
+          photo_url: m.photo_url ?? null,
+          episodes_in_season: m.episodes_in_season,
+          castRole: role,
+        };
+      })
+      .filter((m): m is EligibleSeasonCastMember => Boolean(m));
+  } else {
+    const episodes = await getEpisodesByShowAndSeason(trrShowId, seasonNumber, { limit: 500, offset: 0 });
+    const totalEpisodes = episodes.length;
+
+    eligible = cast
+      .map((m) => {
+        let castRole: "main" | "friend_of" | null = null;
+        if (totalEpisodes > 0 && m.episodes_in_season > totalEpisodes / 2) {
+          castRole = "main";
+        } else if (
+          m.episodes_in_season >= 3 &&
+          (totalEpisodes === 0 || m.episodes_in_season < totalEpisodes / 2)
+        ) {
+          castRole = "friend_of";
+        }
+
+        if (!castRole) return null;
+        return {
+          person_id: m.person_id,
+          person_name: m.person_name ?? null,
+          photo_url: m.photo_url ?? null,
+          episodes_in_season: m.episodes_in_season,
+          castRole,
+        };
+      })
+      .filter((m): m is EligibleSeasonCastMember => Boolean(m));
+  }
+
+  const roleRank = (role: "main" | "friend_of") => (role === "main" ? 0 : 1);
+  eligible.sort((a, b) => {
+    const byRole = roleRank(a.castRole) - roleRank(b.castRole);
+    if (byRole !== 0) return byRole;
+    const byEpisodes = b.episodes_in_season - a.episodes_in_season;
+    if (byEpisodes !== 0) return byEpisodes;
+    const aName = (a.person_name ?? "").toLowerCase();
+    const bName = (b.person_name ?? "").toLowerCase();
+    return aName.localeCompare(bName);
+  });
+
+  return eligible;
+}
+
+/**
+ * Create a cast ranking question with options from survey-eligible season cast.
  */
 async function createCastRankingQuestions(
   authContext: AuthContext,
   surveyId: string,
   trrShowId: string,
+  seasonNumber: number,
 ): Promise<void> {
-  // Fetch cast from TRR API
-  const cast = await getCastByShowId(trrShowId, { limit: 50 });
+  const cast = await getSurveyEligibleSeasonCast(trrShowId, seasonNumber);
 
   if (cast.length === 0) {
-    console.warn(`[create-survey-from-show] No cast found for show ${trrShowId}. Creating empty ranking question.`);
+    console.warn(
+      `[create-survey-from-show] No eligible (Main/Friend-of) cast found for show ${trrShowId} season ${seasonNumber}. Creating empty ranking question.`,
+    );
   }
 
   // Create the ranking question
@@ -238,6 +325,11 @@ async function createCastRankingQuestions(
     display_order: 1,
     is_required: true,
     config: {
+      uiVariant: "circle-ranking",
+      lineLabelTop: "FAVORITE",
+      lineLabelBottom: "LEAST FAVORITE",
+      section: "Rankings",
+      autofill: { source: "cast", include: ["main", "friend_of"] },
       minRank: 1,
       maxRank: cast.length,
     },
@@ -246,15 +338,15 @@ async function createCastRankingQuestions(
   // Create options from cast with standardized metadata
   for (const [index, member] of cast.entries()) {
     const optionMetadata: OptionMetadata = {
-      imageUrl: member.photo_url ?? undefined,
+      imagePath: member.photo_url ?? undefined,
       trrPersonId: member.person_id,
-      role: member.role ?? undefined,
+      castRole: member.castRole,
     };
 
     await createOption(authContext, {
       question_id: question.id,
       option_key: member.person_id, // Use person ID as stable key
-      option_text: member.full_name ?? member.cast_member_name ?? "Unknown",
+      option_text: member.person_name ?? "Unknown",
       display_order: index + 1,
       metadata: optionMetadata as Record<string, unknown>,
     });
@@ -267,20 +359,23 @@ async function createCastRankingQuestions(
 async function createWeeklyPollQuestions(
   authContext: AuthContext,
   surveyId: string,
+  trrShowId: string,
+  seasonNumber: number,
 ): Promise<void> {
-  // Episode rating question
+  // Episode rating question (star rating)
   await createQuestion(authContext, {
     survey_id: surveyId,
     question_key: "episode_rating",
     question_text: "How would you rate this week's episode?",
-    question_type: "likert",
+    question_type: "numeric",
     display_order: 1,
     is_required: true,
     config: {
-      min: 1,
+      uiVariant: "numeric-ranking",
+      min: 0,
       max: 10,
-      minLabel: "Terrible",
-      maxLabel: "Amazing",
+      step: 0.1,
+      labels: { min: "Terrible", max: "Amazing" },
     },
   });
 
@@ -292,17 +387,43 @@ async function createWeeklyPollQuestions(
     question_type: "free_text",
     display_order: 2,
     is_required: false,
+    config: {
+      uiVariant: "text-entry",
+      placeholder: "Best moment, line, scene, or chaotic detail...",
+    },
   });
 
-  // MVP question (will need options added separately or via admin UI)
-  await createQuestion(authContext, {
+  // MVP question (options generated from cast with photos when available)
+  const mvpQuestion = await createQuestion(authContext, {
     survey_id: surveyId,
     question_key: "mvp",
     question_text: "Who was the MVP of this episode?",
     question_type: "single_choice",
     display_order: 3,
     is_required: false,
+    config: {
+      uiVariant: "image-multiple-choice",
+      columns: 4,
+      autofill: { source: "cast", include: ["main", "friend_of"] },
+    },
   });
+
+  // Add cast options (if available)
+  const cast = await getSurveyEligibleSeasonCast(trrShowId, seasonNumber);
+  for (const [index, member] of cast.entries()) {
+    const optionMetadata: OptionMetadata = {
+      imagePath: member.photo_url ?? undefined,
+      trrPersonId: member.person_id,
+      castRole: member.castRole,
+    };
+    await createOption(authContext, {
+      question_id: mvpQuestion.id,
+      option_key: member.person_id,
+      option_text: member.person_name ?? "Unknown",
+      display_order: index + 1,
+      metadata: optionMetadata as Record<string, unknown>,
+    });
+  }
 }
 
 /**
@@ -317,12 +438,15 @@ async function createEpisodeRatingQuestions(
     survey_id: surveyId,
     question_key: "overall_rating",
     question_text: "Rate this episode overall",
-    question_type: "likert",
+    question_type: "numeric",
     display_order: 1,
     is_required: true,
     config: {
-      min: 1,
+      uiVariant: "numeric-ranking",
+      min: 0,
       max: 10,
+      step: 0.1,
+      labels: { min: "Terrible", max: "Perfect" },
     },
   });
 
@@ -331,14 +455,16 @@ async function createEpisodeRatingQuestions(
     survey_id: surveyId,
     question_key: "drama_rating",
     question_text: "How would you rate the drama level?",
-    question_type: "likert",
+    question_type: "numeric",
     display_order: 2,
     is_required: false,
     config: {
       min: 1,
       max: 5,
+      step: 1,
       minLabel: "Boring",
       maxLabel: "Explosive",
+      uiVariant: "numeric-scale-slider",
     },
   });
 
@@ -350,5 +476,9 @@ async function createEpisodeRatingQuestions(
     question_type: "free_text",
     display_order: 3,
     is_required: false,
+    config: {
+      uiVariant: "text-entry",
+      placeholder: "Quick thoughts, best quote, who annoyed you most, etc.",
+    },
   });
 }
