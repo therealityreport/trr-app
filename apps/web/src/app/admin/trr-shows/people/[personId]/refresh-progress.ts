@@ -13,6 +13,7 @@ const SYNC_STAGE_IDS = new Set([
   "tmdb_profile",
   "fandom_profile",
   "fetching",
+  "metadata_enrichment",
   "upserting",
   "pruning",
 ]);

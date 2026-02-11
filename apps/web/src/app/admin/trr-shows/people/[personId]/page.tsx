@@ -212,16 +212,6 @@ const formatRefreshSummary = (summary: unknown): string | null => {
   return null;
 };
 
-const isTimeoutLikeError = (value: string | null | undefined): boolean => {
-  if (!value) return false;
-  const normalized = value.toLowerCase();
-  return (
-    normalized.includes("aborted due to timeout") ||
-    normalized.includes("timed out") ||
-    normalized.includes("timeout")
-  );
-};
-
 const parseDimensionValue = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
   if (typeof value === "string") {
@@ -1675,6 +1665,10 @@ export default function PersonProfilePage() {
     total?: number | null;
     phase?: string | null;
     message?: string | null;
+    rawStage?: string | null;
+    detailMessage?: string | null;
+    runId?: string | null;
+    lastEventAt?: number | null;
   } | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -2056,54 +2050,6 @@ export default function PersonProfilePage() {
       cancelled = true;
     };
   }, [showIdParam, hasAccess]);
-
-  // Refresh images for this person
-  const refreshPersonImages = useCallback(
-    async (options?: {
-      skip_mirror?: boolean;
-      limit_per_source?: number;
-      force_mirror?: boolean;
-    }) => {
-      const headers = await getAuthHeaders();
-      const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/refresh-images`,
-        {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            limit_per_source: 200,
-            force_mirror: true,
-            show_id: showIdParam ?? undefined,
-            show_name: activeShowName ?? undefined,
-            ...options,
-          }),
-        }
-      );
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const normalizeValue = (value: unknown): string | null => {
-          if (!value) return null;
-          if (typeof value === "string") return value;
-          if (value instanceof Error) return value.message;
-          try {
-            return JSON.stringify(value);
-          } catch {
-            return String(value);
-          }
-        };
-        const errorText = normalizeValue(data.error);
-        const detailText = normalizeValue(data.detail);
-        const message =
-          errorText && detailText
-            ? `${errorText}: ${detailText}`
-            : errorText || detailText || "Failed to refresh images";
-        throw new Error(message);
-      }
-      return data;
-    },
-    [getAuthHeaders, personId, showIdParam, activeShowName]
-  );
 
   // Fetch person details
   const fetchPerson = useCallback(async () => {
@@ -2525,23 +2471,25 @@ export default function PersonProfilePage() {
   );
 
   const handleRefreshImages = useCallback(async () => {
-    if (refreshingImages) return;
+    if (refreshingImages || reprocessingImages) return;
 
     setRefreshingImages(true);
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.syncing,
       message: "Syncing person images...",
+      detailMessage: "Syncing person images...",
       current: null,
       total: null,
+      rawStage: "syncing",
+      runId: null,
+      lastEventAt: Date.now(),
     });
     setRefreshNotice(null);
     setRefreshError(null);
     setPhotosError(null);
 
     try {
-      let streamFailed = false;
-      let streamErrorMessage: string | null = null;
-      try {
+      const runStreamAttempt = async () => {
         const syncProgressTracker = createSyncProgressTracker();
         const headers = await getAuthHeaders();
         const response = await fetch(
@@ -2571,156 +2519,165 @@ export default function PersonProfilePage() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        let hadError = false;
         let sawComplete = false;
+        let lastEventAt = Date.now();
+        const staleInterval = setInterval(() => {
+          const now = Date.now();
+          if (now - lastEventAt < 12000) return;
+          setRefreshProgress((prev) => {
+            if (!prev) return prev;
+            const stageLabel = formatPersonRefreshPhaseLabel(prev.rawStage ?? prev.phase) ?? "WORKING";
+            return {
+              ...prev,
+              detailMessage: `Still running: ${stageLabel}`,
+              lastEventAt: now,
+            };
+          });
+          lastEventAt = now;
+        }, 2000);
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          // Normalize CRLF to LF so "\n\n" boundary splitting works in all runtimes.
-          buffer = buffer.replace(/\r\n/g, "\n");
-
-          let boundaryIndex = buffer.indexOf("\n\n");
-          while (boundaryIndex !== -1) {
-            const rawEvent = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + 2);
-
-            const lines = rawEvent.split("\n").filter(Boolean);
-            let eventType = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-              }
-            }
-
-            const dataStr = dataLines.join("\n");
-            let payload: Record<string, unknown> | string = dataStr;
-            try {
-              payload = JSON.parse(dataStr) as Record<string, unknown>;
-            } catch {
-              payload = dataStr;
-            }
-
-            if (eventType === "progress" && payload && typeof payload === "object") {
-              const rawPhase =
-                typeof (payload as { phase?: unknown }).phase === "string"
-                  ? ((payload as { phase: string }).phase)
-                  : typeof (payload as { stage?: unknown }).stage === "string"
-                    ? ((payload as { stage: string }).stage)
-                    : null;
-              const mappedPhase = mapPersonRefreshStage(rawPhase);
-              const message =
-                typeof (payload as { message?: unknown }).message === "string"
-                  ? ((payload as { message: string }).message)
-                  : null;
-              const currentRaw = (payload as { current?: unknown }).current;
-              const totalRaw = (payload as { total?: unknown }).total;
-              const current =
-                typeof currentRaw === "number"
-                  ? currentRaw
-                  : typeof currentRaw === "string"
-                    ? Number.parseInt(currentRaw, 10)
-                    : null;
-              const total =
-                typeof totalRaw === "number"
-                  ? totalRaw
-                  : typeof totalRaw === "string"
-                    ? Number.parseInt(totalRaw, 10)
-                    : null;
-              const numericCurrent =
-                typeof current === "number" && Number.isFinite(current) ? current : null;
-              const numericTotal =
-                typeof total === "number" && Number.isFinite(total) ? total : null;
-              const syncCounts =
-                mappedPhase === PERSON_REFRESH_PHASES.syncing
-                  ? updateSyncProgressTracker(syncProgressTracker, {
-                      rawStage:
-                        typeof (payload as { stage?: unknown }).stage === "string"
-                          ? ((payload as { stage: string }).stage)
-                          : rawPhase,
-                      message,
-                      current: numericCurrent,
-                      total: numericTotal,
-                    })
-                  : null;
-              setRefreshProgress({
-                current: syncCounts?.current ?? numericCurrent,
-                total: syncCounts?.total ?? numericTotal,
-                phase: mappedPhase ?? rawPhase,
-                message,
-              });
-            } else if (eventType === "complete") {
-              sawComplete = true;
-              const summary = payload && typeof payload === "object" && "summary" in payload
-                ? (payload as { summary?: unknown }).summary
-                : payload;
-              const summaryText = formatRefreshSummary(summary);
-              setRefreshNotice(summaryText || "Images refreshed.");
-            } else if (eventType === "error") {
-              hadError = true;
-              const message =
-                payload && typeof payload === "object"
-                  ? (payload as { error?: string; detail?: string })
-                  : null;
-              const errorText =
-                message?.error && message?.detail
-                  ? `${message.error}: ${message.detail}`
-                  : message?.error || "Failed to refresh images";
-              setRefreshError(errorText);
-            }
-
-            boundaryIndex = buffer.indexOf("\n\n");
-          }
-        }
-
-        if (!sawComplete && !hadError) {
-          setRefreshNotice("Images refreshed.");
-        }
-      } catch (streamErr) {
-        streamFailed = true;
-        streamErrorMessage =
-          streamErr instanceof Error ? streamErr.message : String(streamErr);
-        console.warn("Refresh stream failed, falling back to non-stream.", streamErr);
-      }
-
-      if (streamFailed) {
-        setRefreshProgress({
-          phase: PERSON_REFRESH_PHASES.syncing,
-          message: "Syncing person images...",
-          current: null,
-          total: null,
-        });
         try {
-          const result = await refreshPersonImages({ skip_mirror: false, force_mirror: true });
-          const summary =
-            result && typeof result === "object" && "summary" in result
-              ? (result as { summary?: unknown }).summary
-              : result;
-          const summaryText = formatRefreshSummary(summary);
-          setRefreshNotice(summaryText || "Images refreshed.");
-        } catch (fallbackErr) {
-          const fallbackErrorMessage =
-            fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          if (isTimeoutLikeError(fallbackErrorMessage) || isTimeoutLikeError(streamErrorMessage)) {
-            setRefreshError(
-              `Refresh is taking longer than expected. ${fallbackErrorMessage}`
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            lastEventAt = Date.now();
+            buffer += decoder.decode(value, { stream: true });
+            // Normalize CRLF to LF so "\n\n" boundary splitting works in all runtimes.
+            buffer = buffer.replace(/\r\n/g, "\n");
+
+            let boundaryIndex = buffer.indexOf("\n\n");
+            while (boundaryIndex !== -1) {
+              const rawEvent = buffer.slice(0, boundaryIndex);
+              buffer = buffer.slice(boundaryIndex + 2);
+
+              const lines = rawEvent.split("\n").filter(Boolean);
+              let eventType = "message";
+              const dataLines: string[] = [];
+              for (const line of lines) {
+                if (line.startsWith("event:")) {
+                  eventType = line.slice(6).trim();
+                } else if (line.startsWith("data:")) {
+                  dataLines.push(line.slice(5).trim());
+                }
+              }
+
+              const dataStr = dataLines.join("\n");
+              let payload: Record<string, unknown> | string = dataStr;
+              try {
+                payload = JSON.parse(dataStr) as Record<string, unknown>;
+              } catch {
+                payload = dataStr;
+              }
+
+              if (eventType === "progress" && payload && typeof payload === "object") {
+                const rawStage =
+                  typeof (payload as { stage?: unknown }).stage === "string"
+                    ? ((payload as { stage: string }).stage)
+                    : typeof (payload as { phase?: unknown }).phase === "string"
+                      ? ((payload as { phase: string }).phase)
+                      : null;
+                const mappedPhase = mapPersonRefreshStage(rawStage);
+                const message =
+                  typeof (payload as { message?: unknown }).message === "string"
+                    ? ((payload as { message: string }).message)
+                    : null;
+                const runId =
+                  typeof (payload as { run_id?: unknown }).run_id === "string"
+                    ? ((payload as { run_id: string }).run_id)
+                    : null;
+                const currentRaw = (payload as { current?: unknown }).current;
+                const totalRaw = (payload as { total?: unknown }).total;
+                const current =
+                  typeof currentRaw === "number"
+                    ? currentRaw
+                    : typeof currentRaw === "string"
+                      ? Number.parseInt(currentRaw, 10)
+                      : null;
+                const total =
+                  typeof totalRaw === "number"
+                    ? totalRaw
+                    : typeof totalRaw === "string"
+                      ? Number.parseInt(totalRaw, 10)
+                      : null;
+                const numericCurrent =
+                  typeof current === "number" && Number.isFinite(current) ? current : null;
+                const numericTotal =
+                  typeof total === "number" && Number.isFinite(total) ? total : null;
+                const syncCounts =
+                  mappedPhase === PERSON_REFRESH_PHASES.syncing
+                    ? updateSyncProgressTracker(syncProgressTracker, {
+                        rawStage,
+                        message,
+                        current: numericCurrent,
+                        total: numericTotal,
+                      })
+                    : null;
+                setRefreshProgress({
+                  current: syncCounts?.current ?? numericCurrent,
+                  total: syncCounts?.total ?? numericTotal,
+                  phase: mappedPhase ?? rawStage,
+                  rawStage,
+                  message,
+                  detailMessage: message,
+                  runId,
+                  lastEventAt: Date.now(),
+                });
+              } else if (eventType === "complete") {
+                sawComplete = true;
+                const summary = payload && typeof payload === "object" && "summary" in payload
+                  ? (payload as { summary?: unknown }).summary
+                  : payload;
+                const summaryText = formatRefreshSummary(summary);
+                setRefreshNotice(summaryText || "Images refreshed.");
+              } else if (eventType === "error") {
+                const errorPayload =
+                  payload && typeof payload === "object"
+                    ? (payload as { stage?: string; error?: string; detail?: string })
+                    : null;
+                const stage = errorPayload?.stage ? `[${errorPayload.stage}] ` : "";
+                const errorText =
+                  errorPayload?.error && errorPayload?.detail
+                    ? `${stage}${errorPayload.error}: ${errorPayload.detail}`
+                    : `${stage}${errorPayload?.error || "Failed to refresh images"}`;
+                throw new Error(errorText);
+              }
+
+              boundaryIndex = buffer.indexOf("\n\n");
+            }
+          }
+        } finally {
+          clearInterval(staleInterval);
+        }
+
+        if (!sawComplete) {
+          throw new Error("Refresh stream ended before completion.");
+        }
+      };
+
+      let streamError: string | null = null;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          await runStreamAttempt();
+          streamError = null;
+          break;
+        } catch (streamErr) {
+          streamError = streamErr instanceof Error ? streamErr.message : String(streamErr);
+          if (attempt < 2) {
+            setRefreshProgress((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    detailMessage: `Stream disconnected, retrying... (${streamError})`,
+                    lastEventAt: Date.now(),
+                  }
+                : prev
             );
-            setRefreshNotice(
-              "Reloading current data now. Backend refresh may still be running."
-            );
-          } else {
-            const streamContext = streamErrorMessage
-              ? `Stream refresh failed (${streamErrorMessage}). `
-              : "";
-            throw new Error(
-              `${streamContext}Fallback refresh failed (${fallbackErrorMessage}).`
-            );
+            continue;
           }
         }
+      }
+      if (streamError) {
+        throw new Error(`Stream refresh failed: ${streamError}`);
       }
 
       await Promise.all([
@@ -2742,7 +2699,6 @@ export default function PersonProfilePage() {
   }, [
     refreshingImages,
     reprocessingImages,
-    refreshPersonImages,
     fetchPerson,
     fetchCredits,
     fetchFandomData,
@@ -3486,7 +3442,7 @@ export default function PersonProfilePage() {
                 <RefreshProgressBar
                   show={refreshingImages || reprocessingImages}
                   phase={refreshProgress?.phase}
-                  message={refreshProgress?.message}
+                  message={refreshProgress?.detailMessage ?? refreshProgress?.message}
                   current={refreshProgress?.current}
                   total={refreshProgress?.total}
                 />

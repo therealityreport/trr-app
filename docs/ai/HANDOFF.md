@@ -707,3 +707,30 @@ Tags/People sync fix (this session):
 Verification:
 - `pnpm -C apps/web exec tsc --noEmit` (pass)
 - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx'` (pass with one pre-existing warning)
+
+Person refresh stream hardening + live progress fixes (this session):
+- Person page refresh flow (`apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`):
+  - Removed silent non-stream fallback from `Refresh Images`.
+  - Refresh now uses SSE with one automatic retry on stream disconnect.
+  - Added stale stream watchdog (12s) to keep progress copy live (`Still running: ...`) while waiting for events.
+  - Extended refresh progress state with `rawStage`, `detailMessage`, `runId`, `lastEventAt`.
+  - Preserved stage/count rendering and now surfaces detailed stream-stage messages continuously.
+- Refresh stage mapping (`apps/web/src/app/admin/trr-shows/people/[personId]/refresh-progress.ts`):
+  - Added `metadata_enrichment` mapping into `SYNCING` phase so stage appears in live progress grouping.
+- Stream proxy route (`apps/web/src/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route.ts`):
+  - Increased `maxDuration` to `1800`.
+  - On backend/proxy errors, now always returns HTTP 200 SSE `event:error` payloads (instead of non-200 response body errors) so client parser receives actionable stream errors.
+- Blocking refresh proxy route (`apps/web/src/app/api/admin/trr-api/people/[personId]/refresh-images/route.ts`):
+  - Increased `maxDuration` to `1800`.
+  - Increased backend fetch abort timeout from 10m to 30m to avoid premature abort in long jobs.
+
+Tests and checks:
+- `pnpm -C apps/web exec vitest run tests/person-refresh-progress.test.ts tests/person-refresh-images-stream-route.test.ts` (pass; 7 tests)
+- `pnpm -C apps/web run lint` (pass; existing unrelated warnings remain)
+
+New tests:
+- `apps/web/tests/person-refresh-images-stream-route.test.ts`
+  - verifies backend non-OK becomes status-200 SSE `event:error`
+  - verifies successful SSE pass-through body behavior.
+- Updated `apps/web/tests/person-refresh-progress.test.ts`
+  - verifies `metadata_enrichment` maps to `SYNCING`.
