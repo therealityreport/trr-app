@@ -13,6 +13,7 @@ describe("person refresh progress mapping", () => {
     expect(mapPersonRefreshStage("tmdb_profile")).toBe(PERSON_REFRESH_PHASES.syncing);
     expect(mapPersonRefreshStage("sync_tmdb")).toBe(PERSON_REFRESH_PHASES.syncing);
     expect(mapPersonRefreshStage("fetching")).toBe(PERSON_REFRESH_PHASES.syncing);
+    expect(mapPersonRefreshStage("metadata_enrichment")).toBe(PERSON_REFRESH_PHASES.syncing);
     expect(mapPersonRefreshStage("upserting")).toBe(PERSON_REFRESH_PHASES.syncing);
   });
 
