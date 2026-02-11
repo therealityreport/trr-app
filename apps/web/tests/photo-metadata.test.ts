@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapPhotoToMetadata, type PhotoMetadata } from "@/lib/photo-metadata";
+import { mapPhotoToMetadata, mapSeasonAssetToMetadata, type PhotoMetadata } from "@/lib/photo-metadata";
 
 describe("mapPhotoToMetadata", () => {
   it("maps source to badge color", () => {
@@ -228,5 +228,59 @@ describe("mapPhotoToMetadata", () => {
       expect(result.sectionLabel).toBe(c.sectionLabel);
       expect(result.sectionTag).toBe(c.expected);
     }
+  });
+});
+
+describe("mapSeasonAssetToMetadata", () => {
+  it("prefers metadata.people_names when asset.person_name is missing", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "a1",
+        type: "season",
+        source: "web_scrape:eonline.com",
+        kind: "cast",
+        hosted_url: "https://example.com/img.jpg",
+        width: null,
+        height: null,
+        caption: null,
+        season_number: 3,
+        person_name: null,
+        metadata: { people_names: ["Jen Shah", "Jen Shah"] },
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: "image/jpeg",
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      3,
+      "RHOSLC",
+    );
+
+    expect(meta.people).toEqual(["Jen Shah"]);
+  });
+
+  it("labels web-scrape kind=other as Other (not Season Poster)", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "a2",
+        type: "season",
+        source: "web_scrape:eonline.com",
+        kind: "other",
+        hosted_url: "https://example.com/img.jpg",
+        width: null,
+        height: null,
+        caption: null,
+        season_number: 3,
+        person_name: null,
+        metadata: null,
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: "image/jpeg",
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      3,
+      "RHOSLC",
+    );
+
+    expect(meta.contextType).toBe("Other");
   });
 });
