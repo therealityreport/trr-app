@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -22,49 +23,14 @@ interface FontFamily {
   cdnPath?: string;
   description: string;
   usedOn: UsedOnEntry[];
+  /** The actual CSS font-family value to use for rendering previews */
+  fontFamilyValue?: string;
 }
 
-const FONT_FAMILIES: FontFamily[] = [
-  {
-    name: "Sans (Hamburg + Inter + Geist)",
-    cssVar: "--font-sans",
-    usage: "font-sans (Default body font)",
-    weights: [200, 300, 400, 500, 600, 700, 800, 900],
-    hasItalic: false,
-    type: "Font Stack",
-    source: "Tailwind Theme",
-    description: "Includes Hamburg Serial, Inter, and Geist Sans",
-    usedOn: [
-      { page: "Global default", path: "globals.css" },
-    ],
-  },
-  {
-    name: "Serif (Gloucester + Playfair)",
-    cssVar: "--font-serif",
-    usage: "font-serif (Used for h1, h2, h3)",
-    weights: [400, 500, 600, 700, 800, 900],
-    hasItalic: false,
-    type: "Font Stack",
-    source: "Tailwind Theme",
-    description: "Includes Gloucester OS, Playfair Display, and fallbacks",
-    usedOn: [
-      { page: "Global h1/h2/h3", path: "globals.css" },
-    ],
-  },
-  {
-    name: "Games (Plymouth Serial)",
-    cssVar: "--font-games",
-    usage: "font-games",
-    weights: [300, 400, 500, 700, 800, 900],
-    hasItalic: false,
-    type: "Font Stack",
-    source: "Tailwind Theme",
-    description: "Includes Plymouth Serial and fallbacks for game UIs",
-    usedOn: [
-      { page: "Bravodle Cover", path: "app/bravodle/cover/page.tsx" },
-      { page: "Realitease Cover", path: "app/realitease/cover/page.tsx" },
-    ],
-  },
+/* ------------------------------------------------------------------ */
+/*  CDN Fonts                                                         */
+/* ------------------------------------------------------------------ */
+const CDN_FONTS: FontFamily[] = [
   {
     name: "Hamburg Serial",
     cssVar: "--font-hamburg",
@@ -75,6 +41,7 @@ const FONT_FAMILIES: FontFamily[] = [
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/`,
     description: "Primary brand font. Sans-serif display face used across most pages.",
+    fontFamilyValue: "var(--font-hamburg)",
     usedOn: [
       { page: "Home", path: "app/page.tsx" },
       { page: "Login", path: "app/login/page.tsx" },
@@ -103,6 +70,7 @@ const FONT_FAMILIES: FontFamily[] = [
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/`,
     description: "Serif display face used for headings and editorial text.",
+    fontFamilyValue: "var(--font-gloucester)",
     usedOn: [
       { page: "Home", path: "app/page.tsx" },
       { page: "Login", path: "app/login/page.tsx" },
@@ -121,8 +89,9 @@ const FONT_FAMILIES: FontFamily[] = [
     hasItalic: false,
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/`,
+    cdnPath: `${CDN_BASE}/plymouth-serial-book/`,
     description: "Decorative serif used in game covers and surveys.",
+    fontFamilyValue: "var(--font-plymouth-serial)",
     usedOn: [
       { page: "Bravodle Cover", path: "app/bravodle/cover/page.tsx" },
       { page: "Realitease Cover", path: "app/realitease/cover/page.tsx" },
@@ -138,8 +107,9 @@ const FONT_FAMILIES: FontFamily[] = [
     hasItalic: true,
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/`,
+    cdnPath: `${CDN_BASE}/rude-slab-condensed-book/`,
     description: "Condensed slab serif with italic variants. Used in game UIs.",
+    fontFamilyValue: "var(--font-rude-slab)",
     usedOn: [
       { page: "Bravodle Cover", path: "app/bravodle/cover/page.tsx" },
       { page: "Bravodle Play", path: "app/bravodle/play/page.tsx" },
@@ -148,19 +118,26 @@ const FONT_FAMILIES: FontFamily[] = [
     ],
   },
   {
-    name: "Gloucester Goodall",
+    name: "Goodall",
     cssVar: "--font-goodall",
     usage: 'style={{ fontFamily: "var(--font-goodall)" }}',
     weights: [400, 500, 600, 700, 900],
     hasItalic: true,
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/`,
-    description: "Elegant serif with italic variants. Available via CSS var but not yet referenced on any page.",
+    cdnPath: `${CDN_BASE}/gloucester-goodall/`,
+    description: "Elegant serif with italic variants.",
+    fontFamilyValue: "var(--font-goodall)",
     usedOn: [
       { page: "Not yet used", path: "Available via CSS var --font-goodall" },
     ],
   },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Google Fonts                                                      */
+/* ------------------------------------------------------------------ */
+const GOOGLE_FONTS: FontFamily[] = [
   {
     name: "Geist Sans",
     cssVar: "--font-geist-sans",
@@ -170,9 +147,8 @@ const FONT_FAMILIES: FontFamily[] = [
     type: "Google Font",
     source: "Google Fonts",
     description: "Vercel system font. Part of the default sans stack fallback.",
-    usedOn: [
-      { page: "Global fallback", path: "font-sans stack" },
-    ],
+    fontFamilyValue: "var(--font-geist-sans)",
+    usedOn: [{ page: "Global fallback", path: "font-sans stack" }],
   },
   {
     name: "Inter",
@@ -183,9 +159,8 @@ const FONT_FAMILIES: FontFamily[] = [
     type: "Google Font",
     source: "Google Fonts",
     description: "Popular UI font. Part of the default sans stack fallback.",
-    usedOn: [
-      { page: "Global fallback", path: "font-sans stack" },
-    ],
+    fontFamilyValue: "var(--font-inter)",
+    usedOn: [{ page: "Global fallback", path: "font-sans stack" }],
   },
   {
     name: "Playfair Display",
@@ -196,12 +171,59 @@ const FONT_FAMILIES: FontFamily[] = [
     type: "Google Font",
     source: "Google Fonts",
     description: "Transitional serif. Part of the default serif stack fallback.",
+    fontFamilyValue: "var(--font-playfair)",
+    usedOn: [{ page: "Global fallback", path: "font-serif stack" }],
+  },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Font Stacks                                                       */
+/* ------------------------------------------------------------------ */
+const FONT_STACKS: FontFamily[] = [
+  {
+    name: "Sans (Hamburg + Inter + Geist)",
+    cssVar: "--font-sans",
+    usage: "font-sans (Default body font)",
+    weights: [200, 300, 400, 500, 600, 700, 800, 900],
+    hasItalic: false,
+    type: "Font Stack",
+    source: "Tailwind Theme",
+    description: "Includes Hamburg Serial, Inter, and Geist Sans",
+    fontFamilyValue: "var(--font-sans)",
+    usedOn: [{ page: "Global default", path: "globals.css" }],
+  },
+  {
+    name: "Serif (Gloucester + Playfair)",
+    cssVar: "--font-serif",
+    usage: "font-serif (Used for h1, h2, h3)",
+    weights: [400, 500, 600, 700, 800, 900],
+    hasItalic: false,
+    type: "Font Stack",
+    source: "Tailwind Theme",
+    description: "Includes Gloucester OS, Playfair Display, and fallbacks",
+    fontFamilyValue: "var(--font-serif)",
+    usedOn: [{ page: "Global h1/h2/h3", path: "globals.css" }],
+  },
+  {
+    name: "Games (Plymouth Serial)",
+    cssVar: "--font-games",
+    usage: "font-games",
+    weights: [300, 400, 500, 700, 800, 900],
+    hasItalic: false,
+    type: "Font Stack",
+    source: "Tailwind Theme",
+    description: "Includes Plymouth Serial and fallbacks for game UIs",
+    fontFamilyValue: "var(--font-games)",
     usedOn: [
-      { page: "Global fallback", path: "font-serif stack" },
+      { page: "Bravodle Cover", path: "app/bravodle/cover/page.tsx" },
+      { page: "Realitease Cover", path: "app/realitease/cover/page.tsx" },
     ],
   },
 ];
 
+/* ------------------------------------------------------------------ */
+/*  Realitease Fonts                                                  */
+/* ------------------------------------------------------------------ */
 interface RealiteaseFontEntry {
   name: string;
   fontFamily: string;
@@ -270,20 +292,9 @@ const WEIGHT_LABELS: Record<number, string> = {
   900: "Black",
 };
 
-function TypeBadge({ type }: { type: FontFamily["type"] }) {
-  const colorMap = {
-    "CDN Font": "bg-blue-100 text-blue-800 border-blue-200",
-    "Google Font": "bg-green-100 text-green-800 border-green-200",
-    "Font Stack": "bg-zinc-100 text-zinc-700 border-zinc-200",
-  };
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${colorMap[type]}`}
-    >
-      {type}
-    </span>
-  );
-}
+/* ------------------------------------------------------------------ */
+/*  Shared UI Components                                              */
+/* ------------------------------------------------------------------ */
 
 function UsedOnChips({ entries }: { entries: UsedOnEntry[] }) {
   return (
@@ -301,90 +312,120 @@ function UsedOnChips({ entries }: { entries: UsedOnEntry[] }) {
   );
 }
 
-function FontPreview({ family }: { family: FontFamily }) {
+function ChevronIcon({ open }: { open: boolean }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+    <svg
+      className={`h-5 w-5 shrink-0 text-zinc-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  CDN Font Card (primary display)                                   */
+/* ------------------------------------------------------------------ */
+
+function CdnFontCard({
+  family,
+  previewText,
+}: {
+  family: FontFamily;
+  previewText: string;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-lg font-bold text-zinc-900">{family.name}</h3>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <TypeBadge type={family.type} />
-            <span className="text-xs text-zinc-500">{family.source}</span>
+      <div className="border-b border-zinc-100 bg-zinc-50/60 px-6 py-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3
+              className="text-xl font-bold text-zinc-900"
+              style={{ fontFamily: family.fontFamilyValue }}
+            >
+              {family.name}
+            </h3>
+            <p className="mt-1 text-xs text-zinc-500">{family.description}</p>
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <span className="flex-shrink-0 rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white">
+              {family.weights.length} weight{family.weights.length > 1 ? "s" : ""}
+            </span>
             {family.hasItalic && (
-              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+              <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
                 + Italic
               </span>
             )}
           </div>
-          {family.description && (
-            <p className="mt-2 text-xs text-zinc-500">{family.description}</p>
-          )}
         </div>
-        <span className="flex-shrink-0 rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-          {family.weights.length} weight{family.weights.length > 1 ? "s" : ""}
-        </span>
+
+        {/* CDN Path Pill — hyperlinked */}
+        {family.cdnPath && (
+          <a
+            href={family.cdnPath}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800 ring-1 ring-inset ring-blue-200 transition-colors hover:bg-blue-200 hover:text-blue-900"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+            {family.cdnPath}
+          </a>
+        )}
       </div>
 
-      <div className="space-y-3">
-        {/* CSS Variable */}
-        <div className="rounded bg-zinc-50 p-3">
-          <p className="mb-1 text-xs font-medium text-zinc-600">CSS Variable</p>
-          <code className="text-sm text-zinc-900">{family.cssVar}</code>
-        </div>
+      {/* Used On */}
+      <div className="border-b border-zinc-100 px-6 py-3">
+        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          Used On
+        </p>
+        <UsedOnChips entries={family.usedOn} />
+      </div>
 
-        {/* Usage */}
-        <div className="rounded bg-zinc-50 p-3">
-          <p className="mb-1 text-xs font-medium text-zinc-600">Usage</p>
-          <code className="text-xs text-zinc-900 break-all">{family.usage}</code>
-        </div>
-
-        {/* CDN Path */}
-        {family.cdnPath && (
-          <div className="rounded bg-blue-50 p-3">
-            <p className="mb-1 text-xs font-medium text-blue-700">CDN Path</p>
-            <code className="text-xs text-blue-900 break-all">{family.cdnPath}</code>
-          </div>
-        )}
-
-        {/* Used On */}
-        <div className="rounded bg-zinc-50 p-3">
-          <p className="mb-2 text-xs font-medium text-zinc-600">Used On</p>
-          <UsedOnChips entries={family.usedOn} />
-        </div>
-
-        {/* Weight Previews */}
-        <div className="space-y-2 border-t border-zinc-200 pt-4">
-          <p className="text-xs font-medium text-zinc-600">Weight Previews</p>
+      {/* Weight Previews */}
+      <div className="px-6 py-5">
+        <p className="mb-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          Weight Previews
+        </p>
+        <div className="space-y-4">
           {family.weights.map((weight) => (
-            <div key={weight} className="space-y-1">
-              <div
-                style={{
-                  fontFamily: `var(${family.cssVar})`,
-                  fontWeight: weight,
-                }}
-              >
-                <span className="mr-2 inline-block w-28 text-xs text-zinc-400">
+            <div key={weight}>
+              {/* Normal */}
+              <div>
+                <p className="text-xs font-medium text-zinc-400 mb-1">
                   {weight} {WEIGHT_LABELS[weight] ?? ""}
-                </span>
-                <span className="text-lg text-zinc-900">
-                  The quick brown fox jumps over the lazy dog
-                </span>
-              </div>
-              {family.hasItalic && (
-                <div
+                </p>
+                <p
+                  className="text-lg text-zinc-900 leading-snug"
                   style={{
-                    fontFamily: `var(${family.cssVar})`,
+                    fontFamily: family.fontFamilyValue,
                     fontWeight: weight,
-                    fontStyle: "italic",
                   }}
                 >
-                  <span className="mr-2 inline-block w-28 text-xs text-zinc-400">
+                  {previewText}
+                </p>
+              </div>
+              {/* Italic */}
+              {family.hasItalic && (
+                <div className="mt-1.5">
+                  <p className="text-xs font-medium text-zinc-400 mb-1">
                     {weight} Italic
-                  </span>
-                  <span className="text-lg text-zinc-900">
-                    The quick brown fox jumps over the lazy dog
-                  </span>
+                  </p>
+                  <p
+                    className="text-lg text-zinc-900 leading-snug"
+                    style={{
+                      fontFamily: family.fontFamilyValue,
+                      fontWeight: weight,
+                      fontStyle: "italic",
+                    }}
+                  >
+                    {previewText}
+                  </p>
                 </div>
               )}
             </div>
@@ -395,31 +436,157 @@ function FontPreview({ family }: { family: FontFamily }) {
   );
 }
 
-function RealiteaseFontPreview({ font }: { font: RealiteaseFontEntry }) {
+/* ------------------------------------------------------------------ */
+/*  Collapsible Font Stack / Google Font Card                         */
+/* ------------------------------------------------------------------ */
+
+function CollapsibleFontCard({
+  family,
+  previewText,
+}: {
+  family: FontFamily;
+  previewText: string;
+}) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4">
+    <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left transition-colors hover:bg-zinc-50"
+      >
+        <div className="min-w-0">
+          <h3
+            className="text-base font-bold text-zinc-900"
+            style={{ fontFamily: family.fontFamilyValue }}
+          >
+            {family.name}
+          </h3>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+                family.type === "Font Stack"
+                  ? "bg-zinc-100 text-zinc-700 border-zinc-200"
+                  : "bg-green-100 text-green-800 border-green-200"
+              }`}
+            >
+              {family.type}
+            </span>
+            <span className="text-xs text-zinc-500">{family.source}</span>
+            <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-semibold text-zinc-600">
+              {family.weights.length} weight{family.weights.length > 1 ? "s" : ""}
+            </span>
+          </div>
+        </div>
+        <ChevronIcon open={open} />
+      </button>
+
+      {open && (
+        <div className="border-t border-zinc-100">
+          {/* Description */}
+          {family.description && (
+            <div className="px-6 pt-4 pb-2">
+              <p className="text-xs text-zinc-500">{family.description}</p>
+            </div>
+          )}
+
+          {/* CSS Variable */}
+          <div className="px-6 py-2">
+            <div className="rounded bg-zinc-50 p-3">
+              <p className="mb-1 text-xs font-medium text-zinc-600">CSS Variable</p>
+              <code className="text-sm text-zinc-900">{family.cssVar}</code>
+            </div>
+          </div>
+
+          {/* Usage */}
+          <div className="px-6 py-2">
+            <div className="rounded bg-zinc-50 p-3">
+              <p className="mb-1 text-xs font-medium text-zinc-600">Usage</p>
+              <code className="text-xs text-zinc-900 break-all">{family.usage}</code>
+            </div>
+          </div>
+
+          {/* Used On */}
+          <div className="px-6 py-2">
+            <div className="rounded bg-zinc-50 p-3">
+              <p className="mb-2 text-xs font-medium text-zinc-600">Used On</p>
+              <UsedOnChips entries={family.usedOn} />
+            </div>
+          </div>
+
+          {/* Weight Previews */}
+          <div className="px-6 pt-2 pb-5">
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              Weight Previews
+            </p>
+            <div className="space-y-3">
+              {family.weights.map((weight) => (
+                <div key={weight}>
+                  <p className="text-xs font-medium text-zinc-400 mb-1">
+                    {weight} {WEIGHT_LABELS[weight] ?? ""}
+                  </p>
+                  <p
+                    className="text-lg text-zinc-900 leading-snug"
+                    style={{
+                      fontFamily: family.fontFamilyValue,
+                      fontWeight: weight,
+                    }}
+                  >
+                    {previewText}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Realitease Font Card                                              */
+/* ------------------------------------------------------------------ */
+
+function RealiteaseFontPreview({
+  font,
+  previewText,
+}: {
+  font: RealiteaseFontEntry;
+  previewText: string;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
       <div className="mb-3 flex items-start justify-between">
         <div>
-          <h4 className="font-bold text-zinc-900">{font.name}</h4>
+          <h4
+            className="font-bold text-zinc-900"
+            style={{ fontFamily: font.fontFamily }}
+          >
+            {font.name}
+          </h4>
           <code className="text-xs text-zinc-500">{font.fontFamily}</code>
         </div>
-        <TypeBadge type="CDN Font" />
+        <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
+          CDN Font
+        </span>
       </div>
-      <div className="mb-3 rounded bg-blue-50 p-2">
+      <div className="mb-3 rounded-lg bg-blue-50 p-2.5">
         <code className="text-xs text-blue-900 break-all">{font.cdnUrl}</code>
       </div>
-      <div className="space-y-1 border-t border-zinc-100 pt-3">
+      <div className="space-y-3 border-t border-zinc-100 pt-3">
         {font.weights.map((weight) => (
-          <div
-            key={weight}
-            style={{ fontFamily: font.fontFamily, fontWeight: weight }}
-          >
-            <span className="mr-2 inline-block w-20 text-xs text-zinc-400">
+          <div key={weight}>
+            <p className="text-xs font-medium text-zinc-400 mb-1">
               {weight} {WEIGHT_LABELS[weight] ?? ""}
-            </span>
-            <span className="text-base text-zinc-900">
-              The quick brown fox jumps over the lazy dog
-            </span>
+            </p>
+            <p
+              className="text-base text-zinc-900 leading-snug"
+              style={{ fontFamily: font.fontFamily, fontWeight: weight }}
+            >
+              {previewText}
+            </p>
           </div>
         ))}
       </div>
@@ -427,15 +594,22 @@ function RealiteaseFontPreview({ font }: { font: RealiteaseFontEntry }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Main Page                                                         */
+/* ------------------------------------------------------------------ */
+
 export default function AdminFontsPage() {
   const router = useRouter();
   const { user, checking, hasAccess } = useAdminGuard();
+  const [previewText, setPreviewText] = useState(
+    "The quick brown fox jumps over the lazy dog"
+  );
 
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
         <div className="text-center">
-          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent"></div>
+          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
           <p className="text-sm text-gray-600">Checking admin access...</p>
         </div>
       </div>
@@ -445,10 +619,6 @@ export default function AdminFontsPage() {
   if (!user || !hasAccess) {
     return null;
   }
-
-  const cdnFonts = FONT_FAMILIES.filter((f) => f.type === "CDN Font");
-  const googleFonts = FONT_FAMILIES.filter((f) => f.type === "Google Font");
-  const fontStacks = FONT_FAMILIES.filter((f) => f.type === "Font Stack");
 
   return (
     <ClientOnly>
@@ -485,21 +655,39 @@ export default function AdminFontsPage() {
 
         {/* Main Content */}
         <main className="mx-auto max-w-7xl px-6 py-8">
+          {/* Preview Text Input */}
+          <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+            <label
+              htmlFor="preview-text"
+              className="mb-2 block text-xs font-semibold uppercase tracking-wider text-zinc-500"
+            >
+              Preview Text
+            </label>
+            <input
+              id="preview-text"
+              type="text"
+              value={previewText}
+              onChange={(e) => setPreviewText(e.target.value)}
+              placeholder="Type preview text..."
+              className="w-full rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-3 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 transition"
+            />
+          </div>
+
           {/* Summary Bar */}
           <div className="mb-8 flex flex-wrap gap-4">
             <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2">
               <span className="text-sm font-semibold text-blue-900">
-                {cdnFonts.length} CDN Fonts
+                {CDN_FONTS.length} CDN Fonts
               </span>
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2">
               <span className="text-sm font-semibold text-green-900">
-                {googleFonts.length} Google Fonts
+                {GOOGLE_FONTS.length} Google Fonts
               </span>
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-100 px-4 py-2">
               <span className="text-sm font-semibold text-zinc-700">
-                {fontStacks.length} Font Stacks
+                {FONT_STACKS.length} Font Stacks
               </span>
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2">
@@ -509,53 +697,32 @@ export default function AdminFontsPage() {
             </div>
           </div>
 
-          {/* Font Stacks Section */}
-          <section className="mb-12">
-            <h2 className="mb-6 text-xl font-bold text-zinc-900">
-              Font Stacks ({fontStacks.length})
-            </h2>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {fontStacks.map((family) => (
-                <FontPreview key={family.name} family={family} />
-              ))}
-            </div>
-          </section>
-
-          {/* CDN Fonts Section */}
+          {/* ========================================= */}
+          {/* CDN Fonts — Primary Display               */}
+          {/* ========================================= */}
           <section className="mb-12">
             <div className="mb-6 flex items-center gap-3">
               <h2 className="text-xl font-bold text-zinc-900">
-                CDN Fonts ({cdnFonts.length})
+                CDN Fonts ({CDN_FONTS.length})
               </h2>
               <span className="rounded-md bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
                 CloudFront CDN
               </span>
             </div>
             <div className="grid gap-6 md:grid-cols-2">
-              {cdnFonts.map((family) => (
-                <FontPreview key={family.name} family={family} />
+              {CDN_FONTS.map((family) => (
+                <CdnFontCard
+                  key={family.name}
+                  family={family}
+                  previewText={previewText}
+                />
               ))}
             </div>
           </section>
 
-          {/* Google Fonts Section */}
-          <section className="mb-12">
-            <div className="mb-6 flex items-center gap-3">
-              <h2 className="text-xl font-bold text-zinc-900">
-                Google Fonts ({googleFonts.length})
-              </h2>
-              <span className="rounded-md bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800">
-                Google Fonts
-              </span>
-            </div>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {googleFonts.map((family) => (
-                <FontPreview key={family.name} family={family} />
-              ))}
-            </div>
-          </section>
-
-          {/* Realitease Fonts Section */}
+          {/* ========================================= */}
+          {/* Realitease Fonts                          */}
+          {/* ========================================= */}
           <section className="mb-12">
             <div className="mb-4 flex items-center gap-3">
               <h2 className="text-xl font-bold text-zinc-900">
@@ -565,108 +732,54 @@ export default function AdminFontsPage() {
                 Game-specific
               </span>
             </div>
-            <div className="mb-4 rounded bg-zinc-50 p-3">
+            <div className="mb-4 rounded-lg bg-zinc-50 p-3">
               <p className="mb-2 text-xs font-medium text-zinc-600">Used On</p>
               <UsedOnChips entries={REALITEASE_USED_ON} />
             </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {REALITEASE_FONTS.map((font) => (
-                <RealiteaseFontPreview key={font.name} font={font} />
+                <RealiteaseFontPreview
+                  key={font.name}
+                  font={font}
+                  previewText={previewText}
+                />
               ))}
             </div>
           </section>
 
-          {/* Usage Instructions */}
-          <section className="mt-12 rounded-lg border border-blue-200 bg-blue-50 p-6">
-            <h3 className="mb-3 font-bold text-blue-900">Usage Instructions</h3>
-            <div className="space-y-3 text-sm text-blue-800">
-              <p>
-                <strong>To use fonts in your components:</strong>
-              </p>
-
-              <div className="space-y-2">
-                <p className="font-semibold">Option 1: Use font stacks (Recommended)</p>
-                <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">className=&quot;font-sans&quot;</code>
-                  <p className="mt-1 text-xs">Uses Hamburg + Inter + Geist Sans</p>
-                </div>
-                <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">className=&quot;font-serif&quot;</code>
-                  <p className="mt-1 text-xs">Uses Gloucester + Playfair Display</p>
-                </div>
-                <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">className=&quot;font-games&quot;</code>
-                  <p className="mt-1 text-xs">Uses Plymouth Serial for game UIs</p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="font-semibold">Option 2: Use specific fonts with CSS variables</p>
-                <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">style={`{{ fontFamily: "var(--font-hamburg)" }}`}</code>
-                  <p className="mt-1 text-xs">Uses only Hamburg Serial</p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="font-semibold">Option 3: Combine with font weights</p>
-                <div className="rounded bg-blue-100 p-3">
-                  <code className="text-xs">className=&quot;font-sans font-bold&quot;</code>
-                  <p className="mt-1 text-xs">Uses sans stack with bold weight (700)</p>
-                </div>
-              </div>
+          {/* ========================================= */}
+          {/* Google Fonts — Collapsible                 */}
+          {/* ========================================= */}
+          <section className="mb-8">
+            <h2 className="mb-4 text-xl font-bold text-zinc-900">
+              Google Fonts ({GOOGLE_FONTS.length})
+            </h2>
+            <div className="space-y-3">
+              {GOOGLE_FONTS.map((family) => (
+                <CollapsibleFontCard
+                  key={family.name}
+                  family={family}
+                  previewText={previewText}
+                />
+              ))}
             </div>
           </section>
 
-          {/* Theme Configuration */}
-          <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-6">
-            <h3 className="mb-3 font-bold text-zinc-900">Tailwind v4 Theme Configuration</h3>
-            <p className="mb-3 text-sm text-zinc-600">
-              Fonts are configured in globals.css using the @theme directive:
-            </p>
-            <div className="space-y-2">
-              <div className="rounded bg-zinc-50 p-3">
-                <code className="text-xs text-zinc-900">
-                  --font-sans: var(--font-hamburg), var(--font-inter), var(--font-geist-sans)
-                </code>
-              </div>
-              <div className="rounded bg-zinc-50 p-3">
-                <code className="text-xs text-zinc-900">
-                  --font-serif: var(--font-gloucester), var(--font-playfair), ...
-                </code>
-              </div>
-              <div className="rounded bg-zinc-50 p-3">
-                <code className="text-xs text-zinc-900">
-                  --font-body: var(--font-hamburg)
-                </code>
-              </div>
-              <div className="rounded bg-zinc-50 p-3">
-                <code className="text-xs text-zinc-900">
-                  --font-games: var(--font-plymouth-serial), ...
-                </code>
-              </div>
-            </div>
-          </section>
-
-          {/* CDN Info */}
-          <section className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-6">
-            <h3 className="mb-3 font-bold text-blue-900">CDN Configuration</h3>
-            <div className="space-y-2 text-sm text-blue-800">
-              <p>
-                All Monotype and Realitease fonts are served from CloudFront CDN. Font files are stored in S3 and cached globally.
-              </p>
-              <div className="rounded bg-blue-100 p-3">
-                <p className="mb-1 text-xs font-medium">CDN Base URL</p>
-                <code className="text-xs">{CDN_BASE}</code>
-              </div>
-              <div className="rounded bg-blue-100 p-3">
-                <p className="mb-1 text-xs font-medium">Monotype fonts path</p>
-                <code className="text-xs">{CDN_BASE}/monotype/</code>
-              </div>
-              <div className="rounded bg-blue-100 p-3">
-                <p className="mb-1 text-xs font-medium">Realitease fonts path</p>
-                <code className="text-xs">{CDN_BASE}/realitease/</code>
-              </div>
+          {/* ========================================= */}
+          {/* Font Stacks — Collapsible                 */}
+          {/* ========================================= */}
+          <section className="mb-8">
+            <h2 className="mb-4 text-xl font-bold text-zinc-900">
+              Font Stacks ({FONT_STACKS.length})
+            </h2>
+            <div className="space-y-3">
+              {FONT_STACKS.map((family) => (
+                <CollapsibleFontCard
+                  key={family.name}
+                  family={family}
+                  previewText={previewText}
+                />
+              ))}
             </div>
           </section>
         </main>
