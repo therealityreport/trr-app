@@ -56,6 +56,14 @@ interface BrandSeasonRecord {
   updated_at: string;
 }
 
+interface BrandMediaAssetLike {
+  id: string;
+  type: "show" | "season" | "episode" | "cast";
+  kind: string;
+  hosted_url: string;
+  source?: string | null;
+}
+
 export interface TrrSeasonLike {
   id: string;
   season_number: number;
@@ -96,6 +104,9 @@ const defaultSeasonColors = (): SeasonColors => ({
   accent: "#e11d48",
   neutral: "#f4f4f5",
 });
+
+const normalizeAssetKind = (value: string | null | undefined): string =>
+  (value ?? "").trim().toLowerCase();
 
 function ColorField({
   label,
@@ -437,6 +448,11 @@ export default function ShowBrandEditor({
   const [iconUrl, setIconUrl] = useState("");
   const [wordmarkUrl, setWordmarkUrl] = useState("");
   const [heroUrl, setHeroUrl] = useState("");
+  const [defaultPosterAssetId, setDefaultPosterAssetId] = useState("");
+  const [defaultBackdropAssetId, setDefaultBackdropAssetId] = useState("");
+  const [defaultLogoAssetId, setDefaultLogoAssetId] = useState("");
+  const [showMediaAssets, setShowMediaAssets] = useState<BrandMediaAssetLike[]>([]);
+  const [showMediaLoading, setShowMediaLoading] = useState(false);
 
   // New season state
   const [creatingSeason, setCreatingSeason] = useState(false);
@@ -448,6 +464,39 @@ export default function ShowBrandEditor({
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  const fetchShowMediaAssets = useCallback(async () => {
+    setShowMediaLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${trrShowId}/assets`, {
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          (data as { error?: string }).error ||
+            `Failed to load show assets (HTTP ${response.status})`
+        );
+      }
+      const assetsRaw = (data as { assets?: unknown }).assets;
+      const assets = Array.isArray(assetsRaw)
+        ? (assetsRaw as BrandMediaAssetLike[]).filter(
+            (asset) =>
+              asset &&
+              asset.type === "show" &&
+              typeof asset.id === "string" &&
+              typeof asset.hosted_url === "string"
+          )
+        : [];
+      setShowMediaAssets(assets);
+    } catch (err) {
+      console.warn("Failed to fetch show media assets for brand defaults:", err);
+      setShowMediaAssets([]);
+    } finally {
+      setShowMediaLoading(false);
+    }
+  }, [getAuthHeaders, trrShowId]);
 
   const fetchBrand = useCallback(async () => {
     setLoading(true);
@@ -476,6 +525,25 @@ export default function ShowBrandEditor({
         setIconUrl(payload.show.icon_url ?? "");
         setWordmarkUrl(payload.show.wordmark_url ?? "");
         setHeroUrl(payload.show.hero_url ?? "");
+        setDefaultPosterAssetId(
+          typeof nextFonts.defaultPosterAssetId === "string"
+            ? nextFonts.defaultPosterAssetId
+            : ""
+        );
+        setDefaultBackdropAssetId(
+          typeof nextFonts.defaultBackdropAssetId === "string"
+            ? nextFonts.defaultBackdropAssetId
+            : ""
+        );
+        setDefaultLogoAssetId(
+          typeof nextFonts.defaultLogoAssetId === "string"
+            ? nextFonts.defaultLogoAssetId
+            : ""
+        );
+      } else {
+        setDefaultPosterAssetId("");
+        setDefaultBackdropAssetId("");
+        setDefaultLogoAssetId("");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load brand profile");
@@ -488,12 +556,47 @@ export default function ShowBrandEditor({
     fetchBrand();
   }, [fetchBrand]);
 
+  useEffect(() => {
+    void fetchShowMediaAssets();
+  }, [fetchShowMediaAssets]);
+
   const availableSeasonNumbers = useMemo(() => {
     const fromTrr = trrSeasons.map((s) => s.season_number).filter((n) => Number.isFinite(n));
     const base = fromTrr.length > 0 ? fromTrr : Array.from({ length: 30 }, (_, i) => i + 1);
     const used = new Set(seasons.map((s) => s.season_number));
     return base.filter((n) => !used.has(n)).sort((a, b) => a - b);
   }, [trrSeasons, seasons]);
+
+  const showPosterAssets = useMemo(
+    () =>
+      showMediaAssets.filter(
+        (asset) => asset.type === "show" && normalizeAssetKind(asset.kind) === "poster"
+      ),
+    [showMediaAssets]
+  );
+  const showBackdropAssets = useMemo(
+    () =>
+      showMediaAssets.filter(
+        (asset) => asset.type === "show" && normalizeAssetKind(asset.kind) === "backdrop"
+      ),
+    [showMediaAssets]
+  );
+  const showLogoAssets = useMemo(
+    () =>
+      showMediaAssets.filter(
+        (asset) => asset.type === "show" && normalizeAssetKind(asset.kind) === "logo"
+      ),
+    [showMediaAssets]
+  );
+  const showAssetUrlById = useMemo(
+    () =>
+      new Map(
+        showMediaAssets
+          .filter((asset) => typeof asset.id === "string" && typeof asset.hosted_url === "string")
+          .map((asset) => [asset.id, asset.hosted_url])
+      ),
+    [showMediaAssets]
+  );
 
   useEffect(() => {
     if (availableSeasonNumbers.length > 0) {
@@ -550,6 +653,19 @@ export default function ShowBrandEditor({
             ...(showRecord.fonts ?? {}),
             heading: fontsHeading || undefined,
             body: fontsBody || undefined,
+            defaultPosterAssetId: defaultPosterAssetId || undefined,
+            defaultPosterUrl:
+              (defaultPosterAssetId ? showAssetUrlById.get(defaultPosterAssetId) : null) ??
+              undefined,
+            defaultBackdropAssetId: defaultBackdropAssetId || undefined,
+            defaultBackdropUrl:
+              (defaultBackdropAssetId
+                ? showAssetUrlById.get(defaultBackdropAssetId)
+                : null) ?? undefined,
+            defaultLogoAssetId: defaultLogoAssetId || undefined,
+            defaultLogoUrl:
+              (defaultLogoAssetId ? showAssetUrlById.get(defaultLogoAssetId) : null) ??
+              undefined,
           },
           iconUrl: iconUrl || null,
           wordmarkUrl: wordmarkUrl || null,
@@ -722,7 +838,7 @@ export default function ShowBrandEditor({
                   value={fontsHeading}
                   onChange={(e) => setFontsHeading(e.target.value)}
                   className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:outline-none"
-                  placeholder='e.g. "Gloucester OS MT Std"'
+                  placeholder='e.g. "Gloucester"'
                 />
               </label>
               <label className="block">
@@ -773,6 +889,78 @@ export default function ShowBrandEditor({
               />
             </label>
           </div>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+            Default Media
+          </p>
+          <p className="mt-1 text-sm text-zinc-600">
+            Choose brand defaults from imported show media.
+          </p>
+          <div className="mt-3 grid gap-4 lg:grid-cols-3">
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-zinc-700">
+                Default Poster
+              </span>
+              <select
+                value={defaultPosterAssetId}
+                onChange={(e) => setDefaultPosterAssetId(e.target.value)}
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                disabled={showMediaLoading}
+              >
+                <option value="">None</option>
+                {showPosterAssets.map((asset, index) => (
+                  <option key={`poster-${asset.id}`} value={asset.id}>
+                    {`Poster ${index + 1}${asset.source ? ` (${asset.source})` : ""}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-zinc-700">
+                Default Backdrop
+              </span>
+              <select
+                value={defaultBackdropAssetId}
+                onChange={(e) => setDefaultBackdropAssetId(e.target.value)}
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                disabled={showMediaLoading}
+              >
+                <option value="">None</option>
+                {showBackdropAssets.map((asset, index) => (
+                  <option key={`backdrop-${asset.id}`} value={asset.id}>
+                    {`Backdrop ${index + 1}${asset.source ? ` (${asset.source})` : ""}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-zinc-700">
+                Default Logo
+              </span>
+              <select
+                value={defaultLogoAssetId}
+                onChange={(e) => setDefaultLogoAssetId(e.target.value)}
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                disabled={showMediaLoading}
+              >
+                <option value="">None</option>
+                {showLogoAssets.map((asset, index) => (
+                  <option key={`logo-${asset.id}`} value={asset.id}>
+                    {`Logo ${index + 1}${asset.source ? ` (${asset.source})` : ""}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="mt-3 text-xs text-zinc-500">
+            {showMediaLoading
+              ? "Loading show media..."
+              : `${showPosterAssets.length} posters, ${showBackdropAssets.length} backdrops, ${showLogoAssets.length} logos available.`}
+          </p>
         </div>
       </section>
 

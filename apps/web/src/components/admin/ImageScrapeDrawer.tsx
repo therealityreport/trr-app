@@ -115,17 +115,29 @@ export interface SeasonContext {
   seasonId?: string;
 }
 
+export interface ShowContext {
+  type: "show";
+  showId: string;
+  showName: string;
+  seasons?: Array<{
+    seasonNumber: number;
+    seasonId?: string;
+  }>;
+  defaultSeasonNumber?: number | null;
+}
+
 export interface PersonContext {
   type: "person";
   personId: string;
   personName: string;
 }
 
-export type EntityContext = SeasonContext | PersonContext;
+export type EntityContext = SeasonContext | ShowContext | PersonContext;
 
 type ImageKind =
   | "poster"
   | "backdrop"
+  | "logo"
   | "episode_still"
   | "cast"
   | "promo"
@@ -146,6 +158,10 @@ const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "other", label: "Other" },
 ];
 
+const SHOW_ONLY_IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
+  { value: "logo", label: "Logo" },
+];
+
 const SOURCE_LOGO_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "", label: "None" },
   { value: "Bravo", label: "Bravo" },
@@ -156,6 +172,11 @@ const SOURCE_LOGO_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "Prime Video", label: "Prime Video" },
   { value: "Max", label: "Max" },
   { value: "Disney+", label: "Disney+" },
+];
+
+const CONTENT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "None" },
+  { value: "OFFICIAL SEASON ANNOUNCEMENT", label: "OFFICIAL SEASON ANNOUNCEMENT" },
 ];
 
 interface ImageScrapeDrawerProps {
@@ -223,8 +244,10 @@ export function ImageScrapeDrawer({
   // Map of image candidate ID -> image kind
   const [imageKinds, setImageKinds] = useState<Record<string, ImageKind>>({});
   // Optional per-image import metadata (persisted into media_links.context / media_assets.metadata)
+  const [contentTypes, setContentTypes] = useState<Record<string, string>>({});
   const [sourceLogos, setSourceLogos] = useState<Record<string, string>>({});
   const [assetNames, setAssetNames] = useState<Record<string, string>>({});
+  const [selectedShowSeason, setSelectedShowSeason] = useState<string>("na");
 
   // Error state
   const [error, setError] = useState<string | null>(null);
@@ -245,16 +268,22 @@ export function ImageScrapeDrawer({
 
   const defaultCastPortraitName = useCallback(
     (personName: string | null, ordinal: number): string | null => {
-      if (entityContext.type !== "season") return null;
+      if (entityContext.type === "person") return null;
       const showAcronym = buildShowAcronym(entityContext.showName);
-      const seasonSuffix = `${entityContext.seasonNumber}`;
+      const seasonNumber =
+        entityContext.type === "season"
+          ? entityContext.seasonNumber
+          : selectedShowSeason !== "na"
+            ? Number.parseInt(selectedShowSeason, 10)
+            : null;
+      const seasonSuffix = Number.isFinite(seasonNumber) ? String(seasonNumber) : "NA";
       if (!personName) {
         return `${showAcronym}${seasonSuffix}_CastPortrait_${ordinal}`;
       }
       const cleanPerson = personName.replace(/[^a-z0-9]+/gi, "");
       return `${showAcronym}${seasonSuffix}_${cleanPerson}_CastPortrait`;
     },
-    [entityContext, buildShowAcronym]
+    [entityContext, buildShowAcronym, selectedShowSeason]
   );
 
   // Get auth headers
@@ -387,11 +416,19 @@ export function ImageScrapeDrawer({
         const entityId =
           entityContext.type === "season"
             ? entityContext.seasonId
-            : entityContext.personId;
+            : entityContext.type === "person"
+              ? entityContext.personId
+              : entityContext.showId;
 
         if (entityContext.type === "season" && !entityId) {
           throw new Error("Missing seasonId for season import context");
         }
+        const selectedSeason =
+          entityContext.type === "show" && selectedShowSeason !== "na"
+            ? (entityContext.seasons ?? []).find(
+                (s) => s.seasonNumber === Number.parseInt(selectedShowSeason, 10)
+              )
+            : null;
 
         const response = await fetch("/api/admin/trr-api/media-links", {
           method: "POST",
@@ -401,15 +438,32 @@ export function ImageScrapeDrawer({
           },
           body: JSON.stringify({
             media_asset_id: duplicate.media_asset_id,
-            entity_type: entityType === "season" ? "season" : "person",
+            entity_type:
+              entityType === "season"
+                ? "season"
+                : entityType === "show"
+                  ? "show"
+                  : "person",
             entity_id: entityId,
-            kind: entityType === "season" ? duplicate.kind || "other" : "gallery",
+            kind: entityType === "person" ? "gallery" : duplicate.kind || "other",
             context:
               entityContext.type === "season"
                 ? {
                     show_id: entityContext.showId,
                     season_number: entityContext.seasonNumber,
                   }
+                : entityContext.type === "show"
+                  ? {
+                      show_id: entityContext.showId,
+                      ...(selectedSeason
+                        ? {
+                            season_number: selectedSeason.seasonNumber,
+                            ...(selectedSeason.seasonId
+                              ? { season_id: selectedSeason.seasonId }
+                              : {}),
+                          }
+                        : {}),
+                    }
                 : {},
           }),
         });
@@ -439,7 +493,7 @@ export function ImageScrapeDrawer({
         );
       }
     },
-    [entityContext, getAuthHeaders]
+    [entityContext, getAuthHeaders, selectedShowSeason]
   );
 
   // Link all unlinked duplicates
@@ -460,8 +514,10 @@ export function ImageScrapeDrawer({
       setCaptions({});
       setPersonAssignments({});
       setImageKinds({});
+      setContentTypes({});
       setSourceLogos({});
       setAssetNames({});
+      setSelectedShowSeason("na");
       setBulkPeopleSelection([]);
       setImportProgress(null);
       setImportResult(null);
@@ -469,6 +525,20 @@ export function ImageScrapeDrawer({
       setError(null);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (entityContext.type === "show") {
+      const defaultSeason = entityContext.defaultSeasonNumber;
+      if (typeof defaultSeason === "number" && Number.isFinite(defaultSeason)) {
+        setSelectedShowSeason(String(defaultSeason));
+      } else {
+        setSelectedShowSeason("na");
+      }
+    } else {
+      setSelectedShowSeason("na");
+    }
+  }, [isOpen, entityContext]);
 
   // Body scroll lock
   useEffect(() => {
@@ -508,6 +578,7 @@ export function ImageScrapeDrawer({
       setCaptions({});
       setPersonAssignments({});
       setImageKinds({});
+      setContentTypes({});
       setBulkPeopleSelection([]);
       setImportResult(null);
 
@@ -516,6 +587,10 @@ export function ImageScrapeDrawer({
       if (entityContext.type === "season" && entityContext.seasonId) {
         previewPayload.entity_type = "season";
         previewPayload.entity_id = entityContext.seasonId;
+      }
+      if (entityContext.type === "show") {
+        previewPayload.entity_type = "show";
+        previewPayload.entity_id = entityContext.showId;
       }
       if (entityContext.type === "person") {
         previewPayload.entity_type = "person";
@@ -599,17 +674,19 @@ export function ImageScrapeDrawer({
           kind: imageKinds[img.id] || "other",
           person_ids: (personAssignments[img.id] ?? []).map((p) => p.id),
           context_section:
-            entityContext.type === "season" && importMode === "season_announcement"
+            entityContext.type !== "person" && importMode === "season_announcement"
               ? "Cast Portraits"
               : null,
-          context_type:
-            entityContext.type === "season" && importMode === "season_announcement"
-              ? "Season Announcement"
-              : null,
+          context_type: (
+            contentTypes[img.id] ||
+            (entityContext.type !== "person" && importMode === "season_announcement"
+              ? "OFFICIAL SEASON ANNOUNCEMENT"
+              : "")
+          ) || null,
           source_logo: sourceLogos[img.id] || null,
           asset_name:
             assetNames[img.id] ||
-            (entityContext.type === "season" && importMode === "season_announcement"
+            (entityContext.type !== "person" && importMode === "season_announcement"
               ? defaultCastPortraitName(
                   (personAssignments[img.id] ?? [])[0]?.name ?? null,
                   1
@@ -623,6 +700,12 @@ export function ImageScrapeDrawer({
       }
 
       // Build payload based on entity context
+      const selectedShowSeasonRow =
+        entityContext.type === "show" && selectedShowSeason !== "na"
+          ? (entityContext.seasons ?? []).find(
+              (season) => season.seasonNumber === Number.parseInt(selectedShowSeason, 10)
+            )
+          : null;
       const payload =
         entityContext.type === "season"
           ? {
@@ -633,6 +716,21 @@ export function ImageScrapeDrawer({
               source_url: url.trim(),
               images: imagesToImport,
             }
+          : entityContext.type === "show"
+            ? {
+                entity_type: "show" as const,
+                show_id: entityContext.showId,
+                ...(selectedShowSeasonRow
+                  ? {
+                      season_number: selectedShowSeasonRow.seasonNumber,
+                      ...(selectedShowSeasonRow.seasonId
+                        ? { season_id: selectedShowSeasonRow.seasonId }
+                        : {}),
+                    }
+                  : {}),
+                source_url: url.trim(),
+                images: imagesToImport,
+              }
           : {
               entity_type: "person" as const,
               person_id: entityContext.personId,
@@ -759,7 +857,13 @@ export function ImageScrapeDrawer({
   const entityDisplayName =
     entityContext.type === "season"
       ? `${entityContext.showName} - Season ${entityContext.seasonNumber}`
-      : entityContext.personName;
+      : entityContext.type === "show"
+        ? `${entityContext.showName} - Main Media Gallery`
+        : entityContext.personName;
+  const imageKindOptions =
+    entityContext.type === "show"
+      ? [...IMAGE_KIND_OPTIONS, ...SHOW_ONLY_IMAGE_KIND_OPTIONS]
+      : IMAGE_KIND_OPTIONS;
 
   if (!isOpen) return null;
 
@@ -867,7 +971,28 @@ export function ImageScrapeDrawer({
               {/* Bulk assignments */}
               {selectedImages.size > 0 && (
                 <div className="mb-4 grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                  {entityContext.type === "season" && (
+                  {entityContext.type === "show" && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs font-semibold text-zinc-600">Season:</span>
+                      <select
+                        value={selectedShowSeason}
+                        onChange={(e) => setSelectedShowSeason(e.target.value)}
+                        className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                      >
+                        <option value="na">N/A</option>
+                        {(entityContext.seasons ?? [])
+                          .slice()
+                          .sort((a, b) => a.seasonNumber - b.seasonNumber)
+                          .map((season) => (
+                            <option key={`${season.seasonId ?? season.seasonNumber}`} value={season.seasonNumber}>
+                              Season {season.seasonNumber}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {entityContext.type !== "person" && (
                     <div className="flex flex-wrap items-center gap-3">
                       <span className="text-xs font-semibold text-zinc-600">
                         Import type:
@@ -886,6 +1011,13 @@ export function ImageScrapeDrawer({
                               }
                               return next;
                             });
+                            setContentTypes((prev) => {
+                              const next = { ...prev };
+                              for (const imgId of selectedImages) {
+                                next[imgId] = "OFFICIAL SEASON ANNOUNCEMENT";
+                              }
+                              return next;
+                            });
                           }
                         }}
                         className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
@@ -901,7 +1033,7 @@ export function ImageScrapeDrawer({
                     </div>
                   )}
 
-                  {entityContext.type === "season" && (
+                  {entityContext.type !== "person" && (
                     <div className="flex flex-wrap items-center gap-3">
                       <span className="text-xs font-semibold text-zinc-600">
                         Set kind for all selected:
@@ -925,7 +1057,37 @@ export function ImageScrapeDrawer({
                         className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                       >
                         <option value="">Select kind...</option>
-                        {IMAGE_KIND_OPTIONS.map((option) => (
+                        {imageKindOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {entityContext.type !== "person" && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs font-semibold text-zinc-600">
+                        Set content type for all selected:
+                      </span>
+                      <select
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setContentTypes((prev) => {
+                            const next = { ...prev };
+                            for (const imgId of selectedImages) {
+                              if (value) next[imgId] = value;
+                              else delete next[imgId];
+                            }
+                            return next;
+                          });
+                          e.target.value = "";
+                        }}
+                        className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                      >
+                        <option value="">Select content type...</option>
+                        {CONTENT_TYPE_OPTIONS.filter((option) => option.value).map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -1069,13 +1231,34 @@ export function ImageScrapeDrawer({
                             onClick={(e) => e.stopPropagation()}
                             className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                           >
-                            {IMAGE_KIND_OPTIONS.map((option) => (
+                            {imageKindOptions.map((option) => (
                               <option key={option.value} value={option.value}>
                                 {option.label}
                               </option>
                             ))}
                           </select>
-                          {entityContext.type === "season" && importMode === "season_announcement" && (
+                          {entityContext.type !== "person" && (
+                            <>
+                              <select
+                                value={contentTypes[img.id] ?? ""}
+                                onChange={(e) =>
+                                  setContentTypes((prev) => ({
+                                    ...prev,
+                                    [img.id]: e.target.value,
+                                  }))
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                              >
+                                {CONTENT_TYPE_OPTIONS.map((opt) => (
+                                  <option key={opt.value || "none"} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </>
+                          )}
+                          {entityContext.type !== "person" && importMode === "season_announcement" && (
                             <>
                               <select
                                 value={sourceLogos[img.id] ?? ""}

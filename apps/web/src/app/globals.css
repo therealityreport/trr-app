@@ -4,7 +4,7 @@
 /* CDN fonts defined in cdn-fonts.css — map CSS variables for Tailwind theme */
 :root {
   --font-hamburg: "Hamburg Serial";
-  --font-gloucester: "Gloucester OS MT Std";
+  --font-gloucester: "Gloucester";
   --font-plymouth-serial: "Plymouth Serial";
   --font-rude-slab: "Rude Slab Condensed";
   --font-goodall: "Goodall";

@@ -55,7 +55,8 @@
 
 /* Font fallbacks for better compatibility */
 .font-nyt-karnak-condensed {
-  font-family: 'NYTKarnak_Condensed', 'Times New Roman', Times, serif;
+  font-family: "Rude Slab Condensed", 'Times New Roman', Times, serif;
+  font-weight: 700;
 }
 
 .font-karnak-pro-book {

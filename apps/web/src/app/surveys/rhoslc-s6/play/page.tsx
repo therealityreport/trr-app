@@ -248,7 +248,7 @@ export default function RhoslcSurveyPlayPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-rose-50 px-4">
         <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow">
-          <h1 className="font-['NYTKarnak_Condensed'] text-3xl font-bold uppercase tracking-wide text-rose-700">
+          <h1 className="font-rude-slab text-3xl font-bold uppercase tracking-wide text-rose-700">
             Something went wrong
           </h1>
           <p className="mt-4 text-sm text-rose-500">{errorMessage}</p>
@@ -268,7 +268,7 @@ export default function RhoslcSurveyPlayPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-rose-50 px-4">
         <div className="w-full max-w-lg rounded-3xl bg-white p-10 text-center shadow-xl">
-          <h1 className="font-['NYTKarnak_Condensed'] text-4xl font-bold uppercase tracking-wide text-rose-800">
+          <h1 className="font-rude-slab text-4xl font-bold uppercase tracking-wide text-rose-800">
             Survey Closed
           </h1>
           <p className="mt-4 text-sm text-rose-600">
@@ -306,7 +306,7 @@ export default function RhoslcSurveyPlayPage() {
           >
             Back
           </button>
-          <h1 className="font-['NYTKarnak_Condensed'] text-4xl font-bold uppercase tracking-wide text-rose-900">
+          <h1 className="font-rude-slab text-4xl font-bold uppercase tracking-wide text-rose-900">
             Rank the RHOSLC Icons
           </h1>
           <p className="max-w-2xl text-sm leading-relaxed text-rose-700">
@@ -320,7 +320,7 @@ export default function RhoslcSurveyPlayPage() {
 
         <section ref={ratingCardRef} className="rounded-2xl border border-rose-100 bg-white p-6 shadow-sm">
           <div className="flex flex-col items-center gap-4 text-center">
-            <h2 className="font-['NYTKarnak_Condensed'] text-3xl font-bold uppercase tracking-wide text-rose-900">
+            <h2 className="font-rude-slab text-3xl font-bold uppercase tracking-wide text-rose-900">
               Rate the season
             </h2>
             <p className="max-w-2xl text-sm text-rose-700">Pick 1 to 5 snowflakes. Halves are allowed.</p>
@@ -374,7 +374,7 @@ export default function RhoslcSurveyPlayPage() {
               aria-modal="true"
               className="relative z-10 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
             >
-              <h2 className="font-['NYTKarnak_Condensed'] text-2xl font-bold text-rose-900">
+              <h2 className="font-rude-slab text-2xl font-bold text-rose-900">
                 Add a season rating?
               </h2>
               <p className="mt-2 text-sm text-rose-700">

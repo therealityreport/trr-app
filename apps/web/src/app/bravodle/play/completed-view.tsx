@@ -112,7 +112,7 @@ export function BravodleCompletedView({
           />
 
           <div className="space-y-1">
-            <h2 className="font-['NYTKarnak_Condensed'] text-3xl font-bold leading-none text-black">{headingText}</h2>
+            <h2 className="font-rude-slab text-3xl font-bold leading-none text-black">{headingText}</h2>
             <p className="text-xs font-bold uppercase tracking-[0.28em] text-black">Statistics</p>
           </div>
 

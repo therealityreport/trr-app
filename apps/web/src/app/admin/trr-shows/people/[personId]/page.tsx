@@ -11,7 +11,15 @@ import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/Ex
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
-import { mapPhotoToMetadata } from "@/lib/photo-metadata";
+import { mapPhotoToMetadata, resolveMetadataDimensions } from "@/lib/photo-metadata";
+import {
+  THUMBNAIL_CROP_LIMITS,
+  THUMBNAIL_DEFAULTS,
+  isThumbnailCropMode,
+  resolveThumbnailPresentation,
+  resolveThumbnailViewportRect,
+  type ThumbnailCrop,
+} from "@/lib/thumbnail-crop";
 import {
   readAdvancedFilters,
   writeAdvancedFilters,
@@ -26,6 +34,17 @@ import {
   applyFacebankSeedUpdateToLightbox,
   applyFacebankSeedUpdateToPhotos,
 } from "./facebank-seed-state";
+import {
+  applyThumbnailCropUpdateToLightbox,
+  applyThumbnailCropUpdateToPhotos,
+} from "./thumbnail-crop-state";
+import {
+  createSyncProgressTracker,
+  formatPersonRefreshPhaseLabel,
+  mapPersonRefreshStage,
+  PERSON_REFRESH_PHASES,
+  updateSyncProgressTracker,
+} from "./refresh-progress";
 
 // Types
 interface TrrPerson {
@@ -115,10 +134,14 @@ interface TrrPersonPhoto {
   link_id?: string | null;
   media_asset_id?: string | null;
   facebank_seed: boolean;
+  thumbnail_focus_x: number | null;
+  thumbnail_focus_y: number | null;
+  thumbnail_zoom: number | null;
+  thumbnail_crop_mode: "manual" | "auto" | null;
 }
 
 type GallerySortOption = "newest" | "oldest" | "source" | "season-asc" | "season-desc";
-type GalleryShowFilter = "all" | "this-show" | "other-shows";
+type GalleryShowFilter = "all" | "this-show" | "wwhl" | "other-shows";
 
 interface TrrPersonCredit {
   id: string;
@@ -189,7 +212,78 @@ const formatRefreshSummary = (summary: unknown): string | null => {
   return null;
 };
 
+const isTimeoutLikeError = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("aborted due to timeout") ||
+    normalized.includes("timed out") ||
+    normalized.includes("timeout")
+  );
+};
+
+const parseDimensionValue = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+};
+
+const resolvePhotoDimensions = (
+  photo: TrrPersonPhoto | null | undefined
+): { width: number | null; height: number | null } => {
+  if (!photo) return { width: null, height: null };
+  const metadata = photo.metadata as Record<string, unknown> | null;
+  const metaDims = resolveMetadataDimensions(metadata);
+  const metaWidth = parseDimensionValue(metaDims.width);
+  const metaHeight = parseDimensionValue(metaDims.height);
+  return {
+    width: parseDimensionValue(photo.width) ?? metaWidth,
+    height: parseDimensionValue(photo.height) ?? metaHeight,
+  };
+};
+
+const buildThumbnailCropPreview = (
+  photo: TrrPersonPhoto | null | undefined
+): {
+  focusX: number;
+  focusY: number;
+  zoom: number;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  aspectRatio: number;
+} | null => {
+  if (!photo) return null;
+  const dims = resolvePhotoDimensions(photo);
+  return {
+    focusX: photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x,
+    focusY: photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y,
+    zoom: photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom,
+    imageWidth: dims.width,
+    imageHeight: dims.height,
+    aspectRatio: 4 / 5,
+  };
+};
+
+type ThumbnailCropPreview = {
+  focusX: number;
+  focusY: number;
+  zoom: number;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  aspectRatio: number;
+};
+
+type ThumbnailCropOverlayUpdate = ThumbnailCropPreview & {
+  photoId: string;
+  nonce: number;
+};
+
 const SHOW_ACRONYM_RE = /\bRH[A-Z0-9]{2,6}\b/g;
+const WWHL_LABEL = "WWHL";
+const WWHL_NAME_RE = /watch\s+what\s+happens\s+live|wwhl/i;
 
 const buildShowAcronym = (name: string | null | undefined): string | null => {
   if (!name) return null;
@@ -210,6 +304,18 @@ const buildShowAcronym = (name: string | null | undefined): string | null => {
 const extractShowAcronyms = (text: string): Set<string> => {
   const matches = text.toUpperCase().match(SHOW_ACRONYM_RE) ?? [];
   return new Set(matches);
+};
+
+const isWwhlShowName = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  return WWHL_NAME_RE.test(value);
+};
+
+const isLikelyImdbEpisodeCaption = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  const text = value.trim();
+  if (!text) return false;
+  return /\bin\s+.+\(\d{4}\)\s*$/i.test(text);
 };
 
 // Profile photo with error handling
@@ -284,9 +390,14 @@ function RefreshProgressBar({
   const percent = hasProgressBar
     ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100))
     : 0;
-  const phaseLabel =
-    typeof phase === "string" && phase.trim()
-      ? phase.replace(/[_-]+/g, " ").trim()
+  const phaseLabel = formatPersonRefreshPhaseLabel(phase);
+  const countLabel =
+    safeCurrent !== null && safeTotal !== null
+      ? `${safeCurrent.toLocaleString()}/${safeTotal.toLocaleString()}`
+      : null;
+  const detailMessage =
+    typeof message === "string" && message.trim()
+      ? message.trim()
       : null;
 
   return (
@@ -294,7 +405,7 @@ function RefreshProgressBar({
       {(phaseLabel || message || hasCounts) && (
         <div className="mb-1 flex items-center justify-between gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
-            {message || phaseLabel || "Working..."}
+            {countLabel ? `${phaseLabel || "WORKING"} ${countLabel}` : phaseLabel || "WORKING"}
           </p>
           {hasProgressBar && safeCurrent !== null && safeTotal !== null && (
             <p className="text-[11px] tabular-nums text-zinc-500">
@@ -302,6 +413,9 @@ function RefreshProgressBar({
             </p>
           )}
         </div>
+      )}
+      {detailMessage && (
+        <p className="mb-1 text-[11px] text-zinc-500">{detailMessage}</p>
       )}
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
         {hasProgressBar ? (
@@ -334,12 +448,83 @@ function GalleryPhoto({
   const [hasError, setHasError] = useState(false);
   const [currentSrc, setCurrentSrc] = useState<string | null>(photo.hosted_url || photo.url || null);
   const triedFallbackRef = useRef(false);
+  const [naturalDimensions, setNaturalDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const presentation = useMemo(() => {
+    const persistedCrop: ThumbnailCrop | null =
+      isThumbnailCropMode(photo.thumbnail_crop_mode) &&
+      photo.thumbnail_focus_x !== null &&
+      photo.thumbnail_focus_y !== null &&
+      photo.thumbnail_zoom !== null
+        ? {
+            x: photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x,
+            y: photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y,
+            zoom: photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom,
+            mode: photo.thumbnail_crop_mode,
+          }
+        : null;
+
+    return resolveThumbnailPresentation({
+      width: photo.width,
+      height: photo.height,
+      peopleCount: inferPeopleCountForPersonPhoto(photo),
+      crop: persistedCrop,
+    });
+  }, [
+    photo,
+  ]);
 
   useEffect(() => {
     setHasError(false);
     triedFallbackRef.current = false;
     setCurrentSrc(photo.hosted_url || photo.url || null);
+    setNaturalDimensions(null);
   }, [photo.hosted_url, photo.url]);
+
+  const focusPoint = useMemo(() => {
+    const match = presentation.objectPosition.match(
+      /^(-?\d+(?:\.\d+)?)%\s+(-?\d+(?:\.\d+)?)%$/,
+    );
+    if (!match) {
+      return { x: THUMBNAIL_DEFAULTS.x, y: THUMBNAIL_DEFAULTS.y };
+    }
+    return {
+      x: Number.parseFloat(match[1]),
+      y: Number.parseFloat(match[2]),
+    };
+  }, [presentation.objectPosition]);
+
+  const imageDimensions = useMemo(() => {
+    const resolvedWidth = naturalDimensions?.width ?? parseDimensionValue(photo.width) ?? null;
+    const resolvedHeight = naturalDimensions?.height ?? parseDimensionValue(photo.height) ?? null;
+    return { width: resolvedWidth, height: resolvedHeight };
+  }, [photo.height, photo.width, naturalDimensions?.height, naturalDimensions?.width]);
+
+  const viewportRect = useMemo(() => {
+    return resolveThumbnailViewportRect({
+      imageWidth: imageDimensions.width,
+      imageHeight: imageDimensions.height,
+      focusX: focusPoint.x,
+      focusY: focusPoint.y,
+      zoom: presentation.zoom,
+      aspectRatio: 4 / 5,
+    });
+  }, [focusPoint.x, focusPoint.y, imageDimensions.height, imageDimensions.width, presentation.zoom]);
+
+  const exactViewportStyle = useMemo(() => {
+    if (!viewportRect) return null;
+    if (viewportRect.widthPct <= 0 || viewportRect.heightPct <= 0) return null;
+    const widthScale = 100 / viewportRect.widthPct;
+    const heightScale = 100 / viewportRect.heightPct;
+    return {
+      width: `${(widthScale * 100).toFixed(4)}%`,
+      height: `${(heightScale * 100).toFixed(4)}%`,
+      left: `${(-(viewportRect.leftPct / viewportRect.widthPct) * 100).toFixed(4)}%`,
+      top: `${(-(viewportRect.topPct / viewportRect.heightPct) * 100).toFixed(4)}%`,
+    };
+  }, [viewportRect]);
 
   const handleError = () => {
     if (!triedFallbackRef.current && photo.url && currentSrc !== photo.url) {
@@ -367,12 +552,33 @@ function GalleryPhoto({
       <Image
         src={currentSrc}
         alt={photo.caption || "Photo"}
-        fill
-        className="object-cover cursor-zoom-in transition hover:scale-105"
+        width={imageDimensions.width ?? 1200}
+        height={imageDimensions.height ?? 1200}
+        className={
+          exactViewportStyle
+            ? "absolute max-w-none cursor-zoom-in select-none"
+            : "absolute inset-0 h-full w-full object-cover cursor-zoom-in select-none transition-transform duration-200"
+        }
+        style={{
+          ...(exactViewportStyle ?? {
+            objectPosition: presentation.objectPosition,
+            transform: presentation.zoom === 1 ? undefined : `scale(${presentation.zoom})`,
+            transformOrigin: presentation.objectPosition,
+          }),
+        }}
         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 200px"
         unoptimized
         onClick={onClick}
         onError={handleError}
+        onLoad={(event) => {
+          const element = event.currentTarget as HTMLImageElement;
+          if (element.naturalWidth > 0 && element.naturalHeight > 0) {
+            setNaturalDimensions({
+              width: element.naturalWidth,
+              height: element.naturalHeight,
+            });
+          }
+        }}
       />
       {/* Cover badge */}
       {isCover && (
@@ -406,12 +612,18 @@ type TagPerson = { id?: string; name: string };
 
 function TagPeoplePanel({
   photo,
+  defaultPersonTag,
   getAuthHeaders,
   onTagsUpdated,
   onMirrorUpdated,
   onFacebankSeedUpdated,
+  onThumbnailCropUpdated,
+  onThumbnailCropPreviewChange,
+  externalThumbnailCropOverlayUpdate,
+  onRefreshAutoThumbnailCrop,
 }: {
   photo: TrrPersonPhoto;
+  defaultPersonTag: TagPerson | null;
   getAuthHeaders: () => Promise<{ Authorization: string }>;
   onTagsUpdated: (payload: {
     mediaAssetId: string | null;
@@ -430,6 +642,18 @@ function TagPeoplePanel({
     linkId: string;
     facebankSeed: boolean;
   }) => void;
+  onThumbnailCropUpdated: (payload: {
+    origin: "cast_photos" | "media_links";
+    photoId: string;
+    linkId: string | null;
+    thumbnailFocusX: number | null;
+    thumbnailFocusY: number | null;
+    thumbnailZoom: number | null;
+    thumbnailCropMode: "manual" | "auto" | null;
+  }) => void;
+  onThumbnailCropPreviewChange: (preview: ThumbnailCropPreview | null) => void;
+  externalThumbnailCropOverlayUpdate: ThumbnailCropOverlayUpdate | null;
+  onRefreshAutoThumbnailCrop: (photo: TrrPersonPhoto) => Promise<void>;
 }) {
   const isCastPhoto = photo.origin === "cast_photos";
   const isMediaLink = photo.origin === "media_links";
@@ -452,11 +676,42 @@ function TagPeoplePanel({
   const [mirrorError, setMirrorError] = useState<string | null>(null);
   const [facebankSeedSaving, setFacebankSeedSaving] = useState(false);
   const [facebankSeedError, setFacebankSeedError] = useState<string | null>(null);
+  const [cropX, setCropX] = useState<number>(
+    photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x
+  );
+  const [cropY, setCropY] = useState<number>(
+    photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y
+  );
+  const [cropZoom, setCropZoom] = useState<number>(
+    photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom
+  );
+  const [cropSaving, setCropSaving] = useState(false);
+  const [cropError, setCropError] = useState<string | null>(null);
+  const autoTagRequestedPhotoIdRef = useRef<string | null>(null);
   const currentPeopleCount = parsePeopleCount(photo.people_count);
+  const originalCropMode = photo.thumbnail_crop_mode;
+  const originalCropX = photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x;
+  const originalCropY = photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y;
+  const originalCropZoom = photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom;
+  const manualCropDirty =
+    originalCropMode !== "manual" ||
+    Math.abs(cropX - originalCropX) >= 1 ||
+    Math.abs(cropY - originalCropY) >= 1 ||
+    Math.abs(cropZoom - originalCropZoom) >= 0.01;
+  const clampCropZoom = useCallback((value: number) => {
+    return Math.min(
+      THUMBNAIL_CROP_LIMITS.zoomMax,
+      Math.max(THUMBNAIL_CROP_LIMITS.zoomMin, value),
+    );
+  }, []);
+  const clampCropPercent = useCallback((value: number) => {
+    return Math.min(100, Math.max(0, value));
+  }, []);
 
   useEffect(() => {
     const ids = photo.people_ids ?? [];
     const names = photo.people_names ?? [];
+    const fallbackTagName = defaultPersonTag?.name?.trim() || null;
     if (isEditable) {
       if (ids.length > 0) {
         setTaggedPeople(
@@ -464,20 +719,79 @@ function TagPeoplePanel({
         );
       } else if (names.length > 0) {
         setTaggedPeople(names.map((name) => ({ name })));
+      } else if (fallbackTagName) {
+        setTaggedPeople([{ id: defaultPersonTag?.id, name: fallbackTagName }]);
       } else {
         setTaggedPeople([]);
       }
       setReadonlyNames([]);
     } else {
       setTaggedPeople([]);
-      setReadonlyNames(names);
+      setReadonlyNames(names.length > 0 ? names : fallbackTagName ? [fallbackTagName] : []);
     }
     setPeopleCountInput(
       currentPeopleCount !== null && currentPeopleCount !== undefined
         ? String(currentPeopleCount)
         : ""
     );
-  }, [photo.id, photo.people_ids, photo.people_names, currentPeopleCount, isEditable]);
+  }, [
+    currentPeopleCount,
+    defaultPersonTag?.id,
+    defaultPersonTag?.name,
+    isEditable,
+    photo.id,
+    photo.people_ids,
+    photo.people_names,
+  ]);
+
+  useEffect(() => {
+    setCropX(photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x);
+    setCropY(photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y);
+    setCropZoom(clampCropZoom(photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom));
+    setCropError(null);
+  }, [
+    clampCropZoom,
+    photo.id,
+    photo.thumbnail_crop_mode,
+    photo.thumbnail_focus_x,
+    photo.thumbnail_focus_y,
+    photo.thumbnail_zoom,
+  ]);
+
+  useEffect(() => {
+    if (!externalThumbnailCropOverlayUpdate) return;
+    if (externalThumbnailCropOverlayUpdate.photoId !== photo.id) return;
+    setCropX(clampCropPercent(externalThumbnailCropOverlayUpdate.focusX));
+    setCropY(clampCropPercent(externalThumbnailCropOverlayUpdate.focusY));
+    setCropZoom(clampCropZoom(externalThumbnailCropOverlayUpdate.zoom));
+  }, [
+    clampCropPercent,
+    clampCropZoom,
+    externalThumbnailCropOverlayUpdate,
+    photo.id,
+  ]);
+
+  useEffect(() => {
+    const dims = resolvePhotoDimensions(photo);
+    onThumbnailCropPreviewChange({
+      focusX: cropX,
+      focusY: cropY,
+      zoom: cropZoom,
+      imageWidth: dims.width,
+      imageHeight: dims.height,
+      aspectRatio: 4 / 5,
+    });
+  }, [
+    cropX,
+    cropY,
+    cropZoom,
+    photo,
+    onThumbnailCropPreviewChange,
+  ]);
+
+  useEffect(() => {
+    return () => onThumbnailCropPreviewChange(null);
+  }, [onThumbnailCropPreviewChange]);
 
   useEffect(() => {
     if (!isEditable) return;
@@ -535,12 +849,36 @@ function TagPeoplePanel({
         if (!response.ok) {
           throw new Error(data.error || data.detail || "Failed to update tags");
         }
-        const peopleNames = Array.isArray(data.people_names)
+        const normalizedNextPeopleNames = [
+          ...new Set(
+            nextPeople
+              .map((person) => person.name.trim())
+              .filter((name) => name.length > 0),
+          ),
+        ];
+        const normalizedNextPeopleIds = [
+          ...new Set(
+            nextPeople
+              .map((person) => person.id?.trim() ?? "")
+              .filter((id) => id.length > 0),
+          ),
+        ];
+        const responsePeopleNames = Array.isArray(data.people_names)
           ? (data.people_names as string[])
-          : nextPeople.map((p) => p.name);
-        const peopleIds = Array.isArray(data.people_ids)
+          : [];
+        const peopleNames = Array.isArray(data.people_names)
+          ? normalizedNextPeopleNames
+          : normalizedNextPeopleNames.length > 0
+            ? normalizedNextPeopleNames
+            : responsePeopleNames;
+        const responsePeopleIds = Array.isArray(data.people_ids)
           ? (data.people_ids as string[])
-          : nextPeople.map((p) => p.id).filter(Boolean) as string[];
+          : [];
+        const peopleIds = Array.isArray(data.people_ids)
+          ? normalizedNextPeopleIds
+          : normalizedNextPeopleIds.length > 0
+            ? normalizedNextPeopleIds
+            : responsePeopleIds;
         const peopleCountFromResponse = parsePeopleCount(data.people_count);
         const peopleCount =
           peopleCountFromResponse !== null
@@ -587,6 +925,28 @@ function TagPeoplePanel({
     ]
   );
 
+  useEffect(() => {
+    if (!isEditable) return;
+    const fallbackTagName = defaultPersonTag?.name?.trim();
+    if (!fallbackTagName) return;
+    const hasStoredTags =
+      (photo.people_ids?.length ?? 0) > 0 || (photo.people_names?.length ?? 0) > 0;
+    if (hasStoredTags) return;
+    if (autoTagRequestedPhotoIdRef.current === photo.id) return;
+    autoTagRequestedPhotoIdRef.current = photo.id;
+    const next = [{ id: defaultPersonTag?.id, name: fallbackTagName }];
+    setTaggedPeople(next);
+    void updateTags(next);
+  }, [
+    defaultPersonTag?.id,
+    defaultPersonTag?.name,
+    isEditable,
+    photo.id,
+    photo.people_ids,
+    photo.people_names,
+    updateTags,
+  ]);
+
   const handleAddPerson = (person: TrrPerson) => {
     if (!person.id || !person.full_name) return;
     if (taggedPeople.some((p) => p.id === person.id)) return;
@@ -618,8 +978,11 @@ function TagPeoplePanel({
     void updateTags(next);
   };
 
-  const displayTags =
-    taggedPeople.length > 0 ? taggedPeople.map((p) => p.name) : readonlyNames;
+  const displayTags = useMemo(() => {
+    const names =
+      taggedPeople.length > 0 ? taggedPeople.map((person) => person.name) : readonlyNames;
+    return [...new Set(names.filter((name) => typeof name === "string" && name.trim().length > 0))];
+  }, [readonlyNames, taggedPeople]);
 
   const normalizeCountInput = (value: string) => {
     const raw = value.trim();
@@ -714,100 +1077,81 @@ function TagPeoplePanel({
     if (!canRecount) return;
     setRecounting(true);
     setRecountError(null);
+    const runRecount = async () => {
+      const headers = await getAuthHeaders();
+      const endpoint = isCastPhoto
+        ? `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`
+        : `/api/admin/trr-api/media-assets/${photo.media_asset_id}/auto-count`;
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ force: false }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        const message =
+          data.error && data.detail
+            ? `${data.error}: ${data.detail}`
+            : data.error || data.detail || "Failed to auto-count people";
+        throw new Error(message);
+      }
+      return data;
+    };
+
+    const applyRecount = (data: Record<string, unknown>) => {
+      const peopleCount = parsePeopleCount(data.people_count);
+      const peopleCountSource =
+        (data.people_count_source as "auto" | "manual" | null) ?? "auto";
+      setPeopleCountInput(
+        peopleCount !== null && peopleCount !== undefined
+          ? String(peopleCount)
+          : ""
+      );
+      onTagsUpdated({
+        mediaAssetId: photo.media_asset_id ?? null,
+        castPhotoId: isCastPhoto ? photo.id : null,
+        peopleNames: photo.people_names ?? [],
+        peopleIds: photo.people_ids ?? [],
+        peopleCount,
+        peopleCountSource,
+      });
+    };
+
     try {
-      const runRecount = async () => {
-        const headers = await getAuthHeaders();
-        const endpoint = isCastPhoto
-          ? `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`
-          : `/api/admin/trr-api/media-assets/${photo.media_asset_id}/auto-count`;
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ force: false }),
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          const message =
-            data.error && data.detail
-              ? `${data.error}: ${data.detail}`
-              : data.error || data.detail || "Failed to auto-count people";
-          throw new Error(message);
-        }
-        return data;
-      };
-
-      const applyRecount = (data: Record<string, unknown>) => {
-        const peopleCount = parsePeopleCount(data.people_count);
-        const peopleCountSource =
-          (data.people_count_source as "auto" | "manual" | null) ?? "auto";
-        setPeopleCountInput(
-          peopleCount !== null && peopleCount !== undefined
-            ? String(peopleCount)
-            : ""
-        );
-        onTagsUpdated({
-          mediaAssetId: photo.media_asset_id ?? null,
-          castPhotoId: isCastPhoto ? photo.id : null,
-          peopleNames: photo.people_names ?? [],
-          peopleIds: photo.people_ids ?? [],
-          peopleCount,
-          peopleCountSource,
-        });
-      };
-
       const data = await runRecount();
       applyRecount(data);
     } catch (err) {
+      const initialErrorMessage =
+        err instanceof Error ? err.message : "Failed to auto-count people";
+      let mirrorFallbackError: string | null = null;
       try {
         setMirroring(true);
         await mirrorForRecount();
-        const retryData = await (async () => {
-          const headers = await getAuthHeaders();
-          const endpoint = isCastPhoto
-            ? `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`
-            : `/api/admin/trr-api/media-assets/${photo.media_asset_id}/auto-count`;
-          const response = await fetch(endpoint, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ force: false }),
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            const message =
-              data.error && data.detail
-                ? `${data.error}: ${data.detail}`
-                : data.error || data.detail || "Failed to auto-count people";
-            throw new Error(message);
-          }
-          return data;
-        })();
-
-        const peopleCount = parsePeopleCount(retryData.people_count);
-        const peopleCountSource =
-          (retryData.people_count_source as "auto" | "manual" | null) ?? "auto";
-        setPeopleCountInput(
-          peopleCount !== null && peopleCount !== undefined
-            ? String(peopleCount)
-            : ""
-        );
-        onTagsUpdated({
-          mediaAssetId: photo.media_asset_id ?? null,
-          castPhotoId: isCastPhoto ? photo.id : null,
-          peopleNames: photo.people_names ?? [],
-          peopleIds: photo.people_ids ?? [],
-          peopleCount,
-          peopleCountSource,
-        });
-        setRecountError(null);
       } catch (mirrorErr) {
-        setRecountError(
-          mirrorErr instanceof Error ? mirrorErr.message : "Failed to auto-count people"
-        );
+        mirrorFallbackError =
+          mirrorErr instanceof Error ? mirrorErr.message : "Mirror fallback failed";
       } finally {
         setMirroring(false);
       }
-      if (!canRecount) {
-        setRecountError(err instanceof Error ? err.message : "Failed to auto-count people");
+
+      try {
+        const retryData = await runRecount();
+        applyRecount(retryData);
+        setRecountError(null);
+      } catch (retryErr) {
+        const retryErrorMessage =
+          retryErr instanceof Error ? retryErr.message : "Failed to auto-count people";
+        if (mirrorFallbackError) {
+          setRecountError(
+            `${retryErrorMessage} | Mirror fallback failed: ${mirrorFallbackError}`
+          );
+          return;
+        }
+        if (initialErrorMessage && initialErrorMessage !== retryErrorMessage) {
+          setRecountError(`${retryErrorMessage} | Initial error: ${initialErrorMessage}`);
+          return;
+        }
+        setRecountError(retryErrorMessage);
       }
     } finally {
       setRecounting(false);
@@ -887,6 +1231,125 @@ function TagPeoplePanel({
       );
     } finally {
       setFacebankSeedSaving(false);
+    }
+  };
+
+  const persistThumbnailCrop = useCallback(
+    async (crop: ThumbnailCrop | null) => {
+      if (isMediaLink && !photo.link_id) {
+        throw new Error("Cannot update crop: media link id is missing");
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/people/${photo.person_id}/photos/${photo.id}/thumbnail-crop`,
+        {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            origin: photo.origin,
+            link_id: photo.link_id ?? undefined,
+            crop,
+          }),
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data.error && data.detail
+            ? `${data.error}: ${data.detail}`
+            : data.error || data.detail || "Failed to update thumbnail crop";
+        throw new Error(message);
+      }
+
+      const nextPhotoId =
+        typeof data.photo_id === "string" && data.photo_id.trim().length > 0
+          ? data.photo_id
+          : photo.id;
+      const nextLinkId =
+        typeof data.link_id === "string" && data.link_id.trim().length > 0
+          ? data.link_id
+          : photo.link_id ?? null;
+      const nextOrigin =
+        data.origin === "cast_photos" || data.origin === "media_links"
+          ? data.origin
+          : photo.origin;
+      const nextMode =
+        data.thumbnail_crop_mode === "manual" || data.thumbnail_crop_mode === "auto"
+          ? data.thumbnail_crop_mode
+          : null;
+      const nextX =
+        typeof data.thumbnail_focus_x === "number" && Number.isFinite(data.thumbnail_focus_x)
+          ? data.thumbnail_focus_x
+          : null;
+      const nextY =
+        typeof data.thumbnail_focus_y === "number" && Number.isFinite(data.thumbnail_focus_y)
+          ? data.thumbnail_focus_y
+          : null;
+      const nextZoom =
+        typeof data.thumbnail_zoom === "number" && Number.isFinite(data.thumbnail_zoom)
+          ? data.thumbnail_zoom
+          : null;
+
+      onThumbnailCropUpdated({
+        origin: nextOrigin,
+        photoId: nextPhotoId,
+        linkId: nextLinkId,
+        thumbnailFocusX: nextX,
+        thumbnailFocusY: nextY,
+        thumbnailZoom: nextZoom,
+        thumbnailCropMode: nextMode,
+      });
+
+      if (nextMode === "manual") {
+        setCropX(nextX ?? THUMBNAIL_DEFAULTS.x);
+        setCropY(nextY ?? THUMBNAIL_DEFAULTS.y);
+        setCropZoom(clampCropZoom(nextZoom ?? THUMBNAIL_DEFAULTS.zoom));
+      } else {
+        setCropX(THUMBNAIL_DEFAULTS.x);
+        setCropY(THUMBNAIL_DEFAULTS.y);
+        setCropZoom(THUMBNAIL_DEFAULTS.zoom);
+      }
+    },
+    [
+      clampCropZoom,
+      getAuthHeaders,
+      isMediaLink,
+      onThumbnailCropUpdated,
+      photo.id,
+      photo.link_id,
+      photo.origin,
+      photo.person_id,
+    ],
+  );
+
+  const handleSaveManualThumbnailCrop = async () => {
+    setCropSaving(true);
+    setCropError(null);
+    try {
+      await persistThumbnailCrop({
+        x: Math.round(cropX),
+        y: Math.round(cropY),
+        zoom: Number(cropZoom.toFixed(2)),
+        mode: "manual",
+      });
+    } catch (err) {
+      setCropError(err instanceof Error ? err.message : "Failed to update thumbnail crop");
+    } finally {
+      setCropSaving(false);
+    }
+  };
+
+  const handleResetThumbnailCrop = async () => {
+    setCropSaving(true);
+    setCropError(null);
+    try {
+      await persistThumbnailCrop(null);
+      await onRefreshAutoThumbnailCrop(photo);
+    } catch (err) {
+      setCropError(err instanceof Error ? err.message : "Failed to refresh auto thumbnail crop");
+    } finally {
+      setCropSaving(false);
     }
   };
 
@@ -1048,6 +1511,75 @@ function TagPeoplePanel({
         )}
       </div>
 
+      <div className="mt-4">
+        <span className="tracking-widest text-[10px] uppercase text-white/50">
+          Thumbnail Crop
+        </span>
+        <p className="mt-1 text-xs text-white/60">
+          Mode: {photo.thumbnail_crop_mode === "manual" ? "Manual" : "Auto"}
+        </p>
+        <div className="mt-2 space-y-2">
+          <label className="block text-xs text-white/70">
+            Horizontal ({Math.round(cropX)}%)
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={cropX}
+              onChange={(e) => setCropX(Number(e.target.value))}
+              className="mt-1 w-full"
+              disabled={cropSaving}
+            />
+          </label>
+          <label className="block text-xs text-white/70">
+            Vertical ({Math.round(cropY)}%)
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={cropY}
+              onChange={(e) => setCropY(Number(e.target.value))}
+              className="mt-1 w-full"
+              disabled={cropSaving}
+            />
+          </label>
+          <label className="block text-xs text-white/70">
+            Zoom ({cropZoom.toFixed(2)}x)
+            <input
+              type="range"
+              min={1}
+              max={THUMBNAIL_CROP_LIMITS.zoomMax}
+              step={0.01}
+              value={cropZoom}
+              onChange={(e) => setCropZoom(clampCropZoom(Number(e.target.value)))}
+              className="mt-1 w-full"
+              disabled={cropSaving}
+            />
+          </label>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSaveManualThumbnailCrop}
+            disabled={cropSaving || !manualCropDirty}
+            className="rounded-md bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {cropSaving ? "Saving..." : "Save Manual Crop"}
+          </button>
+          <button
+            type="button"
+            onClick={handleResetThumbnailCrop}
+            disabled={cropSaving}
+            className="rounded-md bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {cropSaving ? "Refreshing..." : "Refresh Auto Crop"}
+          </button>
+        </div>
+        {cropError && <p className="mt-2 text-xs text-red-300">{cropError}</p>}
+      </div>
+
       {canToggleFacebankSeed && (
         <div className="mt-4">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -1121,6 +1653,9 @@ export default function PersonProfilePage() {
     photo: TrrPersonPhoto;
     index: number;
   } | null>(null);
+  const [thumbnailCropPreview, setThumbnailCropPreview] = useState<ThumbnailCropPreview | null>(null);
+  const [thumbnailCropOverlayUpdate, setThumbnailCropOverlayUpdate] =
+    useState<ThumbnailCropOverlayUpdate | null>(null);
   const lightboxTriggerRef = useRef<HTMLElement | null>(null);
 
   // Cover photo state
@@ -1134,6 +1669,7 @@ export default function PersonProfilePage() {
 
   // Refresh images state
   const [refreshingImages, setRefreshingImages] = useState(false);
+  const [reprocessingImages, setReprocessingImages] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState<{
     current?: number | null;
     total?: number | null;
@@ -1168,6 +1704,7 @@ export default function PersonProfilePage() {
   const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>(
     showIdParam ? "this-show" : "all"
   );
+  const [selectedOtherShowKey, setSelectedOtherShowKey] = useState<string>("all");
   const [seasonPremiereMap, setSeasonPremiereMap] = useState<Record<number, string>>({});
 
   useEffect(() => {
@@ -1187,22 +1724,48 @@ export default function PersonProfilePage() {
     () => buildShowAcronym(activeShowName),
     [activeShowName]
   );
-  const otherShowNames = useMemo(
-    () =>
-      credits
-        .filter((credit) => credit.show_id !== showIdParam)
-        .map((credit) => credit.show_name)
-        .filter((name): name is string => Boolean(name)),
-    [credits, showIdParam]
+  const activeShowFilterLabel = activeShowAcronym ?? activeShowName ?? "Current Show";
+  const otherShowOptions = useMemo(() => {
+    const byKey = new Map<
+      string,
+      { key: string; showId: string | null; showName: string; acronym: string | null }
+    >();
+    for (const credit of credits) {
+      if (credit.show_id === showIdParam) continue;
+      const showName = credit.show_name?.trim() ?? "";
+      if (!showName || isWwhlShowName(showName)) continue;
+      const key = credit.show_id ? `id:${credit.show_id}` : `name:${showName.toLowerCase()}`;
+      if (byKey.has(key)) continue;
+      byKey.set(key, {
+        key,
+        showId: credit.show_id ?? null,
+        showName,
+        acronym: buildShowAcronym(showName),
+      });
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.showName.localeCompare(b.showName));
+  }, [credits, showIdParam]);
+  const otherShowNameMatches = useMemo(
+    () => otherShowOptions.map((option) => option.showName.toLowerCase()),
+    [otherShowOptions]
   );
-  const otherShowAcronyms = useMemo(() => {
+  const otherShowAcronymMatches = useMemo(() => {
     const acronyms = new Set<string>();
-    for (const name of otherShowNames) {
-      const acronym = buildShowAcronym(name);
-      if (acronym) acronyms.add(acronym.toUpperCase());
+    for (const option of otherShowOptions) {
+      if (option.acronym) acronyms.add(option.acronym.toUpperCase());
     }
     return acronyms;
-  }, [otherShowNames]);
+  }, [otherShowOptions]);
+  const selectedOtherShow = useMemo(
+    () => otherShowOptions.find((option) => option.key === selectedOtherShowKey) ?? null,
+    [otherShowOptions, selectedOtherShowKey]
+  );
+
+  useEffect(() => {
+    if (selectedOtherShowKey === "all") return;
+    if (otherShowOptions.some((option) => option.key === selectedOtherShowKey)) return;
+    setSelectedOtherShowKey("all");
+  }, [otherShowOptions, selectedOtherShowKey]);
 
   // Compute unique sources from photos
   const uniqueSources = useMemo(() => {
@@ -1264,25 +1827,65 @@ export default function PersonProfilePage() {
         const matchesShowName = showNameLower ? textLower.includes(showNameLower) : false;
         const acronyms = extractShowAcronyms(text);
         const matchesShowAcronym = showAcronym ? acronyms.has(showAcronym) : false;
-        const metadataShowName =
-          typeof metadata.show_name === "string" ? metadata.show_name.toLowerCase() : null;
+        const metadataShowNameRaw =
+          typeof metadata.show_name === "string" ? metadata.show_name : null;
+        const metadataShowName = metadataShowNameRaw?.toLowerCase() ?? null;
+        const metadataShowAcronym = buildShowAcronym(metadataShowNameRaw)?.toUpperCase() ?? null;
+        const matchesWwhl = isWwhlShowName(text) || isWwhlShowName(metadataShowNameRaw) || acronyms.has(WWHL_LABEL);
         const metadataMatchesThisShow =
           Boolean(metadataShowName && showNameLower && metadataShowName.includes(showNameLower));
         const metadataMatchesOtherShow =
-          Boolean(metadataShowName && showNameLower && !metadataShowName.includes(showNameLower));
-        const matchesOtherShowName = otherShowNames.some((name) =>
+          Boolean(
+            metadataShowName &&
+              showNameLower &&
+              !metadataShowName.includes(showNameLower) &&
+              !isWwhlShowName(metadataShowNameRaw)
+          );
+        const matchesOtherShowName = otherShowNameMatches.some((name) =>
           textLower.includes(name.toLowerCase())
         );
         const matchesOtherShowAcronym = Array.from(acronyms).some((acro) =>
-          otherShowAcronyms.has(acro)
+          otherShowAcronymMatches.has(acro)
         );
+        const isImdbSource = (photo.source ?? "").toLowerCase() === "imdb";
+        const imdbEpisodeTitleFallbackForThisShow =
+          isImdbSource &&
+          !metaShowId &&
+          !matchesWwhl &&
+          !matchesOtherShowName &&
+          !matchesOtherShowAcronym &&
+          !metadataMatchesOtherShow &&
+          isLikelyImdbEpisodeCaption(photo.caption);
 
         if (galleryShowFilter === "this-show") {
-          return metaShowIdMatches || matchesShowName || matchesShowAcronym || metadataMatchesThisShow;
+          return (
+            metaShowIdMatches ||
+            matchesShowName ||
+            matchesShowAcronym ||
+            metadataMatchesThisShow ||
+            imdbEpisodeTitleFallbackForThisShow
+          );
+        }
+        if (galleryShowFilter === "wwhl") {
+          return matchesWwhl;
         }
         if (galleryShowFilter === "other-shows") {
+          if (selectedOtherShow) {
+            const selectedOtherName = selectedOtherShow.showName.toLowerCase();
+            const selectedOtherAcronym = selectedOtherShow.acronym?.toUpperCase() ?? null;
+            const matchesSelectedById = Boolean(
+              selectedOtherShow.showId && metaShowId === selectedOtherShow.showId
+            );
+            const matchesSelectedByName =
+              textLower.includes(selectedOtherName) ||
+              Boolean(metadataShowName?.includes(selectedOtherName));
+            const matchesSelectedByAcronym = selectedOtherAcronym
+              ? acronyms.has(selectedOtherAcronym) || metadataShowAcronym === selectedOtherAcronym
+              : false;
+            return matchesSelectedById || matchesSelectedByName || matchesSelectedByAcronym;
+          }
           return (
-            (!metaShowIdMatches && Boolean(metaShowId)) ||
+            ((!metaShowIdMatches && Boolean(metaShowId)) && !matchesWwhl) ||
             matchesOtherShowName ||
             matchesOtherShowAcronym ||
             metadataMatchesOtherShow
@@ -1390,8 +1993,9 @@ export default function PersonProfilePage() {
     showIdParam,
     activeShowName,
     activeShowAcronym,
-    otherShowNames,
-    otherShowAcronyms,
+    otherShowNameMatches,
+    otherShowAcronymMatches,
+    selectedOtherShow,
     getPhotoSortDate,
   ]);
 
@@ -1515,7 +2119,7 @@ export default function PersonProfilePage() {
   }, [personId, getAuthHeaders]);
 
   // Fetch photos
-  const fetchPhotos = useCallback(async () => {
+  const fetchPhotos = useCallback(async (): Promise<TrrPersonPhoto[]> => {
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
@@ -1530,11 +2134,16 @@ export default function PersonProfilePage() {
             : data.error || "Failed to fetch photos";
         throw new Error(message);
       }
-      setPhotos(data.photos);
+      const fetchedPhotos = Array.isArray(data.photos)
+        ? (data.photos as TrrPersonPhoto[])
+        : [];
+      setPhotos(fetchedPhotos);
       setPhotosError(null);
+      return fetchedPhotos;
     } catch (err) {
       console.error("Failed to fetch photos:", err);
       setPhotosError(err instanceof Error ? err.message : "Failed to fetch photos");
+      return [];
     }
   }, [personId, getAuthHeaders]);
 
@@ -1778,18 +2387,162 @@ export default function PersonProfilePage() {
     []
   );
 
+  const runPhotoMetadataJob = useCallback(
+    async (endpoint: string) => {
+      const headers = await getAuthHeaders();
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorText =
+          typeof data.error === "string" ? data.error : "Job failed";
+        const detailText = typeof data.detail === "string" ? data.detail : null;
+        throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+      }
+      return data;
+    },
+    [getAuthHeaders]
+  );
+
+  const handleRefreshLightboxPhotoMetadata = useCallback(
+    async (photo: TrrPersonPhoto) => {
+      const errors: string[] = [];
+
+      if (photo.origin === "media_links") {
+        if (!photo.media_asset_id) {
+          throw new Error("Cannot refresh jobs: media asset id is missing");
+        }
+        const jobs = [
+          {
+            label: "People count",
+            endpoint: `/api/admin/trr-api/media-assets/${photo.media_asset_id}/auto-count`,
+          },
+          {
+            label: "Text overlay",
+            endpoint: `/api/admin/trr-api/media-assets/${photo.media_asset_id}/detect-text-overlay`,
+          },
+        ];
+        for (const job of jobs) {
+          try {
+            await runPhotoMetadataJob(job.endpoint);
+          } catch (error) {
+            errors.push(
+              `${job.label}: ${error instanceof Error ? error.message : "failed"}`
+            );
+          }
+        }
+      } else {
+        const jobs = [
+          {
+            label: "People count",
+            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`,
+          },
+          {
+            label: "Text overlay",
+            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`,
+          },
+        ];
+        for (const job of jobs) {
+          try {
+            await runPhotoMetadataJob(job.endpoint);
+          } catch (error) {
+            errors.push(
+              `${job.label}: ${error instanceof Error ? error.message : "failed"}`
+            );
+          }
+        }
+      }
+
+      const refreshedPhotos = await fetchPhotos();
+      const refreshedPhoto = refreshedPhotos.find((candidate) => candidate.id === photo.id) ?? null;
+      if (refreshedPhoto) {
+        setThumbnailCropPreview(buildThumbnailCropPreview(refreshedPhoto));
+      }
+      setLightboxPhoto((prev) => {
+        if (!prev || !refreshedPhoto) return prev;
+        if (prev.photo.id !== refreshedPhoto.id) return prev;
+        return { ...prev, photo: refreshedPhoto };
+      });
+
+      if (errors.length > 0) {
+        throw new Error(errors.join(" | "));
+      }
+
+      setRefreshNotice("Photo metadata refreshed.");
+      setRefreshError(null);
+    },
+    [fetchPhotos, runPhotoMetadataJob]
+  );
+
+  const handleRefreshAutoThumbnailCrop = useCallback(
+    async (photo: TrrPersonPhoto) => {
+      const endpoint =
+        photo.origin === "media_links"
+          ? photo.media_asset_id
+            ? `/api/admin/trr-api/media-assets/${photo.media_asset_id}/auto-count`
+            : null
+          : `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`;
+
+      if (!endpoint) {
+        throw new Error("Cannot refresh auto crop: media asset id is missing");
+      }
+
+      await runPhotoMetadataJob(endpoint);
+
+      const refreshedPhotos = await fetchPhotos();
+      const refreshedPhoto = refreshedPhotos.find((candidate) => candidate.id === photo.id) ?? null;
+      if (!refreshedPhoto) return;
+
+      setThumbnailCropPreview(buildThumbnailCropPreview(refreshedPhoto));
+      setLightboxPhoto((prev) => {
+        if (!prev) return prev;
+        if (prev.photo.id !== refreshedPhoto.id) return prev;
+        return { ...prev, photo: refreshedPhoto };
+      });
+      setRefreshNotice("Auto thumbnail crop refreshed.");
+      setRefreshError(null);
+    },
+    [fetchPhotos, runPhotoMetadataJob],
+  );
+
+  const handleThumbnailCropUpdated = useCallback(
+    (payload: {
+      origin: "cast_photos" | "media_links";
+      photoId: string;
+      linkId: string | null;
+      thumbnailFocusX: number | null;
+      thumbnailFocusY: number | null;
+      thumbnailZoom: number | null;
+      thumbnailCropMode: "manual" | "auto" | null;
+    }) => {
+      setPhotos((prev) => applyThumbnailCropUpdateToPhotos(prev, payload));
+      setLightboxPhoto((prev) => applyThumbnailCropUpdateToLightbox(prev, payload));
+    },
+    []
+  );
+
   const handleRefreshImages = useCallback(async () => {
     if (refreshingImages) return;
 
     setRefreshingImages(true);
-    setRefreshProgress(null);
+    setRefreshProgress({
+      phase: PERSON_REFRESH_PHASES.syncing,
+      message: "Syncing person images...",
+      current: null,
+      total: null,
+    });
     setRefreshNotice(null);
     setRefreshError(null);
     setPhotosError(null);
 
     try {
       let streamFailed = false;
+      let streamErrorMessage: string | null = null;
       try {
+        const syncProgressTracker = createSyncProgressTracker();
         const headers = await getAuthHeaders();
         const response = await fetch(
           `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
@@ -1853,12 +2606,13 @@ export default function PersonProfilePage() {
             }
 
             if (eventType === "progress" && payload && typeof payload === "object") {
-              const phase =
+              const rawPhase =
                 typeof (payload as { phase?: unknown }).phase === "string"
                   ? ((payload as { phase: string }).phase)
                   : typeof (payload as { stage?: unknown }).stage === "string"
                     ? ((payload as { stage: string }).stage)
                     : null;
+              const mappedPhase = mapPersonRefreshStage(rawPhase);
               const message =
                 typeof (payload as { message?: unknown }).message === "string"
                   ? ((payload as { message: string }).message)
@@ -1877,10 +2631,26 @@ export default function PersonProfilePage() {
                   : typeof totalRaw === "string"
                     ? Number.parseInt(totalRaw, 10)
                     : null;
+              const numericCurrent =
+                typeof current === "number" && Number.isFinite(current) ? current : null;
+              const numericTotal =
+                typeof total === "number" && Number.isFinite(total) ? total : null;
+              const syncCounts =
+                mappedPhase === PERSON_REFRESH_PHASES.syncing
+                  ? updateSyncProgressTracker(syncProgressTracker, {
+                      rawStage:
+                        typeof (payload as { stage?: unknown }).stage === "string"
+                          ? ((payload as { stage: string }).stage)
+                          : rawPhase,
+                      message,
+                      current: numericCurrent,
+                      total: numericTotal,
+                    })
+                  : null;
               setRefreshProgress({
-                current: typeof current === "number" && Number.isFinite(current) ? current : null,
-                total: typeof total === "number" && Number.isFinite(total) ? total : null,
-                phase,
+                current: syncCounts?.current ?? numericCurrent,
+                total: syncCounts?.total ?? numericTotal,
+                phase: mappedPhase ?? rawPhase,
                 message,
               });
             } else if (eventType === "complete") {
@@ -1912,17 +2682,45 @@ export default function PersonProfilePage() {
         }
       } catch (streamErr) {
         streamFailed = true;
+        streamErrorMessage =
+          streamErr instanceof Error ? streamErr.message : String(streamErr);
         console.warn("Refresh stream failed, falling back to non-stream.", streamErr);
       }
 
       if (streamFailed) {
-        const result = await refreshPersonImages({ skip_mirror: false, force_mirror: true });
-        const summary =
-          result && typeof result === "object" && "summary" in result
-            ? (result as { summary?: unknown }).summary
-            : result;
-        const summaryText = formatRefreshSummary(summary);
-        setRefreshNotice(summaryText || "Images refreshed.");
+        setRefreshProgress({
+          phase: PERSON_REFRESH_PHASES.syncing,
+          message: "Syncing person images...",
+          current: null,
+          total: null,
+        });
+        try {
+          const result = await refreshPersonImages({ skip_mirror: false, force_mirror: true });
+          const summary =
+            result && typeof result === "object" && "summary" in result
+              ? (result as { summary?: unknown }).summary
+              : result;
+          const summaryText = formatRefreshSummary(summary);
+          setRefreshNotice(summaryText || "Images refreshed.");
+        } catch (fallbackErr) {
+          const fallbackErrorMessage =
+            fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          if (isTimeoutLikeError(fallbackErrorMessage) || isTimeoutLikeError(streamErrorMessage)) {
+            setRefreshError(
+              `Refresh is taking longer than expected. ${fallbackErrorMessage}`
+            );
+            setRefreshNotice(
+              "Reloading current data now. Backend refresh may still be running."
+            );
+          } else {
+            const streamContext = streamErrorMessage
+              ? `Stream refresh failed (${streamErrorMessage}). `
+              : "";
+            throw new Error(
+              `${streamContext}Fallback refresh failed (${fallbackErrorMessage}).`
+            );
+          }
+        }
       }
 
       await Promise.all([
@@ -1943,6 +2741,7 @@ export default function PersonProfilePage() {
     }
   }, [
     refreshingImages,
+    reprocessingImages,
     refreshPersonImages,
     fetchPerson,
     fetchCredits,
@@ -1953,6 +2752,156 @@ export default function PersonProfilePage() {
     personId,
     showIdParam,
     activeShowName,
+  ]);
+
+  const handleReprocessImages = useCallback(async () => {
+    if (refreshingImages || reprocessingImages) return;
+
+    setReprocessingImages(true);
+    setRefreshProgress({
+      phase: PERSON_REFRESH_PHASES.counting,
+      message: "Reprocessing existing images...",
+      current: null,
+      total: null,
+    });
+    setRefreshNotice(null);
+    setRefreshError(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: "{}",
+        }
+      );
+
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => ({}));
+        const message =
+          data.error && data.detail
+            ? `${data.error}: ${data.detail}`
+            : data.error || "Failed to reprocess images";
+        throw new Error(message);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let hadError = false;
+      let sawComplete = false;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n");
+
+        let boundaryIndex = buffer.indexOf("\n\n");
+        while (boundaryIndex !== -1) {
+          const rawEvent = buffer.slice(0, boundaryIndex);
+          buffer = buffer.slice(boundaryIndex + 2);
+
+          const lines = rawEvent.split("\n").filter(Boolean);
+          let eventType = "message";
+          const dataLines: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).trim());
+            }
+          }
+
+          const dataStr = dataLines.join("\n");
+          let payload: Record<string, unknown> | string = dataStr;
+          try {
+            payload = JSON.parse(dataStr) as Record<string, unknown>;
+          } catch {
+            payload = dataStr;
+          }
+
+          if (eventType === "progress" && payload && typeof payload === "object") {
+            const rawPhase =
+              typeof (payload as { stage?: unknown }).stage === "string"
+                ? ((payload as { stage: string }).stage)
+                : null;
+            const mappedPhase = mapPersonRefreshStage(rawPhase);
+            const message =
+              typeof (payload as { message?: unknown }).message === "string"
+                ? ((payload as { message: string }).message)
+                : null;
+            const currentRaw = (payload as { current?: unknown }).current;
+            const totalRaw = (payload as { total?: unknown }).total;
+            const current =
+              typeof currentRaw === "number"
+                ? currentRaw
+                : typeof currentRaw === "string"
+                  ? Number.parseInt(currentRaw, 10)
+                  : null;
+            const total =
+              typeof totalRaw === "number"
+                ? totalRaw
+                : typeof totalRaw === "string"
+                  ? Number.parseInt(totalRaw, 10)
+                  : null;
+            const numericCurrent =
+              typeof current === "number" && Number.isFinite(current) ? current : null;
+            const numericTotal =
+              typeof total === "number" && Number.isFinite(total) ? total : null;
+            setRefreshProgress({
+              current: numericCurrent,
+              total: numericTotal,
+              phase: mappedPhase ?? rawPhase,
+              message,
+            });
+          } else if (eventType === "complete") {
+            sawComplete = true;
+            const summary = payload && typeof payload === "object" && "summary" in payload
+              ? (payload as { summary?: unknown }).summary
+              : payload;
+            const summaryText = formatRefreshSummary(summary);
+            setRefreshNotice(summaryText || "Reprocessing complete.");
+          } else if (eventType === "error") {
+            hadError = true;
+            const message =
+              payload && typeof payload === "object"
+                ? (payload as { error?: string; detail?: string })
+                : null;
+            const errorText =
+              message?.error && message?.detail
+                ? `${message.error}: ${message.detail}`
+                : message?.error || "Failed to reprocess images";
+            setRefreshError(errorText);
+          }
+
+          boundaryIndex = buffer.indexOf("\n\n");
+        }
+      }
+
+      if (!sawComplete && !hadError) {
+        setRefreshNotice("Reprocessing complete.");
+      }
+
+      // Reload photos to show updated crops/counts
+      await fetchPhotos();
+    } catch (err) {
+      console.error("Failed to reprocess images:", err);
+      setRefreshError(
+        err instanceof Error ? err.message : "Failed to reprocess images"
+      );
+    } finally {
+      setReprocessingImages(false);
+      setRefreshProgress(null);
+    }
+  }, [
+    refreshingImages,
+    reprocessingImages,
+    fetchPhotos,
+    getAuthHeaders,
+    personId,
   ]);
 
   // Initial load
@@ -1976,6 +2925,8 @@ export default function PersonProfilePage() {
     triggerElement: HTMLElement
   ) => {
     lightboxTriggerRef.current = triggerElement;
+    setThumbnailCropPreview(buildThumbnailCropPreview(photo));
+    setThumbnailCropOverlayUpdate(null);
     setLightboxPhoto({ photo, index });
     setLightboxOpen(true);
   };
@@ -1986,7 +2937,10 @@ export default function PersonProfilePage() {
     const newIndex =
       direction === "prev" ? lightboxPhoto.index - 1 : lightboxPhoto.index + 1;
     if (newIndex >= 0 && newIndex < filteredPhotos.length) {
-      setLightboxPhoto({ photo: filteredPhotos[newIndex], index: newIndex });
+      const nextPhoto = filteredPhotos[newIndex];
+      setThumbnailCropPreview(buildThumbnailCropPreview(nextPhoto));
+      setThumbnailCropOverlayUpdate(null);
+      setLightboxPhoto({ photo: nextPhoto, index: newIndex });
     }
   };
 
@@ -1994,7 +2948,22 @@ export default function PersonProfilePage() {
   const closeLightbox = () => {
     setLightboxOpen(false);
     setLightboxPhoto(null);
+    setThumbnailCropPreview(null);
+    setThumbnailCropOverlayUpdate(null);
   };
+
+  const handleThumbnailCropOverlayAdjust = useCallback(
+    (nextPreview: ThumbnailCropPreview) => {
+      if (!lightboxPhoto) return;
+      setThumbnailCropPreview(nextPreview);
+      setThumbnailCropOverlayUpdate({
+        ...nextPreview,
+        photoId: lightboxPhoto.photo.id,
+        nonce: Date.now(),
+      });
+    },
+    [lightboxPhoto],
+  );
 
   const archiveGalleryPhoto = useCallback(
     async (photo: TrrPersonPhoto) => {
@@ -2256,7 +3225,7 @@ export default function PersonProfilePage() {
                     <button
                       key={photo.id}
                       onClick={(e) => openLightbox(photo, index, e.currentTarget)}
-                      className="relative aspect-square overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                      className="relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                     >
                       <GalleryPhoto
                         photo={photo}
@@ -2474,13 +3443,24 @@ export default function PersonProfilePage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={handleRefreshImages}
-                    disabled={refreshingImages}
+                    disabled={refreshingImages || reprocessingImages}
                     className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
                     </svg>
                     {refreshingImages ? "Refreshing..." : "Refresh Images"}
+                  </button>
+                  <button
+                    onClick={handleReprocessImages}
+                    disabled={refreshingImages || reprocessingImages}
+                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    {reprocessingImages ? "Processing..." : "Count & Crop"}
                   </button>
                   <button
                     onClick={() => setAdvancedFiltersOpen(true)}
@@ -2504,7 +3484,7 @@ export default function PersonProfilePage() {
               </div>
               <div className="mb-4 space-y-2">
                 <RefreshProgressBar
-                  show={refreshingImages}
+                  show={refreshingImages || reprocessingImages}
                   phase={refreshProgress?.phase}
                   message={refreshProgress?.message}
                   current={refreshProgress?.current}
@@ -2533,7 +3513,29 @@ export default function PersonProfilePage() {
                           : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                       }`}
                     >
-                      {activeShowName ? `This Show (${activeShowName})` : "This Show"}
+                      {activeShowFilterLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGalleryShowFilter("wwhl")}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        galleryShowFilter === "wwhl"
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      {WWHL_LABEL}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGalleryShowFilter("other-shows")}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        galleryShowFilter === "other-shows"
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      Other Shows
                     </button>
                     <button
                       type="button"
@@ -2547,6 +3549,23 @@ export default function PersonProfilePage() {
                       All Media
                     </button>
                   </div>
+                  {galleryShowFilter === "other-shows" && (
+                    <select
+                      value={selectedOtherShowKey}
+                      onChange={(event) => {
+                        setSelectedOtherShowKey(event.target.value);
+                        setGalleryShowFilter("other-shows");
+                      }}
+                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700"
+                    >
+                      <option value="all">All Other Shows & Events</option>
+                      {otherShowOptions.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.acronym ? `${option.showName} (${option.acronym})` : option.showName}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 
@@ -2569,7 +3588,7 @@ export default function PersonProfilePage() {
                         openLightbox(photo, index, e.currentTarget as HTMLElement);
                       }
                     }}
-                    className="group relative aspect-square overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                    className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                   >
                     <GalleryPhoto
                       photo={photo}
@@ -2778,10 +3797,19 @@ export default function PersonProfilePage() {
             metadataExtras={
               <TagPeoplePanel
                 photo={lightboxPhoto.photo}
+                defaultPersonTag={
+                  person.full_name
+                    ? { id: person.id, name: person.full_name }
+                    : null
+                }
                 getAuthHeaders={getAuthHeaders}
                 onTagsUpdated={handleTagsUpdated}
                 onMirrorUpdated={handleMirrorUpdated}
                 onFacebankSeedUpdated={handleFacebankSeedUpdated}
+                onThumbnailCropUpdated={handleThumbnailCropUpdated}
+                onThumbnailCropPreviewChange={setThumbnailCropPreview}
+                externalThumbnailCropOverlayUpdate={thumbnailCropOverlayUpdate}
+                onRefreshAutoThumbnailCrop={handleRefreshAutoThumbnailCrop}
               />
             }
             position={{ current: lightboxPhoto.index + 1, total: filteredPhotos.length }}
@@ -2790,6 +3818,11 @@ export default function PersonProfilePage() {
             hasPrevious={lightboxPhoto.index > 0}
             hasNext={lightboxPhoto.index < filteredPhotos.length - 1}
             triggerRef={lightboxTriggerRef as React.RefObject<HTMLElement | null>}
+            thumbnailCropPreview={
+              thumbnailCropPreview ?? buildThumbnailCropPreview(lightboxPhoto.photo)
+            }
+            onThumbnailCropPreviewAdjust={handleThumbnailCropOverlayAdjust}
+            onRefresh={() => handleRefreshLightboxPhotoMetadata(lightboxPhoto.photo)}
           />
         )}
 

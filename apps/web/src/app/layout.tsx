@@ -41,14 +41,14 @@ export default function RootLayout({
       <head>
         <link
           rel="preload"
-          href="https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/HamburgSerial-930108065.otf"
+          href="https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Hamburg%20Serial/HamburgSerial-930108065.otf"
           as="font"
           type="font/otf"
           crossOrigin="anonymous"
         />
         <link
           rel="preload"
-          href="https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/GloucesterOldStyle-5735713.ttf"
+          href="https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Gloucester/GloucesterOldStyle-5735713.ttf"
           as="font"
           type="font/ttf"
           crossOrigin="anonymous"

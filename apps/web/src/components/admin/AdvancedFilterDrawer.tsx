@@ -130,8 +130,8 @@ export function AdvancedFilterDrawer({
             <div className="mt-3 flex flex-wrap gap-2">
               {(
                 [
-                  { value: "text", label: "TEXT" },
-                  { value: "no_text", label: "NO TEXT" },
+                  { value: "text", label: "YES (CONTAINS TEXT)" },
+                  { value: "no_text", label: "NO (NO TEXT)" },
                 ] as const
               ).map((opt) => (
                 <button

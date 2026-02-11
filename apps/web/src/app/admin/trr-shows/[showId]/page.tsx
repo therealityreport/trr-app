@@ -12,7 +12,7 @@ import SurveysSection from "@/components/admin/surveys-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
-import { ImageScrapeDrawer, type SeasonContext } from "@/components/admin/ImageScrapeDrawer";
+import { ImageScrapeDrawer, type EntityContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { mapSeasonAssetToMetadata } from "@/lib/photo-metadata";
 import {
@@ -30,6 +30,7 @@ import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 interface TrrShow {
   id: string;
   name: string;
+  alternative_names: string[];
   imdb_id: string | null;
   tmdb_id: number | null;
   show_total_seasons: number | null;
@@ -42,6 +43,7 @@ interface TrrShow {
   tmdb_status: string | null;
   tmdb_vote_average: number | null;
   imdb_rating_value: number | null;
+  logo_url?: string | null;
 }
 
 interface TrrSeason {
@@ -72,6 +74,74 @@ interface TrrCastMember {
 
 type TabId = "seasons" | "assets" | "cast" | "surveys" | "social" | "details";
 type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
+type ShowTab = { id: TabId; label: string };
+type RefreshProgressState = {
+  stage?: string | null;
+  message?: string | null;
+  current: number | null;
+  total: number | null;
+};
+
+const SHOW_PAGE_TABS: ShowTab[] = [
+  { id: "seasons", label: "Seasons" },
+  { id: "assets", label: "Media" },
+  { id: "cast", label: "Cast" },
+  { id: "surveys", label: "Surveys" },
+  { id: "social", label: "Social" },
+  { id: "details", label: "Details" },
+];
+
+const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
+  details: "Show Info",
+  seasons_episodes: "Seasons & Episodes",
+  photos: "Show/Season/Episode Media",
+  cast_credits: "Cast & Credits",
+};
+
+const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
+  starting: "Initializing",
+  details_sync_shows: "Show Info",
+  details_tmdb_show_entities: "Show Entities",
+  details_tmdb_watch_providers: "Watch Providers",
+  seasons_episodes_seasons: "Seasons",
+  seasons_episodes_episodes: "Episodes",
+  photos_show_images: "Show Media",
+  photos_season_episode_images: "Season/Episode Media",
+  cast_credits_show_cast: "Cast Credits",
+  cast_credits_episode_appearances: "Episode Credits",
+  sync_show_images: "Show Media",
+  sync_imdb_mediaindex: "Show Media",
+  sync_tmdb_seasons: "Season Media",
+  sync_tmdb_episodes: "Episode Media",
+  mirror_show_images: "Show Media Mirroring",
+  mirror_season_images: "Season Media Mirroring",
+  mirror_episode_images: "Episode Media Mirroring",
+  sync_cast_photos: "Cast Media",
+  sync_imdb: "Cast Media (IMDb)",
+  sync_tmdb: "Cast Media (TMDb)",
+  sync_fandom: "Cast Media (Fandom)",
+  mirror_cast_photos: "Cast Media Mirroring",
+  auto_count: "Auto Count",
+  word_id: "Word Detection",
+  prune: "Cleanup",
+  mirroring: "S3 Mirroring",
+  mirror: "S3 Mirroring",
+};
+
+const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
+  starting: "Initializing",
+  tmdb_profile: "TMDb Profile",
+  fandom_profile: "Fandom Profile",
+  sync_imdb: "Cast Media (IMDb)",
+  sync_tmdb: "Cast Media (TMDb)",
+  sync_fandom: "Cast Media (Fandom)",
+  fetching: "Fetching",
+  upserting: "Upserting",
+  mirroring: "S3 Mirroring",
+  pruning: "Cleanup",
+  auto_count: "Auto Count",
+  word_id: "Word Detection",
+};
 
 const SEASON_PAGE_TABS = [
   { tab: "episodes", label: "Seasons & Episodes" },
@@ -100,6 +170,65 @@ const toFiniteNumber = (value: unknown): number | null => {
 const formatFixed1 = (value: unknown): string | null => {
   const parsed = toFiniteNumber(value);
   return parsed === null ? null : parsed.toFixed(1);
+};
+
+const parseProgressNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const parseAltNamesText = (value: string): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of value.split(/\r?\n|,/)) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+};
+
+const humanizeStage = (value: string): string => {
+  const normalized = value.replace(/[_-]+/g, " ").trim();
+  if (!normalized) return "Working";
+  return normalized
+    .split(" ")
+    .map((token) =>
+      token.length > 0 ? token.charAt(0).toUpperCase() + token.slice(1) : token
+    )
+    .join(" ");
+};
+
+const resolveStageLabel = (
+  stageValue: unknown,
+  stageLabels: Record<string, string>
+): string | null => {
+  if (typeof stageValue !== "string") return null;
+  const normalized = stageValue.trim().toLowerCase();
+  if (!normalized) return null;
+  return stageLabels[normalized] ?? humanizeStage(normalized);
+};
+
+const getShowRefreshTargetLabel = (target: ShowRefreshTarget): string => {
+  return SHOW_REFRESH_TARGET_LABELS[target] ?? target;
+};
+
+const buildProgressMessage = (
+  stageLabel: string | null,
+  rawMessage: unknown,
+  fallback: string
+): string => {
+  const message = typeof rawMessage === "string" ? rawMessage.trim() : "";
+  if (!message) return stageLabel ? `Working on ${stageLabel}...` : fallback;
+  if (stageLabel) return `${stageLabel}: ${message}`;
+  return message;
 };
 
 // Generic gallery image with error handling - falls back to placeholder on broken images
@@ -156,6 +285,79 @@ function CastPhoto({ src, alt }: { src: string; alt: string }) {
       className="object-cover transition hover:scale-105"
     />
   );
+}
+
+const NETWORK_LOGO_DOMAIN_BY_NAME: Record<string, string> = {
+  bravo: "bravotv.com",
+  nbc: "nbc.com",
+  peacock: "peacocktv.com",
+  "paramount+": "paramountplus.com",
+  "e!": "eonline.com",
+  mtv: "mtv.com",
+  vh1: "vh1.com",
+  abc: "abc.com",
+  cbs: "cbs.com",
+  fox: "fox.com",
+  netflix: "netflix.com",
+  hulu: "hulu.com",
+  max: "max.com",
+};
+
+const getNetworkLogoUrl = (network: string | null | undefined): string | null => {
+  if (!network) return null;
+  const normalized = network.trim().toLowerCase();
+  if (!normalized) return null;
+  const domain = NETWORK_LOGO_DOMAIN_BY_NAME[normalized];
+  if (!domain) return null;
+  return `https://logo.clearbit.com/${domain}`;
+};
+
+function NetworkNameOrLogo({
+  network,
+  fallbackLabel,
+}: {
+  network: string | null;
+  fallbackLabel: string;
+}) {
+  const [logoFailed, setLogoFailed] = useState(false);
+  const logoUrl = getNetworkLogoUrl(network);
+
+  if (logoUrl && !logoFailed) {
+    return (
+      <img
+        src={logoUrl}
+        alt={network ? `${network} logo` : "Network logo"}
+        className="h-6 w-auto object-contain"
+        loading="lazy"
+        onError={() => setLogoFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+      {fallbackLabel}
+    </p>
+  );
+}
+
+function ShowNameOrLogo({ name, logoUrl }: { name: string; logoUrl?: string | null }) {
+  const [logoFailed, setLogoFailed] = useState(false);
+  const trimmedLogo = typeof logoUrl === "string" && logoUrl.trim() ? logoUrl.trim() : null;
+
+  if (trimmedLogo && !logoFailed) {
+    return (
+      <img
+        src={trimmedLogo}
+        alt={`${name} logo`}
+        className="h-14 w-auto max-w-[28rem] object-contain"
+        loading="lazy"
+        onError={() => setLogoFailed(true)}
+      />
+    );
+  }
+
+  return <h1 className="text-3xl font-bold text-zinc-900">{name}</h1>;
 }
 
 function RefreshProgressBar({
@@ -246,6 +448,22 @@ export default function TrrShowDetailPage() {
   const [seasonSummariesLoading, setSeasonSummariesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [detailsForm, setDetailsForm] = useState<{
+    displayName: string;
+    nickname: string;
+    altNamesText: string;
+    description: string;
+    premiereDate: string;
+  }>({
+    displayName: "",
+    nickname: "",
+    altNamesText: "",
+    description: "",
+    premiereDate: "",
+  });
+  const [detailsSaving, setDetailsSaving] = useState(false);
+  const [detailsNotice, setDetailsNotice] = useState<string | null>(null);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
 
   // Lightbox state (for cast photos)
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -322,15 +540,24 @@ export default function TrrShowDetailPage() {
       >
     >
   >({});
+  const [refreshingShowAll, setRefreshingShowAll] = useState(false);
+  const [refreshAllNotice, setRefreshAllNotice] = useState<string | null>(null);
+  const [refreshAllError, setRefreshAllError] = useState<string | null>(null);
+  const [refreshAllProgress, setRefreshAllProgress] = useState<RefreshProgressState | null>(
+    null
+  );
 
   // Image scrape drawer state
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
-  const [scrapeDrawerContext, setScrapeDrawerContext] = useState<SeasonContext | null>(null);
+  const [scrapeDrawerContext, setScrapeDrawerContext] = useState<EntityContext | null>(null);
 
   // Refresh images state
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshingPersonIds, setRefreshingPersonIds] = useState<Record<string, boolean>>({});
+  const [refreshingPersonProgress, setRefreshingPersonProgress] = useState<
+    Record<string, RefreshProgressState>
+  >({});
 
   const tabParam = searchParams.get("tab");
   useEffect(() => {
@@ -349,6 +576,16 @@ export default function TrrShowDetailPage() {
     }
   }, [tabParam]);
 
+  const setTab = useCallback(
+    (tab: TabId) => {
+      setActiveTab(tab);
+      const next = new URLSearchParams(searchParams.toString());
+      next.set("tab", tab);
+      router.replace(`?${next.toString()}`, { scroll: false });
+    },
+    [router, searchParams]
+  );
+
   // Helper to get auth headers
   const getAuthHeaders = useCallback(async () => {
     const token = await auth.currentUser?.getIdToken();
@@ -356,29 +593,220 @@ export default function TrrShowDetailPage() {
     return { Authorization: `Bearer ${token}` };
   }, []);
 
-  // Refresh images for a person
-  const refreshPersonImages = useCallback(async (personId: string) => {
-    const headers = await getAuthHeaders();
-    const response = await fetch(
-      `/api/admin/trr-api/people/${personId}/refresh-images`,
-      {
+  // Refresh images for a person with streaming progress when available.
+  const refreshPersonImages = useCallback(
+    async (
+      personId: string,
+      onProgress?: (progress: RefreshProgressState) => void
+    ) => {
+      const headers = await getAuthHeaders();
+      const body = { skip_mirror: false, show_id: showId };
+
+      let streamFailed = false;
+      try {
+        const streamResponse = await fetch(
+          `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }
+        );
+
+        if (!streamResponse.ok || !streamResponse.body) {
+          throw new Error("Person refresh stream unavailable");
+        }
+
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let completePayload: Record<string, unknown> | null = null;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, "\n");
+
+          let boundaryIndex = buffer.indexOf("\n\n");
+          while (boundaryIndex !== -1) {
+            const rawEvent = buffer.slice(0, boundaryIndex);
+            buffer = buffer.slice(boundaryIndex + 2);
+
+            const lines = rawEvent.split("\n").filter(Boolean);
+            let eventType = "message";
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            const dataStr = dataLines.join("\n");
+            let payload: Record<string, unknown> | string = dataStr;
+            try {
+              payload = JSON.parse(dataStr) as Record<string, unknown>;
+            } catch {
+              payload = dataStr;
+            }
+
+            if (eventType === "progress" && payload && typeof payload === "object") {
+              const stageLabel = resolveStageLabel(
+                (payload as { stage?: unknown }).stage,
+                PERSON_REFRESH_STAGE_LABELS
+              );
+              const current = parseProgressNumber((payload as { current?: unknown }).current);
+              const total = parseProgressNumber((payload as { total?: unknown }).total);
+              onProgress?.({
+                stage: stageLabel,
+                message: buildProgressMessage(
+                  stageLabel,
+                  (payload as { message?: unknown }).message,
+                  "Refreshing cast media..."
+                ),
+                current,
+                total,
+              });
+            } else if (eventType === "error") {
+              const message =
+                payload && typeof payload === "object"
+                  ? (payload as { error?: unknown; detail?: unknown })
+                  : null;
+              const errorText =
+                typeof message?.error === "string" && message.error
+                  ? message.error
+                  : "Failed to refresh person images";
+              const detailText =
+                typeof message?.detail === "string" && message.detail ? message.detail : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            } else if (eventType === "complete") {
+              completePayload =
+                payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+            }
+
+            boundaryIndex = buffer.indexOf("\n\n");
+          }
+        }
+
+        return completePayload ?? {};
+      } catch (streamErr) {
+        streamFailed = true;
+        console.warn("Person refresh stream failed, falling back to non-stream.", streamErr);
+      }
+
+      if (streamFailed) {
+        onProgress?.({
+          stage: "Fallback",
+          message: "Refreshing cast media...",
+          current: null,
+          total: null,
+        });
+      }
+
+      const response = await fetch(`/api/admin/trr-api/people/${personId}/refresh-images`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ skip_mirror: false, show_id: showId }),
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data.error && data.detail
+            ? `${data.error}: ${data.detail}`
+            : data.error || data.detail || "Failed to refresh images";
+        throw new Error(message);
       }
-    );
 
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const message =
-        data.error && data.detail
-          ? `${data.error}: ${data.detail}`
-          : data.error || data.detail || "Failed to refresh images";
-      throw new Error(message);
-    }
+      onProgress?.({
+        stage: "Complete",
+        message: "Cast media refresh complete.",
+        current: 1,
+        total: 1,
+      });
+      return data;
+    },
+    [getAuthHeaders, showId]
+  );
 
-    return data;
-  }, [getAuthHeaders, showId]);
+  const refreshCastProfilesAndMedia = useCallback(
+    async (members: TrrCastMember[]) => {
+      const uniqueMembers = Array.from(
+        new Map(
+          members
+            .filter((member) => typeof member.person_id === "string" && member.person_id.trim())
+            .map((member) => [member.person_id, member] as const)
+        ).values()
+      );
+
+      const total = uniqueMembers.length;
+      if (total === 0) {
+        return { attempted: 0, succeeded: 0, failed: 0 };
+      }
+
+      let succeeded = 0;
+      let failed = 0;
+
+      setRefreshTargetProgress((prev) => ({
+        ...prev,
+        cast_credits: {
+          stage: "Cast Profiles & Media",
+          message: "Syncing cast profiles and media from TMDb/IMDb/Fandom...",
+          current: 0,
+          total,
+        },
+      }));
+
+      for (const [index, member] of uniqueMembers.entries()) {
+        const label =
+          member.full_name || member.cast_member_name || `Cast member ${index + 1}`;
+        setRefreshTargetProgress((prev) => ({
+          ...prev,
+          cast_credits: {
+            stage: "Cast Profiles & Media",
+            message: `Syncing ${label} (${index + 1}/${total})...`,
+            current: index,
+            total,
+          },
+        }));
+
+        try {
+          await refreshPersonImages(member.person_id, (progress) => {
+            setRefreshTargetProgress((prev) => ({
+              ...prev,
+              cast_credits: {
+                stage: progress.stage ?? "Cast Profiles & Media",
+                message:
+                  progress.message ??
+                  `Syncing ${label} (${index + 1}/${total})...`,
+                current: index,
+                total,
+              },
+            }));
+          });
+          succeeded += 1;
+        } catch (err) {
+          console.warn(`Failed to refresh cast profile/media for ${label}:`, err);
+          failed += 1;
+        } finally {
+          setRefreshTargetProgress((prev) => ({
+            ...prev,
+            cast_credits: {
+              stage: "Cast Profiles & Media",
+              message: `Synced ${index + 1}/${total} cast profiles/media...`,
+              current: index + 1,
+              total,
+            },
+          }));
+        }
+      }
+
+      return { attempted: total, succeeded, failed };
+    },
+    [refreshPersonImages]
+  );
 
   // Fetch show details
   const fetchShow = useCallback(async () => {
@@ -392,6 +820,71 @@ export default function TrrShowDetailPage() {
       setError(err instanceof Error ? err.message : "Failed to load show");
     }
   }, [showId, getAuthHeaders]);
+
+  const saveShowDetails = useCallback(async () => {
+    if (!show) return;
+    const displayName = detailsForm.displayName.trim();
+    if (!displayName) {
+      setDetailsError("Display Name is required.");
+      return;
+    }
+
+    const nickname = detailsForm.nickname.trim();
+    const altNames = parseAltNamesText(detailsForm.altNamesText);
+    const allAltNames = [
+      ...(nickname ? [nickname] : []),
+      ...altNames.filter((name) => name.toLowerCase() !== nickname.toLowerCase()),
+    ].filter((name) => name.toLowerCase() !== displayName.toLowerCase());
+
+    setDetailsSaving(true);
+    setDetailsError(null);
+    setDetailsNotice(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}`, {
+        method: "PUT",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: displayName,
+          nickname: nickname || "",
+          alternative_names: allAltNames,
+          description: detailsForm.description.trim() || "",
+          premiere_date: detailsForm.premiereDate || "",
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          (data as { error?: string }).error ||
+          `Failed to save show details (HTTP ${response.status})`;
+        throw new Error(message);
+      }
+      const nextShow = (data as { show?: TrrShow }).show ?? null;
+      if (nextShow) {
+        setShow(nextShow);
+      }
+      setDetailsNotice("Show details saved.");
+    } catch (err) {
+      setDetailsError(err instanceof Error ? err.message : "Failed to save show details");
+    } finally {
+      setDetailsSaving(false);
+    }
+  }, [detailsForm, getAuthHeaders, show, showId]);
+
+  useEffect(() => {
+    if (!show) return;
+    const alternatives = Array.isArray(show.alternative_names)
+      ? show.alternative_names.filter((name) => typeof name === "string" && name.trim().length > 0)
+      : [];
+    const [nickname = "", ...restAlt] = alternatives;
+    setDetailsForm({
+      displayName: show.name ?? "",
+      nickname,
+      altNamesText: restAlt.join("\n"),
+      description: show.description ?? "",
+      premiereDate: show.premiere_date ?? "",
+    });
+  }, [show]);
 
   // Fetch seasons
   const fetchSeasons = useCallback(async () => {
@@ -487,7 +980,7 @@ export default function TrrShowDetailPage() {
   );
 
   // Fetch cast
-  const fetchCast = useCallback(async () => {
+  const fetchCast = useCallback(async (): Promise<TrrCastMember[]> => {
     try {
       const headers = await getAuthHeaders();
       // Fetch all cast without filters - photo filtering done client-side if needed
@@ -503,12 +996,15 @@ export default function TrrShowDetailPage() {
             : `Failed to fetch cast (HTTP ${response.status})`;
         throw new Error(message);
       }
-      const cast = (data as { cast?: unknown }).cast;
-      setCast(Array.isArray(cast) ? (cast as TrrCastMember[]) : []);
+      const castRaw = (data as { cast?: unknown }).cast;
+      const nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
+      setCast(nextCast);
+      return nextCast;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch cast";
       console.warn("Failed to fetch cast:", message);
       setError(message);
+      return [];
     }
   }, [showId, getAuthHeaders]);
 
@@ -747,27 +1243,18 @@ export default function TrrShowDetailPage() {
   );
 
   const refreshShow = useCallback(
-    async (target: ShowRefreshTarget) => {
-      const label = (() => {
-        switch (target) {
-          case "details":
-            return "Show Details";
-          case "seasons_episodes":
-            return "Seasons & Episodes";
-          case "photos":
-            return "Photos";
-          case "cast_credits":
-            return "Cast/Credits";
-          default:
-            return target;
-        }
-      })();
+    async (target: ShowRefreshTarget): Promise<boolean> => {
+      const label = getShowRefreshTargetLabel(target);
+
+      let success = false;
+      let castProfilesSummary: { attempted: number; succeeded: number; failed: number } | null =
+        null;
 
       setRefreshingTargets((prev) => ({ ...prev, [target]: true }));
       setRefreshTargetProgress((prev) => ({
         ...prev,
         [target]: {
-          stage: "starting",
+          stage: "Initializing",
           message: `Refreshing ${label}...`,
           current: 0,
           total: null,
@@ -795,7 +1282,7 @@ export default function TrrShowDetailPage() {
               ? `/api/admin/trr-api/shows/${showId}/refresh-photos/stream`
               : `/api/admin/trr-api/shows/${showId}/refresh/stream`;
           const streamBody =
-            target === "photos" ? {} : { targets: [target] };
+            target === "photos" ? { skip_mirror: false } : { targets: [target] };
           const response = await fetch(streamUrl, {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
@@ -852,26 +1339,24 @@ export default function TrrShowDetailPage() {
                   ?? (payload as { stage?: unknown; step?: unknown; target?: unknown }).step
                   ?? (payload as { stage?: unknown; step?: unknown; target?: unknown }).target;
                 const messageRaw = (payload as { message?: unknown }).message;
+                const stageCurrentRaw = (payload as { stage_current?: unknown }).stage_current;
+                const stageTotalRaw = (payload as { stage_total?: unknown }).stage_total;
                 const currentRaw = (payload as { current?: unknown }).current;
                 const totalRaw = (payload as { total?: unknown }).total;
-                const current =
-                  typeof currentRaw === "number"
-                    ? currentRaw
-                    : typeof currentRaw === "string"
-                      ? Number.parseInt(currentRaw, 10)
-                      : null;
-                const total =
-                  typeof totalRaw === "number"
-                    ? totalRaw
-                  : typeof totalRaw === "string"
-                      ? Number.parseInt(totalRaw, 10)
-                      : null;
+                const current = parseProgressNumber(stageCurrentRaw ?? currentRaw);
+                const total = parseProgressNumber(stageTotalRaw ?? totalRaw);
+                const stageLabel = resolveStageLabel(stageRaw, SHOW_REFRESH_STAGE_LABELS);
+                const progressMessage = buildProgressMessage(
+                  stageLabel,
+                  messageRaw,
+                  `Refreshing ${label}...`
+                );
 
                 setRefreshTargetProgress((prev) => ({
                   ...prev,
                   [target]: {
-                    stage: typeof stageRaw === "string" ? stageRaw : prev[target]?.stage ?? null,
-                    message: typeof messageRaw === "string" ? messageRaw : prev[target]?.message ?? null,
+                    stage: stageLabel ?? prev[target]?.stage ?? null,
+                    message: progressMessage || prev[target]?.message || null,
                     current: typeof current === "number" && Number.isFinite(current) ? current : null,
                     total: typeof total === "number" && Number.isFinite(total) ? total : null,
                   },
@@ -946,19 +1431,33 @@ export default function TrrShowDetailPage() {
                     await fetchShow();
                   } else if (target === "seasons_episodes") {
                     await Promise.all([fetchShow(), fetchSeasons()]);
+                    const photosOk = await refreshShow("photos");
+                    if (!photosOk) {
+                      throw new Error("Seasons & Episodes refreshed, but photo mirroring failed.");
+                    }
                   } else if (target === "photos") {
                     if (activeTab === "assets" && assetsView === "media") {
                       await loadGalleryAssets(selectedGallerySeason);
                     }
                   } else if (target === "cast_credits") {
+                    const castMembers = await fetchCast();
+                    castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
                     await fetchCast();
                   }
 
                   const durationMs =
                     typeof step?.duration_ms === "number" ? step.duration_ms : null;
+                  const castSuffix =
+                    target === "cast_credits" && castProfilesSummary
+                      ? `, cast profiles/media: ${castProfilesSummary.succeeded}/${castProfilesSummary.attempted}${
+                          castProfilesSummary.failed > 0
+                            ? ` (${castProfilesSummary.failed} failed)`
+                            : ""
+                        }`
+                      : "";
                   setRefreshTargetNotice((prev) => ({
                     ...prev,
-                    [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}.`,
+                    [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
                   }));
                 }
               } else if (eventType === "error") {
@@ -1023,21 +1522,35 @@ export default function TrrShowDetailPage() {
             await fetchShow();
           } else if (target === "seasons_episodes") {
             await Promise.all([fetchShow(), fetchSeasons()]);
+            const photosOk = await refreshShow("photos");
+            if (!photosOk) {
+              throw new Error("Seasons & Episodes refreshed, but photo mirroring failed.");
+            }
           } else if (target === "cast_credits") {
+            const castMembers = await fetchCast();
+            castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
             await fetchCast();
           }
 
           const durationMs = typeof step?.duration_ms === "number" ? step.duration_ms : null;
+          const castSuffix =
+            target === "cast_credits" && castProfilesSummary
+              ? `, cast profiles/media: ${castProfilesSummary.succeeded}/${castProfilesSummary.attempted}${
+                  castProfilesSummary.failed > 0 ? ` (${castProfilesSummary.failed} failed)` : ""
+                }`
+              : "";
           setRefreshTargetNotice((prev) => ({
             ...prev,
-            [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}.`,
+            [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
           }));
         } else if (!sawComplete) {
           setRefreshTargetNotice((prev) => ({ ...prev, [target]: `Refreshed ${label}.` }));
         }
+        success = true;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Refresh failed";
         setRefreshTargetError((prev) => ({ ...prev, [target]: message }));
+        success = false;
       } finally {
         setRefreshingTargets((prev) => ({ ...prev, [target]: false }));
         setRefreshTargetProgress((prev) => {
@@ -1046,11 +1559,14 @@ export default function TrrShowDetailPage() {
           return next;
         });
       }
+
+      return success;
     },
     [
       activeTab,
       assetsView,
       fetchCast,
+      refreshCastProfilesAndMedia,
       fetchSeasons,
       fetchShow,
       getAuthHeaders,
@@ -1059,6 +1575,66 @@ export default function TrrShowDetailPage() {
       showId,
     ]
   );
+
+  const refreshAllShowData = useCallback(async () => {
+    if (refreshingShowAll) return;
+
+    setRefreshingShowAll(true);
+    setRefreshAllError(null);
+    setRefreshAllNotice(null);
+    setRefreshAllProgress({
+      stage: "Initializing",
+      message: "Starting full show refresh...",
+      current: 0,
+      total: 3,
+    });
+
+    try {
+      const targets: ShowRefreshTarget[] = ["details", "seasons_episodes", "cast_credits"];
+      const failedLabels: string[] = [];
+
+      for (const [index, target] of targets.entries()) {
+        const targetLabel = getShowRefreshTargetLabel(target);
+        setRefreshAllProgress({
+          stage: targetLabel,
+          message: `Refreshing ${targetLabel}...`,
+          current: index,
+          total: targets.length,
+        });
+        const ok = await refreshShow(target);
+        setRefreshAllProgress({
+          stage: targetLabel,
+          message: ok ? `${targetLabel} complete.` : `${targetLabel} failed.`,
+          current: index + 1,
+          total: targets.length,
+        });
+        if (!ok) {
+          if (target === "details") failedLabels.push("show info");
+          if (target === "seasons_episodes") failedLabels.push("seasons/episodes/media");
+          if (target === "cast_credits") failedLabels.push("cast/credits");
+        }
+      }
+
+      if (failedLabels.length > 0) {
+        setRefreshAllError(`Refresh completed with issues in: ${failedLabels.join(", ")}.`);
+        return;
+      }
+
+      setRefreshAllNotice(
+        "Refreshed show info, seasons/episodes, media/photos, and cast/credits."
+      );
+    } catch (err) {
+      setRefreshAllError(err instanceof Error ? err.message : "Refresh failed");
+    } finally {
+      setRefreshingShowAll(false);
+      setRefreshAllProgress(null);
+    }
+  }, [refreshShow, refreshingShowAll]);
+
+  const refreshShowCast = useCallback(async () => {
+    if (refreshingShowAll || Object.values(refreshingTargets).some(Boolean)) return;
+    await refreshShow("cast_credits");
+  }, [refreshShow, refreshingShowAll, refreshingTargets]);
 
   const detectTextOverlayForUnknown = useCallback(async () => {
     const targets = galleryAssets
@@ -1111,11 +1687,25 @@ export default function TrrShowDetailPage() {
       if (!personId) return;
 
       setRefreshingPersonIds((prev) => ({ ...prev, [personId]: true }));
+      setRefreshingPersonProgress((prev) => ({
+        ...prev,
+        [personId]: {
+          stage: "Initializing",
+          message: `Refreshing cast media for ${label}...`,
+          current: 0,
+          total: null,
+        },
+      }));
       setRefreshNotice(null);
       setRefreshError(null);
 
       try {
-        await refreshPersonImages(personId);
+        await refreshPersonImages(personId, (progress) => {
+          setRefreshingPersonProgress((prev) => ({
+            ...prev,
+            [personId]: progress,
+          }));
+        });
         await fetchCast();
         setRefreshNotice(`Refreshed person for ${label}.`);
       } catch (err) {
@@ -1125,6 +1715,11 @@ export default function TrrShowDetailPage() {
         );
       } finally {
         setRefreshingPersonIds((prev) => {
+          const next = { ...prev };
+          delete next[personId];
+          return next;
+        });
+        setRefreshingPersonProgress((prev) => {
           const next = { ...prev };
           delete next[personId];
           return next;
@@ -1265,6 +1860,34 @@ export default function TrrShowDetailPage() {
 
   const tmdbVoteAverageText = formatFixed1(show.tmdb_vote_average);
   const imdbRatingText = formatFixed1(show.imdb_rating_value);
+  const primaryNetwork = show.networks?.[0] ?? null;
+  const networkLabel = show.networks?.slice(0, 2).join(" · ") || "TRR Core";
+  const isShowRefreshBusy =
+    refreshingShowAll || Object.values(refreshingTargets).some((value) => value);
+  const activeRefreshTarget =
+    (Object.entries(refreshingTargets).find(([, isRefreshing]) => isRefreshing)?.[0] as
+      | ShowRefreshTarget
+      | undefined) ?? null;
+  const activeTargetProgress = activeRefreshTarget
+    ? refreshTargetProgress[activeRefreshTarget]
+    : null;
+  const globalRefreshProgress = activeTargetProgress ?? refreshAllProgress;
+  const globalRefreshStage = activeTargetProgress?.stage ?? refreshAllProgress?.stage ?? null;
+  const globalRefreshMessage =
+    activeTargetProgress?.message ??
+    (activeRefreshTarget
+      ? `Refreshing ${getShowRefreshTargetLabel(activeRefreshTarget)}...`
+      : refreshAllProgress?.message ?? null);
+  const globalRefreshCurrent =
+    activeTargetProgress?.current ?? refreshAllProgress?.current ?? null;
+  const globalRefreshTotal = activeTargetProgress?.total ?? refreshAllProgress?.total ?? null;
+  const castTabProgress =
+    refreshingTargets.cast_credits && refreshTargetProgress.cast_credits
+      ? refreshTargetProgress.cast_credits
+      : globalRefreshProgress;
+  const showCastTabProgress =
+    isShowRefreshBusy &&
+    Boolean(castTabProgress?.message || castTabProgress?.stage || castTabProgress?.total !== null);
 
   return (
     <ClientOnly>
@@ -1282,13 +1905,9 @@ export default function TrrShowDetailPage() {
             </div>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                  {show.networks?.slice(0, 2).join(" · ") || "TRR Core"}
-                </p>
-                <div className="flex items-center gap-3">
-                  <h1 className="text-3xl font-bold text-zinc-900">
-                    {show.name}
-                  </h1>
+                <NetworkNameOrLogo network={primaryNetwork} fallbackLabel={networkLabel} />
+                <div className="mt-2 flex items-center gap-3">
+                  <ShowNameOrLogo name={show.name} logoUrl={show.logo_url} />
                   {/* TMDb and IMDb links */}
                   <div className="flex items-center gap-2">
                     <TmdbLinkIcon tmdbId={show.tmdb_id} type="show" />
@@ -1325,6 +1944,15 @@ export default function TrrShowDetailPage() {
                 </div>
               </div>
               <div className="flex flex-col gap-3 sm:items-end">
+                <button
+                  type="button"
+                  onClick={refreshAllShowData}
+                  disabled={isShowRefreshBusy}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                </button>
+
                 {/* Add/Remove from Shows button */}
                 {isCovered ? (
                   <button
@@ -1369,40 +1997,44 @@ export default function TrrShowDetailPage() {
                     <span className="text-zinc-500">IMDB</span>
                   </div>
                 )}
+                {refreshAllNotice && (
+                  <p className="max-w-xs text-right text-xs text-zinc-500">{refreshAllNotice}</p>
+                )}
+                {refreshAllError && (
+                  <p className="max-w-xs text-right text-xs text-red-600">{refreshAllError}</p>
+                )}
+                {globalRefreshProgress && (
+                  <div className="w-full max-w-xs">
+                    <RefreshProgressBar
+                      show={isShowRefreshBusy}
+                      stage={globalRefreshStage}
+                      message={globalRefreshMessage}
+                      current={globalRefreshCurrent}
+                      total={globalRefreshTotal}
+                    />
+                  </div>
+                )}
               </div>
+            </div>
+            <div className="mt-4">
+              <nav className="flex flex-wrap gap-2">
+                {SHOW_PAGE_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setTab(tab.id)}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                      activeTab === tab.id
+                        ? "border-zinc-900 bg-zinc-900 text-white"
+                        : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </nav>
             </div>
           </div>
         </header>
-
-        {/* Tabs */}
-        <div className="hidden">
-          <div className="mx-auto max-w-6xl px-6">
-            <nav className="flex flex-wrap gap-2 py-4">
-              {(
-                [
-                  { id: "seasons", label: "Seasons & Episodes" },
-                  { id: "assets", label: "Assets" },
-                  { id: "cast", label: "Cast" },
-                  { id: "surveys", label: "Surveys" },
-                  { id: "social", label: "Social Media" },
-                  { id: "details", label: "Details" },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                    activeTab === tab.id
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </nav>
-          </div>
-        </div>
 
         {/* Content */}
         <main className="mx-auto max-w-6xl px-6 py-8">
@@ -1418,13 +2050,11 @@ export default function TrrShowDetailPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => refreshShow("seasons_episodes")}
-                  disabled={refreshingTargets.seasons_episodes}
+                  onClick={refreshAllShowData}
+                  disabled={isShowRefreshBusy}
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                 >
-                  {refreshingTargets.seasons_episodes
-                    ? "Refreshing..."
-                    : "Refresh Seasons & Episodes"}
+                  {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
                 </button>
               </div>
 
@@ -1615,8 +2245,8 @@ export default function TrrShowDetailPage() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => refreshShow("photos")}
-                        disabled={refreshingTargets.photos}
+                        onClick={refreshAllShowData}
+                        disabled={isShowRefreshBusy}
                         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1627,7 +2257,7 @@ export default function TrrShowDetailPage() {
                             d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4"
                           />
                         </svg>
-                        {refreshingTargets.photos ? "Refreshing..." : "Refresh Photos"}
+                        {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
                       </button>
 
                       <button
@@ -1640,10 +2270,9 @@ export default function TrrShowDetailPage() {
                         Filters
                       </button>
 
-                      {/* Import Images button - only show when a specific season is selected */}
-                      {selectedGallerySeason !== "all" && (
-                        <button
-                          onClick={() => {
+                      <button
+                        onClick={() => {
+                          if (selectedGallerySeason !== "all") {
                             const selectedSeason = visibleSeasons.find(
                               (season) => season.season_number === selectedGallerySeason
                             );
@@ -1654,16 +2283,27 @@ export default function TrrShowDetailPage() {
                               seasonNumber: selectedGallerySeason,
                               seasonId: selectedSeason?.id,
                             });
-                            setScrapeDrawerOpen(true);
-                          }}
-                          className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                        >
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                          Import Images
-                        </button>
-                      )}
+                          } else {
+                            setScrapeDrawerContext({
+                              type: "show",
+                              showId: showId,
+                              showName: show.name,
+                              seasons: visibleSeasons.map((season) => ({
+                                seasonNumber: season.season_number,
+                                seasonId: season.id,
+                              })),
+                              defaultSeasonNumber: null,
+                            });
+                          }
+                          setScrapeDrawerOpen(true);
+                        }}
+                        className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Import Images
+                      </button>
                     </div>
                   </div>
 
@@ -1925,11 +2565,11 @@ export default function TrrShowDetailPage() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => refreshShow("cast_credits")}
-                    disabled={refreshingTargets.cast_credits}
+                    onClick={refreshShowCast}
+                    disabled={isShowRefreshBusy}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {refreshingTargets.cast_credits ? "Refreshing..." : "Refresh Cast/Credits"}
+                    {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
                   </button>
                 </div>
               </div>
@@ -1945,11 +2585,11 @@ export default function TrrShowDetailPage() {
                 </p>
               )}
               <RefreshProgressBar
-                show={refreshingTargets.cast_credits}
-                stage={refreshTargetProgress.cast_credits?.stage}
-                message={refreshTargetProgress.cast_credits?.message}
-                current={refreshTargetProgress.cast_credits?.current}
-                total={refreshTargetProgress.cast_credits?.total}
+                show={showCastTabProgress}
+                stage={castTabProgress?.stage}
+                message={castTabProgress?.message}
+                current={castTabProgress?.current}
+                total={castTabProgress?.total}
               />
               {(refreshNotice || refreshError) && (
                 <p className={`mb-4 text-sm ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
@@ -2008,6 +2648,13 @@ export default function TrrShowDetailPage() {
                           ? "Refreshing..."
                           : "Refresh Person"}
                       </button>
+                      <RefreshProgressBar
+                        show={Boolean(refreshingPersonIds[member.person_id])}
+                        stage={refreshingPersonProgress[member.person_id]?.stage}
+                        message={refreshingPersonProgress[member.person_id]?.message}
+                        current={refreshingPersonProgress[member.person_id]?.current}
+                        total={refreshingPersonProgress[member.person_id]?.total}
+                      />
                     </Link>
                   );
                 })}
@@ -2043,17 +2690,27 @@ export default function TrrShowDetailPage() {
                     Show Information
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
-                    External IDs & Links
+                    Details & External IDs
                   </h3>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => refreshShow("details")}
-                  disabled={refreshingTargets.details}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  {refreshingTargets.details ? "Refreshing..." : "Refresh Show Details"}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={saveShowDetails}
+                    disabled={detailsSaving}
+                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {detailsSaving ? "Saving..." : "Save Info"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={refreshAllShowData}
+                    disabled={isShowRefreshBusy}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
               </div>
 
               {(refreshTargetNotice.details || refreshTargetError.details) && (
@@ -2072,8 +2729,94 @@ export default function TrrShowDetailPage() {
                 current={refreshTargetProgress.details?.current}
                 total={refreshTargetProgress.details?.total}
               />
+              {(detailsNotice || detailsError) && (
+                <p className={`mb-4 text-sm ${detailsError ? "text-red-600" : "text-zinc-500"}`}>
+                  {detailsError || detailsNotice}
+                </p>
+              )}
 
               <div className="space-y-6">
+                <div>
+                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Editable Info</h4>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Display Name
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.displayName}
+                          onChange={(e) =>
+                            setDetailsForm((prev) => ({ ...prev, displayName: e.target.value }))
+                          }
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          placeholder="Real Housewives of Beverly Hills"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Nickname
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.nickname}
+                          onChange={(e) =>
+                            setDetailsForm((prev) => ({ ...prev, nickname: e.target.value }))
+                          }
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          placeholder="RHOBH"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Premiere Date
+                        </span>
+                        <input
+                          type="date"
+                          value={detailsForm.premiereDate}
+                          onChange={(e) =>
+                            setDetailsForm((prev) => ({ ...prev, premiereDate: e.target.value }))
+                          }
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                        />
+                      </label>
+
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Alt Names
+                        </span>
+                        <textarea
+                          value={detailsForm.altNamesText}
+                          onChange={(e) =>
+                            setDetailsForm((prev) => ({ ...prev, altNamesText: e.target.value }))
+                          }
+                          rows={3}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          placeholder={"One per line (or comma-separated)\nThe Real Housewives of Beverly Hills"}
+                        />
+                      </label>
+
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Description
+                        </span>
+                        <textarea
+                          value={detailsForm.description}
+                          onChange={(e) =>
+                            setDetailsForm((prev) => ({ ...prev, description: e.target.value }))
+                          }
+                          rows={4}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          placeholder="Short show description"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
                 {/* External IDs */}
                 <div>
                   <h4 className="mb-3 text-sm font-semibold text-zinc-700">
@@ -2201,10 +2944,24 @@ export default function TrrShowDetailPage() {
             isOpen={true}
             onClose={closeAssetLightbox}
             metadata={mapSeasonAssetToMetadata(assetLightbox.asset, selectedGallerySeason !== "all" ? selectedGallerySeason : undefined, show?.name)}
-            canManage={true}
+            canManage={assetLightbox.asset.source?.toLowerCase?.().startsWith("web_scrape:")}
             isStarred={Boolean((assetLightbox.asset.metadata as Record<string, unknown> | null)?.starred)}
             onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
             onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
+            onDelete={async () => {
+              const asset = assetLightbox.asset;
+              const headers = await getAuthHeaders();
+              const response = await fetch(`/api/admin/trr-api/media-assets/${asset.id}`, {
+                method: "DELETE",
+                headers,
+              });
+              if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data?.detail || "Delete failed");
+              }
+              setGalleryAssets((prev) => prev.filter((a) => a.id !== asset.id));
+              closeAssetLightbox();
+            }}
             position={{
               current: assetLightbox.index + 1,
               total: assetLightbox.filteredAssets.length,

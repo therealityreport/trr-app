@@ -61,7 +61,7 @@ export default function RhoslcSurveyResultsPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-rose-50 px-4">
         <div className="w-full max-w-md rounded-3xl bg-white p-10 text-center shadow-xl">
-          <h1 className="font-['NYTKarnak_Condensed'] text-3xl font-bold uppercase tracking-wide text-rose-800">
+          <h1 className="font-rude-slab text-3xl font-bold uppercase tracking-wide text-rose-800">
             Sign in to view results
           </h1>
           <p className="mt-4 text-sm text-rose-600">Log in to see how your ranking stacks up.</p>
@@ -88,7 +88,7 @@ export default function RhoslcSurveyResultsPage() {
           >
             Back
           </button>
-          <h1 className="font-['NYTKarnak_Condensed'] text-4xl font-bold uppercase tracking-wide text-rose-900">
+          <h1 className="font-rude-slab text-4xl font-bold uppercase tracking-wide text-rose-900">
             Your RHOSLC Ranking
           </h1>
           <p className="max-w-2xl text-sm text-rose-700">
@@ -103,7 +103,7 @@ export default function RhoslcSurveyResultsPage() {
               <div className="text-xs font-semibold uppercase tracking-[0.3em] text-rose-500">Your season rating</div>
               {response.seasonRating !== null && response.seasonRating !== undefined ? (
                 <div className="mt-4 flex flex-col items-center gap-3">
-                  <div className="font-['NYTKarnak_Condensed'] text-5xl font-bold tabular-nums text-rose-900">
+                  <div className="font-rude-slab text-5xl font-bold tabular-nums text-rose-900">
                     {response.seasonRating.toFixed(1)}
                   </div>
                   <div className="flex justify-center gap-2">
