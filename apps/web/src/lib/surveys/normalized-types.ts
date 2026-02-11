@@ -127,6 +127,16 @@ export interface AnswerInput {
  */
 export interface SurveyWithQuestions extends NormalizedSurvey {
   questions: (SurveyQuestion & { options: QuestionOption[] })[];
+  /** Optional TRR linkage (if the survey was created from / linked to TRR core show/season). */
+  trr_link?: {
+    survey_id: string;
+    trr_show_id: string;
+    trr_season_id: string | null;
+    trr_episode_id: string | null;
+    season_number: number | null;
+    created_at: string;
+    updated_at: string;
+  };
 }
 
 /**

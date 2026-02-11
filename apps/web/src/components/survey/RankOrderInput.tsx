@@ -25,6 +25,11 @@ export default function RankOrderInput({
   const lineLabelTop = config.lineLabelTop ?? "BEST";
   const lineLabelBottom = config.lineLabelBottom ?? "WORST";
 
+  const getImagePath = React.useCallback((metadata: unknown): string => {
+    const record = metadata as { imagePath?: string; imageUrl?: string } | null | undefined;
+    return record?.imagePath ?? record?.imageUrl ?? "";
+  }, []);
+
   // Convert options to SurveyRankingItem format
   const items: SurveyRankingItem[] = React.useMemo(
     () =>
@@ -33,9 +38,9 @@ export default function RankOrderInput({
         .map((opt) => ({
           id: opt.option_key,
           label: opt.option_text,
-          img: (opt.metadata as { imagePath?: string })?.imagePath ?? "",
+          img: getImagePath(opt.metadata),
         })),
-    [question.options]
+    [getImagePath, question.options]
   );
 
   // Handle ranking change from FlashbackRanker

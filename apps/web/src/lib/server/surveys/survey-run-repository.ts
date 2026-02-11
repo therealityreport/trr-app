@@ -15,6 +15,7 @@ import type {
   SurveyWithQuestions,
 } from "@/lib/surveys/normalized-types";
 import { t } from "./survey-schema";
+import { getLinkBySurveyId } from "./survey-trr-links-repository";
 
 /**
  * Get the currently active run for a survey by slug.
@@ -87,9 +88,12 @@ export async function getSurveyWithQuestions(
     options: optionsByQuestion.get(q.id) ?? [],
   }));
 
+  const trrLink = await getLinkBySurveyId(survey.id);
+
   return {
     ...survey,
     questions: questionsWithOptions,
+    ...(trrLink ? { trr_link: trrLink } : {}),
   };
 }
 

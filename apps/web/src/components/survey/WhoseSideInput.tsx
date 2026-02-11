@@ -35,7 +35,8 @@ export default function WhoseSideInput({
   );
 
   const getImagePath = (option: QuestionOption): string | undefined => {
-    return (option.metadata as { imagePath?: string })?.imagePath;
+    const metadata = option.metadata as { imagePath?: string; imageUrl?: string } | null | undefined;
+    return metadata?.imagePath ?? metadata?.imageUrl;
   };
 
   return (
@@ -64,6 +65,7 @@ export default function WhoseSideInput({
                   width={128}
                   height={128}
                   className="w-full h-full object-cover"
+                  unoptimized={getImagePath(optionA)!.startsWith("http")}
                 />
               </div>
             )}
@@ -98,6 +100,7 @@ export default function WhoseSideInput({
                   width={128}
                   height={128}
                   className="w-full h-full object-cover"
+                  unoptimized={getImagePath(optionB)!.startsWith("http")}
                 />
               </div>
             )}

@@ -69,6 +69,28 @@ function mapSpecQuestion(specQuestion: SpecQuestion): MappedQuestion {
         options: [],
       };
 
+    case "two-axis-grid":
+      return {
+        dbType: "likert",
+        config: {
+          uiVariant: "two-axis-grid",
+          extent: specQuestion.extent,
+          xLabelLeft: specQuestion.xLabelLeft,
+          xLabelRight: specQuestion.xLabelRight,
+          yLabelBottom: specQuestion.yLabelBottom,
+          yLabelTop: specQuestion.yLabelTop,
+          rows: specQuestion.subjects.map(
+            (subject): ConfigMatrixRow => ({
+              id: subject.id,
+              label: subject.name,
+              img: subject.img,
+            })
+          ),
+          description: specQuestion.description,
+        },
+        options: [],
+      };
+
     case "circle-ranking":
       return {
         dbType: "ranking",

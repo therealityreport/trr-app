@@ -9,7 +9,7 @@
  * - ranking → "circle-ranking" | "rectangle-ranking"
  * - single_choice → "two-choice-slider" | "text-multiple-choice" | "image-multiple-choice" | "dropdown"
  * - multi_choice → "multi-select-choice"
- * - likert → "three-choice-slider" | "agree-likert-scale"
+ * - likert → "three-choice-slider" | "agree-likert-scale" | "two-axis-grid"
  * - free_text → "text-entry"
  */
 
@@ -20,6 +20,7 @@
 export type UiVariant =
   | "numeric-ranking"        // Episode rating with stars (0-10)
   | "numeric-scale-slider"   // Cast member slider (Boring/Entertaining)
+  | "two-axis-grid"          // 2D perceptual map (snap-to-grid cast placement)
   | "circle-ranking"         // Cast power rankings - grid with circles
   | "rectangle-ranking"      // Season/franchise rankings - classic list
   | "three-choice-slider"    // Keep/Fire/Demote slider
@@ -71,6 +72,8 @@ export interface TextValidation {
 export interface BaseQuestionConfig {
   uiVariant?: UiVariant;
   description?: string;
+  /** Optional grouping label (used by admin editor + play UI to render sections). */
+  section?: string;
 }
 
 /**
@@ -102,6 +105,25 @@ export interface NumericScaleSliderConfig extends BaseQuestionConfig {
   maxLabel: string;
   /** Cast member this slider is about */
   subject?: CastMemberSubject;
+}
+
+/**
+ * Two Axis Grid Config (two-axis-grid)
+ * 2D perceptual map where cast members are placed on an (x,y) grid.
+ *
+ * Coordinates are centered at (0,0) with extent +/- N (default N=5).
+ */
+export interface TwoAxisGridConfig extends BaseQuestionConfig {
+  uiVariant: "two-axis-grid";
+  /** Maximum absolute coordinate value (default: 5). Total intersections per axis: 2*extent + 1 */
+  extent?: number;
+  /** Axis labels */
+  xLabelLeft: string;
+  xLabelRight: string;
+  yLabelBottom: string;
+  yLabelTop: string;
+  /** Cast members/items to place (preferred over deriving from question.options). */
+  rows?: MatrixRow[];
 }
 
 /**
@@ -216,6 +238,7 @@ export interface TextEntryConfig extends BaseQuestionConfig {
 export type QuestionConfig =
   | NumericRankingConfig
   | NumericScaleSliderConfig
+  | TwoAxisGridConfig
   | CircleRankingConfig
   | RectangleRankingConfig
   | ThreeChoiceSliderConfig
@@ -238,6 +261,10 @@ export function isNumericRankingConfig(config: QuestionConfig): config is Numeri
 
 export function isNumericScaleSliderConfig(config: QuestionConfig): config is NumericScaleSliderConfig {
   return config.uiVariant === "numeric-scale-slider";
+}
+
+export function isTwoAxisGridConfig(config: QuestionConfig): config is TwoAxisGridConfig {
+  return config.uiVariant === "two-axis-grid";
 }
 
 export function isCircleRankingConfig(config: QuestionConfig): config is CircleRankingConfig {
