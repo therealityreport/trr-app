@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -127,9 +127,15 @@ const toFiniteNumber = (value: unknown): number | null => {
   return null;
 };
 
-const formatFixed1 = (value: unknown): string | null => {
-  const parsed = toFiniteNumber(value);
-  return parsed === null ? null : parsed.toFixed(1);
+const normalizePosterUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  if (trimmed.startsWith("/")) return `https://image.tmdb.org/t/p/original${trimmed}`;
+  return null;
 };
 
 export default function TrrShowsPage() {
@@ -137,7 +143,9 @@ export default function TrrShowsPage() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const latestSearchRequestRef = useRef(0);
 
   // Sync-from-lists state
   const [syncingLists, setSyncingLists] = useState(false);
@@ -153,6 +161,10 @@ export default function TrrShowsPage() {
   const [coveredShowPosterById, setCoveredShowPosterById] = useState<
     Record<string, string | null>
   >({});
+  const [coveredShowTotalEpisodesById, setCoveredShowTotalEpisodesById] = useState<
+    Record<string, number | null>
+  >({});
+  const posterLookupRequestedIdsRef = useRef<Set<string>>(new Set());
 
   // Get auth headers helper
   const getAuthHeaders = useCallback(async () => {
@@ -192,14 +204,33 @@ export default function TrrShowsPage() {
     if (!hasAccess || !user) return;
     if (loadingCovered) return;
 
-    const missing = coveredShows
-      .map((s) => s.trr_show_id)
-      .filter((id) => !(id in coveredShowPosterById));
+    const coveredIds = coveredShows.map((s) => s.trr_show_id);
+    const coveredIdSet = new Set(coveredIds);
+
+    // Keep only currently visible covered-show IDs in the request tracker.
+    for (const trackedId of posterLookupRequestedIdsRef.current) {
+      if (!coveredIdSet.has(trackedId)) {
+        posterLookupRequestedIdsRef.current.delete(trackedId);
+      }
+    }
+
+    const missing = coveredIds.filter((id) => !posterLookupRequestedIdsRef.current.has(id));
 
     if (missing.length === 0) return;
 
+    for (const id of missing) {
+      posterLookupRequestedIdsRef.current.add(id);
+    }
+
     // Mark as "in progress" (null) so we don't refetch in a loop.
     setCoveredShowPosterById((prev) => {
+      const next = { ...prev };
+      for (const id of missing) {
+        next[id] = null;
+      }
+      return next;
+    });
+    setCoveredShowTotalEpisodesById((prev) => {
       const next = { ...prev };
       for (const id of missing) {
         next[id] = null;
@@ -225,21 +256,62 @@ export default function TrrShowsPage() {
                 { headers }
               );
               const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-              if (!response.ok) throw new Error();
 
-              const seasonsRaw = (data as { seasons?: unknown }).seasons;
-              const seasons = Array.isArray(seasonsRaw) ? (seasonsRaw as Array<Record<string, unknown>>) : [];
+              const seasonsRaw = response.ok ? (data as { seasons?: unknown }).seasons : [];
+              const seasons = Array.isArray(seasonsRaw)
+                ? (seasonsRaw as Array<Record<string, unknown>>)
+                : [];
 
-              const best = seasons
-                .filter((s) => typeof s.season_number === "number" && s.season_number > 0)
-                .sort((a, b) => (b.season_number as number) - (a.season_number as number))
-                .find((s) => typeof s.url_original_poster === "string" && s.url_original_poster.length > 0);
+              const seasonsSorted = seasons
+                .map((season) => ({
+                  season,
+                  seasonNumber: toFiniteNumber((season as Record<string, unknown>).season_number),
+                }))
+                .filter(
+                  (
+                    entry
+                  ): entry is { season: Record<string, unknown>; seasonNumber: number } =>
+                    typeof entry.seasonNumber === "number" && entry.seasonNumber > 0
+                )
+                .sort((a, b) => b.seasonNumber - a.seasonNumber);
 
-              const posterUrl = best?.url_original_poster as string | undefined;
+              let posterUrl: string | null = null;
+              for (const { season } of seasonsSorted) {
+                posterUrl =
+                  normalizePosterUrl(season.url_original_poster) ||
+                  normalizePosterUrl(season.poster_url) ||
+                  normalizePosterUrl(season.poster_path);
+                if (posterUrl) break;
+              }
+
+              const showResponse = await fetch(`/api/admin/trr-api/shows/${trrShowId}`, {
+                headers,
+              });
+              const showData = (await showResponse.json().catch(() => ({}))) as Record<
+                string,
+                unknown
+              >;
+
+              let totalEpisodes: number | null = null;
+              if (showResponse.ok) {
+                const showRaw = (showData as { show?: Record<string, unknown> }).show;
+                totalEpisodes = toFiniteNumber(showRaw?.show_total_episodes);
+                if (!posterUrl) {
+                  posterUrl =
+                    normalizePosterUrl(showRaw?.poster_url) ||
+                    normalizePosterUrl(showRaw?.url_original_poster) ||
+                    normalizePosterUrl(showRaw?.poster_path);
+                }
+              }
+
               if (cancelled) return;
               if (posterUrl) {
                 setCoveredShowPosterById((prev) => ({ ...prev, [trrShowId]: posterUrl }));
               }
+              setCoveredShowTotalEpisodesById((prev) => ({
+                ...prev,
+                [trrShowId]: totalEpisodes,
+              }));
             } catch {
               // Leave as null (no poster).
             }
@@ -261,7 +333,6 @@ export default function TrrShowsPage() {
     user,
     loadingCovered,
     coveredShows,
-    coveredShowPosterById,
     getAuthHeaders,
   ]);
 
@@ -326,11 +397,15 @@ export default function TrrShowsPage() {
   const searchShows = useCallback(async (searchQuery: string) => {
     if (!searchQuery.trim()) {
       setResults(null);
+      setSearchError(null);
+      setLoading(false);
       return;
     }
 
+    const requestId = latestSearchRequestRef.current + 1;
+    latestSearchRequestRef.current = requestId;
     setLoading(true);
-    setError(null);
+    setSearchError(null);
 
     try {
       const token = await auth.currentUser?.getIdToken();
@@ -353,14 +428,35 @@ export default function TrrShowsPage() {
       }
 
       const data = await response.json();
+      if (requestId !== latestSearchRequestRef.current) return;
       setResults(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed");
+      if (requestId !== latestSearchRequestRef.current) return;
+      setSearchError(err instanceof Error ? err.message : "Search failed");
       setResults(null);
     } finally {
+      if (requestId !== latestSearchRequestRef.current) return;
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!hasAccess || !user) return;
+    const q = query.trim();
+
+    if (!q) {
+      setResults(null);
+      setSearchError(null);
+      setLoading(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void searchShows(q);
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [hasAccess, user, query, searchShows]);
 
   const syncFromLists = useCallback(async () => {
     if (syncingLists) return;
@@ -399,7 +495,7 @@ export default function TrrShowsPage() {
       );
 
       // If the user is actively searching, re-run search to reflect updates.
-      if (query.trim() && results) {
+      if (query.trim()) {
         await searchShows(query);
       }
     } catch (err) {
@@ -408,12 +504,7 @@ export default function TrrShowsPage() {
     } finally {
       setSyncingLists(false);
     }
-  }, [getAuthHeaders, query, results, searchShows, syncingLists]);
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    searchShows(query);
-  };
+  }, [getAuthHeaders, query, searchShows, syncingLists]);
 
   if (checking) {
     return (
@@ -465,89 +556,112 @@ export default function TrrShowsPage() {
         </header>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
-          {/* Shows (editorial coverage) */}
+          {/* Search */}
           <section className="mb-8 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Editorial Coverage
-                </p>
-                <h2 className="text-xl font-bold text-zinc-900">
-                  Shows
-                </h2>
-              </div>
-              <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
-                {coveredShows.length} shows
-              </span>
-            </div>
-
-            {loadingCovered ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-900 border-t-transparent" />
-              </div>
-            ) : coveredShows.length === 0 ? (
-              <p className="text-sm text-zinc-500">
-                No shows added yet. Search for shows below and click &quot;Add to
-                Shows&quot; to add them to your editorial coverage list.
+            <div className="mb-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                Search
               </p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {coveredShows.map((show) => {
-                  const label = getCoveredShowDisplayName(show.show_name);
-                  const posterUrl = coveredShowPosterById[show.trr_show_id] ?? null;
-                  return (
-                    <div
-                      key={show.id}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                    >
-                      <Link
-                        href={`/admin/trr-shows/${show.trr_show_id}`}
-                        className="group flex min-w-0 flex-1 items-center gap-3"
-                      >
-                        <div className="relative h-14 w-10 flex-shrink-0 overflow-hidden rounded-md bg-zinc-200">
-                          {posterUrl ? (
-                            <Image
-                              src={posterUrl}
-                              alt={`${label.secondary ?? label.primary} poster`}
-                              fill
-                              className="object-cover"
-                              sizes="40px"
-                              unoptimized
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-zinc-400">
-                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                                <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2" />
-                                <path d="M7 17l3-4 2 2 4-5 3 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            </div>
-                          )}
-                        </div>
+              <h2 className="text-xl font-bold text-zinc-900">Find Shows</h2>
+            </div>
+            <div className="relative">
+              <label htmlFor="search" className="sr-only">
+                Search shows
+              </label>
+              <input
+                id="search"
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search shows by name (e.g., 'Real Housewives', 'Vanderpump', 'RHOSLC')"
+                className="w-full rounded-lg border border-zinc-200 px-4 py-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+              />
 
-                        <div className="min-w-0">
-                          <span className="block truncate text-sm font-medium text-zinc-900 group-hover:underline">
-                            {label.primary}
-                          </span>
-                          {label.secondary && (
-                            <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                              {label.secondary}
-                            </span>
-                          )}
-                        </div>
-                      </Link>
-                      <button
-                        onClick={() => removeFromCoveredShows(show.trr_show_id)}
-                        disabled={removingShowId === show.trr_show_id}
-                        className="ml-2 flex-shrink-0 rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        {removingShowId === show.trr_show_id ? "..." : "Remove"}
-                      </button>
+              {query.trim().length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-[26rem] overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-xl">
+                  {loading ? (
+                    <div className="flex items-center justify-center py-6">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-900 border-t-transparent" />
                     </div>
-                  );
-                })}
-              </div>
+                  ) : searchError ? (
+                    <div className="p-3 text-sm text-red-700">{searchError}</div>
+                  ) : !results || results.shows.length === 0 ? (
+                    <div className="p-3 text-sm text-zinc-500">
+                      No shows found matching your query.
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-zinc-100">
+                      {results.shows.map((show) => {
+                        const isCovered = coveredShowIds.has(show.id);
+                        const displayName = getShowDisplayName(show);
+                        const networks = show.networks.slice(0, 2).join(" · ");
+                        const seasonsText =
+                          typeof show.show_total_seasons === "number" && show.show_total_seasons > 0
+                            ? `${show.show_total_seasons} seasons`
+                            : null;
+                        const metaText = [networks || null, seasonsText].filter(Boolean).join(" · ");
+
+                        return (
+                          <li key={show.id} className="flex items-start justify-between gap-3 p-3">
+                            <div className="min-w-0 flex-1">
+                              <Link
+                                href={`/admin/trr-shows/${show.id}`}
+                                className="block rounded-md px-1 py-0.5 transition hover:bg-zinc-50"
+                              >
+                                <p className="truncate text-sm font-semibold text-zinc-900">
+                                  {displayName.primary}
+                                </p>
+                                {displayName.secondary && (
+                                  <p className="mt-0.5 text-xs text-zinc-500 line-clamp-1">
+                                    {displayName.secondary}
+                                  </p>
+                                )}
+                                {metaText && (
+                                  <p className="mt-1 text-xs text-zinc-500">{metaText}</p>
+                                )}
+                              </Link>
+                            </div>
+                            {isCovered ? (
+                              <span
+                                className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"
+                                title="In Shows"
+                              >
+                                <svg
+                                  className="h-3 w-3"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M5 13l4 4L19 7"
+                                  />
+                                </svg>
+                                <span className="sr-only">In Shows</span>
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => addToCoveredShows(show)}
+                                disabled={addingShowId === show.id}
+                                className="rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+                              >
+                                {addingShowId === show.id ? "Adding..." : "Add"}
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               )}
-            </section>
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">
+              Results appear in a dropdown while you type.
+            </p>
+          </section>
 
           {(syncListsNotice || syncListsError) && (
             <section
@@ -574,32 +688,6 @@ export default function TrrShowsPage() {
             </section>
           )}
 
-          {/* Search Form */}
-          <section className="mb-8 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <form onSubmit={handleSearch} className="flex gap-4">
-              <div className="flex-1">
-                <label htmlFor="search" className="sr-only">
-                  Search shows
-                </label>
-                <input
-                  id="search"
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search shows by name (e.g., 'Real Housewives', 'Vanderpump', 'RHOSLC')"
-                  className="w-full rounded-lg border border-zinc-200 px-4 py-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={loading || !query.trim()}
-                className="rounded-lg bg-zinc-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? "Searching..." : "Search"}
-              </button>
-            </form>
-          </section>
-
           {/* Error State */}
           {error && (
             <section className="mb-8 rounded-2xl border border-red-200 bg-red-50 p-6">
@@ -608,198 +696,94 @@ export default function TrrShowsPage() {
             </section>
           )}
 
-          {/* Results */}
-          {results && (
-            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Search Results
-                  </p>
-                  <h2 className="text-xl font-bold text-zinc-900">
-                    {results.pagination.count} shows found
-                  </h2>
-                </div>
-              </div>
-
-              {results.shows.length === 0 ? (
-                <p className="text-sm text-zinc-500">
-                  No shows found matching your query.
+          {/* Shows (editorial coverage) */}
+          <section className="mb-8 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                  Editorial Coverage
                 </p>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  {results.shows.map((show) => {
-                    const isCovered = coveredShowIds.has(show.id);
-                    const tmdbVoteAverageText = formatFixed1(show.tmdb_vote_average);
-                    const displayName = getShowDisplayName(show);
-                    return (
-                      <div
-                        key={show.id}
-                        className="group rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-400 hover:shadow-md"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <Link
-                            href={`/admin/trr-shows/${show.id}`}
-                            className="flex-1 min-w-0"
-                          >
-                            <h3 className="text-lg font-semibold text-zinc-900 truncate hover:underline">
-                              {displayName.primary}
-                            </h3>
-                            {displayName.secondary && (
-                              <p className="mt-1 text-xs text-zinc-500 line-clamp-1">
-                                {displayName.secondary}
-                              </p>
-                            )}
-                            {show.networks.length > 0 && (
-                              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                                {show.networks.slice(0, 2).join(" · ")}
-                              </p>
-                            )}
-                          </Link>
-                          <div className="flex flex-col items-end gap-1">
-                            {show.show_total_seasons && (
-                              <span className="rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-semibold text-zinc-700">
-                                {show.show_total_seasons} seasons
-                              </span>
-                            )}
-                            {tmdbVoteAverageText && (
-                              <span className="text-xs text-zinc-500">
-                                ★ {tmdbVoteAverageText}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {show.description && (
-                          <p className="mt-2 text-sm text-zinc-600 line-clamp-2">
-                            {show.description}
-                          </p>
-                        )}
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {show.genres?.slice(0, 3).map((genre) => (
-                            <span
-                              key={genre}
-                              className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600"
-                            >
-                              {genre}
-                            </span>
-                          ))}
-                          {show.tmdb_status && (
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                                show.tmdb_status === "Returning Series"
-                                  ? "bg-green-100 text-green-700"
-                                  : show.tmdb_status === "Ended"
-                                    ? "bg-zinc-100 text-zinc-600"
-                                    : "bg-blue-100 text-blue-700"
-                              }`}
-                            >
-                              {show.tmdb_status}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-3 flex items-center justify-between">
-                          <Link
-                            href={`/admin/trr-shows/${show.id}`}
-                            className="flex items-center gap-2 text-xs font-semibold text-zinc-900"
-                          >
-                            <span className="transition group-hover:translate-x-0.5">
-                              View Details
-                            </span>
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              className="transition group-hover:translate-x-0.5"
-                            >
-                              <path
-                                d="M4 12L12 4M12 4H5M12 4V11"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </Link>
-
-                          {/* Add/Remove from Covered Shows */}
-                          {isCovered ? (
-                            <span
-                              className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700"
-                              title="In Shows"
-                            >
-                              <svg
-                                className="h-3 w-3"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={2}
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M5 13l4 4L19 7"
-                                />
-                              </svg>
-                              <span className="sr-only">In Shows</span>
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => addToCoveredShows(show)}
-                              disabled={addingShowId === show.id}
-                              className="rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-                            >
-                              {addingShowId === show.id
-                                ? "Adding..."
-                                : "Add to Shows"}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Empty State */}
-          {!results && !loading && !error && (
-            <section className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-12 text-center">
-              <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-zinc-200 flex items-center justify-center">
-                <svg
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="text-zinc-500"
-                >
-                  <circle
-                    cx="11"
-                    cy="11"
-                    r="7"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  />
-                  <path
-                    d="M16 16L20 20"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
+                <h2 className="text-xl font-bold text-zinc-900">Shows</h2>
               </div>
-              <h3 className="text-lg font-semibold text-zinc-900">
-                Search for a show
-              </h3>
-              <p className="mt-2 text-sm text-zinc-500">
-                Enter a show name above to browse the TRR metadata database.
-                <br />
-                Try &quot;Real Housewives&quot;, &quot;Vanderpump Rules&quot;,
-                or &quot;RHOSLC&quot;.
+              <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                {coveredShows.length} shows
+              </span>
+            </div>
+
+            {loadingCovered ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-900 border-t-transparent" />
+              </div>
+            ) : coveredShows.length === 0 ? (
+              <p className="text-sm text-zinc-500">
+                No shows added yet. Search above and click &quot;Add&quot; to add a show
+                to editorial coverage.
               </p>
-            </section>
-          )}
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {coveredShows.map((show) => {
+                  const label = getCoveredShowDisplayName(show.show_name);
+                  const posterUrl = coveredShowPosterById[show.trr_show_id] ?? null;
+                  const totalEpisodes = coveredShowTotalEpisodesById[show.trr_show_id] ?? null;
+                  return (
+                    <div
+                      key={show.id}
+                      className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                    >
+                      <Link
+                        href={`/admin/trr-shows/${show.trr_show_id}`}
+                        className="group flex min-w-0 flex-1 items-start gap-3"
+                      >
+                        <div className="relative w-20 flex-shrink-0 aspect-[4/5] overflow-hidden rounded-md bg-zinc-200">
+                          {posterUrl ? (
+                            <Image
+                              src={posterUrl}
+                              alt={`${label.secondary ?? label.primary} poster`}
+                              fill
+                              className="object-cover"
+                              sizes="80px"
+                              unoptimized
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-zinc-400">
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2" />
+                                <path d="M7 17l3-4 2 2 4-5 3 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <span className="block text-sm font-medium leading-snug text-zinc-900 whitespace-normal break-words group-hover:underline">
+                            {label.primary}
+                          </span>
+                          {label.secondary && (
+                            <span className="mt-0.5 block text-xs leading-snug text-zinc-500 whitespace-normal break-words">
+                              {label.secondary}
+                            </span>
+                          )}
+                          <span className="mt-1 block text-xs text-zinc-500">
+                            Total Episodes:{" "}
+                            {typeof totalEpisodes === "number"
+                              ? totalEpisodes.toLocaleString()
+                              : "—"}
+                          </span>
+                        </div>
+                      </Link>
+                      <button
+                        onClick={() => removeFromCoveredShows(show.trr_show_id)}
+                        disabled={removingShowId === show.trr_show_id}
+                        className="ml-2 flex-shrink-0 rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {removingShowId === show.trr_show_id ? "..." : "Remove"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </main>
       </div>
     </ClientOnly>

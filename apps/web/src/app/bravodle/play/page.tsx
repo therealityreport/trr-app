@@ -253,8 +253,8 @@ function HowToPlayModal({ onClose }: { onClose: () => void }) {
 
         <div className="Container flex max-h-[820px] flex-col gap-6 overflow-y-auto px-4 pt-6 pb-4">
           <div className="space-y-4 text-left">
-            <h2 className="font-['NYTKarnak_Condensed'] text-3xl font-bold leading-none text-black">How To Play</h2>
-            <p className="font-['NYTKarnak_Condensed'] text-xl font-bold leading-tight text-black">
+            <h2 className="font-rude-slab text-3xl font-bold leading-none text-black">How To Play</h2>
+            <p className="font-rude-slab text-xl font-bold leading-tight text-black">
               Guess the Reality Personality in 8 tries.
             </p>
             <ul className="space-y-1 text-base font-medium leading-tight text-black">
@@ -1186,7 +1186,7 @@ function ReportProblemModal({
       <div className="w-full max-w-lg rounded-lg bg-white px-6 pb-8 pt-6 shadow-[0px_4px_23px_rgba(0,0,0,0.2)]">
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <h2 className="font-['NYTKarnak_Condensed'] text-2xl font-bold leading-none text-black">Report a Problem</h2>
+            <h2 className="font-rude-slab text-2xl font-bold leading-none text-black">Report a Problem</h2>
             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-black/70">{gameTitle}</p>
           </div>
           <button

@@ -10,9 +10,10 @@ interface RouteParams {
 }
 
 /**
- * POST /api/admin/trr-api/people/[personId]/refresh-images/stream
+ * POST /api/admin/trr-api/people/[personId]/reprocess-images/stream
  *
- * Proxies refresh images request to TRR-Backend with SSE streaming.
+ * Proxies reprocess (count + text-ID + crop) request to TRR-Backend with SSE streaming.
+ * Unlike refresh-images, this does NOT sync or mirror — it only reprocesses existing photos.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
@@ -26,16 +27,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    let body: Record<string, unknown> | undefined;
-    if (request.headers.get("content-type")?.includes("application/json")) {
-      try {
-        body = await request.json();
-      } catch {
-        body = undefined;
-      }
-    }
-
-    const backendUrl = getBackendApiUrl(`/admin/person/${personId}/refresh-images/stream`);
+    const backendUrl = getBackendApiUrl(`/admin/person/${personId}/reprocess-images/stream`);
     if (!backendUrl) {
       return new Response(
         `event: error\ndata: ${JSON.stringify({ error: "Backend API not configured" })}\n\n`,
@@ -57,14 +49,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${serviceRoleKey}`,
       },
-      body: JSON.stringify(body ?? {}),
+      body: "{}",
     });
 
     if (!backendResponse.ok) {
       const errorText = await backendResponse.text();
       return new Response(
         `event: error\ndata: ${JSON.stringify({
-          error: "Backend refresh failed",
+          error: "Backend reprocess failed",
           detail: errorText,
         })}\n\n`,
         { status: backendResponse.status, headers: { "Content-Type": "text/event-stream" } }

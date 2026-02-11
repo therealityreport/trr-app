@@ -22,6 +22,7 @@ import {
 } from "@/lib/admin/advanced-filters";
 import {
   inferHasTextOverlay,
+  matchesContentTypesForSeasonAsset,
 } from "@/lib/gallery-filter-utils";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
@@ -82,6 +83,35 @@ interface TrrShowCastMember {
 }
 
 type TabId = "episodes" | "assets" | "cast" | "surveys" | "social" | "details";
+type RefreshProgressState = {
+  stage?: string | null;
+  message?: string | null;
+  current: number | null;
+  total: number | null;
+};
+
+const SEASON_REFRESH_STAGE_LABELS: Record<string, string> = {
+  starting: "Initializing",
+  sync_show_images: "Show Media",
+  sync_imdb_mediaindex: "Show Media",
+  sync_tmdb_seasons: "Season Media",
+  sync_tmdb_episodes: "Episode Media",
+  mirror_show_images: "Show Media Mirroring",
+  mirror_season_images: "Season Media Mirroring",
+  mirror_episode_images: "Episode Media Mirroring",
+  sync_cast_photos: "Cast Media",
+  sync_imdb: "Cast Media (IMDb)",
+  sync_tmdb: "Cast Media (TMDb)",
+  sync_fandom: "Cast Media (Fandom)",
+  mirror_cast_photos: "Cast Media Mirroring",
+  auto_count: "Auto Count",
+  word_id: "Word Detection",
+  prune: "Cleanup",
+  mirroring: "S3 Mirroring",
+  mirror: "S3 Mirroring",
+  cast_credits_show_cast: "Cast Credits",
+  cast_credits_episode_appearances: "Episode Credits",
+};
 
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -97,6 +127,47 @@ const toFiniteNumber = (value: unknown): number | null => {
 const formatFixed1 = (value: unknown): string | null => {
   const parsed = toFiniteNumber(value);
   return parsed === null ? null : parsed.toFixed(1);
+};
+
+const parseProgressNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const humanizeStage = (value: string): string => {
+  const normalized = value.replace(/[_-]+/g, " ").trim();
+  if (!normalized) return "Working";
+  return normalized
+    .split(" ")
+    .map((token) =>
+      token.length > 0 ? token.charAt(0).toUpperCase() + token.slice(1) : token
+    )
+    .join(" ");
+};
+
+const resolveStageLabel = (
+  stageValue: unknown,
+  stageLabels: Record<string, string>
+): string | null => {
+  if (typeof stageValue !== "string") return null;
+  const normalized = stageValue.trim().toLowerCase();
+  if (!normalized) return null;
+  return stageLabels[normalized] ?? humanizeStage(normalized);
+};
+
+const buildProgressMessage = (
+  stageLabel: string | null,
+  rawMessage: unknown,
+  fallback: string
+): string => {
+  const message = typeof rawMessage === "string" ? rawMessage.trim() : "";
+  if (!message) return stageLabel ? `Working on ${stageLabel}...` : fallback;
+  if (stageLabel) return `${stageLabel}: ${message}`;
+  return message;
 };
 
 function GalleryImage({
@@ -148,6 +219,73 @@ function CastPhoto({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+function RefreshProgressBar({
+  show,
+  stage,
+  message,
+  current,
+  total,
+}: {
+  show: boolean;
+  stage?: string | null;
+  message?: string | null;
+  current?: number | null;
+  total?: number | null;
+}) {
+  if (!show) return null;
+  const hasCounts =
+    typeof current === "number" &&
+    Number.isFinite(current) &&
+    typeof total === "number" &&
+    Number.isFinite(total) &&
+    total >= 0 &&
+    current >= 0;
+  const safeTotal = hasCounts ? Math.max(0, Math.floor(total)) : null;
+  const safeCurrent = hasCounts
+    ? Math.max(
+        0,
+        Math.floor(
+          safeTotal !== null && safeTotal > 0 ? Math.min(current, safeTotal) : current
+        )
+      )
+    : null;
+  const hasProgressBar = safeCurrent !== null && safeTotal !== null && safeTotal > 0;
+  const percent = hasProgressBar
+    ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100))
+    : 0;
+  const stageLabel =
+    typeof stage === "string" && stage.trim()
+      ? stage.replace(/[_-]+/g, " ").trim()
+      : null;
+
+  return (
+    <div className="mt-2 w-full">
+      {(message || stageLabel || hasCounts) && (
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
+            {message || stageLabel || "Working..."}
+          </p>
+          {hasProgressBar && safeCurrent !== null && safeTotal !== null && (
+            <p className="text-[11px] tabular-nums text-zinc-500">
+              {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} ({percent}%)
+            </p>
+          )}
+        </div>
+      )}
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
+        {hasProgressBar ? (
+          <div
+            className="h-full rounded-full bg-zinc-700 transition-all"
+            style={{ width: `${percent}%` }}
+          />
+        ) : safeTotal === 0 ? null : (
+          <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-zinc-700/70" />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function mapEpisodeToMetadata(episode: TrrEpisode, showName?: string): PhotoMetadata {
   const fileTypeMatch = episode.url_original_still?.match(/\.([a-z0-9]+)$/i);
   const fileType = fileTypeMatch ? fileTypeMatch[1].toLowerCase() : null;
@@ -187,6 +325,17 @@ export default function SeasonDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshingAssets, setRefreshingAssets] = useState(false);
+  const [assetsRefreshNotice, setAssetsRefreshNotice] = useState<string | null>(null);
+  const [assetsRefreshError, setAssetsRefreshError] = useState<string | null>(null);
+  const [assetsRefreshProgress, setAssetsRefreshProgress] = useState<RefreshProgressState | null>(
+    null
+  );
+  const [refreshingCast, setRefreshingCast] = useState(false);
+  const [castRefreshNotice, setCastRefreshNotice] = useState<string | null>(null);
+  const [castRefreshError, setCastRefreshError] = useState<string | null>(null);
+  const [castRefreshProgress, setCastRefreshProgress] = useState<RefreshProgressState | null>(
+    null
+  );
   const [trrShowCast, setTrrShowCast] = useState<TrrShowCastMember[]>([]);
   const [trrShowCastLoading, setTrrShowCastLoading] = useState(false);
   const [trrShowCastError, setTrrShowCastError] = useState<string | null>(null);
@@ -401,14 +550,460 @@ export default function SeasonDetailPage() {
   const handleRefreshImages = useCallback(async () => {
     if (refreshingAssets) return;
     setRefreshingAssets(true);
+    setAssetsRefreshError(null);
+    setAssetsRefreshNotice(null);
+    setAssetsRefreshProgress({
+      stage: "Initializing",
+      message: "Refreshing show/season/episode media...",
+      current: 0,
+      total: null,
+    });
     try {
+      const headers = await getAuthHeaders();
+      let sawComplete = false;
+      let streamFailed = false;
+
+      try {
+        const streamResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh-photos/stream`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ skip_mirror: false }),
+        });
+
+        if (!streamResponse.ok || !streamResponse.body) {
+          throw new Error("Media refresh stream unavailable");
+        }
+
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, "\n");
+
+          let boundaryIndex = buffer.indexOf("\n\n");
+          while (boundaryIndex !== -1) {
+            const rawEvent = buffer.slice(0, boundaryIndex);
+            buffer = buffer.slice(boundaryIndex + 2);
+
+            const lines = rawEvent.split("\n").filter(Boolean);
+            let eventType = "message";
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            const dataStr = dataLines.join("\n");
+            let payload: Record<string, unknown> | string = dataStr;
+            try {
+              payload = JSON.parse(dataStr) as Record<string, unknown>;
+            } catch {
+              payload = dataStr;
+            }
+
+            if (eventType === "progress" && payload && typeof payload === "object") {
+              const stageLabel = resolveStageLabel(
+                (payload as { stage?: unknown; step?: unknown }).stage ??
+                  (payload as { stage?: unknown; step?: unknown }).step,
+                SEASON_REFRESH_STAGE_LABELS
+              );
+              const stageCurrent = parseProgressNumber(
+                (payload as { stage_current?: unknown }).stage_current
+              );
+              const stageTotal = parseProgressNumber(
+                (payload as { stage_total?: unknown }).stage_total
+              );
+              const current = parseProgressNumber(
+                (payload as { current?: unknown }).current
+              );
+              const total = parseProgressNumber(
+                (payload as { total?: unknown }).total
+              );
+
+              setAssetsRefreshProgress({
+                stage: stageLabel,
+                message: buildProgressMessage(
+                  stageLabel,
+                  (payload as { message?: unknown }).message,
+                  "Refreshing media..."
+                ),
+                current: stageCurrent ?? current,
+                total: stageTotal ?? total,
+              });
+            } else if (eventType === "complete") {
+              sawComplete = true;
+            } else if (eventType === "error") {
+              const errorPayload =
+                payload && typeof payload === "object"
+                  ? (payload as { error?: unknown; detail?: unknown })
+                  : null;
+              const errorText =
+                typeof errorPayload?.error === "string" && errorPayload.error
+                  ? errorPayload.error
+                  : "Failed to refresh media";
+              const detailText =
+                typeof errorPayload?.detail === "string" && errorPayload.detail
+                  ? errorPayload.detail
+                  : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            }
+
+            boundaryIndex = buffer.indexOf("\n\n");
+          }
+        }
+      } catch (streamErr) {
+        streamFailed = true;
+        console.warn("Season media refresh stream failed, falling back to non-stream.", streamErr);
+      }
+
+      if (streamFailed) {
+        setAssetsRefreshProgress({
+          stage: "Fallback",
+          message: "Refreshing media...",
+          current: null,
+          total: null,
+        });
+        const fallbackResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ targets: ["photos"] }),
+        });
+        const fallbackData = await fallbackResponse.json().catch(() => ({}));
+        if (!fallbackResponse.ok) {
+          const message =
+            typeof (fallbackData as { error?: unknown }).error === "string"
+              ? (fallbackData as { error: string }).error
+              : "Failed to refresh media";
+          throw new Error(message);
+        }
+      }
+
       await fetchAssets();
+      setAssetsRefreshNotice(
+        streamFailed
+          ? "Refreshed media."
+          : sawComplete
+          ? "Refreshed show, season, episode, and cast media."
+          : "Refreshed media."
+      );
     } catch (err) {
-      console.error("Failed to refresh images:", err);
+      console.error("Failed to refresh media:", err);
+      setAssetsRefreshError(err instanceof Error ? err.message : "Failed to refresh media");
     } finally {
       setRefreshingAssets(false);
+      setAssetsRefreshProgress(null);
     }
-  }, [refreshingAssets, fetchAssets]);
+  }, [refreshingAssets, fetchAssets, getAuthHeaders, showId]);
+
+  const refreshSeasonCast = useCallback(async () => {
+    if (refreshingCast) return;
+
+    setRefreshingCast(true);
+    setCastRefreshError(null);
+    setCastRefreshNotice(null);
+    setCastRefreshProgress({
+      stage: "Initializing",
+      message: "Refreshing cast credits and cast media...",
+      current: 0,
+      total: null,
+    });
+
+    try {
+      const headers = await getAuthHeaders();
+      let streamFailed = false;
+
+      try {
+        const refreshResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh/stream`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ targets: ["cast_credits"] }),
+        });
+
+        if (!refreshResponse.ok || !refreshResponse.body) {
+          throw new Error("Cast refresh stream unavailable");
+        }
+
+        const reader = refreshResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, "\n");
+
+          let boundaryIndex = buffer.indexOf("\n\n");
+          while (boundaryIndex !== -1) {
+            const rawEvent = buffer.slice(0, boundaryIndex);
+            buffer = buffer.slice(boundaryIndex + 2);
+
+            const lines = rawEvent.split("\n").filter(Boolean);
+            let eventType = "message";
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            const dataStr = dataLines.join("\n");
+            let payload: Record<string, unknown> | string = dataStr;
+            try {
+              payload = JSON.parse(dataStr) as Record<string, unknown>;
+            } catch {
+              payload = dataStr;
+            }
+
+            if (eventType === "progress" && payload && typeof payload === "object") {
+              const stageLabel = resolveStageLabel(
+                (payload as { step?: unknown; stage?: unknown }).step ??
+                  (payload as { step?: unknown; stage?: unknown }).stage,
+                SEASON_REFRESH_STAGE_LABELS
+              );
+              const current = parseProgressNumber(
+                (payload as { current?: unknown }).current
+              );
+              const total = parseProgressNumber((payload as { total?: unknown }).total);
+              setCastRefreshProgress({
+                stage: stageLabel,
+                message: buildProgressMessage(
+                  stageLabel,
+                  (payload as { message?: unknown }).message,
+                  "Refreshing cast..."
+                ),
+                current,
+                total,
+              });
+            } else if (eventType === "error") {
+              const errorPayload =
+                payload && typeof payload === "object"
+                  ? (payload as { error?: unknown; detail?: unknown })
+                  : null;
+              const errorText =
+                typeof errorPayload?.error === "string" && errorPayload.error
+                  ? errorPayload.error
+                  : "Failed to refresh cast credits";
+              const detailText =
+                typeof errorPayload?.detail === "string" && errorPayload.detail
+                  ? errorPayload.detail
+                  : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            }
+
+            boundaryIndex = buffer.indexOf("\n\n");
+          }
+        }
+      } catch (streamErr) {
+        streamFailed = true;
+        console.warn("Season cast refresh stream failed, falling back to non-stream.", streamErr);
+      }
+
+      if (streamFailed) {
+        setCastRefreshProgress({
+          stage: "Fallback",
+          message: "Refreshing cast credits...",
+          current: null,
+          total: null,
+        });
+        const fallbackResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ targets: ["cast_credits"] }),
+        });
+        const fallbackData = await fallbackResponse.json().catch(() => ({}));
+        if (!fallbackResponse.ok) {
+          const message =
+            typeof (fallbackData as { error?: unknown }).error === "string"
+              ? (fallbackData as { error: string }).error
+              : "Failed to refresh cast credits";
+          throw new Error(message);
+        }
+      }
+
+      const castResponse = await fetch(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500`,
+        { headers }
+      );
+      const castData = await castResponse.json().catch(() => ({}));
+      if (!castResponse.ok) {
+        const message =
+          typeof (castData as { error?: unknown }).error === "string"
+            ? (castData as { error: string }).error
+            : "Failed to fetch refreshed season cast";
+        throw new Error(message);
+      }
+
+      const refreshedCast = (castData as { cast?: unknown }).cast;
+      const refreshedCastMembers = Array.isArray(refreshedCast)
+        ? (refreshedCast as SeasonCastMember[])
+        : [];
+      setCast(refreshedCastMembers);
+
+      const castMembersToSync = Array.from(
+        new Map(
+          refreshedCastMembers
+            .filter(
+              (member) => typeof member.person_id === "string" && member.person_id.trim()
+            )
+            .map((member) => [member.person_id, member] as const)
+        ).values()
+      );
+
+      let castProfilesFailed = 0;
+      const castProfilesTotal = castMembersToSync.length;
+
+      for (const [index, member] of castMembersToSync.entries()) {
+        const displayName = member.person_name || `Cast member ${index + 1}`;
+        setCastRefreshProgress({
+          stage: "Cast Profiles & Media",
+          message: `Syncing ${displayName} from TMDb/IMDb/Fandom (${index + 1}/${castProfilesTotal})...`,
+          current: index,
+          total: castProfilesTotal,
+        });
+
+        const requestBody = {
+          skip_mirror: false,
+          show_id: showId,
+          show_name: show?.name ?? undefined,
+        };
+
+        try {
+          let personStreamFailed = false;
+          try {
+            const personStreamResponse = await fetch(
+              `/api/admin/trr-api/people/${member.person_id}/refresh-images/stream`,
+              {
+                method: "POST",
+                headers: { ...headers, "Content-Type": "application/json" },
+                body: JSON.stringify(requestBody),
+              }
+            );
+
+            if (!personStreamResponse.ok || !personStreamResponse.body) {
+              throw new Error("Person refresh stream unavailable");
+            }
+
+            const personReader = personStreamResponse.body.getReader();
+            const personDecoder = new TextDecoder();
+            let personBuffer = "";
+
+            while (true) {
+              const { value, done } = await personReader.read();
+              if (done) break;
+              personBuffer += personDecoder.decode(value, { stream: true });
+              personBuffer = personBuffer.replace(/\r\n/g, "\n");
+
+              let boundaryIndex = personBuffer.indexOf("\n\n");
+              while (boundaryIndex !== -1) {
+                const rawEvent = personBuffer.slice(0, boundaryIndex);
+                personBuffer = personBuffer.slice(boundaryIndex + 2);
+
+                const lines = rawEvent.split("\n").filter(Boolean);
+                let eventType = "message";
+                const dataLines: string[] = [];
+                for (const line of lines) {
+                  if (line.startsWith("event:")) {
+                    eventType = line.slice(6).trim();
+                  } else if (line.startsWith("data:")) {
+                    dataLines.push(line.slice(5).trim());
+                  }
+                }
+
+                const dataStr = dataLines.join("\n");
+                let payload: Record<string, unknown> | string = dataStr;
+                try {
+                  payload = JSON.parse(dataStr) as Record<string, unknown>;
+                } catch {
+                  payload = dataStr;
+                }
+
+                if (eventType === "progress" && payload && typeof payload === "object") {
+                  const stageLabel = resolveStageLabel(
+                    (payload as { stage?: unknown; step?: unknown }).stage ??
+                      (payload as { stage?: unknown; step?: unknown }).step,
+                    SEASON_REFRESH_STAGE_LABELS
+                  );
+                  setCastRefreshProgress({
+                    stage: stageLabel ?? "Cast Profiles & Media",
+                    message: buildProgressMessage(
+                      stageLabel,
+                      (payload as { message?: unknown }).message,
+                      `Syncing ${displayName}...`
+                    ),
+                    current: index,
+                    total: castProfilesTotal,
+                  });
+                } else if (eventType === "error") {
+                  throw new Error("Failed to sync cast member profile/media");
+                }
+
+                boundaryIndex = personBuffer.indexOf("\n\n");
+              }
+            }
+          } catch (personStreamErr) {
+            personStreamFailed = true;
+            console.warn(
+              `Season cast member stream refresh failed for ${displayName}; using non-stream fallback.`,
+              personStreamErr
+            );
+          }
+
+          if (personStreamFailed) {
+            const personFallbackResponse = await fetch(
+              `/api/admin/trr-api/people/${member.person_id}/refresh-images`,
+              {
+                method: "POST",
+                headers: { ...headers, "Content-Type": "application/json" },
+                body: JSON.stringify(requestBody),
+              }
+            );
+            const personFallbackData = await personFallbackResponse.json().catch(() => ({}));
+            if (!personFallbackResponse.ok) {
+              const message =
+                typeof (personFallbackData as { error?: unknown }).error === "string"
+                  ? (personFallbackData as { error: string }).error
+                  : "Failed to sync cast member profile/media";
+              throw new Error(message);
+            }
+          }
+        } catch (castProfileErr) {
+          console.warn(
+            `Failed syncing season cast profile/media for ${displayName}:`,
+            castProfileErr
+          );
+          castProfilesFailed += 1;
+        } finally {
+          setCastRefreshProgress({
+            stage: "Cast Profiles & Media",
+            message: `Synced ${index + 1}/${castProfilesTotal} cast profiles/media...`,
+            current: index + 1,
+            total: castProfilesTotal,
+          });
+        }
+      }
+
+      setCastRefreshNotice(
+        castProfilesTotal > 0
+          ? `Refreshed season cast, then synced cast profiles/media from TMDb/IMDb/Fandom (${castProfilesTotal - castProfilesFailed}/${castProfilesTotal}${castProfilesFailed > 0 ? `, ${castProfilesFailed} failed` : ""}).`
+          : "Refreshed season cast."
+      );
+    } catch (err) {
+      setCastRefreshError(err instanceof Error ? err.message : "Failed to refresh season cast");
+    } finally {
+      setRefreshingCast(false);
+      setCastRefreshProgress(null);
+    }
+  }, [refreshingCast, getAuthHeaders, showId, seasonNumber, show?.name]);
 
   const openAddBackdrops = useCallback(async () => {
     if (!season?.id) return;
@@ -630,11 +1225,11 @@ export default function SeasonDetailPage() {
   const formatEpisodesLabel = (count: number) =>
     count > 0 ? `${count} episodes this season` : "Appeared this season";
 
-  const isSeasonBackdrop = (asset: SeasonAsset) => {
+  const isSeasonBackdrop = useCallback((asset: SeasonAsset) => {
     // Only trust the normalized "kind" field. Some historical metadata flags were incorrect
     // (e.g. season posters tagged as backdrops). Kind is the source-of-truth for grouping.
     return (asset.kind ?? "").toLowerCase().trim() === "backdrop";
-  };
+  }, []);
 
   const filteredMediaAssets = useMemo(() => {
     return applyAdvancedFiltersToSeasonAssets(assets, advancedFilters, {
@@ -642,6 +1237,49 @@ export default function SeasonDetailPage() {
       getSeasonNumber: () => seasonNumber,
     });
   }, [assets, advancedFilters, seasonNumber, show?.name]);
+
+  const mediaSections = useMemo(() => {
+    const backdrops: SeasonAsset[] = [];
+    const seasonPosters: SeasonAsset[] = [];
+    const episodeStills: SeasonAsset[] = [];
+    const castPhotos: SeasonAsset[] = [];
+
+    for (const asset of filteredMediaAssets) {
+      if (asset.type === "cast") {
+        castPhotos.push(asset);
+        continue;
+      }
+
+      if (asset.type === "episode") {
+        episodeStills.push(asset);
+        continue;
+      }
+
+      if (asset.type !== "season") continue;
+
+      if (isSeasonBackdrop(asset) && (asset.source ?? "").toLowerCase() === "tmdb") {
+        backdrops.push(asset);
+        continue;
+      }
+
+      const isEpisodeStill = matchesContentTypesForSeasonAsset(
+        asset,
+        ["episode_still"],
+        seasonNumber,
+        show?.name ?? undefined
+      );
+      if (isEpisodeStill) {
+        episodeStills.push(asset);
+        continue;
+      }
+
+      if (!isSeasonBackdrop(asset)) {
+        seasonPosters.push(asset);
+      }
+    }
+
+    return { backdrops, seasonPosters, episodeStills, castPhotos };
+  }, [filteredMediaAssets, isSeasonBackdrop, seasonNumber, show?.name]);
 
   const isTextFilterActive = useMemo(() => {
     const wantsText = advancedFilters.text.includes("text");
@@ -988,25 +1626,30 @@ export default function SeasonDetailPage() {
                 </div>
               </div>
 
+              {(assetsRefreshNotice || assetsRefreshError) && (
+                <p
+                  className={`mb-4 text-sm ${
+                    assetsRefreshError ? "text-red-600" : "text-zinc-500"
+                  }`}
+                >
+                  {assetsRefreshError || assetsRefreshNotice}
+                </p>
+              )}
+              <RefreshProgressBar
+                show={refreshingAssets}
+                stage={assetsRefreshProgress?.stage}
+                message={assetsRefreshProgress?.message}
+                current={assetsRefreshProgress?.current}
+                total={assetsRefreshProgress?.total}
+              />
+
               {assetsView === "media" ? (
                 <div className="space-y-8">
-                {filteredMediaAssets.filter(
-                  (a) =>
-                    a.type === "season" &&
-                    isSeasonBackdrop(a) &&
-                    (a.source ?? "").toLowerCase() === "tmdb"
-                ).length > 0 && (
+                {mediaSections.backdrops.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Backdrops</h4>
                     <div className="grid grid-cols-3 gap-4">
-                      {filteredMediaAssets
-                        .filter(
-                          (a) =>
-                            a.type === "season" &&
-                            isSeasonBackdrop(a) &&
-                            (a.source ?? "").toLowerCase() === "tmdb"
-                        )
-                        .map((asset, i, arr) => (
+                      {mediaSections.backdrops.map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
@@ -1024,13 +1667,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {filteredMediaAssets.filter((a) => a.type === "season" && !isSeasonBackdrop(a)).length > 0 && (
+                {mediaSections.seasonPosters.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Season Posters</h4>
                     <div className="grid grid-cols-4 gap-4">
-                      {filteredMediaAssets
-                        .filter((a) => a.type === "season" && !isSeasonBackdrop(a))
-                        .map((asset, i, arr) => (
+                      {mediaSections.seasonPosters.map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
@@ -1047,13 +1688,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {filteredMediaAssets.filter((a) => a.type === "episode").length > 0 && (
+                {mediaSections.episodeStills.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Episode Stills</h4>
                     <div className="grid grid-cols-6 gap-3">
-                      {filteredMediaAssets
-                        .filter((a) => a.type === "episode")
-                        .map((asset, i, arr) => (
+                      {mediaSections.episodeStills.map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
@@ -1070,13 +1709,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {filteredMediaAssets.filter((a) => a.type === "cast").length > 0 && (
+                {mediaSections.castPhotos.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Cast Photos</h4>
                     <div className="grid grid-cols-5 gap-4">
-                      {filteredMediaAssets
-                        .filter((a) => a.type === "cast")
-                        .map((asset, i, arr) => (
+                      {mediaSections.castPhotos.map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
@@ -1146,10 +1783,32 @@ export default function SeasonDetailPage() {
                     Season {season.season_number}
                   </h3>
                 </div>
-                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                  {cast.length} members
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
+                    {cast.length} members
+                  </span>
+                  <button
+                    type="button"
+                    onClick={refreshSeasonCast}
+                    disabled={refreshingCast}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {refreshingCast ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
               </div>
+              {(castRefreshNotice || castRefreshError) && (
+                <p className={`mb-4 text-sm ${castRefreshError ? "text-red-600" : "text-zinc-500"}`}>
+                  {castRefreshError || castRefreshNotice}
+                </p>
+              )}
+              <RefreshProgressBar
+                show={refreshingCast}
+                stage={castRefreshProgress?.stage}
+                message={castRefreshProgress?.message}
+                current={castRefreshProgress?.current}
+                total={castRefreshProgress?.total}
+              />
 
               <div className="space-y-8">
                 {!hasEpisodeCounts && cast.length > 0 && (

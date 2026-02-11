@@ -67,6 +67,16 @@ export async function POST(request: NextRequest) {
           }
         );
       }
+    } else if (effectiveEntityType === "show") {
+      if (!body.show_id) {
+        return new Response(
+          `event: error\ndata: ${JSON.stringify({ error: "show_id is required for show entity type" })}\n\n`,
+          {
+            status: 400,
+            headers: { "Content-Type": "text/event-stream" },
+          }
+        );
+      }
     } else if (effectiveEntityType === "person") {
       if (!body.person_id) {
         return new Response(
@@ -79,7 +89,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       return new Response(
-        `event: error\ndata: ${JSON.stringify({ error: "entity_type must be 'season' or 'person'" })}\n\n`,
+        `event: error\ndata: ${JSON.stringify({ error: "entity_type must be 'season', 'show', or 'person'" })}\n\n`,
         {
           status: 400,
           headers: { "Content-Type": "text/event-stream" },

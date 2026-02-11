@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { mapPhotoToMetadata, mapSeasonAssetToMetadata, type PhotoMetadata } from "@/lib/photo-metadata";
+import {
+  mapPhotoToMetadata,
+  mapSeasonAssetToMetadata,
+  resolveMetadataDimensions,
+  type PhotoMetadata,
+} from "@/lib/photo-metadata";
 
 describe("mapPhotoToMetadata", () => {
   it("maps source to badge color", () => {
@@ -228,6 +233,92 @@ describe("mapPhotoToMetadata", () => {
       expect(result.sectionLabel).toBe(c.sectionLabel);
       expect(result.sectionTag).toBe(c.expected);
     }
+  });
+
+  it("infers IMDb episode still from caption when type fields are missing", () => {
+    const result = mapPhotoToMetadata({
+      id: "imdb-episode",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: "https://example.com/imdb.jpg",
+      caption:
+        "Lisa Barlow , Mary Cosby , Heather Gay in Opas and Outbursts (2025)",
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: { fandom_section_tag: "OTHER" },
+      fetched_at: null,
+    });
+
+    expect(result.sectionTag).toBe("EPISODE STILL");
+  });
+
+  it("infers non-fandom content type from context and caption", () => {
+    const result = mapPhotoToMetadata({
+      id: "confessional-1",
+      person_id: "p1",
+      source: "tmdb",
+      url: null,
+      hosted_url: "https://example.com/confessional.jpg",
+      caption: "Confessional interview look",
+      width: null,
+      height: null,
+      context_type: "confessional interview",
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+
+    expect(result.sectionTag).toBe("CONFESSIONAL");
+  });
+
+  it("uses fallback people list when tags are missing", () => {
+    const result = mapPhotoToMetadata(
+      {
+        id: "fallback-person",
+        person_id: "p1",
+        source: "imdb",
+        url: null,
+        hosted_url: "https://example.com/imdb.jpg",
+        caption: null,
+        width: null,
+        height: null,
+        context_type: null,
+        season: null,
+        people_names: null,
+        title_names: null,
+        metadata: null,
+        fetched_at: null,
+      },
+      { fallbackPeople: ["Meredith Marks"] }
+    );
+
+    expect(result.people).toEqual(["Meredith Marks"]);
+  });
+});
+
+describe("resolveMetadataDimensions", () => {
+  it("parses nested dimensions objects and strings", () => {
+    const fromObject = resolveMetadataDimensions({
+      dimensions: { width: 1200, height: 1500 },
+    });
+    expect(fromObject).toEqual({ width: 1200, height: 1500 });
+
+    const fromShortObject = resolveMetadataDimensions({
+      dimensions: { w: 1080, h: 1350 },
+    });
+    expect(fromShortObject).toEqual({ width: 1080, height: 1350 });
+
+    const fromString = resolveMetadataDimensions({
+      dimensions: "1080x1350",
+    });
+    expect(fromString).toEqual({ width: 1080, height: 1350 });
   });
 });
 

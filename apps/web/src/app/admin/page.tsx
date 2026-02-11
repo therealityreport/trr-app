@@ -55,9 +55,9 @@ const ADMIN_TOOLS = [
     badge: "Settings",
   },
   {
-    key: "font-library",
-    title: "Font Library",
-    description: "Reference every licensed font family, weight, and usage guidance loaded in the app.",
+    key: "design-system",
+    title: "UI Design System",
+    description: "Reference for fonts, survey question components, and form patterns used across the app.",
     href: "/admin/fonts" as const,
     badge: "Design",
   },

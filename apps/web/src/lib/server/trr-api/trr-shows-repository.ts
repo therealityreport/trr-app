@@ -1,5 +1,6 @@
 import "server-only";
 import { query as pgQuery } from "@/lib/server/postgres";
+import { parseThumbnailCrop } from "@/lib/thumbnail-crop";
 import {
   getPhotoIdsByPersonId,
   getTagsByPhotoIds,
@@ -13,6 +14,7 @@ import { dedupePhotosByCanonicalKeysPreferMediaLinks } from "@/lib/server/trr-ap
 export interface TrrShow {
   id: string;
   name: string;
+  alternative_names: string[];
   imdb_id: string | null;
   tmdb_id: number | null;
   show_total_seasons: number | null;
@@ -38,6 +40,16 @@ export interface TrrShow {
   // Timestamps
   created_at: string;
   updated_at: string;
+}
+
+export interface UpdateTrrShowInput {
+  name?: string;
+  description?: string | null;
+  premiereDate?: string | null;
+  alternativeNames?: string[];
+  primaryPosterImageId?: string | null;
+  primaryBackdropImageId?: string | null;
+  primaryLogoImageId?: string | null;
 }
 
 export interface TrrSeason {
@@ -286,6 +298,66 @@ export async function getShowByImdbId(imdbId: string): Promise<TrrShow | null> {
     [imdbId]
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * Update editable fields for a single show.
+ */
+export async function updateShowById(
+  id: string,
+  input: UpdateTrrShowInput
+): Promise<TrrShow | null> {
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let paramIndex = 1;
+
+  if (input.name !== undefined) {
+    updates.push(`name = $${paramIndex++}::text`);
+    values.push(input.name);
+  }
+  if (input.description !== undefined) {
+    updates.push(`description = $${paramIndex++}::text`);
+    values.push(input.description);
+  }
+  if (input.premiereDate !== undefined) {
+    updates.push(`premiere_date = $${paramIndex++}::date`);
+    values.push(input.premiereDate);
+  }
+  if (input.alternativeNames !== undefined) {
+    updates.push(`alternative_names = $${paramIndex++}::text[]`);
+    values.push(input.alternativeNames);
+  }
+  if (input.primaryPosterImageId !== undefined) {
+    updates.push(`primary_poster_image_id = $${paramIndex++}::uuid`);
+    values.push(input.primaryPosterImageId);
+  }
+  if (input.primaryBackdropImageId !== undefined) {
+    updates.push(`primary_backdrop_image_id = $${paramIndex++}::uuid`);
+    values.push(input.primaryBackdropImageId);
+  }
+  if (input.primaryLogoImageId !== undefined) {
+    updates.push(`primary_logo_image_id = $${paramIndex++}::uuid`);
+    values.push(input.primaryLogoImageId);
+  }
+
+  if (updates.length === 0) {
+    return getShowById(id);
+  }
+
+  values.push(id);
+  const result = await pgQuery<TrrShow>(
+    `UPDATE core.shows AS s
+     SET ${updates.join(", ")}
+     WHERE s.id = $${paramIndex}::uuid
+     RETURNING s.*`,
+    values
+  );
+  const row = result.rows[0] ?? null;
+  if (!row) return null;
+
+  // Keep response shape aligned with getShowById.
+  const withUrls = await getShowById(row.id);
+  return withUrls ?? row;
 }
 
 // ============================================================================
@@ -729,6 +801,10 @@ export interface TrrPersonPhoto {
   link_id?: string | null;
   media_asset_id?: string | null;
   facebank_seed: boolean;
+  thumbnail_focus_x: number | null;
+  thumbnail_focus_y: number | null;
+  thumbnail_zoom: number | null;
+  thumbnail_crop_mode: "manual" | "auto" | null;
 }
 
 export interface TrrPersonCredit {
@@ -740,6 +816,29 @@ export interface TrrPersonCredit {
   billing_order: number | null;
   credit_category: string;
 }
+
+type ThumbnailCropFields = Pick<
+  TrrPersonPhoto,
+  "thumbnail_focus_x" | "thumbnail_focus_y" | "thumbnail_zoom" | "thumbnail_crop_mode"
+>;
+
+const EMPTY_THUMBNAIL_CROP_FIELDS: ThumbnailCropFields = {
+  thumbnail_focus_x: null,
+  thumbnail_focus_y: null,
+  thumbnail_zoom: null,
+  thumbnail_crop_mode: null,
+};
+
+const toThumbnailCropFields = (value: unknown): ThumbnailCropFields => {
+  const parsed = parseThumbnailCrop(value, { clamp: true });
+  if (!parsed) return EMPTY_THUMBNAIL_CROP_FIELDS;
+  return {
+    thumbnail_focus_x: parsed.x,
+    thumbnail_focus_y: parsed.y,
+    thumbnail_zoom: parsed.zoom,
+    thumbnail_crop_mode: parsed.mode,
+  };
+};
 
 /**
  * Get all photos for a person, ordered by source then gallery_index.
@@ -960,6 +1059,7 @@ export async function getPhotosByPersonId(
     const mdPeopleCountSourceRaw = md.people_count_source;
     const mdPeopleCountSource =
       typeof mdPeopleCountSourceRaw === "string" ? mdPeopleCountSourceRaw : null;
+    const thumbnailCropFields = toThumbnailCropFields(md.thumbnail_crop);
     return {
       ...photo,
       source: normalizedFandom.source,
@@ -973,6 +1073,7 @@ export async function getPhotosByPersonId(
       link_id: null,
       media_asset_id: null,
       facebank_seed: false,
+      ...thumbnailCropFields,
     };
   });
 
@@ -1076,6 +1177,17 @@ export async function getPhotosByPersonId(
         const peopleNames = contextPeopleNames ?? metadataPeopleNames ?? null;
         const normalizedScrape = normalizeScrapeSource(row.source || "web_scrape", row.source_url, row.metadata);
         const normalizedFandom = normalizeFandomSource(normalizedScrape, row.metadata);
+        const contextThumbnailCrop =
+          context && typeof context === "object"
+            ? (context as { thumbnail_crop?: unknown }).thumbnail_crop
+            : null;
+        const metadataThumbnailCrop =
+          normalizedFandom.metadata && typeof normalizedFandom.metadata === "object"
+            ? (normalizedFandom.metadata as { thumbnail_crop?: unknown }).thumbnail_crop
+            : null;
+        const thumbnailCropFields = toThumbnailCropFields(
+          contextThumbnailCrop ?? metadataThumbnailCrop,
+        );
 
         return {
           id: row.link_id,
@@ -1105,6 +1217,7 @@ export async function getPhotosByPersonId(
           link_id: row.link_id,
           media_asset_id: row.media_asset_id,
           facebank_seed: Boolean(row.facebank_seed),
+          ...thumbnailCropFields,
         } as TrrPersonPhoto;
       })
       .filter((p): p is TrrPersonPhoto => p !== null);
@@ -1749,6 +1862,7 @@ export async function getAssetsByShowSeason(
         media_asset_id: string;
         asset_id: string | null;
         source: string | null;
+        source_url: string | null;
         hosted_url: string | null;
         hosted_content_type: string | null;
         width: number | null;
@@ -1766,6 +1880,7 @@ export async function getAssetsByShowSeason(
            ml.media_asset_id,
            ma.id AS asset_id,
            ma.source,
+           ma.source_url,
            ma.hosted_url,
            ma.hosted_content_type,
            ma.width,
@@ -1798,6 +1913,11 @@ export async function getAssetsByShowSeason(
                 unknown
               >)
             : ({ ...(ctx as Record<string, unknown>) } as Record<string, unknown>);
+        const normalizedScrape = normalizeScrapeSource(
+          row.source ?? "unknown",
+          row.source_url ?? null,
+          mergedMetadata
+        );
 
         const ctxSection =
           typeof (ctx as Record<string, unknown>).context_section === "string"
@@ -1812,7 +1932,7 @@ export async function getAssetsByShowSeason(
           id: row.asset_id ?? row.media_asset_id,
           type: "season",
           origin_table: "media_assets",
-          source: row.source ?? "unknown",
+          source: normalizedScrape,
           kind: row.link_kind ?? "other",
           hosted_url: hostedUrl,
           width: row.width ?? null,
@@ -2085,6 +2205,7 @@ export async function getAssetsByShowId(
       media_asset_id: string;
       asset_id: string | null;
       source: string | null;
+      source_url: string | null;
       hosted_url: string | null;
       hosted_content_type: string | null;
       width: number | null;
@@ -2102,6 +2223,7 @@ export async function getAssetsByShowId(
          ml.media_asset_id,
          ma.id AS asset_id,
          ma.source,
+         ma.source_url,
          ma.hosted_url,
          ma.hosted_content_type,
          ma.width,
@@ -2134,6 +2256,11 @@ export async function getAssetsByShowId(
               ...(ctx as Record<string, unknown>),
             } as Record<string, unknown>)
           : ({ ...(ctx as Record<string, unknown>) } as Record<string, unknown>);
+      const normalizedScrape = normalizeScrapeSource(
+        row.source ?? "unknown",
+        row.source_url ?? null,
+        mergedMetadata
+      );
 
       const ctxSection =
         typeof (ctx as Record<string, unknown>).context_section === "string"
@@ -2148,7 +2275,7 @@ export async function getAssetsByShowId(
         id: row.asset_id ?? row.media_asset_id,
         type: "show",
         origin_table: "media_assets",
-        source: row.source ?? "unknown",
+        source: normalizedScrape,
         kind: row.link_kind ?? "other",
         hosted_url: hostedUrl,
         width: row.width ?? null,

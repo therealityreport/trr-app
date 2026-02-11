@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef, type ReactNode } from "react";
+import { useEffect, useState, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Image from "next/image";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
+import {
+  THUMBNAIL_CROP_LIMITS,
+  resolveThumbnailViewportRect,
+} from "@/lib/thumbnail-crop";
 
 // Inline SVG icons to avoid external dependencies
 const XIcon = ({ className }: { className?: string }) => (
@@ -111,6 +115,36 @@ function formatContentTypeLabel(raw: string): string {
   }
 }
 
+function formatSourceBadgeLabel(source: string, sourceUrl?: string | null): string {
+  const raw = (source || "").trim();
+  if (!raw) return "unknown";
+
+  const lower = raw.toLowerCase();
+  if (lower.startsWith("web_scrape") || lower.startsWith("webscrape")) {
+    if (sourceUrl) {
+      try {
+        const hostname = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
+        if (hostname) return hostname;
+      } catch {
+        // Fall through to prefix cleanup.
+      }
+    }
+
+    const cleaned = raw
+      .replace(/^web[_-]?scrape:?/i, "")
+      .replace(/^www\./i, "")
+      .trim();
+    return cleaned || raw;
+  }
+
+  return raw;
+}
+
+const clampPercent = (value: number, min = 0, max = 100): number =>
+  Math.min(max, Math.max(min, value));
+const clampZoom = (value: number): number =>
+  Math.min(THUMBNAIL_CROP_LIMITS.zoomMax, Math.max(THUMBNAIL_CROP_LIMITS.zoomMin, value));
+
 export type ImageType = "cast" | "episode" | "season";
 
 interface ImageManagementProps {
@@ -119,6 +153,7 @@ interface ImageManagementProps {
   isArchived?: boolean;
   isStarred?: boolean;
   canManage?: boolean;
+  onRefresh?: () => Promise<void>;
   onArchive?: () => Promise<void>;
   onUnarchive?: () => Promise<void>;
   onToggleStar?: (starred: boolean) => Promise<void>;
@@ -140,15 +175,33 @@ interface ImageLightboxProps extends ImageManagementProps {
   hasPrevious?: boolean;
   hasNext?: boolean;
   triggerRef?: React.RefObject<HTMLElement | null>;
+  thumbnailCropPreview?: {
+    focusX: number;
+    focusY: number;
+    zoom: number;
+    imageWidth: number | null;
+    imageHeight: number | null;
+    aspectRatio?: number;
+  } | null;
+  onThumbnailCropPreviewAdjust?: (preview: {
+    focusX: number;
+    focusY: number;
+    zoom: number;
+    imageWidth: number | null;
+    imageHeight: number | null;
+    aspectRatio: number;
+  }) => void;
 }
 
 interface MetadataPanelProps {
   metadata: PhotoMetadata;
   isExpanded: boolean;
+  runtimeDimensions?: { width: number; height: number } | null;
   management?: {
     isArchived?: boolean;
     isStarred?: boolean;
     canManage?: boolean;
+    onRefresh?: () => Promise<void>;
     onArchive?: () => Promise<void>;
     onUnarchive?: () => Promise<void>;
     onToggleStar?: (starred: boolean) => Promise<void>;
@@ -158,10 +211,17 @@ interface MetadataPanelProps {
   extras?: ReactNode;
 }
 
-function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPanelProps) {
+function MetadataPanel({
+  metadata,
+  isExpanded,
+  runtimeDimensions,
+  management,
+  extras,
+}: MetadataPanelProps) {
   const [showFullCaption, setShowFullCaption] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [starLoading, setStarLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const captionTruncateLength = 200;
   const needsTruncation =
     metadata.caption && metadata.caption.length > captionTruncateLength;
@@ -173,25 +233,68 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
     normalizedContextType !== normalizedSectionTag &&
     normalizedContextType !== normalizedImdbType;
   const sourcePageLabel = metadata.sourcePageTitle || metadata.sourceUrl || null;
+  const sourceBadgeLabel = formatSourceBadgeLabel(metadata.source, metadata.sourceUrl);
+  const formatDateLabel = (value: Date | null | undefined): string =>
+    value ? value.toLocaleDateString() : "Unknown";
+  const effectiveDimensions = metadata.dimensions ?? runtimeDimensions ?? null;
+  const dimensionsLabel = effectiveDimensions
+    ? `${effectiveDimensions.width} × ${effectiveDimensions.height}`
+    : "Unknown";
+  const metadataCoverageRows: Array<{ label: string; value: string }> = [
+    { label: "Source Page", value: sourcePageLabel ?? "Unknown" },
+    { label: "Source Logo", value: metadata.sourceLogo ?? "Unknown" },
+    { label: "Name", value: metadata.assetName ?? "Unknown" },
+    {
+      label: "Content Type",
+      value: metadata.sectionTag ? formatContentTypeLabel(metadata.sectionTag) : "Unknown",
+    },
+    { label: "Section", value: metadata.sectionLabel ?? "Unknown" },
+    { label: "Dimensions", value: dimensionsLabel },
+    { label: "File Type", value: metadata.fileType?.toUpperCase() ?? "Unknown" },
+    { label: "Created", value: formatDateLabel(metadata.createdAt) },
+    { label: "Added", value: formatDateLabel(metadata.addedAt) },
+    {
+      label: "Text Overlay",
+      value:
+        metadata.hasTextOverlay === true
+          ? "YES"
+          : metadata.hasTextOverlay === false
+            ? "NO"
+            : "UNKNOWN",
+    },
+    {
+      label: "People",
+      value: metadata.people.length > 0 ? metadata.people.join(", ") : "Unknown",
+    },
+    {
+      label: "Titles",
+      value: metadata.titles.length > 0 ? metadata.titles.join(", ") : "Unknown",
+    },
+    { label: "Fetched", value: formatDateLabel(metadata.fetchedAt) },
+  ];
 
   const handleAction = async (
-    action: "archive" | "unarchive" | "delete",
+    action: "refresh" | "archive" | "unarchive" | "delete",
     handler?: () => Promise<void>
   ) => {
     if (!handler || actionLoading) return;
     setActionLoading(action);
+    setActionError(null);
     try {
       await handler();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Action failed");
     } finally {
       setActionLoading(null);
     }
   };
 
+  const canRefresh = Boolean(management?.onRefresh);
   const canArchive = Boolean(management?.onArchive) || Boolean(management?.onUnarchive);
   const canReassign = Boolean(management?.onReassign);
   const canDelete = Boolean(management?.onDelete);
   const canStar = Boolean(management?.onToggleStar);
-  const hasAnyActions = canArchive || canReassign || canDelete;
+  const hasAnyActions = canRefresh || canArchive || canReassign || canDelete;
 
   return (
     <div
@@ -199,8 +302,18 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
       className="h-full w-full overflow-y-auto bg-black/50 backdrop-blur-xl p-4"
     >
       {/* Quick Actions (requested placement: above Source) */}
-      {management?.canManage && (canArchive || canStar) && (
+      {management?.canManage && (canRefresh || canArchive || canStar) && (
         <div className="mb-4 flex items-center gap-2">
+          {canRefresh && (
+            <button
+              type="button"
+              onClick={() => handleAction("refresh", management.onRefresh)}
+              disabled={actionLoading !== null || starLoading}
+              className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "refresh" ? "Refreshing..." : "Refresh"}
+            </button>
+          )}
           {canArchive &&
             (management.isArchived ? (
               <button
@@ -242,6 +355,9 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
           )}
         </div>
       )}
+      {actionError && (
+        <p className="mb-4 text-xs text-red-300">{actionError}</p>
+      )}
 
       {/* Source Badge */}
       <div className="mb-4">
@@ -258,7 +374,7 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
             className="inline-block rounded px-2 py-0.5 text-xs font-medium text-black"
             style={{ backgroundColor: metadata.sourceBadgeColor }}
           >
-            {metadata.source.toUpperCase()}
+            {sourceBadgeLabel.toUpperCase()}
           </span>
         </div>
       </div>
@@ -334,17 +450,13 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
           </div>
         )}
 
-        {/* Dimensions */}
-        {metadata.dimensions && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Dimensions
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {metadata.dimensions.width} × {metadata.dimensions.height}
-            </p>
-          </div>
-        )}
+        {/* Dimensions (always shown so missing values are explicit) */}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Dimensions
+          </span>
+          <p className="mt-1 text-sm text-white/90">{dimensionsLabel}</p>
+        </div>
 
         {metadata.fileType && (
           <div className="mb-4">
@@ -379,16 +491,18 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
           </div>
         )}
 
-        {metadata.hasTextOverlay !== undefined && metadata.hasTextOverlay !== null && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              WORD ID
-            </span>
-            <p className="mt-1 text-sm font-semibold text-white/90">
-              {metadata.hasTextOverlay ? "WORDS" : "NO WORDS"}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            TEXT OVERLAY
+          </span>
+          <p className="mt-1 text-sm font-semibold text-white/90">
+            {metadata.hasTextOverlay === true
+              ? "YES (Contains Text)"
+              : metadata.hasTextOverlay === false
+                ? "NO (No Text)"
+                : "UNKNOWN"}
+          </p>
+        </div>
 
         {/* Season */}
         {metadata.season && (
@@ -484,6 +598,23 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
 
         {extras && <div className="mb-4">{extras}</div>}
 
+        <div className="mb-4 rounded border border-white/10 bg-white/[0.03] p-3">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Metadata Coverage
+          </span>
+          <div className="mt-2 space-y-1">
+            {metadataCoverageRows.map((row) => (
+              <div
+                key={row.label}
+                className="flex items-start justify-between gap-2 text-xs text-white/85"
+              >
+                <span className="text-white/60">{row.label}</span>
+                <span className="max-w-[60%] break-words text-right">{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Titles */}
         {metadata.titles.length > 0 && (
           <div className="mb-4">
@@ -519,6 +650,15 @@ function MetadataPanel({ metadata, isExpanded, management, extras }: MetadataPan
             Actions
           </span>
           <div className="mt-2 space-y-2">
+            {canRefresh && (
+              <button
+                onClick={() => handleAction("refresh", management.onRefresh)}
+                disabled={actionLoading !== null || starLoading}
+                className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
+              >
+                {actionLoading === "refresh" ? "Refreshing..." : "Refresh Metadata Jobs"}
+              </button>
+            )}
             {canArchive &&
               (management.isArchived ? (
                 <button
@@ -587,6 +727,8 @@ function isInputElement(element: EventTarget | null): boolean {
   );
 }
 
+type CropResizeHandle = "nw" | "ne" | "sw" | "se";
+
 export function ImageLightbox({
   src,
   fallbackSrc,
@@ -601,6 +743,8 @@ export function ImageLightbox({
   hasPrevious = false,
   hasNext = false,
   triggerRef,
+  thumbnailCropPreview,
+  onThumbnailCropPreviewAdjust,
   // Management props (imageType/imageId used by parent to construct handlers)
   isArchived,
   isStarred,
@@ -608,21 +752,28 @@ export function ImageLightbox({
   onArchive,
   onUnarchive,
   onToggleStar,
+  onRefresh,
   onDelete,
   onReassign,
 }: ImageLightboxProps) {
   const [currentSrc, setCurrentSrc] = useState(src);
   const [imageFailed, setImageFailed] = useState(false);
+  const [previewImageSize, setPreviewImageSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const triedFallbackRef = useRef(false);
   const [showMetadata, setShowMetadata] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousTrigger = useRef<HTMLElement | null>(null);
+  const overlayImageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setCurrentSrc(src);
     setImageFailed(false);
     triedFallbackRef.current = false;
+    setPreviewImageSize(null);
   }, [src, fallbackSrc]);
 
   const handleImageError = () => {
@@ -650,6 +801,13 @@ export function ImageLightbox({
       previousTrigger.current = null;
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, []);
 
   // Focus trap - cycle Tab within modal
   useEffect(() => {
@@ -749,6 +907,187 @@ export function ImageLightbox({
 
   if (!isOpen) return null;
 
+  const previewImageWidth = thumbnailCropPreview?.imageWidth ?? previewImageSize?.width ?? null;
+  const previewImageHeight = thumbnailCropPreview?.imageHeight ?? previewImageSize?.height ?? null;
+  const previewAspectRatio =
+    thumbnailCropPreview?.aspectRatio && Number.isFinite(thumbnailCropPreview.aspectRatio)
+      ? thumbnailCropPreview.aspectRatio
+      : 4 / 5;
+  const previewRect =
+    thumbnailCropPreview
+      ? resolveThumbnailViewportRect({
+          imageWidth: previewImageWidth,
+          imageHeight: previewImageHeight,
+          focusX: thumbnailCropPreview.focusX,
+          focusY: thumbnailCropPreview.focusY,
+          zoom: thumbnailCropPreview.zoom,
+          aspectRatio: previewAspectRatio,
+        })
+      : null;
+  const effectivePreviewRect =
+    previewRect ??
+    (thumbnailCropPreview
+      ? {
+          leftPct: 0,
+          topPct: 0,
+          widthPct: 100,
+          heightPct: 100,
+        }
+      : null);
+  const previewCenter =
+    effectivePreviewRect
+      ? {
+          xPct: effectivePreviewRect.leftPct + effectivePreviewRect.widthPct / 2,
+          yPct: effectivePreviewRect.topPct + effectivePreviewRect.heightPct / 2,
+        }
+      : null;
+  const focusLineXPct =
+    thumbnailCropPreview && Number.isFinite(thumbnailCropPreview.focusX)
+      ? clampPercent(thumbnailCropPreview.focusX)
+      : previewCenter?.xPct ?? 50;
+  const canAdjustThumbnailCrop = Boolean(
+    showMetadata &&
+      onThumbnailCropPreviewAdjust &&
+      thumbnailCropPreview &&
+      effectivePreviewRect &&
+      previewCenter,
+  );
+  const emitThumbnailCropPreviewAdjust = (next: {
+    focusX: number;
+    focusY: number;
+    zoom: number;
+  }) => {
+    if (!onThumbnailCropPreviewAdjust || !thumbnailCropPreview) return;
+    onThumbnailCropPreviewAdjust({
+      focusX: Number(clampPercent(next.focusX).toFixed(2)),
+      focusY: Number(clampPercent(next.focusY).toFixed(2)),
+      zoom: Number(clampZoom(next.zoom).toFixed(2)),
+      imageWidth: thumbnailCropPreview.imageWidth,
+      imageHeight: thumbnailCropPreview.imageHeight,
+      aspectRatio: thumbnailCropPreview.aspectRatio ?? previewAspectRatio,
+    });
+  };
+  const handleCropFramePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!canAdjustThumbnailCrop || !thumbnailCropPreview || !overlayImageRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = overlayImageRef.current.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startFocusX = thumbnailCropPreview.focusX;
+    const startFocusY = thumbnailCropPreview.focusY;
+    const startZoom = thumbnailCropPreview.zoom;
+
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const dxPct = ((moveEvent.clientX - startX) / bounds.width) * 100;
+      const dyPct = ((moveEvent.clientY - startY) / bounds.height) * 100;
+      emitThumbnailCropPreviewAdjust({
+        focusX: startFocusX + dxPct,
+        focusY: startFocusY + dyPct,
+        zoom: startZoom,
+      });
+    };
+
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  };
+  const handleCropResizePointerDown =
+    (handle: CropResizeHandle) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!canAdjustThumbnailCrop || !thumbnailCropPreview || !overlayImageRef.current || !previewCenter) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+
+      const bounds = overlayImageRef.current.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0) return;
+
+      const centerClientX = bounds.left + (previewCenter.xPct / 100) * bounds.width;
+      const centerClientY = bounds.top + (previewCenter.yPct / 100) * bounds.height;
+      const startDistance = Math.max(
+        10,
+        Math.hypot(event.clientX - centerClientX, event.clientY - centerClientY),
+      );
+      const startZoom = thumbnailCropPreview.zoom;
+      const startFocusX = thumbnailCropPreview.focusX;
+      const startFocusY = thumbnailCropPreview.focusY;
+      const cursorByHandle: Record<CropResizeHandle, string> = {
+        nw: "nwse-resize",
+        se: "nwse-resize",
+        ne: "nesw-resize",
+        sw: "nesw-resize",
+      };
+
+      document.body.style.cursor = cursorByHandle[handle];
+      document.body.style.userSelect = "none";
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        const distance = Math.max(
+          10,
+          Math.hypot(moveEvent.clientX - centerClientX, moveEvent.clientY - centerClientY),
+        );
+        const nextZoom = startZoom * (startDistance / distance);
+        emitThumbnailCropPreviewAdjust({
+          focusX: startFocusX,
+          focusY: startFocusY,
+          zoom: nextZoom,
+        });
+      };
+
+      const handlePointerUp = () => {
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+        window.removeEventListener("pointercancel", handlePointerUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+      window.addEventListener("pointercancel", handlePointerUp);
+    };
+  const subjectHighlightRect =
+    previewCenter
+      ? (() => {
+          const baseWidth = clampPercent(
+            (effectivePreviewRect?.widthPct ?? 100) * 0.42,
+            18,
+            55,
+          );
+          const baseHeight = clampPercent(
+            (effectivePreviewRect?.heightPct ?? 100) * 0.58,
+            24,
+            70,
+          );
+          const left = clampPercent(previewCenter.xPct - baseWidth / 2, 0, 100 - baseWidth);
+          const top = clampPercent(previewCenter.yPct - baseHeight / 2, 0, 100 - baseHeight);
+          return { left, top, width: baseWidth, height: baseHeight };
+        })()
+      : null;
+  const effectiveThumbnailPreviewStyle =
+    effectivePreviewRect && effectivePreviewRect.widthPct > 0 && effectivePreviewRect.heightPct > 0
+      ? {
+          width: `${(10000 / effectivePreviewRect.widthPct).toFixed(4)}%`,
+          height: `${(10000 / effectivePreviewRect.heightPct).toFixed(4)}%`,
+          left: `${(-(effectivePreviewRect.leftPct / effectivePreviewRect.widthPct) * 100).toFixed(4)}%`,
+          top: `${(-(effectivePreviewRect.topPct / effectivePreviewRect.heightPct) * 100).toFixed(4)}%`,
+        }
+      : null;
+
   return (
     <div
       ref={modalRef}
@@ -824,16 +1163,154 @@ export function ImageLightbox({
               Image failed to load
             </div>
           ) : (
-            <Image
-              src={currentSrc}
-              alt={alt}
-              width={800}
-              height={1200}
-              className="max-h-[80vh] w-auto object-contain shadow-2xl md:max-h-[90vh]"
-              priority
-              unoptimized
-              onError={handleImageError}
-            />
+            <div ref={overlayImageRef} className="relative inline-block">
+              <Image
+                src={currentSrc}
+                alt={alt}
+                width={800}
+                height={1200}
+                className="max-h-[80vh] w-auto object-contain shadow-2xl md:max-h-[90vh]"
+                priority
+                unoptimized
+                onError={handleImageError}
+                onLoad={(event) => {
+                  const img = event.currentTarget as HTMLImageElement;
+                  if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                    setPreviewImageSize({
+                      width: img.naturalWidth,
+                      height: img.naturalHeight,
+                    });
+                  }
+                }}
+              />
+              {effectivePreviewRect && (
+                <div className="pointer-events-none absolute inset-0">
+                  <div
+                    className="absolute bottom-0 top-0 w-px bg-white/45"
+                    style={{ left: "50%" }}
+                  />
+                  <div
+                    className="absolute bottom-0 top-0 w-px bg-fuchsia-400/90"
+                    style={{ left: `${focusLineXPct}%` }}
+                  />
+                  <div
+                    className={`absolute rounded border-2 border-cyan-300/90 bg-cyan-300/10 ${
+                      canAdjustThumbnailCrop ? "pointer-events-auto cursor-move" : "pointer-events-none"
+                    }`}
+                    style={{
+                      left: `${effectivePreviewRect.leftPct}%`,
+                      top: `${effectivePreviewRect.topPct}%`,
+                      width: `${effectivePreviewRect.widthPct}%`,
+                      height: `${effectivePreviewRect.heightPct}%`,
+                      boxShadow: "0 0 0 9999px rgba(0,0,0,0.35)",
+                    }}
+                    onPointerDown={handleCropFramePointerDown}
+                    role={canAdjustThumbnailCrop ? "presentation" : undefined}
+                  >
+                    {canAdjustThumbnailCrop && (
+                      <>
+                        <button
+                          type="button"
+                          aria-label="Resize crop from top-left corner"
+                          className="absolute -left-2 -top-2 h-4 w-4 rounded-sm border border-cyan-100 bg-cyan-300/90"
+                          onPointerDown={handleCropResizePointerDown("nw")}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Resize crop from top-right corner"
+                          className="absolute -right-2 -top-2 h-4 w-4 rounded-sm border border-cyan-100 bg-cyan-300/90"
+                          onPointerDown={handleCropResizePointerDown("ne")}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Resize crop from bottom-left corner"
+                          className="absolute -bottom-2 -left-2 h-4 w-4 rounded-sm border border-cyan-100 bg-cyan-300/90"
+                          onPointerDown={handleCropResizePointerDown("sw")}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Resize crop from bottom-right corner"
+                          className="absolute -bottom-2 -right-2 h-4 w-4 rounded-sm border border-cyan-100 bg-cyan-300/90"
+                          onPointerDown={handleCropResizePointerDown("se")}
+                        />
+                      </>
+                    )}
+                  </div>
+                  {subjectHighlightRect && (
+                    <div
+                      className="absolute rounded border border-fuchsia-300/95 bg-fuchsia-400/20"
+                      style={{
+                        left: `${subjectHighlightRect.left}%`,
+                        top: `${subjectHighlightRect.top}%`,
+                        width: `${subjectHighlightRect.width}%`,
+                        height: `${subjectHighlightRect.height}%`,
+                      }}
+                    />
+                  )}
+                  <div className="absolute left-2 top-2 rounded bg-black/55 px-2 py-1 text-[10px] uppercase tracking-wider text-white/90">
+                    Thumbnail Crop + Subject Focus
+                  </div>
+                  <div
+                    className={`absolute left-2 rounded bg-black/55 px-2 py-1 text-[10px] uppercase tracking-wider text-cyan-100 ${
+                      canAdjustThumbnailCrop ? "top-[5rem]" : "top-14"
+                    }`}
+                  >
+                    Cyan frame = actual thumbnail crop
+                  </div>
+                  <div
+                    className={`absolute left-2 rounded bg-black/55 px-2 py-1 text-[10px] uppercase tracking-wider text-fuchsia-200/95 ${
+                      canAdjustThumbnailCrop ? "top-[6.5rem]" : "top-[5.5rem]"
+                    }`}
+                  >
+                    Pink box = subject guide only
+                  </div>
+                  {canAdjustThumbnailCrop && (
+                    <div className="absolute left-2 top-14 rounded bg-black/55 px-2 py-1 text-[10px] uppercase tracking-wider text-cyan-100">
+                      Drag frame to move, drag corners to resize
+                    </div>
+                  )}
+                  <div className="absolute left-2 top-8 rounded bg-black/55 px-2 py-1 text-[10px] uppercase tracking-wider text-fuchsia-200/95">
+                    Fuchsia line = face/nose center
+                  </div>
+                  {previewCenter && (
+                    <div
+                      className="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90 bg-white/20"
+                      style={{
+                        left: `${previewCenter.xPct}%`,
+                        top: `${previewCenter.yPct}%`,
+                      }}
+                    >
+                      <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/90" />
+                      <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/90" />
+                    </div>
+                  )}
+                  {previewCenter && (
+                    <div
+                      className="absolute bottom-0 top-0 w-px bg-cyan-300/90"
+                      style={{ left: `${previewCenter.xPct}%` }}
+                    />
+                  )}
+                  {effectiveThumbnailPreviewStyle && (
+                    <div className="pointer-events-none absolute bottom-3 right-3 w-24 overflow-hidden rounded border border-cyan-300/90 bg-black/75 shadow-lg">
+                      <div className="px-1 py-0.5 text-[9px] uppercase tracking-wider text-cyan-100">
+                        Actual Thumb
+                      </div>
+                      <div className="relative aspect-[4/5] w-full overflow-hidden">
+                        <Image
+                          src={currentSrc}
+                          alt=""
+                          width={240}
+                          height={300}
+                          unoptimized
+                          className="absolute max-w-none select-none"
+                          style={effectiveThumbnailPreviewStyle}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -849,12 +1326,14 @@ export function ImageLightbox({
               <MetadataPanel
                 metadata={metadata}
                 isExpanded={showMetadata}
+                runtimeDimensions={previewImageSize}
                 management={
                   canManage
                     ? {
                         isArchived,
                         isStarred,
                         canManage,
+                        onRefresh,
                         onArchive,
                         onUnarchive,
                         onToggleStar,

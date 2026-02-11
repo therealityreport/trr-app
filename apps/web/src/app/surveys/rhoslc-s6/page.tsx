@@ -136,7 +136,7 @@ export default function RhoslcCoverPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-rose-50 px-4">
         <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow">
-          <h1 className="font-['NYTKarnak_Condensed'] text-3xl font-bold uppercase tracking-wide text-rose-700">
+          <h1 className="font-rude-slab text-3xl font-bold uppercase tracking-wide text-rose-700">
             Something went wrong
           </h1>
           <p className="mt-4 text-sm text-rose-500">{errorMessage}</p>
@@ -172,8 +172,8 @@ export default function RhoslcCoverPage() {
           </button>
           <SurveyIcon />
           <div className="space-y-1">
-            <p className="font-['NYTKarnak_Condensed'] text-sm uppercase tracking-[0.4em] text-rose-600">Survey</p>
-            <h1 className="font-['NYTKarnak_Condensed'] text-4xl font-bold text-rose-900">
+            <p className="font-rude-slab text-sm uppercase tracking-[0.4em] text-rose-600">Survey</p>
+            <h1 className="font-rude-slab text-4xl font-bold text-rose-900">
               RHOSLC Season 6 Flashback Ranking
             </h1>
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-rose-700">Episode {meta?.episodeId ?? ""}</p>
@@ -193,7 +193,7 @@ export default function RhoslcCoverPage() {
 
           <section className="grid gap-8 rounded-2xl border border-rose-100 bg-rose-50 p-6 shadow-inner">
             <article className="rounded-xl border border-white bg-white p-6 text-left shadow-sm">
-              <h2 className="font-['NYTKarnak_Condensed'] text-2xl font-bold uppercase tracking-wide text-rose-900">
+              <h2 className="font-rude-slab text-2xl font-bold uppercase tracking-wide text-rose-900">
                 This Week’s Prompt
               </h2>
               <p className="mt-3 text-sm text-rose-700">
@@ -204,7 +204,7 @@ export default function RhoslcCoverPage() {
             </article>
 
             <article className="rounded-xl border border-white bg-white p-6 text-left shadow-sm">
-              <h3 className="font-['NYTKarnak_Condensed'] text-xl font-bold uppercase tracking-wide text-rose-900">
+              <h3 className="font-rude-slab text-xl font-bold uppercase tracking-wide text-rose-900">
                 How it works
               </h3>
               <ul className="mt-3 space-y-2 text-sm text-rose-700">

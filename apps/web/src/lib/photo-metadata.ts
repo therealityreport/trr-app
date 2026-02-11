@@ -61,6 +61,33 @@ const parseDateValue = (value: unknown): Date | null => {
   return null;
 };
 
+const parseDimensionNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
+const parseDimensionPairString = (
+  value: unknown
+): { width: number; height: number } | null => {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/([0-9]{2,5})\s*[xX×]\s*([0-9]{2,5})/);
+  if (!match) return null;
+  const width = Number.parseInt(match[1], 10);
+  const height = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
+};
+
 const normalizeBool = (value: unknown): boolean | null => {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -127,6 +154,79 @@ const inferFandomSectionTag = (value: string | null | undefined): string | null 
   return "OTHER";
 };
 
+const normalizeSectionToken = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  if (!normalized) return null;
+  if (normalized.includes("confessional")) return "CONFESSIONAL";
+  if (
+    normalized.includes("intro") ||
+    normalized.includes("tagline") ||
+    normalized.includes("opening") ||
+    normalized.includes("theme song") ||
+    normalized.includes("chapter card") ||
+    normalized.includes("title card")
+  ) {
+    return "INTRO";
+  }
+  if (normalized.includes("reunion")) return "REUNION";
+  if (normalized.includes("promo") || normalized.includes("promotional")) return "PROMO";
+  if (
+    normalized.includes("episode still") ||
+    normalized.includes("still frame") ||
+    normalized.includes("episodic still")
+  ) {
+    return "EPISODE STILL";
+  }
+  if (normalized === "cast photo" || normalized === "cast photos" || normalized === "cast portraits") {
+    return "PROMO";
+  }
+  if (normalized.includes("other")) return "OTHER";
+  return null;
+};
+
+const inferGeneralSectionTag = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  if (!normalized) return null;
+  if (normalized.includes("confessional")) return "CONFESSIONAL";
+  if (
+    normalized.includes("intro") ||
+    normalized.includes("tagline") ||
+    normalized.includes("opening") ||
+    normalized.includes("theme song") ||
+    normalized.includes("chapter card") ||
+    normalized.includes("title card")
+  ) {
+    return "INTRO";
+  }
+  if (normalized.includes("reunion")) return "REUNION";
+  if (
+    normalized.includes("promo") ||
+    normalized.includes("promotional") ||
+    normalized.includes("season announcement") ||
+    normalized.includes("cast portrait")
+  ) {
+    return "PROMO";
+  }
+  if (
+    normalized.includes("episode still") ||
+    normalized.includes("still frame") ||
+    normalized.includes("episode photo")
+  ) {
+    return "EPISODE STILL";
+  }
+  return null;
+};
+
 const sanitizeFandomSectionLabel = (value: string | null | undefined): string | null => {
   if (!value) return null;
   const trimmed = value.trim();
@@ -150,11 +250,133 @@ const parseSeasonNumber = (value: string | null | undefined): number | null => {
   return null;
 };
 
-export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
+const inferImdbEpisodeStillFromCaption = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  const text = value.trim();
+  if (!text) return false;
+  return /\bin\s+.+\(\d{4}\)\s*$/i.test(text);
+};
+
+export const resolveMetadataDimensions = (
+  metadata: Record<string, unknown> | null | undefined
+): { width: number | null; height: number | null } => {
+  if (!metadata) return { width: null, height: null };
+
+  const directWidthKeys = [
+    "image_width",
+    "width",
+    "original_width",
+    "source_width",
+    "source_image_width",
+    "hosted_width",
+    "natural_width",
+    "asset_width",
+  ] as const;
+  const directHeightKeys = [
+    "image_height",
+    "height",
+    "original_height",
+    "source_height",
+    "source_image_height",
+    "hosted_height",
+    "natural_height",
+    "asset_height",
+  ] as const;
+
+  let width: number | null = null;
+  let height: number | null = null;
+
+  for (const key of directWidthKeys) {
+    width = parseDimensionNumber(metadata[key]);
+    if (width !== null) break;
+  }
+  for (const key of directHeightKeys) {
+    height = parseDimensionNumber(metadata[key]);
+    if (height !== null) break;
+  }
+
+  const nestedCandidates = [metadata.dimensions, metadata.dimension, metadata.resolution];
+  for (const candidate of nestedCandidates) {
+    if (width !== null && height !== null) break;
+    if (typeof candidate === "string") {
+      const pair = parseDimensionPairString(candidate);
+      if (pair) {
+        width = width ?? pair.width;
+        height = height ?? pair.height;
+      }
+      continue;
+    }
+    if (candidate && typeof candidate === "object") {
+      const record = candidate as Record<string, unknown>;
+      width =
+        width ??
+        parseDimensionNumber(record.width) ??
+        parseDimensionNumber(record.w) ??
+        parseDimensionNumber(record.image_width);
+      height =
+        height ??
+        parseDimensionNumber(record.height) ??
+        parseDimensionNumber(record.h) ??
+        parseDimensionNumber(record.image_height);
+    }
+  }
+
+  return { width, height };
+};
+
+const resolveSectionTag = (args: {
+  sourceLower: string;
+  sectionTagRaw: string | null;
+  sectionLabel: string | null;
+  contextType: string | null;
+  caption: string | null;
+  imdbType: string | null;
+}): string | null => {
+  const { sourceLower, sectionTagRaw, sectionLabel, contextType, caption, imdbType } = args;
+  const isFandom = sourceLower === "fandom" || sourceLower === "fandom-gallery";
+  const isImdb = sourceLower === "imdb";
+
+  const normalizedRawTag = normalizeSectionToken(sectionTagRaw);
+  if (normalizedRawTag && normalizedRawTag !== "OTHER") {
+    return normalizedRawTag;
+  }
+
+  const text = [sectionTagRaw, sectionLabel, contextType, caption, imdbType]
+    .filter(Boolean)
+    .join(" ");
+  const inferredTag = isFandom ? inferFandomSectionTag(text) : inferGeneralSectionTag(text);
+
+  if (inferredTag && inferredTag !== "OTHER") {
+    return inferredTag;
+  }
+
+  if (
+    isImdb &&
+    (inferImdbEpisodeStillFromCaption(caption) ||
+      /\bepisode|still|frame\b/i.test(imdbType ?? "") ||
+      /\bepisode|still\b/i.test(contextType ?? ""))
+  ) {
+    return "EPISODE STILL";
+  }
+
+  if (normalizedRawTag) {
+    return normalizedRawTag;
+  }
+
+  if (text.trim().length > 0) {
+    return "OTHER";
+  }
+
+  return inferredTag;
+};
+
+export function mapPhotoToMetadata(
+  photo: TrrPersonPhoto,
+  options?: { fallbackPeople?: string[] }
+): PhotoMetadata {
   const ingestStatus = (photo.ingest_status ?? "").toLowerCase();
   const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
   const sourceLower = photo.source?.toLowerCase?.() ?? "";
-  const isFandom = sourceLower === "fandom" || sourceLower === "fandom-gallery";
   const isImdb = sourceLower === "imdb";
 
   const sectionTagRaw =
@@ -170,35 +392,19 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
           ? sanitizeFandomSectionLabel(photo.context_section)
         : null;
 
-  // Fandom "content type" is primarily inferred from the section heading on the gallery page.
-  // Some historical rows stored OTHER even though the section label is informative (e.g. "Theme Song Snaps").
-  // Always infer using the combined label/caption/context so display + filtering is correct without DB backfills.
-  const fandomTagInput = [sectionTagRaw, sectionLabel, photo.context_type, photo.caption]
-    .filter(Boolean)
-    .join(" ");
-  const inferredFandomTag = isFandom ? inferFandomSectionTag(fandomTagInput) : null;
-  const sectionTag = isFandom
-    ? (inferredFandomTag ?? sectionTagRaw ?? sectionLabel ?? null)
-    : sectionTagRaw ?? sectionLabel ?? null;
-
-  // Web-scraped "Season Announcement" imports:
-  // - store "Cast Portraits" in context_section (Section)
-  // - store "Season Announcement" in context_type
-  // For display + filtering, treat these as PROMO content type.
-  let sectionTagOut = sectionTag;
-  if (!isFandom) {
-    const ct = (photo.context_type ?? "").toLowerCase();
-    const label = (sectionLabel ?? "").toLowerCase();
-    if (ct.includes("season announcement") || label === "cast portraits") {
-      sectionTagOut = "PROMO";
-    }
-  }
-
   const imdbTypeRaw =
     typeof metadata.imdb_image_type === "string"
       ? metadata.imdb_image_type
       : null;
   const imdbType = imdbTypeRaw ?? (isImdb ? photo.context_type ?? null : null);
+  const sectionTagOut = resolveSectionTag({
+    sourceLower,
+    sectionTagRaw,
+    sectionLabel,
+    contextType: photo.context_type,
+    caption: photo.caption,
+    imdbType,
+  });
 
   const episodeNumber =
     typeof metadata.episode_number === "number"
@@ -247,18 +453,11 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     photo.hosted_content_type ?? null,
     photo.hosted_url || photo.url || null
   );
-  const metadataWidth =
-    typeof metadata.image_width === "number"
-      ? metadata.image_width
-      : typeof metadata.width === "number"
-        ? metadata.width
-        : null;
-  const metadataHeight =
-    typeof metadata.image_height === "number"
-      ? metadata.image_height
-      : typeof metadata.height === "number"
-        ? metadata.height
-        : null;
+  const metadataDimensions = resolveMetadataDimensions(metadata);
+  const metadataWidth = metadataDimensions.width;
+  const metadataHeight = metadataDimensions.height;
+  const resolvedWidth = parseDimensionNumber(photo.width) ?? metadataWidth;
+  const resolvedHeight = parseDimensionNumber(photo.height) ?? metadataHeight;
   const inferredSeason =
     photo.season ??
     (typeof metadata.season_number === "number" ? metadata.season_number : null) ??
@@ -276,6 +475,10 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
       : typeof metadata.assetName === "string"
         ? metadata.assetName
         : null;
+  const fallbackPeople = (options?.fallbackPeople ?? []).filter(
+    (name) => typeof name === "string" && name.trim().length > 0
+  );
+
   return {
     source: photo.source,
     sourceBadgeColor: SOURCE_COLORS[photo.source.toLowerCase()] ?? "#6b7280",
@@ -295,15 +498,15 @@ export function mapPhotoToMetadata(photo: TrrPersonPhoto): PhotoMetadata {
     sourceUrl,
     caption: photo.caption,
     dimensions:
-      (photo.width ?? metadataWidth) && (photo.height ?? metadataHeight)
+      resolvedWidth && resolvedHeight
         ? {
-            width: (photo.width ?? metadataWidth) as number,
-            height: (photo.height ?? metadataHeight) as number,
+            width: resolvedWidth,
+            height: resolvedHeight,
           }
         : null,
     season: inferredSeason,
     contextType: photo.context_type,
-    people: [...new Set(photo.people_names ?? [])],
+    people: [...new Set([...(photo.people_names ?? []), ...fallbackPeople])],
     titles: [...new Set(photo.title_names ?? [])],
     fetchedAt: photo.fetched_at ? new Date(photo.fetched_at) : null,
   };
@@ -321,7 +524,6 @@ export function mapSeasonAssetToMetadata(
   const ingestStatus = (asset.ingest_status ?? "").toLowerCase();
   const metadata = (asset.metadata ?? {}) as Record<string, unknown>;
   const sourceLower = asset.source?.toLowerCase?.() ?? "";
-  const isFandom = sourceLower === "fandom" || sourceLower === "fandom-gallery";
   const isImdb = sourceLower === "imdb";
 
   // Section tag handling (similar to mapPhotoToMetadata)
@@ -337,30 +539,27 @@ export function mapSeasonAssetToMetadata(
         : typeof asset.context_section === "string"
           ? sanitizeFandomSectionLabel(asset.context_section)
           : null;
-  const fandomTagInput = [sectionTagRaw, sectionLabel, asset.context_type, asset.caption]
-    .filter(Boolean)
-    .join(" ");
-  const inferredFandomTag = isFandom ? inferFandomSectionTag(fandomTagInput) : null;
-  const sectionTag = isFandom
-    ? (inferredFandomTag ?? sectionTagRaw ?? sectionLabel ?? null)
-    : sectionTagRaw ?? sectionLabel ?? null;
-
-  let sectionTagOut = sectionTag;
-  if (!isFandom) {
-    const ct = (asset.context_type ?? "").toLowerCase();
-    const kindLower = (asset.kind ?? "").toLowerCase().trim();
-    const label = (sectionLabel ?? "").toLowerCase();
-    if (kindLower === "promo" || ct.includes("season announcement") || label === "cast portraits") {
-      sectionTagOut = "PROMO";
-    }
-  }
-
   // IMDb type handling
   const imdbTypeRaw =
     typeof metadata.imdb_image_type === "string"
       ? metadata.imdb_image_type
       : null;
   const imdbType = imdbTypeRaw ?? (isImdb ? asset.context_type ?? null : null);
+  let sectionTagOut = resolveSectionTag({
+    sourceLower,
+    sectionTagRaw,
+    sectionLabel,
+    contextType: asset.context_type ?? null,
+    caption: asset.caption ?? null,
+    imdbType,
+  });
+  const kindLower = (asset.kind ?? "").toLowerCase().trim();
+  if (kindLower === "promo" && !sectionTagOut) sectionTagOut = "PROMO";
+  if (kindLower === "intro" && !sectionTagOut) sectionTagOut = "INTRO";
+  if (kindLower === "reunion" && !sectionTagOut) sectionTagOut = "REUNION";
+  if ((kindLower === "episode_still" || kindLower === "episode still") && !sectionTagOut) {
+    sectionTagOut = "EPISODE STILL";
+  }
 
   // Episode handling
   const episodeNumber =
@@ -418,18 +617,11 @@ export function mapSeasonAssetToMetadata(
   );
 
   // Dimensions from metadata fallback
-  const metadataWidth =
-    typeof metadata.image_width === "number"
-      ? metadata.image_width
-      : typeof metadata.width === "number"
-        ? metadata.width
-        : null;
-  const metadataHeight =
-    typeof metadata.image_height === "number"
-      ? metadata.image_height
-      : typeof metadata.height === "number"
-        ? metadata.height
-        : null;
+  const metadataDimensions = resolveMetadataDimensions(metadata);
+  const metadataWidth = metadataDimensions.width;
+  const metadataHeight = metadataDimensions.height;
+  const resolvedWidth = parseDimensionNumber(asset.width) ?? metadataWidth;
+  const resolvedHeight = parseDimensionNumber(asset.height) ?? metadataHeight;
 
   const sourceLogo =
     typeof metadata.source_logo === "string"
@@ -445,34 +637,34 @@ export function mapSeasonAssetToMetadata(
         : null;
 
   // Determine context type label
-  const kindLower = (asset.kind ?? "").toLowerCase();
+  const kindLowerContext = (asset.kind ?? "").toLowerCase();
   const contextType =
     asset.type === "episode"
       ? `Episode ${asset.episode_number ?? ""}`
       : asset.type === "season"
-        ? kindLower === "cast"
+        ? kindLowerContext === "cast"
           ? "Cast Photos"
-          : kindLower === "backdrop"
+          : kindLowerContext === "backdrop"
             ? "Backdrop"
-            : kindLower === "promo"
+            : kindLowerContext === "promo"
               ? "Promo"
-              : kindLower === "intro"
+              : kindLowerContext === "intro"
                 ? "Intro"
-                : kindLower === "reunion"
+                : kindLowerContext === "reunion"
                   ? "Reunion"
-                  : kindLower === "episode_still"
+                  : kindLowerContext === "episode_still"
                     ? "Episode Still"
-                    : kindLower === "other"
+                    : kindLowerContext === "other"
                       ? sourceLower.startsWith("web_scrape:")
                         ? "Other"
                         : "Season Poster"
                     : "Season Poster"
-        : asset.type === "show"
-          ? kindLower === "backdrop"
+      : asset.type === "show"
+          ? kindLowerContext === "backdrop"
             ? "Backdrop"
-            : kindLower === "logo"
+            : kindLowerContext === "logo"
               ? "Logo"
-              : kindLower === "poster"
+              : kindLowerContext === "poster"
                 ? "Show Poster"
                 : "Show Image"
         : asset.context_type ?? "Cast Photo";
@@ -508,10 +700,10 @@ export function mapSeasonAssetToMetadata(
     sourceUrl,
     caption: asset.caption,
     dimensions:
-      (asset.width ?? metadataWidth) && (asset.height ?? metadataHeight)
+      resolvedWidth && resolvedHeight
         ? {
-            width: (asset.width ?? metadataWidth) as number,
-            height: (asset.height ?? metadataHeight) as number,
+            width: resolvedWidth,
+            height: resolvedHeight,
           }
         : null,
     season: asset.season_number ?? seasonNumber ?? null,

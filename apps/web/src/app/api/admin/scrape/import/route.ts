@@ -10,8 +10,9 @@ export const dynamic = "force-dynamic";
  * Proxies scrape import request to TRR-Backend.
  * Imports selected images to S3 and database.
  *
- * Supports two entity types:
+ * Supports entity types:
  * - season: requires show_id, season_number
+ * - show: requires show_id (season_number optional for metadata)
  * - person: requires person_id
  */
 export async function POST(request: NextRequest) {
@@ -52,6 +53,13 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+    } else if (effectiveEntityType === "show") {
+      if (!body.show_id) {
+        return NextResponse.json(
+          { error: "show_id is required for show entity type" },
+          { status: 400 }
+        );
+      }
     } else if (effectiveEntityType === "person") {
       if (!body.person_id) {
         return NextResponse.json(
@@ -61,7 +69,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       return NextResponse.json(
-        { error: "entity_type must be 'season' or 'person'" },
+        { error: "entity_type must be 'season', 'show', or 'person'" },
         { status: 400 }
       );
     }
