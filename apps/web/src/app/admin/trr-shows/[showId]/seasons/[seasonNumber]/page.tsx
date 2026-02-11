@@ -11,7 +11,7 @@ import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
-import SocialPostsSection from "@/components/admin/social-posts-section";
+import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { mapSeasonAssetToMetadata, type PhotoMetadata } from "@/lib/photo-metadata";
@@ -25,6 +25,10 @@ import {
   matchesContentTypesForSeasonAsset,
 } from "@/lib/gallery-filter-utils";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
+import {
+  isThumbnailCropMode,
+  resolveThumbnailPresentation,
+} from "@/lib/thumbnail-crop";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 interface TrrShow {
@@ -70,6 +74,10 @@ interface SeasonCastMember {
   episodes_in_season: number;
   total_episodes: number | null;
   photo_url: string | null;
+  thumbnail_focus_x?: number | null;
+  thumbnail_focus_y?: number | null;
+  thumbnail_zoom?: number | null;
+  thumbnail_crop_mode?: "manual" | "auto" | null;
 }
 
 interface TrrShowCastMember {
@@ -82,7 +90,17 @@ interface TrrShowCastMember {
   cover_photo_url: string | null;
 }
 
-type TabId = "episodes" | "assets" | "cast" | "surveys" | "social" | "details";
+interface BravoVideoItem {
+  title?: string | null;
+  runtime?: string | null;
+  kicker?: string | null;
+  image_url?: string | null;
+  clip_url: string;
+  season_number?: number | null;
+  published_at?: string | null;
+}
+
+type TabId = "episodes" | "assets" | "videos" | "cast" | "surveys" | "social" | "details";
 type RefreshProgressState = {
   stage?: string | null;
   message?: string | null;
@@ -175,11 +193,13 @@ function GalleryImage({
   alt,
   sizes = "200px",
   className = "object-cover",
+  style,
 }: {
   src: string;
   alt: string;
   sizes?: string;
   className?: string;
+  style?: React.CSSProperties;
 }) {
   const [hasError, setHasError] = useState(false);
 
@@ -201,6 +221,7 @@ function GalleryImage({
       alt={alt}
       fill
       className={className}
+      style={style}
       sizes={sizes}
       unoptimized
       onError={() => setHasError(true)}
@@ -208,13 +229,54 @@ function GalleryImage({
   );
 }
 
-function CastPhoto({ src, alt }: { src: string; alt: string }) {
+function CastPhoto({
+  src,
+  alt,
+  thumbnail_focus_x,
+  thumbnail_focus_y,
+  thumbnail_zoom,
+  thumbnail_crop_mode,
+}: {
+  src: string;
+  alt: string;
+  thumbnail_focus_x?: number | null;
+  thumbnail_focus_y?: number | null;
+  thumbnail_zoom?: number | null;
+  thumbnail_crop_mode?: "manual" | "auto" | null;
+}) {
+  const hasPersistedCrop =
+    isThumbnailCropMode(thumbnail_crop_mode) &&
+    typeof thumbnail_focus_x === "number" &&
+    Number.isFinite(thumbnail_focus_x) &&
+    typeof thumbnail_focus_y === "number" &&
+    Number.isFinite(thumbnail_focus_y) &&
+    typeof thumbnail_zoom === "number" &&
+    Number.isFinite(thumbnail_zoom);
+
+  const presentation = resolveThumbnailPresentation({
+    width: null,
+    height: null,
+    crop: hasPersistedCrop
+      ? {
+          x: thumbnail_focus_x,
+          y: thumbnail_focus_y,
+          zoom: thumbnail_zoom,
+          mode: thumbnail_crop_mode,
+        }
+      : null,
+  });
+
   return (
     <GalleryImage
       src={src}
       alt={alt}
       sizes="200px"
-      className="object-cover transition hover:scale-105"
+      className="object-cover transition-transform duration-300"
+      style={{
+        objectPosition: presentation.objectPosition,
+        transformOrigin: presentation.objectPosition,
+        transform: presentation.zoom !== 1 ? `scale(${presentation.zoom})` : undefined,
+      }}
     />
   );
 }
@@ -320,6 +382,9 @@ export default function SeasonDetailPage() {
   const [episodes, setEpisodes] = useState<TrrEpisode[]>([]);
   const [assets, setAssets] = useState<SeasonAsset[]>([]);
   const [cast, setCast] = useState<SeasonCastMember[]>([]);
+  const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
+  const [bravoVideosLoading, setBravoVideosLoading] = useState(false);
+  const [bravoVideosError, setBravoVideosError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("episodes");
   const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
   const [loading, setLoading] = useState(true);
@@ -409,7 +474,7 @@ export default function SeasonDetailPage() {
 
   const tabParam = searchParams.get("tab");
   useEffect(() => {
-    const allowedTabs: TabId[] = ["episodes", "assets", "cast", "surveys", "social", "details"];
+    const allowedTabs: TabId[] = ["episodes", "assets", "videos", "cast", "surveys", "social", "details"];
     if (!tabParam) return;
 
     // Back-compat alias: ?tab=media -> assets (media view)
@@ -454,6 +519,34 @@ export default function SeasonDetailPage() {
       setTrrShowCastLoading(false);
     }
   }, [getAuthHeaders, showId]);
+
+  const fetchSeasonBravoVideos = useCallback(async () => {
+    if (!Number.isFinite(seasonNumber)) return;
+    setBravoVideosLoading(true);
+    setBravoVideosError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${showId}/bravo/videos?season_number=${seasonNumber}&merge_person_sources=true`,
+        {
+          headers,
+          cache: "no-store",
+        }
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        videos?: BravoVideoItem[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch season videos");
+      }
+      setBravoVideos(Array.isArray(data.videos) ? data.videos : []);
+    } catch (err) {
+      setBravoVideosError(err instanceof Error ? err.message : "Failed to fetch season videos");
+    } finally {
+      setBravoVideosLoading(false);
+    }
+  }, [getAuthHeaders, seasonNumber, showId]);
 
   const loadSeasonData = useCallback(async () => {
     if (!Number.isFinite(seasonNumber)) {
@@ -516,13 +609,14 @@ export default function SeasonDetailPage() {
       setEpisodes(episodesData.episodes ?? []);
       setAssets(assetsData.assets ?? []);
       setCast(castData.cast ?? []);
+      await fetchSeasonBravoVideos();
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load season");
     } finally {
       setLoading(false);
     }
-  }, [showId, seasonNumber, getAuthHeaders]);
+  }, [fetchSeasonBravoVideos, getAuthHeaders, seasonNumber, showId]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -1225,6 +1319,13 @@ export default function SeasonDetailPage() {
   const formatEpisodesLabel = (count: number) =>
     count > 0 ? `${count} episodes this season` : "Appeared this season";
 
+  const formatBravoPublishedDate = (value: string | null | undefined): string | null => {
+    if (!value || typeof value !== "string") return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString();
+  };
+
   const isSeasonBackdrop = useCallback((asset: SeasonAsset) => {
     // Only trust the normalized "kind" field. Some historical metadata flags were incorrect
     // (e.g. season posters tagged as backdrops). Kind is the source-of-truth for grouping.
@@ -1422,6 +1523,7 @@ export default function SeasonDetailPage() {
                 [
                   { id: "episodes", label: "Seasons & Episodes" },
                   { id: "assets", label: "Assets" },
+                  { id: "videos", label: "Videos" },
                   { id: "cast", label: "Cast" },
                   { id: "surveys", label: "Surveys" },
                   { id: "social", label: "Social Media" },
@@ -1772,6 +1874,65 @@ export default function SeasonDetailPage() {
             </div>
           )}
 
+          {activeTab === "videos" && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Bravo Videos
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">
+                    Season {season.season_number}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchSeasonBravoVideos}
+                  disabled={bravoVideosLoading}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {bravoVideosLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+
+              {bravoVideosError && <p className="mb-4 text-sm text-red-600">{bravoVideosError}</p>}
+              {!bravoVideosLoading && bravoVideos.length === 0 && !bravoVideosError && (
+                <p className="text-sm text-zinc-500">No persisted Bravo videos found for this season.</p>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {bravoVideos.map((video, index) => (
+                  <article key={`${video.clip_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                    <a href={video.clip_url} target="_blank" rel="noopener noreferrer" className="group block">
+                      <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
+                        {video.image_url ? (
+                          <GalleryImage
+                            src={video.image_url}
+                            alt={video.title || "Bravo video"}
+                            sizes="400px"
+                            className="object-cover transition group-hover:scale-105"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
+                        )}
+                      </div>
+                      <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
+                        {video.title || "Untitled video"}
+                      </h4>
+                    </a>
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                      {video.runtime && <span>{video.runtime}</span>}
+                      {video.kicker && <span>{video.kicker}</span>}
+                      {formatBravoPublishedDate(video.published_at) && (
+                        <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+
           {activeTab === "cast" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
@@ -1821,9 +1982,16 @@ export default function SeasonDetailPage() {
                           href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
-                          <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
+                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
                             {member.photo_url ? (
-                              <CastPhoto src={member.photo_url} alt={member.person_name || "Cast"} />
+                              <CastPhoto
+                                src={member.photo_url}
+                                alt={member.person_name || "Cast"}
+                                thumbnail_focus_x={member.thumbnail_focus_x}
+                                thumbnail_focus_y={member.thumbnail_focus_y}
+                                thumbnail_zoom={member.thumbnail_zoom}
+                                thumbnail_crop_mode={member.thumbnail_crop_mode}
+                              />
                             ) : (
                               <div className="flex h-full items-center justify-center text-zinc-400">
                                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
@@ -1860,9 +2028,16 @@ export default function SeasonDetailPage() {
                           href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
-                          <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
+                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
                             {member.photo_url ? (
-                              <CastPhoto src={member.photo_url} alt={member.person_name || "Cast"} />
+                              <CastPhoto
+                                src={member.photo_url}
+                                alt={member.person_name || "Cast"}
+                                thumbnail_focus_x={member.thumbnail_focus_x}
+                                thumbnail_focus_y={member.thumbnail_focus_y}
+                                thumbnail_zoom={member.thumbnail_zoom}
+                                thumbnail_crop_mode={member.thumbnail_crop_mode}
+                              />
                             ) : (
                               <div className="flex h-full items-center justify-center text-zinc-400">
                                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
@@ -1899,9 +2074,16 @@ export default function SeasonDetailPage() {
                           href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
-                          <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
+                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
                             {member.photo_url ? (
-                              <CastPhoto src={member.photo_url} alt={member.person_name || "Cast"} />
+                              <CastPhoto
+                                src={member.photo_url}
+                                alt={member.person_name || "Cast"}
+                                thumbnail_focus_x={member.thumbnail_focus_x}
+                                thumbnail_focus_y={member.thumbnail_focus_y}
+                                thumbnail_zoom={member.thumbnail_zoom}
+                                thumbnail_crop_mode={member.thumbnail_crop_mode}
+                              />
                             ) : (
                               <div className="flex h-full items-center justify-center text-zinc-400">
                                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
@@ -1938,9 +2120,16 @@ export default function SeasonDetailPage() {
                           href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
-                          <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
+                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
                             {member.photo_url ? (
-                              <CastPhoto src={member.photo_url} alt={member.person_name || "Cast"} />
+                              <CastPhoto
+                                src={member.photo_url}
+                                alt={member.person_name || "Cast"}
+                                thumbnail_focus_x={member.thumbnail_focus_x}
+                                thumbnail_focus_y={member.thumbnail_focus_y}
+                                thumbnail_zoom={member.thumbnail_zoom}
+                                thumbnail_crop_mode={member.thumbnail_crop_mode}
+                              />
                             ) : (
                               <div className="flex h-full items-center justify-center text-zinc-400">
                                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
@@ -1984,7 +2173,12 @@ export default function SeasonDetailPage() {
           )}
 
           {activeTab === "social" && (
-            <SocialPostsSection showId={showId} showName={show.name} />
+            <SeasonSocialAnalyticsSection
+              showId={showId}
+              seasonNumber={season.season_number}
+              seasonId={season.id}
+              showName={show.name}
+            />
           )}
 
           {activeTab === "details" && (

@@ -4,10 +4,6 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
 import { auth } from "@/lib/firebase";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
-import {
-  PeopleSearchMultiSelect,
-  type PersonOption,
-} from "@/components/admin/PeopleSearchMultiSelect";
 
 function normalizePersonName(value: string): string {
   return value
@@ -106,6 +102,25 @@ interface DuplicateImage {
   linking: boolean;
 }
 
+interface ShowCastMemberApi {
+  person_id: string;
+  full_name?: string | null;
+  cast_member_name?: string | null;
+  role?: string | null;
+}
+
+interface SeasonCastMemberApi {
+  person_id: string;
+  person_name?: string | null;
+}
+
+interface CastDropdownOption {
+  value: string;
+  label: string;
+  personIds: string[];
+  isFriend: boolean;
+}
+
 // Entity context - pass one of these to pre-configure the drawer
 export interface SeasonContext {
   type: "season";
@@ -162,22 +177,13 @@ const SHOW_ONLY_IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> =
   { value: "logo", label: "Logo" },
 ];
 
-const SOURCE_LOGO_OPTIONS: Array<{ value: string; label: string }> = [
+const LOGO_SCOPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "", label: "None" },
-  { value: "Bravo", label: "Bravo" },
-  { value: "Peacock", label: "Peacock" },
-  { value: "NBC", label: "NBC" },
-  { value: "Netflix", label: "Netflix" },
-  { value: "Hulu", label: "Hulu" },
-  { value: "Prime Video", label: "Prime Video" },
-  { value: "Max", label: "Max" },
-  { value: "Disney+", label: "Disney+" },
+  { value: "SOURCE", label: "SOURCE" },
+  { value: "SHOW", label: "SHOW" },
 ];
 
-const CONTENT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "", label: "None" },
-  { value: "OFFICIAL SEASON ANNOUNCEMENT", label: "OFFICIAL SEASON ANNOUNCEMENT" },
-];
+const GROUP_PICTURE_OPTION_VALUE = "__group_picture_full_time__";
 
 interface ImageScrapeDrawerProps {
   isOpen: boolean;
@@ -217,7 +223,6 @@ export function ImageScrapeDrawer({
   onImportComplete,
 }: ImageScrapeDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
-  const peopleExactCacheRef = useRef<Map<string, PersonOption | null>>(new Map());
 
   // Form state
   const [url, setUrl] = useState("");
@@ -237,54 +242,18 @@ export function ImageScrapeDrawer({
   // Duplicate tracking for linking
   const [duplicates, setDuplicates] = useState<DuplicateImage[]>([]);
 
-  // People tagging
-  const [bulkPeopleSelection, setBulkPeopleSelection] = useState<PersonOption[]>([]);
-  // Map of image candidate ID -> assigned people
-  const [personAssignments, setPersonAssignments] = useState<Record<string, PersonOption[]>>({});
+  // Cast/logo tagging
+  const [castOptions, setCastOptions] = useState<CastDropdownOption[]>([]);
+  const [castOptionsLoading, setCastOptionsLoading] = useState(false);
+  const [castSelectionByImage, setCastSelectionByImage] = useState<Record<string, string>>({});
+  const [logoScopeByImage, setLogoScopeByImage] = useState<Record<string, string>>({});
+
   // Map of image candidate ID -> image kind
   const [imageKinds, setImageKinds] = useState<Record<string, ImageKind>>({});
-  // Optional per-image import metadata (persisted into media_links.context / media_assets.metadata)
-  const [contentTypes, setContentTypes] = useState<Record<string, string>>({});
-  const [sourceLogos, setSourceLogos] = useState<Record<string, string>>({});
-  const [assetNames, setAssetNames] = useState<Record<string, string>>({});
   const [selectedShowSeason, setSelectedShowSeason] = useState<string>("na");
 
   // Error state
   const [error, setError] = useState<string | null>(null);
-
-  const buildShowAcronym = useCallback((name: string): string => {
-    const words = name
-      .replace(/[^a-z0-9 ]/gi, " ")
-      .split(/\s+/)
-      .filter(Boolean);
-    if (words.length === 0) return "SHOW";
-    const filtered = words.filter(
-      (word) => !["the", "and", "a", "an", "to", "for", "of"].includes(word.toLowerCase())
-    );
-    return (filtered.length > 0 ? filtered : words)
-      .map((word) => word[0]?.toUpperCase?.() ?? "")
-      .join("") || "SHOW";
-  }, []);
-
-  const defaultCastPortraitName = useCallback(
-    (personName: string | null, ordinal: number): string | null => {
-      if (entityContext.type === "person") return null;
-      const showAcronym = buildShowAcronym(entityContext.showName);
-      const seasonNumber =
-        entityContext.type === "season"
-          ? entityContext.seasonNumber
-          : selectedShowSeason !== "na"
-            ? Number.parseInt(selectedShowSeason, 10)
-            : null;
-      const seasonSuffix = Number.isFinite(seasonNumber) ? String(seasonNumber) : "NA";
-      if (!personName) {
-        return `${showAcronym}${seasonSuffix}_CastPortrait_${ordinal}`;
-      }
-      const cleanPerson = personName.replace(/[^a-z0-9]+/gi, "");
-      return `${showAcronym}${seasonSuffix}_${cleanPerson}_CastPortrait`;
-    },
-    [entityContext, buildShowAcronym, selectedShowSeason]
-  );
 
   // Get auth headers
   const getAuthHeaders = useCallback(async () => {
@@ -293,64 +262,134 @@ export function ImageScrapeDrawer({
     return { Authorization: `Bearer ${token}` };
   }, []);
 
-  const resolveExactPersonByName = useCallback(
-    async (name: string): Promise<PersonOption | null> => {
-      const trimmed = name.trim();
-      const normalized = normalizePersonName(trimmed);
-      if (!trimmed || normalized.length < 2) return null;
+  const isFriendRole = useCallback((role: string | null | undefined): boolean => {
+    const normalized = (role ?? "").toLowerCase();
+    return normalized.includes("friend");
+  }, []);
 
-      const cacheKey = normalized;
-      if (peopleExactCacheRef.current.has(cacheKey)) {
-        return peopleExactCacheRef.current.get(cacheKey) ?? null;
-      }
+  const resolveTargetSeasonNumber = useCallback((): number | null => {
+    if (entityContext.type === "season") return entityContext.seasonNumber;
+    if (entityContext.type === "show" && selectedShowSeason !== "na") {
+      const parsed = Number.parseInt(selectedShowSeason, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }, [entityContext, selectedShowSeason]);
 
-      try {
-        const headers = await getAuthHeaders();
-        const response = await fetch(
-          `/api/admin/trr-api/people?q=${encodeURIComponent(trimmed)}&limit=25`,
-          { headers }
-        );
-        if (!response.ok) {
-          peopleExactCacheRef.current.set(cacheKey, null);
-          return null;
-        }
-        const data = (await response.json().catch(() => ({}))) as {
-          people?: Array<{ id?: string; full_name?: string | null }>;
-        };
-        const results = Array.isArray(data.people) ? data.people : [];
-        const exact = results.filter((row) => {
-          const fullName = typeof row.full_name === "string" ? row.full_name : "";
-          return normalizePersonName(fullName) === normalized;
+  const loadCastOptions = useCallback(async () => {
+    if (entityContext.type === "person") {
+      setCastOptions([]);
+      return;
+    }
+
+    const targetSeason = resolveTargetSeasonNumber();
+    if (entityContext.type === "show" && targetSeason === null) {
+      setCastOptions([]);
+      return;
+    }
+
+    try {
+      setCastOptionsLoading(true);
+      const headers = await getAuthHeaders();
+
+      const showCastPromise = fetch(`/api/admin/trr-api/shows/${entityContext.showId}/cast?limit=500`, { headers });
+      const seasonCastPromise =
+        targetSeason !== null
+          ? fetch(
+              `/api/admin/trr-api/shows/${entityContext.showId}/seasons/${targetSeason}/cast?limit=500`,
+              { headers }
+            )
+          : null;
+
+      const [showCastResponse, seasonCastResponse] = await Promise.all([showCastPromise, seasonCastPromise]);
+      if (!showCastResponse.ok) throw new Error("Failed to load cast roles");
+      if (seasonCastResponse && !seasonCastResponse.ok) throw new Error("Failed to load season cast");
+
+      const showCastData = (await showCastResponse.json().catch(() => ({}))) as {
+        cast?: ShowCastMemberApi[];
+      };
+      const seasonCastData = seasonCastResponse
+        ? ((await seasonCastResponse.json().catch(() => ({}))) as { cast?: SeasonCastMemberApi[] })
+        : { cast: undefined };
+
+      const showCastRows = Array.isArray(showCastData.cast) ? showCastData.cast : [];
+      const seasonCastRows = Array.isArray(seasonCastData.cast) ? seasonCastData.cast : [];
+      const seasonIds = new Set(seasonCastRows.map((row) => row.person_id).filter(Boolean));
+
+      const filteredShowCast =
+        targetSeason !== null ? showCastRows.filter((row) => seasonIds.has(row.person_id)) : showCastRows;
+
+      let entries = filteredShowCast
+        .map((row) => {
+          const personId = row.person_id;
+          const name = (row.full_name ?? row.cast_member_name ?? "").trim();
+          if (!personId || !name) return null;
+          const friend = isFriendRole(row.role ?? null);
+          return {
+            value: personId,
+            label: `${name}${friend ? " (Friend)" : " (Full-time)"}`,
+            personIds: [personId],
+            isFriend: friend,
+          } as CastDropdownOption;
+        })
+        .filter((row): row is CastDropdownOption => row !== null)
+        .sort((a, b) => {
+          if (a.isFriend !== b.isFriend) return a.isFriend ? 1 : -1;
+          return a.label.localeCompare(b.label);
         });
-        if (exact.length !== 1) {
-          peopleExactCacheRef.current.set(cacheKey, null);
-          return null;
-        }
-        const match = exact[0];
-        if (!match?.id || typeof match.full_name !== "string") {
-          peopleExactCacheRef.current.set(cacheKey, null);
-          return null;
-        }
-        const person: PersonOption = { id: match.id, name: match.full_name };
-        peopleExactCacheRef.current.set(cacheKey, person);
-        return person;
-      } catch {
-        peopleExactCacheRef.current.set(cacheKey, null);
-        return null;
+
+      if (entries.length === 0 && seasonCastRows.length > 0) {
+        entries = seasonCastRows
+          .map((row) => {
+            const personId = row.person_id;
+            const name = (row.person_name ?? "").trim();
+            if (!personId || !name) return null;
+            return {
+              value: personId,
+              label: `${name} (Full-time)`,
+              personIds: [personId],
+              isFriend: false,
+            } as CastDropdownOption;
+          })
+          .filter((row): row is CastDropdownOption => row !== null)
+          .sort((a, b) => a.label.localeCompare(b.label));
       }
-    },
-    [getAuthHeaders]
-  );
+
+      const fullTimeIds = entries.filter((row) => !row.isFriend).map((row) => row.value);
+      if (fullTimeIds.length > 0) {
+        entries.unshift({
+          value: GROUP_PICTURE_OPTION_VALUE,
+          label: "Group Picture (All Full-time)",
+          personIds: fullTimeIds,
+          isFriend: false,
+        });
+      }
+
+      setCastOptions(entries);
+    } catch (err) {
+      console.error("Failed to load cast options for image import:", err);
+      setCastOptions([]);
+    } finally {
+      setCastOptionsLoading(false);
+    }
+  }, [entityContext, getAuthHeaders, isFriendRole, resolveTargetSeasonNumber]);
 
   const autoFillCastFromContext = useCallback(
-    async (imageIds: Iterable<string>) => {
+    (imageIds: Iterable<string>) => {
       if (!previewData) return;
-      if (entityContext.type !== "season") return;
+      if (castOptions.length === 0) return;
 
       const imagesById = new Map(previewData.images.map((img) => [img.id, img]));
       const captionUpdates: Record<string, string> = {};
-      const assignmentUpdates: Record<string, PersonOption[]> = {};
-      const resolvedNameCache = new Map<string, PersonOption | null>();
+      const assignmentUpdates: Record<string, string> = {};
+      const castByNormalizedName = new Map<string, CastDropdownOption>();
+      for (const option of castOptions) {
+        if (option.value === GROUP_PICTURE_OPTION_VALUE) continue;
+        const normalized = normalizePersonName(option.label.replace(/\s+\((Friend|Full-time)\)\s*$/i, ""));
+        if (normalized && !castByNormalizedName.has(normalized)) {
+          castByNormalizedName.set(normalized, option);
+        }
+      }
 
       for (const id of imageIds) {
         const img = imagesById.get(id);
@@ -361,13 +400,10 @@ export function ImageScrapeDrawer({
         }
         if (parsed.name) {
           const normalized = normalizePersonName(parsed.name);
-          if (!normalized) continue;
-          let match = resolvedNameCache.get(normalized);
-          if (match === undefined) {
-            match = await resolveExactPersonByName(parsed.name);
-            resolvedNameCache.set(normalized, match);
+          const matched = castByNormalizedName.get(normalized);
+          if (matched) {
+            assignmentUpdates[id] = matched.value;
           }
-          if (match) assignmentUpdates[id] = [match];
         }
       }
 
@@ -382,18 +418,16 @@ export function ImageScrapeDrawer({
       }
 
       if (Object.keys(assignmentUpdates).length > 0) {
-        setPersonAssignments((prev) => {
+        setCastSelectionByImage((prev) => {
           const next = { ...prev };
-          for (const [id, people] of Object.entries(assignmentUpdates)) {
-            if (!next[id] || next[id].length === 0) {
-              next[id] = people;
-            }
+          for (const [id, value] of Object.entries(assignmentUpdates)) {
+            if (!next[id]) next[id] = value;
           }
           return next;
         });
       }
     },
-    [previewData, entityContext.type, resolveExactPersonByName]
+    [previewData, castOptions]
   );
 
   // Link a duplicate image to the current entity
@@ -512,13 +546,11 @@ export function ImageScrapeDrawer({
       setPreviewData(null);
       setSelectedImages(new Set());
       setCaptions({});
-      setPersonAssignments({});
+      setCastSelectionByImage({});
       setImageKinds({});
-      setContentTypes({});
-      setSourceLogos({});
-      setAssetNames({});
+      setLogoScopeByImage({});
+      setCastOptions([]);
       setSelectedShowSeason("na");
-      setBulkPeopleSelection([]);
       setImportProgress(null);
       setImportResult(null);
       setDuplicates([]);
@@ -539,6 +571,12 @@ export function ImageScrapeDrawer({
       setSelectedShowSeason("na");
     }
   }, [isOpen, entityContext]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (entityContext.type === "person") return;
+    void loadCastOptions();
+  }, [entityContext, isOpen, loadCastOptions, selectedShowSeason]);
 
   // Body scroll lock
   useEffect(() => {
@@ -576,10 +614,9 @@ export function ImageScrapeDrawer({
       setPreviewData(null);
       setSelectedImages(new Set());
       setCaptions({});
-      setPersonAssignments({});
+      setCastSelectionByImage({});
       setImageKinds({});
-      setContentTypes({});
-      setBulkPeopleSelection([]);
+      setLogoScopeByImage({});
       setImportResult(null);
 
       const headers = await getAuthHeaders();
@@ -648,6 +685,16 @@ export function ImageScrapeDrawer({
     setCaptions((prev) => ({ ...prev, [id]: caption }));
   };
 
+  const resolveCastPersonIds = useCallback(
+    (imageId: string): string[] => {
+      const selectionValue = castSelectionByImage[imageId];
+      if (!selectionValue) return [];
+      const matched = castOptions.find((option) => option.value === selectionValue);
+      return matched ? matched.personIds : [];
+    },
+    [castOptions, castSelectionByImage]
+  );
+
   // Import selected images with SSE streaming progress
   const handleImport = async () => {
     if (selectedImages.size === 0) {
@@ -667,32 +714,26 @@ export function ImageScrapeDrawer({
 
       const imagesToImport = previewData.images
         .filter((img) => selectedImages.has(img.id))
-        .map((img) => ({
+        .map((img) => {
+          const imageKind = imageKinds[img.id] || "other";
+          return {
           candidate_id: img.id,
           url: img.best_url,
           caption: captions[img.id] || null,
-          kind: imageKinds[img.id] || "other",
-          person_ids: (personAssignments[img.id] ?? []).map((p) => p.id),
+          kind: imageKind,
+          person_ids: imageKind === "cast" ? resolveCastPersonIds(img.id) : [],
           context_section:
             entityContext.type !== "person" && importMode === "season_announcement"
               ? "Cast Portraits"
               : null,
-          context_type: (
-            contentTypes[img.id] ||
-            (entityContext.type !== "person" && importMode === "season_announcement"
+          context_type:
+            entityContext.type !== "person" && importMode === "season_announcement"
               ? "OFFICIAL SEASON ANNOUNCEMENT"
-              : "")
-          ) || null,
-          source_logo: sourceLogos[img.id] || null,
-          asset_name:
-            assetNames[img.id] ||
-            (entityContext.type !== "person" && importMode === "season_announcement"
-              ? defaultCastPortraitName(
-                  (personAssignments[img.id] ?? [])[0]?.name ?? null,
-                  1
-                )
-              : null),
-        }));
+              : null,
+          source_logo: imageKind === "logo" ? logoScopeByImage[img.id] || null : null,
+          asset_name: null,
+          };
+        });
 
       const urlToKindMap = new Map<string, ImageKind>();
       for (const img of imagesToImport) {
@@ -1011,13 +1052,6 @@ export function ImageScrapeDrawer({
                               }
                               return next;
                             });
-                            setContentTypes((prev) => {
-                              const next = { ...prev };
-                              for (const imgId of selectedImages) {
-                                next[imgId] = "OFFICIAL SEASON ANNOUNCEMENT";
-                              }
-                              return next;
-                            });
                           }
                         }}
                         className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
@@ -1050,7 +1084,7 @@ export function ImageScrapeDrawer({
                             return next;
                           });
                           if (value === "cast") {
-                            void autoFillCastFromContext(selectedImages);
+                            autoFillCastFromContext(selectedImages);
                           }
                           e.target.value = "";
                         }}
@@ -1068,83 +1102,14 @@ export function ImageScrapeDrawer({
 
                   {entityContext.type !== "person" && (
                     <div className="flex flex-wrap items-center gap-3">
-                      <span className="text-xs font-semibold text-zinc-600">
-                        Set content type for all selected:
+                      <span className="text-xs text-zinc-600">
+                        {castOptionsLoading
+                          ? "Loading season cast options..."
+                          : castOptions.length > 0
+                            ? "Cast images use Full-time/Friend dropdown. Group Picture tags all Full-time."
+                            : "Select a season to load cast options for cast-image tagging."}
                       </span>
-                      <select
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setContentTypes((prev) => {
-                            const next = { ...prev };
-                            for (const imgId of selectedImages) {
-                              if (value) next[imgId] = value;
-                              else delete next[imgId];
-                            }
-                            return next;
-                          });
-                          e.target.value = "";
-                        }}
-                        className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
-                      >
-                        <option value="">Select content type...</option>
-                        {CONTENT_TYPE_OPTIONS.filter((option) => option.value).map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
                     </div>
-                  )}
-
-                  <div className="grid gap-2">
-                    <span className="text-xs font-semibold text-zinc-600">
-                      Tag people for all selected:
-                    </span>
-                    <PeopleSearchMultiSelect
-                      value={bulkPeopleSelection}
-                      onChange={setBulkPeopleSelection}
-                      getAuthHeaders={getAuthHeaders}
-                      disabled={importing}
-                      placeholder="Search and add people..."
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPersonAssignments((prev) => {
-                            const next = { ...prev };
-                            for (const imgId of selectedImages) {
-                              if (bulkPeopleSelection.length > 0) {
-                                next[imgId] = [...bulkPeopleSelection];
-                              } else {
-                                delete next[imgId];
-                              }
-                            }
-                            return next;
-                          });
-                        }}
-                        className="rounded bg-zinc-900 px-2 py-1 text-xs font-semibold text-white hover:bg-zinc-800"
-                      >
-                        Apply
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBulkPeopleSelection([])}
-                        className="text-xs font-medium text-zinc-600 hover:text-zinc-800"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-
-                  {Object.keys(personAssignments).length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setPersonAssignments({})}
-                      className="text-xs font-medium text-red-600 hover:text-red-700"
-                    >
-                      Clear all people tags
-                    </button>
                   )}
                 </div>
               )}
@@ -1153,6 +1118,7 @@ export function ImageScrapeDrawer({
               <div className="mb-6 grid grid-cols-3 gap-3">
                 {previewData.images.map((img) => {
                   const isSelected = selectedImages.has(img.id);
+                  const selectedKind = imageKinds[img.id] || "other";
                   const badgeText = formatImageCandidateBadgeText({
                     width: img.width,
                     height: img.height,
@@ -1220,12 +1186,12 @@ export function ImageScrapeDrawer({
                             onClick={(e) => e.stopPropagation()}
                           />
                           <select
-                            value={imageKinds[img.id] || "other"}
+                            value={selectedKind}
                             onChange={(e) => {
                               const value = e.target.value as ImageKind;
                               setImageKinds((prev) => ({ ...prev, [img.id]: value }));
                               if (value === "cast") {
-                                void autoFillCastFromContext([img.id]);
+                                autoFillCastFromContext([img.id]);
                               }
                             }}
                             onClick={(e) => e.stopPropagation()}
@@ -1237,83 +1203,48 @@ export function ImageScrapeDrawer({
                               </option>
                             ))}
                           </select>
-                          {entityContext.type !== "person" && (
-                            <>
-                              <select
-                                value={contentTypes[img.id] ?? ""}
-                                onChange={(e) =>
-                                  setContentTypes((prev) => ({
-                                    ...prev,
-                                    [img.id]: e.target.value,
-                                  }))
-                                }
-                                onClick={(e) => e.stopPropagation()}
-                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
-                              >
-                                {CONTENT_TYPE_OPTIONS.map((opt) => (
-                                  <option key={opt.value || "none"} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </>
+                          {entityContext.type !== "person" && selectedKind === "cast" && (
+                            <select
+                              value={castSelectionByImage[img.id] ?? ""}
+                              onChange={(e) =>
+                                setCastSelectionByImage((prev) => ({
+                                  ...prev,
+                                  [img.id]: e.target.value,
+                                }))
+                              }
+                              disabled={castOptionsLoading || castOptions.length === 0}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none disabled:bg-zinc-100"
+                            >
+                              <option value="">
+                                {castOptionsLoading ? "Loading cast..." : "Select cast member"}
+                              </option>
+                              {castOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
                           )}
-                          {entityContext.type !== "person" && importMode === "season_announcement" && (
-                            <>
-                              <select
-                                value={sourceLogos[img.id] ?? ""}
-                                onChange={(e) =>
-                                  setSourceLogos((prev) => ({
-                                    ...prev,
-                                    [img.id]: e.target.value,
-                                  }))
-                                }
-                                onClick={(e) => e.stopPropagation()}
-                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
-                              >
-                                {SOURCE_LOGO_OPTIONS.map((opt) => (
-                                  <option key={opt.value || "none"} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                type="text"
-                                value={assetNames[img.id] ?? ""}
-                                onChange={(e) =>
-                                  setAssetNames((prev) => ({
-                                    ...prev,
-                                    [img.id]: e.target.value,
-                                  }))
-                                }
-                                placeholder={
-                                  defaultCastPortraitName(
-                                    (personAssignments[img.id] ?? [])[0]?.name ?? null,
-                                    1
-                                  ) ?? "Asset name"
-                                }
-                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                            </>
+                          {entityContext.type !== "person" && selectedKind === "logo" && (
+                            <select
+                              value={logoScopeByImage[img.id] ?? ""}
+                              onChange={(e) =>
+                                setLogoScopeByImage((prev) => ({
+                                  ...prev,
+                                  [img.id]: e.target.value,
+                                }))
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                            >
+                              {LOGO_SCOPE_OPTIONS.map((opt) => (
+                                <option key={opt.value || "none"} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
                           )}
-                          <PeopleSearchMultiSelect
-                            value={personAssignments[img.id] ?? []}
-                            onChange={(nextPeople) => {
-                              setPersonAssignments((prev) => {
-                                const next = { ...prev };
-                                if (nextPeople.length > 0) {
-                                  next[img.id] = nextPeople;
-                                } else {
-                                  delete next[img.id];
-                                }
-                                return next;
-                              });
-                            }}
-                            getAuthHeaders={getAuthHeaders}
-                            disabled={importing}
-                            placeholder="Tag people..."
-                          />
                         </div>
                       )}
                     </div>

@@ -2,6 +2,53 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-11)
+
+- Sync-by-Bravo season eligibility guard update on show page:
+  - Season dropdown/default now includes only seasons with `>1` episodes or a known premiere date.
+  - Placeholder seasons with no premiere/episode evidence are excluded from selection.
+  - Added modal empty-state (`No eligible seasons`) and blocked preview/commit with explicit error when no eligible season exists.
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Validation: `pnpm -C apps/web run lint -- 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only)
+- Image import drawer metadata UX update:
+  - Removed manual people tagging + freeform asset-name entry from `Import Images`.
+  - Third dropdown is now image-kind aware:
+    - `Cast Photos` => season cast dropdown (`Full-time` + `Friend`) with `Group Picture (All Full-time)`.
+    - `Logo` => `SOURCE` / `SHOW`.
+  - Cast options are loaded from show cast roles filtered by selected season cast membership.
+  - File: `apps/web/src/components/admin/ImageScrapeDrawer.tsx`
+  - Validation: `pnpm -C apps/web run lint -- src/components/admin/ImageScrapeDrawer.tsx`
+- Refresh log completion behavior update:
+  - When a topic finishes, it now collapses to a one-line row like `SHOWS: Done ✔️`.
+  - Completed topics automatically move to the bottom of the log; active topics stay expanded above.
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Full refresh pipeline optimization on show page:
+  - `Refresh` now avoids duplicate deep cast profile/media sync in the full run.
+  - `Refresh` now uses photo fast-mode (`limit_per_source=20`, `imdb_mediaindex_max_pages=6`, skip auto-count, skip word detection).
+  - Explicit cast refresh path still allows deep person profile/media sync when needed.
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Refresh log redesign on show page:
+  - Replaced flat repeated log list with grouped topic containers shown once each:
+    - `SHOWS`, `SEASONS`, `EPISODES`, `PEOPLE`, `MEDIA`, `BRAVOTV`
+  - Each topic now contains nested sub-job updates and latest status summary.
+  - Log lines are normalized for readability (UUID-like ids redacted to `person`).
+  - Bravo preview/commit events now appear in `BRAVOTV`.
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Show page Sync-by-Bravo gating added:
+  - `Sync by Bravo` now requires synced seasons + episodes + cast before opening the workflow.
+  - Missing prerequisites are shown inline in the header.
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Show page refresh visibility improved:
+  - Clicking/hovering the running header `Refresh` button opens a live in-depth refresh log panel.
+  - Log includes stage messages, counts, and percentages from streamed progress events.
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Error handling update:
+  - Sync-by-Bravo preview/commit now surfaces backend `detail` messages (not just `error` fields).
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Validation for this update:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (2 pre-existing warnings)
+  - `pnpm -C apps/web exec vitest run tests/show-cast-route-default-min-episodes.test.ts tests/show-bravo-videos-proxy-route.test.ts` (`3 passed`)
+
 ## Goal
 
 - Fix TRR-APP dev "infinite loading" + admin TRR-Core pages failing after moving into the multi-repo workspace.
@@ -734,3 +781,311 @@ New tests:
   - verifies successful SSE pass-through body behavior.
 - Updated `apps/web/tests/person-refresh-progress.test.ts`
   - verifies `metadata_enrichment` maps to `SYNCING`.
+
+Show page refresh summary UX + text-overlay unknown copy (this session):
+- Updated show landing page photos refresh notice formatting in `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`.
+  - Now outputs grouped status copy:
+    - `SUCCESS: ...` with key photo counters (fetched, upserted, mirrored, pruned, etc.)
+    - `FAILS: ...` only when one or more failure counters are greater than zero
+    - Optional duration suffix
+  - Removed noisy zero-value failure fields from the default success message path.
+- Updated advanced filter drawer warning copy in `apps/web/src/components/admin/AdvancedFilterDrawer.tsx`.
+  - Message now clarifies that `text overlay unknown/unclassified` is separate from `failed detections`.
+  - Button label changed from `Detect For Visible` to `Classify Visible Images`.
+
+Verification:
+- `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/components/admin/AdvancedFilterDrawer.tsx'` (pass with 2 pre-existing `@next/next/no-img-element` warnings in show page)
+
+People-count/tag semantics + source-pill link UX (this session):
+- Updated tag save routes to stop deriving people-count from tagged people list:
+  - `apps/web/src/app/api/admin/trr-api/cast-photos/[photoId]/tags/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/media-links/[linkId]/tags/route.ts`
+  - `people_count` is now only set when an explicit numeric `people_count` is submitted.
+  - `people_count_source` is now `manual` only when explicit count is provided; tag-only updates do not set manual count source.
+- Updated person lightbox recount behavior in:
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - Recount button is now available for tagged photos and sends `force: true` only when existing count source is `manual`.
+  - Frontend fallback no longer infers `manual` source from tag-only edits.
+- Hyperlinked Source pill to the original source page in:
+  - `apps/web/src/components/admin/ImageLightbox.tsx`
+  - Source badge now opens `metadata.sourceUrl` in a new tab when available.
+
+Verification:
+- `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/api/admin/trr-api/cast-photos/[photoId]/tags/route.ts' 'src/app/api/admin/trr-api/media-links/[linkId]/tags/route.ts' 'src/components/admin/ImageLightbox.tsx' 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/components/admin/AdvancedFilterDrawer.tsx'` (pass; 2 pre-existing `@next/next/no-img-element` warnings remain in show page)
+
+Fandom mismatch display guard (this session):
+- Updated `apps/web/src/lib/server/trr-api/trr-shows-repository.ts` in `getFandomDataByPersonId(...)` to filter out mismatched `core.cast_fandom` rows before returning data to the person page.
+- Added person-name matching helpers (normalized-name + URL slug checks) and now keep only rows that match the target `core.people.full_name`.
+- Effect: legacy bad rows (wrong person/page linkage) no longer render in `/admin/trr-shows/people/[personId]` Fandom tab.
+
+Verification:
+- `pnpm -C apps/web exec eslint 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass with pre-existing repo warnings unrelated to this change)
+
+Person credits expansion for unsynced shows (this session):
+- Updated `apps/web/src/lib/server/trr-api/trr-shows-repository.ts` `getCreditsByPersonId(...)` to merge local credits with IMDb name filmography credits from `https://m.imdb.com/name/{nm}/fullcredits`.
+- Added IMDb filmography parser + merge logic:
+  - Parses fullcredits title anchors (`nm_flmg_job_*` title rows), dedupes by IMDb title id.
+  - Maps IMDb title ids back to local shows via `core.shows.imdb_id` + `core.show_external_ids`.
+  - Returns credits for non-local shows with `show_id: null` and `external_url` set to IMDb title URL.
+- Expanded `TrrPersonCredit` shape with optional fields used by UI (`source_type`, `external_imdb_id`, `external_url`) and nullable `show_id`.
+- Updated person credits UI in `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`:
+  - Credits with local `show_id` keep linking to `/admin/trr-shows/{showId}`.
+  - Credits without local `show_id` now link out to IMDb (`external_url`) and show an `IMDb` pill.
+
+Verification:
+- `pnpm -C apps/web exec eslint 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass; pre-existing warnings in file)
+- `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx'` (pass)
+
+Bravo import + cast eligibility + tabs update (this session, 2026-02-11):
+- Added admin proxy routes for Bravo sync/read:
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/import-bravo/preview/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/import-bravo/commit/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/bravo/videos/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/bravo/news/route.ts`
+- Show page updates (`apps/web/src/app/admin/trr-shows/[showId]/page.tsx`):
+  - `Sync by Bravo` button under `Refresh`
+  - Import-by-Bravo modal with URL, previewed description/airs, selectable images
+  - top-level `News` tab
+  - `Assets` sub-tabs: `Images`, `Videos`, `Brand`
+  - persisted Bravo videos/news rendering (video links open Bravo URLs)
+- Season page updates (`apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`):
+  - added `Videos` tab from persisted Bravo videos filtered by season
+- Person page updates (`apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`):
+  - added `Videos` and `News` tabs using persisted Bravo endpoints with `person_id`
+  - featured-photo fallback now checks `profile_image_url['bravo']` after cover photo
+- Cast eligibility enforcement in app layer:
+  - show cast route default `minEpisodes=1` behavior
+  - repository show/season cast gating to exclude zero-episode-evidence members
+  - total episode count remains rendered in show/season cast UIs
+- Added tests:
+  - `apps/web/tests/show-cast-route-default-min-episodes.test.ts`
+  - `apps/web/tests/show-bravo-videos-proxy-route.test.ts`
+
+Validation (this session):
+- `pnpm -C apps/web exec vitest run tests/show-cast-route-default-min-episodes.test.ts tests/show-bravo-videos-proxy-route.test.ts` (pass, 3 tests)
+- `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/cast/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/import-bravo/preview/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/import-bravo/commit/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/bravo/videos/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/bravo/news/route.ts' 'src/lib/server/trr-api/trr-shows-repository.ts'` (warnings only)
+- `pnpm -C apps/web exec tsc --noEmit` fails on pre-existing `TS1501` at `src/lib/server/trr-api/trr-shows-repository.ts:844`
+
+Import-by-Bravo preview UX/date enhancements (this session, 2026-02-11):
+- `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Import modal preview now separates sections:
+    - `Show Images` (selectable import list)
+    - `News` (image + headline + link + posted date)
+    - `Videos` (image + title + link + posted date + season filter)
+  - Preview videos season filter defaults to latest season available (e.g. Season 10 for Summer House).
+- Added posted date rendering in Bravo cards:
+  - show page `Assets > Videos`
+  - show page top-level `News`
+  - season page `Videos`
+  - person page `Videos` and `News`
+- Types updated for Bravo items to include `published_at`.
+
+Validation:
+- `pnpm -C apps/web exec vitest run tests/show-cast-route-default-min-episodes.test.ts tests/show-bravo-videos-proxy-route.test.ts` (pass, 3 tests)
+- `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx'` (warnings only)
+- `pnpm -C apps/web exec tsc --noEmit` still fails on pre-existing TS1501 at `src/lib/server/trr-api/trr-shows-repository.ts:844`
+
+Import-by-Bravo modal cast URL visibility (this session, 2026-02-11):
+- Updated `/admin/trr-shows/[showId]` Import-by-Bravo modal to render `Cast Member URLs` before `News` and `Videos` preview sections.
+- Data source:
+  - parsed preview people (`name` + `canonical_url`)
+  - discovered person URLs fallback (for unresolved names)
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only; no errors)
+
+Season Social Analytics V2 UI + proxies (this session, 2026-02-11):
+- Added new Season Social Analytics dashboard component:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - Includes:
+    - filter rail (scope/platform/week)
+    - KPI cards
+    - weekly trend view
+    - platform sentiment breakdown
+    - positive/negative sentiment drivers
+    - Bravo content leaderboard
+    - viewer discussion highlights
+    - ingest controls + job status panel
+    - CSV/PDF export actions
+    - collapsible manual sources fallback (reusing `social-posts-section`)
+- Wired season social tab to new component:
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+- Added season social proxy routes:
+  - `.../social/targets/route.ts` (`GET`, `PUT`)
+  - `.../social/ingest/route.ts` (`POST`)
+  - `.../social/jobs/route.ts` (`GET`)
+  - `.../social/analytics/route.ts` (`GET`)
+  - `.../social/export/route.ts` (`GET`, `format=csv|pdf`)
+- Manual social posts season scoping fix:
+  - `apps/web/src/components/admin/social-posts-section.tsx`
+    - optional `seasonId` prop
+    - season-aware list/read and create payload (`trr_season_id`)
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/social-posts/route.ts`
+    - `GET` now supports `trr_season_id` query and uses season-scoped repository reads
+
+Validation (this session):
+- `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/components/admin/social-posts-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/social-posts/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/export/route.ts'` (pass)
+- `pnpm -C apps/web exec tsc --noEmit` still fails on pre-existing `TS1501` at `src/lib/server/trr-api/trr-shows-repository.ts:844`
+
+Sync-by-Bravo preview reliability/UX patch (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - split modal loading flags into `syncBravoPreviewLoading` and `syncBravoCommitLoading`.
+  - `Preview` button now shows `Previewing...`; commit button shows `Syncing...` only during commit.
+  - moved sync error/notice rendering directly below URL input so failed preview is immediately visible.
+  - preview path now handles non-JSON responses defensively and reports HTTP status/message.
+  - `Show Images` preview list now excludes URLs already used by preview news/video cards.
+  - close/cancel controls disabled while request in flight to prevent accidental dismissal.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only, no errors)
+  - `pnpm -C apps/web exec vitest run tests/show-bravo-videos-proxy-route.test.ts tests/show-cast-route-default-min-episodes.test.ts` (pass)
+
+Sync-by-Bravo show-image kind selection (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Added per-image `Type` dropdown in the `Show Images` preview list.
+  - Dropdown options map to backend import kinds: `poster`, `backdrop`, `logo`, `episode_still`, `cast`, `promo`, `intro`, `reunion`, `other`.
+  - Added frontend default-kind inference (`logo`, `key art/poster`, `backdrop`, etc.) for faster review.
+  - Commit request now includes:
+    - `selected_show_images: [{url, kind}]`
+    - legacy `selected_show_image_urls[]` retained for compatibility.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only)
+  - `pnpm -C apps/web exec vitest run tests/show-bravo-videos-proxy-route.test.ts tests/show-cast-route-default-min-episodes.test.ts` (pass)
+
+Sync-by-Bravo modal step flow update (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Added modal step state (`preview` -> `confirm`).
+  - Primary button in step 1 now `Next`.
+  - Step 2 displays sync review content:
+    - cast member URL list being synced
+    - selected show images being synced (thumbnail + title/url + selected type)
+  - Footer button behavior:
+    - step 1: `Cancel` + `Next`
+    - step 2: `Back` + `Sync by Bravo`
+  - Added `Step 1 of 2` / `Step 2 of 2` indicator in modal header.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only)
+  - `pnpm -C apps/web exec vitest run tests/show-bravo-videos-proxy-route.test.ts tests/show-cast-route-default-min-episodes.test.ts` (pass)
+
+Show Logos moved to Brand sub-tab (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Removed `Logos` section from Assets `Images` sub-tab gallery rendering.
+  - Added `Logos` section to Assets `Brand` sub-tab, rendered above `ShowBrandEditor`.
+  - Added `brandLogoAssets` memo for show-logo assets (`type=show`, `kind=logo`).
+  - Updated Assets-tab gallery loading effect so `Brand` triggers `loadGalleryAssets("all")`.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only, no errors)
+
+Sync-by-Bravo season-scoped payload update (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Added `defaultSyncBravoSeasonNumber` (latest show season from TRR seasons data).
+- Preview request now sends `season_number` (latest season).
+- Commit request now sends `season_number` from selected preview season filter (fallback latest season).
+- Purpose: keep Bravo video ingest scoped to current season workflow (Season 10 for Summer House).
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only)
+  - `pnpm -C apps/web exec vitest run tests/show-bravo-videos-proxy-route.test.ts tests/show-cast-route-default-min-episodes.test.ts` (pass)
+
+Runtime fix: `defaultSyncBravoSeasonNumber` TDZ error (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Root cause: callback dependency array referenced `defaultSyncBravoSeasonNumber` before that `const` was initialized in component scope.
+- Fix: moved `defaultSyncBravoSeasonNumber` memo above `previewSyncByBravo` and `commitSyncByBravo`, removed duplicate lower declaration.
+- Validation: `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only).
+
+Sync-by-Bravo auto URL + no-manual-URL modal flow (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Added `inferBravoShowUrl(show.name)` helper to derive `https://www.bravotv.com/{slug}`.
+  - `Sync by Bravo` button now:
+    - infers URL,
+    - sets `syncBravoUrl`,
+    - auto-runs preview immediately on open.
+  - Removed manual `Bravo Show URL` input field from preview step.
+  - Preview step now starts with `Show Name` + `Refresh Preview` button.
+  - Confirm step summary block now shows `Show Name` instead of raw URL.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only)
+  - `pnpm -C apps/web exec vitest run tests/show-bravo-videos-proxy-route.test.ts tests/show-cast-route-default-min-episodes.test.ts` (pass)
+
+Season Social page weekly table + scoped ingest controls (this session, 2026-02-11):
+- File: `apps/web/src/components/admin/season-social-analytics-section.tsx`
+- Changes:
+  - Added new weekly table section: `Weekly Bravo Post Count Table`.
+  - Table shows one row per week with per-platform post counts:
+    - Instagram, YouTube, TikTok, Twitter/X, Total.
+  - Added per-row `Run Week` action button.
+  - Updated ingest behavior to honor selected scope:
+    - uses current `Platform` dropdown (all or one platform),
+    - uses current `Week` dropdown (including week 0),
+    - sends `date_start/date_end` from selected week window when week-scoped.
+  - Added scope hint text under ingest actions:
+    - `Run scope: Week X / All Weeks · Platform Y / All Platforms`.
+  - Added support for new analytics fields in component typing:
+    - `window.week_zero_start`
+    - `weekly_platform_posts`.
+- Validation:
+  - `npm run -s lint -- src/components/admin/season-social-analytics-section.tsx` (pass)
+  - `npm run -s test -- tests/show-bravo-videos-proxy-route.test.ts tests/show-cast-route-default-min-episodes.test.ts` (pass)
+
+Show-level Social tab season default + selector (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Show-level Social tab now defaults to the most recent season that is airing/has aired.
+  - Added season dropdown (shown when multiple seasons are available) to switch social scope to a different season.
+  - Social tab now passes selected season ID into `SocialPostsSection` via `seasonId`, so manual social links are season-scoped by default.
+  - Fallback behavior: if no aired seasons are available, defaults to highest season number available.
+- Validation:
+  - `npm run -s lint -- 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass; existing warnings only)
+  - `npm run -s test -- tests/show-bravo-videos-proxy-route.test.ts tests/show-cast-route-default-min-episodes.test.ts` (pass)
+
+Show-level Social tab now renders season analytics dashboard (this session, 2026-02-11):
+- File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Added `SeasonSocialAnalyticsSection` import.
+  - Updated show-level Social tab content to render `SeasonSocialAnalyticsSection` when a season is selected from the Social Scope selector.
+  - Preserved `SocialPostsSection` as fallback only when no season is selected.
+  - Props passed through from selected show-season context:
+    - `showId`
+    - `seasonNumber`
+    - `seasonId`
+    - `showName`
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass; existing warnings only)
+  - Browser smoke test attempted, but local browser automation was blocked by launcher/session tooling errors (`playwright` launch conflict and `chrome-devtools` transport closed).
+
+Bravo profile + cast gallery UX alignment (this session, 2026-02-11):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+- Changes:
+  - Sync-by-Bravo modal now has a top-level `Sync Season` dropdown and sends selected `season_number` in preview + commit payloads.
+  - Added helper selection logic so cast thumbnails prefer `bravo_profile` media links (season-specific first), then fallback images.
+  - Show cast keeps manual `cover_photo_url` priority; Bravo profile images become fallback when no manual cover is assigned.
+  - Season cast cards now match show cast cards:
+    - uniform `4:5` (`aspect-[4/5]`) image containers,
+    - crop-preview rendering using `thumbnail_focus_x/y`, `thumbnail_zoom`, `thumbnail_crop_mode`, and `resolveThumbnailPresentation`.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass with pre-existing warnings only).
+  - `curl` smoke:
+    - show social page loads (`200`) at `/admin/trr-shows/7782652f-783a-488b-8860-41b97de32e75?tab=social`.
+    - Sync-by-Bravo endpoints exist and enforce auth (`401` unauthenticated).
+  - Browser automation note:
+    - MCP Playwright/Chrome DevTools live UI run was blocked in this environment (Chrome persistent-session launch conflict / devtools transport closure).
+
+Cast member External IDs now render Bravo profile socials (this session, 2026-02-11):
+- File: `apps/web/src/components/admin/ExternalLinks.tsx`
+- Changes:
+  - Added support for social keys populated by Bravo profile sync, including both legacy and canonical forms:
+    - `instagram`/`instagram_id`/`instagram_url`
+    - `twitter`/`twitter_id`/`twitter_url`
+    - `facebook`/`facebook_id`/`facebook_url`
+    - `tiktok`/`tiktok_id`/`tiktok_url`
+    - `youtube`/`youtube_id`/`youtube_url`
+  - External IDs panel now displays clickable links for TikTok and YouTube in addition to Instagram/Twitter/Facebook.
+  - Link builder now prefers stored `*_url` when present; otherwise derives URL from handle/ID.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/components/admin/ExternalLinks.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx'` (pass)

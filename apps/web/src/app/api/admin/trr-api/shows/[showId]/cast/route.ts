@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getCoverPhotos } from "@/lib/server/admin/person-cover-photos-repository";
-import { getCastByShowId, getShowCastWithStats } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  getShowArchiveFootageCast,
+  getShowCastWithStats,
+} from "@/lib/server/trr-api/trr-shows-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -41,14 +44,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const minEpisodes = searchParams.get("minEpisodes");
     const requireImage = searchParams.get("requireImage");
 
-    const shouldIncludeStats = Boolean(minEpisodes) || Boolean(requireImage);
-    const cast = shouldIncludeStats
-      ? await getShowCastWithStats(showId, { limit, offset })
-      : await getCastByShowId(showId, { limit, offset });
+    const parsedMinEpisodes = minEpisodes ? parseInt(minEpisodes, 10) : 1;
+    const minEpisodesValue =
+      Number.isFinite(parsedMinEpisodes) && parsedMinEpisodes >= 0 ? parsedMinEpisodes : 1;
 
-    const minEpisodesValue = minEpisodes ? parseInt(minEpisodes, 10) : null;
+    const [cast, archiveCast] = await Promise.all([
+      getShowCastWithStats(showId, { limit, offset }),
+      getShowArchiveFootageCast(showId, { limit, offset }),
+    ]);
+
     let filteredCast = cast;
-    if (minEpisodesValue && Number.isFinite(minEpisodesValue)) {
+    if (Number.isFinite(minEpisodesValue)) {
       filteredCast = filteredCast.filter(
         (member) => (member.total_episodes ?? 0) >= minEpisodesValue
       );
@@ -58,12 +64,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     let castWithCover = filteredCast;
+    let archiveCastWithCover = archiveCast;
 
-    if (filteredCast.length > 0) {
-      const personIds = [...new Set(filteredCast.map((member) => member.person_id))];
+    if (filteredCast.length > 0 || archiveCast.length > 0) {
+      const personIds = [
+        ...new Set([...filteredCast, ...archiveCast].map((member) => member.person_id)),
+      ];
       try {
         const coverPhotos = await getCoverPhotos(personIds);
         castWithCover = filteredCast.map((member) => ({
+          ...member,
+          cover_photo_url: coverPhotos.get(member.person_id)?.photo_url ?? null,
+        }));
+        archiveCastWithCover = archiveCast.map((member) => ({
           ...member,
           cover_photo_url: coverPhotos.get(member.person_id)?.photo_url ?? null,
         }));
@@ -73,11 +86,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           ...member,
           cover_photo_url: null,
         }));
+        archiveCastWithCover = archiveCast.map((member) => ({
+          ...member,
+          cover_photo_url: null,
+        }));
       }
+    }
+
+    if (requireImage === "true" || requireImage === "1") {
+      archiveCastWithCover = archiveCastWithCover.filter((member) => Boolean(member.photo_url));
     }
 
     return NextResponse.json({
       cast: castWithCover,
+      archive_footage_cast: archiveCastWithCover,
       pagination: {
         limit,
         offset,

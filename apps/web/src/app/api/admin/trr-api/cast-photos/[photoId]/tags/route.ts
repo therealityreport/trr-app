@@ -67,20 +67,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       "people_count"
     );
     const peopleCount =
-      typeof peopleCountRaw === "number" && Number.isFinite(peopleCountRaw)
+      hasExplicitCount && typeof peopleCountRaw === "number" && Number.isFinite(peopleCountRaw)
         ? Math.max(1, Math.floor(peopleCountRaw))
-        : peopleCountRaw === null
-          ? null
-          : hasExplicitCount
-            ? null
-            : peopleNames.length > 0 || peopleIds.length > 0
-              ? Math.max(peopleNames.length, peopleIds.length)
-              : null;
-
-    const peopleCountSource =
-      peopleNames.length > 0 || peopleIds.length > 0 || peopleCount !== null
-        ? "manual"
         : null;
+
+    const peopleCountSource = hasExplicitCount && peopleCount !== null ? "manual" : null;
 
     const result = await upsertCastPhotoTags({
       cast_photo_id: photoId,

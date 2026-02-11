@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
 import {
   getPostsByShowId,
+  getPostsBySeasonId,
   createPost,
   type SocialPlatform,
 } from "@/lib/server/admin/social-posts-repository";
@@ -40,7 +41,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const posts = await getPostsByShowId(showId);
+    const { searchParams } = new URL(request.url);
+    const trrSeasonId = searchParams.get("trr_season_id");
+    const posts = trrSeasonId ? await getPostsBySeasonId(trrSeasonId) : await getPostsByShowId(showId);
 
     return NextResponse.json({ posts });
   } catch (error) {

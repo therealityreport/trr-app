@@ -8,6 +8,7 @@ import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
 import SocialPostsSection from "@/components/admin/social-posts-section";
+import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
@@ -24,6 +25,10 @@ import {
   inferHasTextOverlay,
 } from "@/lib/gallery-filter-utils";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
+import {
+  isThumbnailCropMode,
+  resolveThumbnailPresentation,
+} from "@/lib/thumbnail-crop";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -69,10 +74,56 @@ interface TrrCastMember {
   credit_category: string;
   photo_url: string | null;
   cover_photo_url: string | null;
+  thumbnail_focus_x?: number | null;
+  thumbnail_focus_y?: number | null;
+  thumbnail_zoom?: number | null;
+  thumbnail_crop_mode?: "manual" | "auto" | null;
   total_episodes?: number | null;
+  archive_episode_count?: number | null;
 }
 
-type TabId = "seasons" | "assets" | "cast" | "surveys" | "social" | "details";
+interface BravoPersonTag {
+  person_id?: string | null;
+  person_name?: string | null;
+  person_url?: string | null;
+}
+
+interface BravoVideoItem {
+  title?: string | null;
+  runtime?: string | null;
+  kicker?: string | null;
+  image_url?: string | null;
+  clip_url: string;
+  season_number?: number | null;
+  published_at?: string | null;
+  person_tags?: BravoPersonTag[];
+}
+
+interface BravoNewsItem {
+  headline?: string | null;
+  image_url?: string | null;
+  article_url: string;
+  published_at?: string | null;
+  person_tags?: BravoPersonTag[];
+}
+
+interface BravoPreviewPerson {
+  name?: string | null;
+  canonical_url?: string | null;
+}
+
+type BravoImportImageKind =
+  | "poster"
+  | "backdrop"
+  | "logo"
+  | "episode_still"
+  | "cast"
+  | "promo"
+  | "intro"
+  | "reunion"
+  | "other";
+
+type TabId = "seasons" | "assets" | "news" | "cast" | "surveys" | "social" | "details";
 type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
 type ShowTab = { id: TabId; label: string };
 type RefreshProgressState = {
@@ -82,9 +133,47 @@ type RefreshProgressState = {
   total: number | null;
 };
 
+type RefreshLogEntry = {
+  id: string;
+  at: string;
+  category: string;
+  message: string;
+  current: number | null;
+  total: number | null;
+};
+
+type ShowRefreshRunOptions = {
+  photoMode?: "fast" | "full";
+  includeCastProfiles?: boolean;
+};
+
+type RefreshLogTopicKey =
+  | "shows"
+  | "seasons"
+  | "episodes"
+  | "people"
+  | "media"
+  | "bravotv";
+
+type RefreshLogTopicDefinition = {
+  key: RefreshLogTopicKey;
+  label: string;
+  description: string;
+};
+
+const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
+  { key: "shows", label: "SHOWS", description: "Show info, entities, providers" },
+  { key: "seasons", label: "SEASONS", description: "Season-level sync progress" },
+  { key: "episodes", label: "EPISODES", description: "Episode-level sync and credits" },
+  { key: "people", label: "PEOPLE", description: "Cast/member profile and person jobs" },
+  { key: "media", label: "MEDIA", description: "Images, mirroring, auto-count, cleanup" },
+  { key: "bravotv", label: "BRAVOTV", description: "Bravo preview/commit actions" },
+];
+
 const SHOW_PAGE_TABS: ShowTab[] = [
   { id: "seasons", label: "Seasons" },
-  { id: "assets", label: "Media" },
+  { id: "assets", label: "Assets" },
+  { id: "news", label: "News" },
   { id: "cast", label: "Cast" },
   { id: "surveys", label: "Surveys" },
   { id: "social", label: "Social" },
@@ -146,6 +235,7 @@ const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
 const SEASON_PAGE_TABS = [
   { tab: "episodes", label: "Seasons & Episodes" },
   { tab: "assets", label: "Assets" },
+  { tab: "videos", label: "Videos" },
   { tab: "cast", label: "Cast" },
   { tab: "surveys", label: "Surveys" },
   { tab: "social", label: "Social Media" },
@@ -195,6 +285,44 @@ const parseAltNamesText = (value: string): string[] => {
   return out;
 };
 
+const inferBravoShowUrl = (showName: string | null | undefined): string | null => {
+  if (typeof showName !== "string") return null;
+  const slug = showName
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  if (!slug) return null;
+  return `https://www.bravotv.com/${slug}`;
+};
+
+const BRAVO_IMPORT_IMAGE_KIND_OPTIONS: Array<{ value: BravoImportImageKind; label: string }> = [
+  { value: "poster", label: "Poster" },
+  { value: "backdrop", label: "Backdrop" },
+  { value: "logo", label: "Logo" },
+  { value: "episode_still", label: "Episode Still" },
+  { value: "cast", label: "Cast" },
+  { value: "promo", label: "Promo" },
+  { value: "intro", label: "Intro" },
+  { value: "reunion", label: "Reunion" },
+  { value: "other", label: "Other" },
+];
+
+const inferBravoImportImageKind = (
+  image: { url: string; alt?: string | null }
+): BravoImportImageKind => {
+  const haystack = `${image.alt ?? ""} ${image.url}`.toLowerCase();
+  if (haystack.includes("logo")) return "logo";
+  if (haystack.includes("key art") || haystack.includes("poster")) return "poster";
+  if (haystack.includes("backdrop") || haystack.includes("background")) return "backdrop";
+  if (haystack.includes("cast")) return "cast";
+  if (haystack.includes("still")) return "episode_still";
+  if (haystack.includes("intro")) return "intro";
+  if (haystack.includes("reunion")) return "reunion";
+  return "promo";
+};
+
 const humanizeStage = (value: string): string => {
   const normalized = value.replace(/[_-]+/g, " ").trim();
   if (!normalized) return "Working";
@@ -231,18 +359,107 @@ const buildProgressMessage = (
   return message;
 };
 
+const UUID_LIKE_RE =
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+
+const normalizeRefreshLogMessage = (value: string): string => {
+  return value
+    .replace(UUID_LIKE_RE, "person")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const resolveRefreshLogTopic = (category: string, message: string): RefreshLogTopicKey => {
+  const haystack = `${category} ${message}`.toLowerCase();
+
+  if (haystack.includes("bravo")) return "bravotv";
+  if (haystack.includes("seasons & episodes") || haystack.includes("seasons_episodes")) {
+    return "seasons";
+  }
+  if (haystack.includes("episode")) return "episodes";
+  if (
+    haystack.includes("media") ||
+    haystack.includes("image") ||
+    haystack.includes("photo") ||
+    haystack.includes("mirror") ||
+    haystack.includes("auto-count") ||
+    haystack.includes("auto count") ||
+    haystack.includes("word detection") ||
+    haystack.includes("cleanup") ||
+    haystack.includes("prune")
+  ) {
+    return "media";
+  }
+  if (
+    haystack.includes("person") ||
+    haystack.includes("cast profile") ||
+    haystack.includes("cast member") ||
+    haystack.includes("cast credits") ||
+    haystack.includes("fandom profile") ||
+    haystack.includes("tmdb profile")
+  ) {
+    return "people";
+  }
+  if (haystack.includes("season")) return "seasons";
+  return "shows";
+};
+
+const extractRefreshLogSubJob = (entry: RefreshLogEntry): { subJob: string; details: string } => {
+  const normalizedMessage = normalizeRefreshLogMessage(entry.message);
+  const prefixMatch = normalizedMessage.match(/^([^:]{2,50}):\s+(.+)$/);
+  if (prefixMatch) {
+    return {
+      subJob: prefixMatch[1].trim(),
+      details: prefixMatch[2].trim(),
+    };
+  }
+  const fallbackSubJob = entry.category.trim() || "Update";
+  return {
+    subJob: fallbackSubJob,
+    details: normalizedMessage,
+  };
+};
+
+const isRefreshTopicDone = (entry: RefreshLogEntry | null): boolean => {
+  if (!entry) return false;
+  if (
+    typeof entry.current === "number" &&
+    typeof entry.total === "number" &&
+    entry.total > 0 &&
+    entry.current >= entry.total
+  ) {
+    return true;
+  }
+  const message = entry.message.toLowerCase();
+  return (
+    message.includes("complete") ||
+    message.includes("completed") ||
+    message.includes("done") ||
+    message.includes("synced") ||
+    message.includes("skipping")
+  );
+};
+
+const isRefreshTopicFailed = (entry: RefreshLogEntry | null): boolean => {
+  if (!entry) return false;
+  const message = entry.message.toLowerCase();
+  return message.includes("failed") || message.includes("error");
+};
+
 // Generic gallery image with error handling - falls back to placeholder on broken images
 function GalleryImage({
   src,
   alt,
   sizes = "200px",
   className = "object-cover",
+  style,
   children,
 }: {
   src: string;
   alt: string;
   sizes?: string;
   className?: string;
+  style?: React.CSSProperties;
   children?: React.ReactNode;
 }) {
   const [hasError, setHasError] = useState(false);
@@ -266,6 +483,7 @@ function GalleryImage({
         alt={alt}
         fill
         className={className}
+        style={style}
         sizes={sizes}
         unoptimized
         onError={() => setHasError(true)}
@@ -276,13 +494,54 @@ function GalleryImage({
 }
 
 // Cast photo with error handling - falls back to placeholder on broken images
-function CastPhoto({ src, alt }: { src: string; alt: string }) {
+function CastPhoto({
+  src,
+  alt,
+  thumbnail_focus_x,
+  thumbnail_focus_y,
+  thumbnail_zoom,
+  thumbnail_crop_mode,
+}: {
+  src: string;
+  alt: string;
+  thumbnail_focus_x?: number | null;
+  thumbnail_focus_y?: number | null;
+  thumbnail_zoom?: number | null;
+  thumbnail_crop_mode?: "manual" | "auto" | null;
+}) {
+  const hasPersistedCrop =
+    isThumbnailCropMode(thumbnail_crop_mode) &&
+    typeof thumbnail_focus_x === "number" &&
+    Number.isFinite(thumbnail_focus_x) &&
+    typeof thumbnail_focus_y === "number" &&
+    Number.isFinite(thumbnail_focus_y) &&
+    typeof thumbnail_zoom === "number" &&
+    Number.isFinite(thumbnail_zoom);
+
+  const presentation = resolveThumbnailPresentation({
+    width: null,
+    height: null,
+    crop: hasPersistedCrop
+      ? {
+          x: thumbnail_focus_x,
+          y: thumbnail_focus_y,
+          zoom: thumbnail_zoom,
+          mode: thumbnail_crop_mode,
+        }
+      : null,
+  });
+
   return (
     <GalleryImage
       src={src}
       alt={alt}
       sizes="200px"
-      className="object-cover transition hover:scale-105"
+      className="object-cover transition-transform duration-300"
+      style={{
+        objectPosition: presentation.objectPosition,
+        transformOrigin: presentation.objectPosition,
+        transform: presentation.zoom !== 1 ? `scale(${presentation.zoom})` : undefined,
+      }}
     />
   );
 }
@@ -438,8 +697,32 @@ export default function TrrShowDetailPage() {
   const [show, setShow] = useState<TrrShow | null>(null);
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
   const [cast, setCast] = useState<TrrCastMember[]>([]);
+  const [archiveFootageCast, setArchiveFootageCast] = useState<TrrCastMember[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("seasons");
-  const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
+  const [selectedSocialSeasonId, setSelectedSocialSeasonId] = useState<string | null>(null);
+  const [assetsView, setAssetsView] = useState<"images" | "videos" | "brand">("images");
+  const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
+  const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
+  const [bravoLoading, setBravoLoading] = useState(false);
+  const [bravoError, setBravoError] = useState<string | null>(null);
+  const [syncBravoOpen, setSyncBravoOpen] = useState(false);
+  const [syncBravoUrl, setSyncBravoUrl] = useState("");
+  const [syncBravoDescription, setSyncBravoDescription] = useState("");
+  const [syncBravoAirs, setSyncBravoAirs] = useState("");
+  const [syncBravoStep, setSyncBravoStep] = useState<"preview" | "confirm">("preview");
+  const [syncBravoImages, setSyncBravoImages] = useState<Array<{ url: string; alt?: string | null }>>([]);
+  const [syncBravoPreviewPeople, setSyncBravoPreviewPeople] = useState<BravoPreviewPerson[]>([]);
+  const [syncBravoDiscoveredPersonUrls, setSyncBravoDiscoveredPersonUrls] = useState<string[]>([]);
+  const [syncBravoPreviewVideos, setSyncBravoPreviewVideos] = useState<BravoVideoItem[]>([]);
+  const [syncBravoPreviewNews, setSyncBravoPreviewNews] = useState<BravoNewsItem[]>([]);
+  const [syncBravoTargetSeasonNumber, setSyncBravoTargetSeasonNumber] = useState<number | null>(null);
+  const [syncBravoPreviewSeasonFilter, setSyncBravoPreviewSeasonFilter] = useState<number | "all">("all");
+  const [syncBravoSelectedImages, setSyncBravoSelectedImages] = useState<Set<string>>(new Set());
+  const [syncBravoImageKinds, setSyncBravoImageKinds] = useState<Record<string, BravoImportImageKind>>({});
+  const [syncBravoPreviewLoading, setSyncBravoPreviewLoading] = useState(false);
+  const [syncBravoCommitLoading, setSyncBravoCommitLoading] = useState(false);
+  const [syncBravoError, setSyncBravoError] = useState<string | null>(null);
+  const [syncBravoNotice, setSyncBravoNotice] = useState<string | null>(null);
   const [openSeasonId, setOpenSeasonId] = useState<string | null>(null);
   const hasAutoOpenedSeasonRef = useRef(false);
   const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<
@@ -546,6 +829,8 @@ export default function TrrShowDetailPage() {
   const [refreshAllProgress, setRefreshAllProgress] = useState<RefreshProgressState | null>(
     null
   );
+  const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
+  const [refreshLogOpen, setRefreshLogOpen] = useState(false);
 
   // Image scrape drawer state
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
@@ -561,13 +846,13 @@ export default function TrrShowDetailPage() {
 
   const tabParam = searchParams.get("tab");
   useEffect(() => {
-    const allowedTabs: TabId[] = ["seasons", "assets", "cast", "surveys", "social", "details"];
+    const allowedTabs: TabId[] = ["seasons", "assets", "news", "cast", "surveys", "social", "details"];
     if (!tabParam) return;
 
-    // Back-compat alias: ?tab=gallery -> ASSETS (Media)
+    // Back-compat alias: ?tab=gallery -> ASSETS (Images)
     if (tabParam === "gallery") {
       setActiveTab("assets");
-      setAssetsView("media");
+      setAssetsView("images");
       return;
     }
 
@@ -592,6 +877,76 @@ export default function TrrShowDetailPage() {
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  const appendRefreshLog = useCallback(
+    (entry: { category: string; message: string; current?: number | null; total?: number | null }) => {
+      const normalizedMessage = normalizeRefreshLogMessage(entry.message);
+      if (!normalizedMessage) return;
+      setRefreshLogEntries((prev) => {
+        const nextEntry: RefreshLogEntry = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          at: new Date().toISOString(),
+          category: entry.category.trim() || "Refresh",
+          message: normalizedMessage,
+          current:
+            typeof entry.current === "number" && Number.isFinite(entry.current)
+              ? entry.current
+              : null,
+          total:
+            typeof entry.total === "number" && Number.isFinite(entry.total) ? entry.total : null,
+        };
+        const previous = prev[prev.length - 1];
+        if (
+          previous &&
+          previous.category === nextEntry.category &&
+          previous.message === nextEntry.message &&
+          previous.current === nextEntry.current &&
+          previous.total === nextEntry.total
+        ) {
+          return prev;
+        }
+        return [...prev.slice(-149), nextEntry];
+      });
+    },
+    []
+  );
+
+  const refreshLogTopicGroups = useMemo(() => {
+    const grouped = new Map<RefreshLogTopicKey, RefreshLogEntry[]>();
+    for (const topic of REFRESH_LOG_TOPIC_DEFINITIONS) {
+      grouped.set(topic.key, []);
+    }
+    for (const entry of refreshLogEntries) {
+      const topicKey = resolveRefreshLogTopic(entry.category, entry.message);
+      grouped.get(topicKey)?.push(entry);
+    }
+
+    const groups = REFRESH_LOG_TOPIC_DEFINITIONS.map((topic) => {
+      const entries = grouped.get(topic.key) ?? [];
+      const latest = entries.length > 0 ? entries[entries.length - 1] : null;
+      const failed = isRefreshTopicFailed(latest);
+      const done = !failed && isRefreshTopicDone(latest);
+      const status: "pending" | "active" | "done" | "failed" = failed
+        ? "failed"
+        : done
+          ? "done"
+          : entries.length > 0
+            ? "active"
+            : "pending";
+      return {
+        topic,
+        entries,
+        entriesForView: [...entries].reverse(),
+        latest,
+        status,
+      };
+    });
+
+    return [
+      ...groups.filter((group) => group.status !== "done"),
+      ...groups.filter((group) => group.status === "done"),
+    ];
+  }, [refreshLogEntries]);
 
   // Refresh images for a person with streaming progress when available.
   const refreshPersonImages = useCallback(
@@ -758,6 +1113,12 @@ export default function TrrShowDetailPage() {
           total,
         },
       }));
+      appendRefreshLog({
+        category: "Cast Profiles",
+        message: `Syncing cast profiles and media (${total} members)...`,
+        current: 0,
+        total,
+      });
 
       for (const [index, member] of uniqueMembers.entries()) {
         const label =
@@ -771,6 +1132,12 @@ export default function TrrShowDetailPage() {
             total,
           },
         }));
+        appendRefreshLog({
+          category: "Cast Profiles",
+          message: `Syncing ${label}...`,
+          current: index,
+          total,
+        });
 
         try {
           await refreshPersonImages(member.person_id, (progress) => {
@@ -789,6 +1156,12 @@ export default function TrrShowDetailPage() {
           succeeded += 1;
         } catch (err) {
           console.warn(`Failed to refresh cast profile/media for ${label}:`, err);
+          appendRefreshLog({
+            category: "Cast Profiles",
+            message: `Failed to sync ${label}.`,
+            current: index + 1,
+            total,
+          });
           failed += 1;
         } finally {
           setRefreshTargetProgress((prev) => ({
@@ -800,12 +1173,24 @@ export default function TrrShowDetailPage() {
               total,
             },
           }));
+          appendRefreshLog({
+            category: "Cast Profiles",
+            message: `Synced ${index + 1}/${total} cast members.`,
+            current: index + 1,
+            total,
+          });
         }
       }
 
+      appendRefreshLog({
+        category: "Cast Profiles",
+        message: `Completed cast profile/media sync (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`,
+        current: total,
+        total,
+      });
       return { attempted: total, succeeded, failed };
     },
-    [refreshPersonImages]
+    [appendRefreshLog, refreshPersonImages]
   );
 
   // Fetch show details
@@ -997,16 +1382,367 @@ export default function TrrShowDetailPage() {
         throw new Error(message);
       }
       const castRaw = (data as { cast?: unknown }).cast;
+      const archiveCastRaw = (data as { archive_footage_cast?: unknown }).archive_footage_cast;
       const nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
+      const nextArchiveCast = Array.isArray(archiveCastRaw)
+        ? (archiveCastRaw as TrrCastMember[])
+        : [];
       setCast(nextCast);
+      setArchiveFootageCast(nextArchiveCast);
       return nextCast;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch cast";
       console.warn("Failed to fetch cast:", message);
       setError(message);
+      setArchiveFootageCast([]);
       return [];
     }
   }, [showId, getAuthHeaders]);
+
+  const loadBravoData = useCallback(async () => {
+    try {
+      setBravoLoading(true);
+      setBravoError(null);
+      const headers = await getAuthHeaders();
+
+      const [videosResponse, newsResponse] = await Promise.all([
+        fetch(`/api/admin/trr-api/shows/${showId}/bravo/videos?merge_person_sources=true`, {
+          headers,
+          cache: "no-store",
+        }),
+        fetch(`/api/admin/trr-api/shows/${showId}/bravo/news`, {
+          headers,
+          cache: "no-store",
+        }),
+      ]);
+
+      const videosData = (await videosResponse.json().catch(() => ({}))) as {
+        videos?: BravoVideoItem[];
+        error?: string;
+      };
+      const newsData = (await newsResponse.json().catch(() => ({}))) as {
+        news?: BravoNewsItem[];
+        error?: string;
+      };
+
+      if (!videosResponse.ok) {
+        throw new Error(videosData.error || "Failed to fetch Bravo videos");
+      }
+      if (!newsResponse.ok) {
+        throw new Error(newsData.error || "Failed to fetch Bravo news");
+      }
+
+      setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
+      setBravoNews(Array.isArray(newsData.news) ? newsData.news : []);
+    } catch (err) {
+      setBravoError(err instanceof Error ? err.message : "Failed to load Bravo data");
+    } finally {
+      setBravoLoading(false);
+    }
+  }, [getAuthHeaders, showId]);
+
+  const syncBravoSeasonOptions = useMemo(() => {
+    const numbers = seasons
+      .filter((season) => {
+        const summary = seasonEpisodeSummaries[season.id];
+        const episodeCount = summary?.count;
+        const hasEpisodeEvidence = typeof episodeCount === "number" && Number.isFinite(episodeCount) && episodeCount > 1;
+        const hasPremiereDate = Boolean((summary?.premiereDate ?? season.air_date)?.trim());
+        return hasEpisodeEvidence || hasPremiereDate;
+      })
+      .map((season) => season.season_number)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    return [...new Set(numbers)].sort((a, b) => b - a);
+  }, [seasonEpisodeSummaries, seasons]);
+
+  const defaultSyncBravoSeasonNumber = useMemo(() => {
+    if (syncBravoSeasonOptions.length === 0) return null;
+    return syncBravoSeasonOptions[0];
+  }, [syncBravoSeasonOptions]);
+
+  const syncBravoSeasonEligibilityError =
+    "No eligible seasons for Bravo sync. A season must have more than 1 episode or a premiere date.";
+
+  useEffect(() => {
+    setSyncBravoTargetSeasonNumber((prev) => {
+      if (
+        typeof prev === "number" &&
+        Number.isFinite(prev) &&
+        syncBravoSeasonOptions.includes(prev)
+      ) {
+        return prev;
+      }
+      return defaultSyncBravoSeasonNumber;
+    });
+  }, [defaultSyncBravoSeasonNumber, syncBravoSeasonOptions]);
+
+  const previewSyncByBravo = useCallback(async (urlOverride?: string) => {
+    const hasEpisodeEvidence =
+      (show?.show_total_episodes ?? 0) > 0 ||
+      Object.values(seasonEpisodeSummaries).some((summary) => (summary?.count ?? 0) > 0);
+    if (seasons.length === 0 || !hasEpisodeEvidence || cast.length === 0) {
+      appendRefreshLog({
+        category: "BravoTV",
+        message: "Blocked: sync seasons, episodes, and cast first.",
+      });
+      setSyncBravoError(
+        "Sync seasons, episodes, and cast first. Run Refresh and wait for completion."
+      );
+      return;
+    }
+    if (syncBravoSeasonOptions.length === 0) {
+      setSyncBravoError(syncBravoSeasonEligibilityError);
+      appendRefreshLog({
+        category: "BravoTV",
+        message: `Blocked: ${syncBravoSeasonEligibilityError}`,
+      });
+      return;
+    }
+    const targetUrl = (typeof urlOverride === "string" ? urlOverride : syncBravoUrl).trim();
+    if (!targetUrl) {
+      setSyncBravoError("Show URL is required.");
+      return;
+    }
+    if (targetUrl !== syncBravoUrl) {
+      setSyncBravoUrl(targetUrl);
+    }
+    setSyncBravoPreviewLoading(true);
+    setSyncBravoError(null);
+    setSyncBravoNotice(null);
+    appendRefreshLog({
+      category: "BravoTV",
+      message: "Loading Bravo preview...",
+    });
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/import-bravo/preview`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          show_url: targetUrl,
+          include_people: true,
+          include_videos: true,
+          include_news: true,
+          season_number: syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? undefined,
+        }),
+      });
+      const clone = response.clone();
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        detail?: string;
+        show?: { description?: string | null; airs_text?: string | null };
+        image_candidates?: Array<{ url?: string; alt?: string | null }>;
+        people?: BravoPreviewPerson[];
+        discovered_person_urls?: string[];
+        videos?: BravoVideoItem[];
+        news?: BravoNewsItem[];
+      } | null;
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+            data?.detail ||
+            `Bravo preview failed (HTTP ${response.status})`
+        );
+      }
+
+      if (!data || typeof data !== "object") {
+        const fallbackText = (await clone.text().catch(() => "")).trim();
+        const message = fallbackText
+          ? `Bravo preview returned a non-JSON payload: ${fallbackText.slice(0, 180)}`
+          : "Bravo preview returned an empty response.";
+        throw new Error(message);
+      }
+
+      const nextDescription =
+        typeof data.show?.description === "string" ? data.show.description : "";
+      const nextAirs =
+        typeof data.show?.airs_text === "string" ? data.show.airs_text : "";
+      const nextImages = Array.isArray(data.image_candidates)
+        ? data.image_candidates
+            .map((image) => ({
+              url: typeof image.url === "string" ? image.url : "",
+              alt: typeof image.alt === "string" ? image.alt : null,
+            }))
+            .filter((image) => image.url)
+        : [];
+      const nextVideos = Array.isArray(data.videos)
+        ? data.videos.filter((video): video is BravoVideoItem => typeof video?.clip_url === "string")
+        : [];
+      const nextNews = Array.isArray(data.news)
+        ? data.news.filter((item): item is BravoNewsItem => typeof item?.article_url === "string")
+        : [];
+      const nextPeople = Array.isArray(data.people)
+        ? data.people.filter((person): person is BravoPreviewPerson => {
+            const personUrl = person?.canonical_url;
+            return typeof personUrl === "string" && personUrl.trim().length > 0;
+          })
+        : [];
+      const nextDiscoveredUrls = Array.isArray(data.discovered_person_urls)
+        ? data.discovered_person_urls
+            .filter((url): url is string => typeof url === "string")
+            .map((url) => url.trim())
+            .filter((url) => url.length > 0)
+        : [];
+      const excludedShowImageUrls = new Set<string>();
+      for (const video of nextVideos) {
+        if (typeof video.image_url === "string" && video.image_url.trim()) {
+          excludedShowImageUrls.add(video.image_url.trim());
+        }
+      }
+      for (const newsItem of nextNews) {
+        if (typeof newsItem.image_url === "string" && newsItem.image_url.trim()) {
+          excludedShowImageUrls.add(newsItem.image_url.trim());
+        }
+      }
+      const filteredShowImages = nextImages.filter((image) => !excludedShowImageUrls.has(image.url));
+      const nextImageKinds: Record<string, BravoImportImageKind> = {};
+      for (const image of filteredShowImages) {
+        nextImageKinds[image.url] = inferBravoImportImageKind(image);
+      }
+
+      const seasonFromPreview = nextVideos
+        .map((video) => video.season_number)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+      const seasonFromShow = seasons
+        .map((season) => season.season_number)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+      const latestSeason = [...seasonFromPreview, ...seasonFromShow].sort((a, b) => b - a)[0] ?? null;
+      const defaultPreviewSeason =
+        typeof syncBravoTargetSeasonNumber === "number" &&
+        seasonFromPreview.includes(syncBravoTargetSeasonNumber)
+          ? syncBravoTargetSeasonNumber
+          : latestSeason !== null && seasonFromPreview.includes(latestSeason)
+            ? latestSeason
+            : seasonFromPreview.length > 0
+              ? [...seasonFromPreview].sort((a, b) => b - a)[0]
+              : "all";
+
+      setSyncBravoDescription(nextDescription);
+      setSyncBravoAirs(nextAirs);
+      setSyncBravoImages(filteredShowImages);
+      setSyncBravoImageKinds(nextImageKinds);
+      setSyncBravoPreviewPeople(nextPeople);
+      setSyncBravoDiscoveredPersonUrls(nextDiscoveredUrls);
+      setSyncBravoPreviewVideos(nextVideos);
+      setSyncBravoPreviewNews(nextNews);
+      setSyncBravoPreviewSeasonFilter(defaultPreviewSeason);
+      setSyncBravoSelectedImages(new Set(filteredShowImages.map((image) => image.url)));
+      setSyncBravoNotice("Preview loaded from persisted Bravo parse output.");
+      appendRefreshLog({
+        category: "BravoTV",
+        message: `Preview ready: ${nextPeople.length} cast URLs, ${nextVideos.length} videos, ${nextNews.length} news, ${filteredShowImages.length} show images.`,
+      });
+    } catch (err) {
+      appendRefreshLog({
+        category: "BravoTV",
+        message: `Preview failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+      });
+      setSyncBravoError(err instanceof Error ? err.message : "Bravo preview failed");
+    } finally {
+      setSyncBravoPreviewLoading(false);
+    }
+  }, [
+    appendRefreshLog,
+    cast.length,
+    defaultSyncBravoSeasonNumber,
+    getAuthHeaders,
+    seasonEpisodeSummaries,
+    seasons,
+    showId,
+    show?.show_total_episodes,
+    syncBravoSeasonEligibilityError,
+    syncBravoSeasonOptions.length,
+    syncBravoTargetSeasonNumber,
+    syncBravoUrl,
+  ]);
+
+  const commitSyncByBravo = useCallback(async () => {
+    if (!syncBravoUrl.trim()) {
+      setSyncBravoError("Show URL is required.");
+      return;
+    }
+    if (syncBravoSeasonOptions.length === 0) {
+      setSyncBravoError(syncBravoSeasonEligibilityError);
+      appendRefreshLog({
+        category: "BravoTV",
+        message: `Blocked: ${syncBravoSeasonEligibilityError}`,
+      });
+      return;
+    }
+
+    setSyncBravoCommitLoading(true);
+    setSyncBravoError(null);
+    setSyncBravoNotice(null);
+    appendRefreshLog({
+      category: "BravoTV",
+      message: "Committing Bravo sync...",
+    });
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/import-bravo/commit`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          show_url: syncBravoUrl.trim(),
+          selected_show_images: Array.from(syncBravoSelectedImages).map((url) => ({
+            url,
+            kind: syncBravoImageKinds[url] ?? "promo",
+          })),
+          selected_show_image_urls: Array.from(syncBravoSelectedImages),
+          description_override: syncBravoDescription.trim() || undefined,
+          airs_override: syncBravoAirs.trim() || undefined,
+          season_number:
+            syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? undefined,
+        }),
+      });
+
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        detail?: string;
+        counts?: { imported_show_images?: number; people_updated?: number };
+      };
+      if (!response.ok) {
+        throw new Error(data.error || data.detail || "Bravo sync failed");
+      }
+
+      setSyncBravoNotice(
+        `Synced Bravo data${typeof data.counts?.people_updated === "number" ? `; people updated: ${data.counts.people_updated}` : ""}${typeof data.counts?.imported_show_images === "number" ? `; images imported: ${data.counts.imported_show_images}` : ""}.`
+      );
+      appendRefreshLog({
+        category: "BravoTV",
+        message: `Bravo sync complete: ${data.counts?.people_updated ?? 0} people updated, ${data.counts?.imported_show_images ?? 0} show images imported.`,
+      });
+
+      await Promise.all([fetchShow(), loadBravoData(), fetchCast()]);
+    } catch (err) {
+      appendRefreshLog({
+        category: "BravoTV",
+        message: `Bravo sync failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+      });
+      setSyncBravoError(err instanceof Error ? err.message : "Bravo sync failed");
+    } finally {
+      setSyncBravoCommitLoading(false);
+    }
+  }, [
+    appendRefreshLog,
+    fetchCast,
+    fetchShow,
+    getAuthHeaders,
+    loadBravoData,
+    showId,
+    syncBravoDescription,
+    syncBravoImageKinds,
+    defaultSyncBravoSeasonNumber,
+    syncBravoSeasonEligibilityError,
+    syncBravoSeasonOptions.length,
+    syncBravoSelectedImages,
+    syncBravoAirs,
+    syncBravoTargetSeasonNumber,
+    syncBravoUrl,
+  ]);
+
+  const syncBravoLoading = syncBravoPreviewLoading || syncBravoCommitLoading;
 
   // Check if show is covered
   const checkCoverage = useCallback(async () => {
@@ -1066,12 +1802,12 @@ export default function TrrShowDetailPage() {
     const loadData = async () => {
       setLoading(true);
       await fetchShow();
-      await Promise.all([fetchSeasons(), fetchCast(), checkCoverage()]);
+      await Promise.all([fetchSeasons(), fetchCast(), checkCoverage(), loadBravoData()]);
       setLoading(false);
     };
 
     loadData();
-  }, [hasAccess, fetchShow, fetchSeasons, fetchCast, checkCoverage]);
+  }, [hasAccess, fetchShow, fetchSeasons, fetchCast, checkCoverage, loadBravoData]);
 
   useEffect(() => {
     if (seasons.length > 0) {
@@ -1081,6 +1817,13 @@ export default function TrrShowDetailPage() {
 
   const formatDate = (value: string | null) =>
     value ? new Date(value).toLocaleDateString() : "TBD";
+
+  const formatBravoPublishedDate = (value: string | null | undefined): string | null => {
+    if (!value || typeof value !== "string") return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString();
+  };
 
   const formatDateRange = (premiere: string | null, finale: string | null) => {
     if (!premiere && !finale) return "Dates unavailable";
@@ -1102,6 +1845,16 @@ export default function TrrShowDetailPage() {
           : selectedGallerySeason,
     });
   }, [galleryAssets, advancedFilters, selectedGallerySeason, show?.name]);
+
+  const brandLogoAssets = useMemo(
+    () =>
+      galleryAssets.filter(
+        (asset) =>
+          asset.type === "show" &&
+          (asset.kind ?? "").toLowerCase().trim() === "logo"
+      ),
+    [galleryAssets]
+  );
 
   const isTextFilterActive = useMemo(() => {
     const wantsText = advancedFilters.text.includes("text");
@@ -1151,6 +1904,143 @@ export default function TrrShowDetailPage() {
     () => seasons.filter((season) => isSeasonAired(season)),
     [seasons, isSeasonAired]
   );
+
+  const socialSeasonOptions = useMemo(() => {
+    const sortByMostRecentSeason = (a: TrrSeason, b: TrrSeason) => {
+      if (a.season_number !== b.season_number) {
+        return b.season_number - a.season_number;
+      }
+      return String(b.id).localeCompare(String(a.id));
+    };
+
+    const aired = [...visibleSeasons].sort(sortByMostRecentSeason);
+    if (aired.length > 0) return aired;
+    return [...seasons].sort(sortByMostRecentSeason);
+  }, [seasons, visibleSeasons]);
+
+  const defaultSocialSeasonId = useMemo(
+    () => socialSeasonOptions[0]?.id ?? null,
+    [socialSeasonOptions]
+  );
+
+  useEffect(() => {
+    setSelectedSocialSeasonId((prev) => {
+      if (prev && socialSeasonOptions.some((season) => season.id === prev)) {
+        return prev;
+      }
+      return defaultSocialSeasonId;
+    });
+  }, [defaultSocialSeasonId, socialSeasonOptions]);
+
+  const selectedSocialSeason = useMemo(
+    () => socialSeasonOptions.find((season) => season.id === selectedSocialSeasonId) ?? null,
+    [selectedSocialSeasonId, socialSeasonOptions]
+  );
+
+  const syncBravoPreviewSeasonOptions = useMemo(() => {
+    const set = new Set<number>();
+    for (const video of syncBravoPreviewVideos) {
+      if (typeof video.season_number === "number" && Number.isFinite(video.season_number)) {
+        set.add(video.season_number);
+      }
+    }
+    return Array.from(set).sort((a, b) => b - a);
+  }, [syncBravoPreviewVideos]);
+
+  const syncBravoFilteredPreviewVideos = useMemo(() => {
+    if (syncBravoPreviewSeasonFilter === "all") return syncBravoPreviewVideos;
+    return syncBravoPreviewVideos.filter(
+      (video) =>
+        typeof video.season_number === "number" &&
+        video.season_number === syncBravoPreviewSeasonFilter
+    );
+  }, [syncBravoPreviewSeasonFilter, syncBravoPreviewVideos]);
+
+  const syncBravoPreviewCastLinks = useMemo(() => {
+    const byUrl = new Map<string, { name: string | null; url: string }>();
+
+    for (const person of syncBravoPreviewPeople) {
+      const url =
+        typeof person.canonical_url === "string" && person.canonical_url.trim()
+          ? person.canonical_url.trim()
+          : "";
+      if (!url) continue;
+      const name =
+        typeof person.name === "string" && person.name.trim() ? person.name.trim() : null;
+      byUrl.set(url, { name, url });
+    }
+
+    for (const discoveredUrl of syncBravoDiscoveredPersonUrls) {
+      const url = typeof discoveredUrl === "string" ? discoveredUrl.trim() : "";
+      if (!url || byUrl.has(url)) continue;
+      byUrl.set(url, { name: null, url });
+    }
+
+    return Array.from(byUrl.values()).sort((a, b) => {
+      const aKey = (a.name || a.url).toLowerCase();
+      const bKey = (b.name || b.url).toLowerCase();
+      return aKey.localeCompare(bKey);
+    });
+  }, [syncBravoDiscoveredPersonUrls, syncBravoPreviewPeople]);
+
+  const syncBravoSelectedImageSummaries = useMemo(() => {
+    const byUrl = new Map(syncBravoImages.map((image) => [image.url, image]));
+    return Array.from(syncBravoSelectedImages)
+      .map((url) => {
+        const image = byUrl.get(url);
+        return {
+          url,
+          alt: image?.alt ?? null,
+          kind: syncBravoImageKinds[url] ?? inferBravoImportImageKind({ url, alt: image?.alt ?? null }),
+        };
+      })
+      .sort((a, b) => {
+        const aKey = (a.alt || a.url).toLowerCase();
+        const bKey = (b.alt || b.url).toLowerCase();
+        return aKey.localeCompare(bKey);
+      });
+  }, [syncBravoImageKinds, syncBravoImages, syncBravoSelectedImages]);
+
+  const openSyncBravoConfirmStep = useCallback(() => {
+    const missing: string[] = [];
+    const hasEpisodeEvidence =
+      (show?.show_total_episodes ?? 0) > 0 ||
+      Object.values(seasonEpisodeSummaries).some((summary) => (summary?.count ?? 0) > 0);
+    if (seasons.length <= 0) missing.push("seasons");
+    if (!hasEpisodeEvidence) missing.push("episodes");
+    if (cast.length <= 0) missing.push("cast");
+    if (missing.length > 0) {
+      setSyncBravoError(
+        `Sync seasons, episodes, and cast first (missing: ${missing.join(", ")}).`
+      );
+      return;
+    }
+    const hasPreviewData =
+      syncBravoImages.length > 0 ||
+      syncBravoPreviewCastLinks.length > 0 ||
+      syncBravoPreviewNews.length > 0 ||
+      syncBravoPreviewVideos.length > 0 ||
+      Boolean(syncBravoDescription.trim()) ||
+      Boolean(syncBravoAirs.trim());
+    if (!hasPreviewData) {
+      setSyncBravoError("Run Preview first before moving to the next step.");
+      return;
+    }
+    setSyncBravoError(null);
+    setSyncBravoNotice(null);
+    setSyncBravoStep("confirm");
+  }, [
+    syncBravoAirs,
+    syncBravoDescription,
+    syncBravoImages.length,
+    syncBravoPreviewCastLinks.length,
+    syncBravoPreviewNews.length,
+    syncBravoPreviewVideos.length,
+    cast.length,
+    seasonEpisodeSummaries,
+    seasons.length,
+    show?.show_total_episodes,
+  ]);
 
   useEffect(() => {
     if (visibleSeasons.length === 0) return;
@@ -1243,8 +2133,13 @@ export default function TrrShowDetailPage() {
   );
 
   const refreshShow = useCallback(
-    async (target: ShowRefreshTarget): Promise<boolean> => {
+    async (
+      target: ShowRefreshTarget,
+      options?: ShowRefreshRunOptions
+    ): Promise<boolean> => {
       const label = getShowRefreshTargetLabel(target);
+      const includeCastProfiles = options?.includeCastProfiles ?? true;
+      const fastPhotoMode = options?.photoMode === "fast";
 
       let success = false;
       let castProfilesSummary: { attempted: number; succeeded: number; failed: number } | null =
@@ -1270,6 +2165,20 @@ export default function TrrShowDetailPage() {
         delete next[target];
         return next;
       });
+      appendRefreshLog({
+        category: label,
+        message: `Starting ${label} refresh...`,
+        current: 0,
+        total: null,
+      });
+      if (target === "photos" && fastPhotoMode) {
+        appendRefreshLog({
+          category: label,
+          message: "Fast mode enabled: reduced media crawl pages and skipped auto-count/word-detection.",
+          current: null,
+          total: null,
+        });
+      }
 
       try {
         let streamFailed = false;
@@ -1282,7 +2191,15 @@ export default function TrrShowDetailPage() {
               ? `/api/admin/trr-api/shows/${showId}/refresh-photos/stream`
               : `/api/admin/trr-api/shows/${showId}/refresh/stream`;
           const streamBody =
-            target === "photos" ? { skip_mirror: false } : { targets: [target] };
+            target === "photos"
+              ? {
+                  skip_mirror: false,
+                  limit_per_source: fastPhotoMode ? 20 : 50,
+                  imdb_mediaindex_max_pages: fastPhotoMode ? 6 : 25,
+                  skip_auto_count: fastPhotoMode,
+                  skip_word_detection: fastPhotoMode,
+                }
+              : { targets: [target] };
           const response = await fetch(streamUrl, {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
@@ -1361,6 +2278,12 @@ export default function TrrShowDetailPage() {
                     total: typeof total === "number" && Number.isFinite(total) ? total : null,
                   },
                 }));
+                appendRefreshLog({
+                  category: label,
+                  message: progressMessage,
+                  current: typeof current === "number" && Number.isFinite(current) ? current : null,
+                  total: typeof total === "number" && Number.isFinite(total) ? total : null,
+                });
               } else if (eventType === "complete") {
                 sawComplete = true;
 
@@ -1378,36 +2301,54 @@ export default function TrrShowDetailPage() {
                   const castMirrored = asNum((payload as { cast_photos_mirrored?: unknown }).cast_photos_mirrored);
                   const castFailed = asNum((payload as { cast_photos_failed?: unknown }).cast_photos_failed);
                   const castPruned = asNum((payload as { cast_photos_pruned?: unknown }).cast_photos_pruned);
-                  const autoAttempted = asNum((payload as { auto_counts_attempted?: unknown }).auto_counts_attempted);
                   const autoSucceeded = asNum((payload as { auto_counts_succeeded?: unknown }).auto_counts_succeeded);
                   const autoFailed = asNum((payload as { auto_counts_failed?: unknown }).auto_counts_failed);
-                  const wordAttempted = asNum((payload as { text_overlay_attempted?: unknown }).text_overlay_attempted);
                   const wordSucceeded = asNum((payload as { text_overlay_succeeded?: unknown }).text_overlay_succeeded);
                   const wordFailed = asNum((payload as { text_overlay_failed?: unknown }).text_overlay_failed);
 
-                  if (activeTab === "assets" && assetsView === "media") {
+                  if (activeTab === "assets" && assetsView === "images") {
                     await loadGalleryAssets(selectedGallerySeason);
                   }
+
+                  const successParts = [
+                    castFetched !== null ? `photos fetched: ${castFetched}` : null,
+                    castUpserted !== null ? `photos upserted: ${castUpserted}` : null,
+                    castMirrored !== null ? `photos mirrored: ${castMirrored}` : null,
+                    castPruned !== null ? `photos pruned: ${castPruned}` : null,
+                    autoSucceeded !== null ? `auto counts set: ${autoSucceeded}` : null,
+                    wordSucceeded !== null ? `text-overlay classified: ${wordSucceeded}` : null,
+                  ].filter((part): part is string => Boolean(part));
+                  const failParts = [
+                    castFailed !== null && castFailed > 0 ? `photos failed: ${castFailed}` : null,
+                    autoFailed !== null && autoFailed > 0
+                      ? `auto counts failed: ${autoFailed}`
+                      : null,
+                    wordFailed !== null && wordFailed > 0
+                      ? `text-overlay failed: ${wordFailed}`
+                      : null,
+                  ].filter((part): part is string => Boolean(part));
 
                   setRefreshTargetNotice((prev) => ({
                     ...prev,
                     photos: [
-                      `Photos refreshed${durationMs !== null ? ` (${durationMs}ms)` : ""}.`,
-                      castFetched !== null ? `photos fetched: ${castFetched}` : null,
-                      castUpserted !== null ? `photos upserted: ${castUpserted}` : null,
-                      castMirrored !== null ? `photos mirrored: ${castMirrored}` : null,
-                      castFailed !== null ? `photos failed: ${castFailed}` : null,
-                      castPruned !== null ? `photos pruned: ${castPruned}` : null,
-                      autoAttempted !== null ? `auto counts attempted: ${autoAttempted}` : null,
-                      autoSucceeded !== null ? `auto counts succeeded: ${autoSucceeded}` : null,
-                      autoFailed !== null ? `auto counts failed: ${autoFailed}` : null,
-                      wordAttempted !== null ? `word id attempted: ${wordAttempted}` : null,
-                      wordSucceeded !== null ? `word id succeeded: ${wordSucceeded}` : null,
-                      wordFailed !== null ? `word id failed: ${wordFailed}` : null,
+                      successParts.length > 0
+                        ? `SUCCESS: ${successParts.join(", ")}`
+                        : "SUCCESS: photos refresh complete",
+                      failParts.length > 0 ? `FAILS: ${failParts.join(", ")}` : null,
+                      durationMs !== null ? `duration: ${durationMs}ms` : null,
                     ]
                       .filter(Boolean)
-                      .join(", "),
+                      .join(" | "),
                   }));
+                  appendRefreshLog({
+                    category: label,
+                    message:
+                      successParts.length > 0
+                        ? `Photos refresh complete: ${successParts.join(", ")}.`
+                        : "Photos refresh complete.",
+                    current: null,
+                    total: null,
+                  });
                 } else {
                   const resultsRaw = (payload as { results?: unknown }).results;
                   const results =
@@ -1431,17 +2372,22 @@ export default function TrrShowDetailPage() {
                     await fetchShow();
                   } else if (target === "seasons_episodes") {
                     await Promise.all([fetchShow(), fetchSeasons()]);
-                    const photosOk = await refreshShow("photos");
+                    const photosOk = await refreshShow("photos", {
+                      photoMode: fastPhotoMode ? "fast" : "full",
+                      includeCastProfiles: false,
+                    });
                     if (!photosOk) {
                       throw new Error("Seasons & Episodes refreshed, but photo mirroring failed.");
                     }
                   } else if (target === "photos") {
-                    if (activeTab === "assets" && assetsView === "media") {
+                    if (activeTab === "assets" && assetsView === "images") {
                       await loadGalleryAssets(selectedGallerySeason);
                     }
                   } else if (target === "cast_credits") {
-                    const castMembers = await fetchCast();
-                    castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
+                    if (includeCastProfiles) {
+                      const castMembers = await fetchCast();
+                      castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
+                    }
                     await fetchCast();
                   }
 
@@ -1459,6 +2405,12 @@ export default function TrrShowDetailPage() {
                     ...prev,
                     [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
                   }));
+                  appendRefreshLog({
+                    category: label,
+                    message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
+                    current: null,
+                    total: null,
+                  });
                 }
               } else if (eventType === "error") {
                 const message =
@@ -1469,6 +2421,12 @@ export default function TrrShowDetailPage() {
                   message?.error && message?.detail
                     ? `${message.error}: ${message.detail}`
                     : message?.error || "Refresh failed";
+                appendRefreshLog({
+                  category: label,
+                  message: `Failed: ${errorText}`,
+                  current: null,
+                  total: null,
+                });
                 throw new Error(errorText);
               }
 
@@ -1481,6 +2439,12 @@ export default function TrrShowDetailPage() {
         }
 
         if (streamFailed) {
+          appendRefreshLog({
+            category: label,
+            message: "Live stream unavailable; retrying with fallback refresh.",
+            current: null,
+            total: null,
+          });
           if (target === "photos") {
             throw new Error("Photo refresh stream failed.");
           }
@@ -1522,13 +2486,18 @@ export default function TrrShowDetailPage() {
             await fetchShow();
           } else if (target === "seasons_episodes") {
             await Promise.all([fetchShow(), fetchSeasons()]);
-            const photosOk = await refreshShow("photos");
+            const photosOk = await refreshShow("photos", {
+              photoMode: fastPhotoMode ? "fast" : "full",
+              includeCastProfiles: false,
+            });
             if (!photosOk) {
               throw new Error("Seasons & Episodes refreshed, but photo mirroring failed.");
             }
           } else if (target === "cast_credits") {
-            const castMembers = await fetchCast();
-            castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
+            if (includeCastProfiles) {
+              const castMembers = await fetchCast();
+              castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
+            }
             await fetchCast();
           }
 
@@ -1543,13 +2512,31 @@ export default function TrrShowDetailPage() {
             ...prev,
             [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
           }));
+          appendRefreshLog({
+            category: label,
+            message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
+            current: null,
+            total: null,
+          });
         } else if (!sawComplete) {
           setRefreshTargetNotice((prev) => ({ ...prev, [target]: `Refreshed ${label}.` }));
+          appendRefreshLog({
+            category: label,
+            message: `Completed ${label}.`,
+            current: null,
+            total: null,
+          });
         }
         success = true;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Refresh failed";
         setRefreshTargetError((prev) => ({ ...prev, [target]: message }));
+        appendRefreshLog({
+          category: label,
+          message: `Failed: ${message}`,
+          current: null,
+          total: null,
+        });
         success = false;
       } finally {
         setRefreshingTargets((prev) => ({ ...prev, [target]: false }));
@@ -1564,6 +2551,7 @@ export default function TrrShowDetailPage() {
     },
     [
       activeTab,
+      appendRefreshLog,
       assetsView,
       fetchCast,
       refreshCastProfilesAndMedia,
@@ -1579,12 +2567,20 @@ export default function TrrShowDetailPage() {
   const refreshAllShowData = useCallback(async () => {
     if (refreshingShowAll) return;
 
+    setRefreshLogEntries([]);
+    setRefreshLogOpen(true);
     setRefreshingShowAll(true);
     setRefreshAllError(null);
     setRefreshAllNotice(null);
     setRefreshAllProgress({
       stage: "Initializing",
       message: "Starting full show refresh...",
+      current: 0,
+      total: 3,
+    });
+    appendRefreshLog({
+      category: "Refresh",
+      message: "Starting full refresh.",
       current: 0,
       total: 3,
     });
@@ -1595,15 +2591,33 @@ export default function TrrShowDetailPage() {
 
       for (const [index, target] of targets.entries()) {
         const targetLabel = getShowRefreshTargetLabel(target);
+        const targetOptions: ShowRefreshRunOptions | undefined =
+          target === "seasons_episodes"
+            ? { photoMode: "fast", includeCastProfiles: false }
+            : target === "cast_credits"
+              ? { includeCastProfiles: false }
+              : undefined;
         setRefreshAllProgress({
           stage: targetLabel,
           message: `Refreshing ${targetLabel}...`,
           current: index,
           total: targets.length,
         });
-        const ok = await refreshShow(target);
+        appendRefreshLog({
+          category: targetLabel,
+          message: `Refreshing ${targetLabel}...`,
+          current: index,
+          total: targets.length,
+        });
+        const ok = await refreshShow(target, targetOptions);
         setRefreshAllProgress({
           stage: targetLabel,
+          message: ok ? `${targetLabel} complete.` : `${targetLabel} failed.`,
+          current: index + 1,
+          total: targets.length,
+        });
+        appendRefreshLog({
+          category: targetLabel,
           message: ok ? `${targetLabel} complete.` : `${targetLabel} failed.`,
           current: index + 1,
           total: targets.length,
@@ -1617,23 +2631,41 @@ export default function TrrShowDetailPage() {
 
       if (failedLabels.length > 0) {
         setRefreshAllError(`Refresh completed with issues in: ${failedLabels.join(", ")}.`);
+        appendRefreshLog({
+          category: "Refresh",
+          message: `Completed with issues: ${failedLabels.join(", ")}.`,
+          current: targets.length,
+          total: targets.length,
+        });
         return;
       }
 
       setRefreshAllNotice(
         "Refreshed show info, seasons/episodes, media/photos, and cast/credits."
       );
+      appendRefreshLog({
+        category: "Refresh",
+        message: "Completed full refresh successfully.",
+        current: targets.length,
+        total: targets.length,
+      });
     } catch (err) {
       setRefreshAllError(err instanceof Error ? err.message : "Refresh failed");
+      appendRefreshLog({
+        category: "Refresh",
+        message: `Refresh failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+        current: null,
+        total: null,
+      });
     } finally {
       setRefreshingShowAll(false);
       setRefreshAllProgress(null);
     }
-  }, [refreshShow, refreshingShowAll]);
+  }, [appendRefreshLog, refreshShow, refreshingShowAll]);
 
   const refreshShowCast = useCallback(async () => {
     if (refreshingShowAll || Object.values(refreshingTargets).some(Boolean)) return;
-    await refreshShow("cast_credits");
+    await refreshShow("cast_credits", { includeCastProfiles: true });
   }, [refreshShow, refreshingShowAll, refreshingTargets]);
 
   const detectTextOverlayForUnknown = useCallback(async () => {
@@ -1670,15 +2702,20 @@ export default function TrrShowDetailPage() {
       }
     }
 
-    if (activeTab === "assets" && assetsView === "media") {
+    if (activeTab === "assets" && assetsView === "images") {
       await loadGalleryAssets(selectedGallerySeason);
     }
   }, [galleryAssets, getAuthHeaders, activeTab, assetsView, loadGalleryAssets, selectedGallerySeason]);
 
-  // Load gallery when tab becomes active or season filter changes
+  // Load gallery for image/brand views when Assets tab is active.
   useEffect(() => {
-    if (activeTab === "assets" && assetsView === "media" && visibleSeasons.length > 0) {
+    if (activeTab !== "assets") return;
+    if (assetsView === "images" && visibleSeasons.length > 0) {
       loadGalleryAssets(selectedGallerySeason);
+      return;
+    }
+    if (assetsView === "brand") {
+      loadGalleryAssets("all");
     }
   }, [activeTab, assetsView, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
 
@@ -1888,6 +2925,23 @@ export default function TrrShowDetailPage() {
   const showCastTabProgress =
     isShowRefreshBusy &&
     Boolean(castTabProgress?.message || castTabProgress?.stage || castTabProgress?.total !== null);
+  const syncedSeasonCount = seasons.length;
+  const syncedEpisodeCount = Object.values(seasonEpisodeSummaries).reduce(
+    (sum, summary) => sum + (summary?.count ?? 0),
+    0
+  );
+  const syncedCastCount = cast.length;
+  const syncBravoReadinessIssues: string[] = [];
+  if (syncedSeasonCount <= 0) syncBravoReadinessIssues.push("seasons");
+  if (syncedEpisodeCount <= 0 && (show.show_total_episodes ?? 0) <= 0) {
+    syncBravoReadinessIssues.push("episodes");
+  }
+  if (syncedCastCount <= 0) syncBravoReadinessIssues.push("cast");
+  const canSyncByBravo = syncBravoReadinessIssues.length === 0;
+  const syncBravoReadinessMessage = canSyncByBravo
+    ? null
+    : `Sync seasons, episodes, and cast first (missing: ${syncBravoReadinessIssues.join(", ")}).`;
+  const autoGeneratedBravoUrl = inferBravoShowUrl(show?.name) || syncBravoUrl.trim() || "";
 
   return (
     <ClientOnly>
@@ -1946,36 +3000,54 @@ export default function TrrShowDetailPage() {
               <div className="flex flex-col gap-3 sm:items-end">
                 <button
                   type="button"
-                  onClick={refreshAllShowData}
-                  disabled={isShowRefreshBusy}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  onClick={() => {
+                    if (isShowRefreshBusy) {
+                      setRefreshLogOpen((prev) => !prev);
+                      return;
+                    }
+                    void refreshAllShowData();
+                  }}
+                  onMouseEnter={() => {
+                    if (isShowRefreshBusy) setRefreshLogOpen(true);
+                  }}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                 >
-                  {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                  {isShowRefreshBusy
+                    ? `Refreshing... ${refreshLogOpen ? "(Hide Log)" : "(View Log)"}`
+                    : "Refresh"}
                 </button>
-
-                {/* Add/Remove from Shows button */}
-                {isCovered ? (
-                  <button
-                    onClick={removeFromCoveredShows}
-                    disabled={coverageLoading}
-                    className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50"
-                  >
-                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                    {coverageLoading ? "..." : "In Shows"}
-                  </button>
-                ) : (
-                  <button
-                    onClick={addToCoveredShows}
-                    disabled={coverageLoading}
-                    className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    {coverageLoading ? "..." : "Add to Shows"}
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!canSyncByBravo) {
+                      setSyncBravoError(
+                        syncBravoReadinessMessage ||
+                          "Sync seasons, episodes, and cast first."
+                      );
+                      return;
+                    }
+                    const inferredBravoUrl =
+                      inferBravoShowUrl(show?.name) || syncBravoUrl.trim();
+                    const initialSeason =
+                      syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? null;
+                    setSyncBravoTargetSeasonNumber(initialSeason);
+                    setSyncBravoOpen(true);
+                    setSyncBravoStep("preview");
+                    setSyncBravoError(null);
+                    setSyncBravoNotice(null);
+                    setSyncBravoUrl(inferredBravoUrl);
+                    void previewSyncByBravo(inferredBravoUrl);
+                  }}
+                  disabled={!canSyncByBravo || syncBravoLoading}
+                  title={syncBravoReadinessMessage || undefined}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Sync by Bravo
+                </button>
+                {syncBravoReadinessMessage && (
+                  <p className="max-w-xs text-right text-[11px] text-amber-700">
+                    {syncBravoReadinessMessage}
+                  </p>
                 )}
 
                 {/* Ratings */}
@@ -2012,6 +3084,133 @@ export default function TrrShowDetailPage() {
                       current={globalRefreshCurrent}
                       total={globalRefreshTotal}
                     />
+                  </div>
+                )}
+                {refreshLogOpen && (
+                  <div className="w-full max-w-xl rounded-lg border border-zinc-200 bg-white p-3 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Refresh Log
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setRefreshLogOpen(false)}
+                        className="text-xs font-semibold text-zinc-500 hover:text-zinc-800"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    {refreshLogEntries.length === 0 ? (
+                      <p className="text-xs text-zinc-500">No refresh activity yet.</p>
+                    ) : (
+                      <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+                        {refreshLogTopicGroups.map(({ topic, entries, entriesForView, latest, status }) => {
+                          const latestParts = latest ? extractRefreshLogSubJob(latest) : null;
+                          const latestPercent =
+                            latest &&
+                            typeof latest.current === "number" &&
+                            typeof latest.total === "number" &&
+                            latest.total > 0
+                              ? Math.min(100, Math.round((latest.current / latest.total) * 100))
+                              : null;
+
+                          if (status === "done") {
+                            return (
+                              <article
+                                key={topic.key}
+                                className="rounded-lg border border-green-200 bg-green-50 px-3 py-2"
+                              >
+                                <p className="text-xs font-semibold text-green-800">
+                                  {topic.label}: Done ✔️
+                                </p>
+                              </article>
+                            );
+                          }
+
+                          return (
+                            <article key={topic.key} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+                                    {topic.label}
+                                  </p>
+                                  <p className="text-[11px] text-zinc-500">{topic.description}</p>
+                                </div>
+                                {latest && (
+                                  <p className="text-[10px] text-zinc-400">
+                                    {new Date(latest.at).toLocaleTimeString()}
+                                  </p>
+                                )}
+                              </div>
+
+                              {status === "failed" && (
+                                <p className="mt-2 text-xs font-semibold text-red-700">
+                                  {topic.label}: Failed ✖
+                                </p>
+                              )}
+
+                              {latest ? (
+                                <div className="mt-2 rounded-md border border-zinc-200 bg-white p-2">
+                                  <p className="text-xs font-semibold text-zinc-800">{latestParts?.subJob}</p>
+                                  <p className="mt-1 text-xs text-zinc-600">{latestParts?.details}</p>
+                                  {typeof latest.current === "number" &&
+                                    typeof latest.total === "number" && (
+                                      <p className="mt-1 text-[11px] text-zinc-500">
+                                        {latest.current.toLocaleString()}/{latest.total.toLocaleString()}
+                                        {latestPercent !== null ? ` (${latestPercent}%)` : ""}
+                                      </p>
+                                    )}
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-xs text-zinc-500">No updates yet.</p>
+                              )}
+
+                              {entries.length > 0 && (
+                                <details className="mt-2" open={entries.length <= 3}>
+                                  <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                    Sub-jobs ({entries.length})
+                                  </summary>
+                                  <div className="mt-2 space-y-1">
+                                    {entriesForView.slice(0, 30).map((entry) => {
+                                      const parts = extractRefreshLogSubJob(entry);
+                                      const percent =
+                                        typeof entry.current === "number" &&
+                                        typeof entry.total === "number" &&
+                                        entry.total > 0
+                                          ? Math.min(100, Math.round((entry.current / entry.total) * 100))
+                                          : null;
+                                      return (
+                                        <div
+                                          key={entry.id}
+                                          className="rounded border border-zinc-100 bg-white px-2 py-1.5"
+                                        >
+                                          <div className="flex items-center justify-between gap-2">
+                                            <p className="text-[11px] font-semibold text-zinc-700">
+                                              {parts.subJob}
+                                            </p>
+                                            <p className="text-[10px] text-zinc-400">
+                                              {new Date(entry.at).toLocaleTimeString()}
+                                            </p>
+                                          </div>
+                                          <p className="mt-0.5 text-[11px] text-zinc-600">{parts.details}</p>
+                                          {typeof entry.current === "number" &&
+                                            typeof entry.total === "number" && (
+                                              <p className="mt-0.5 text-[10px] text-zinc-500">
+                                                {entry.current.toLocaleString()}/{entry.total.toLocaleString()}
+                                                {percent !== null ? ` (${percent}%)` : ""}
+                                              </p>
+                                            )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </details>
+                              )}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2186,7 +3385,7 @@ export default function TrrShowDetailPage() {
               <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  {assetsView === "media" ? "Season Gallery" : "Brand"}
+                  {assetsView === "images" ? "Season Gallery" : assetsView === "videos" ? "Videos" : "Brand"}
                 </p>
                 <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
                 </div>
@@ -2194,14 +3393,25 @@ export default function TrrShowDetailPage() {
                 <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
                   <button
                     type="button"
-                    onClick={() => setAssetsView("media")}
+                    onClick={() => setAssetsView("images")}
                     className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                      assetsView === "media"
+                      assetsView === "images"
                         ? "bg-white text-zinc-900 shadow-sm"
                         : "text-zinc-500 hover:text-zinc-700"
                     }`}
                   >
-                    Media
+                    Images
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssetsView("videos")}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                      assetsView === "videos"
+                        ? "bg-white text-zinc-900 shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700"
+                    }`}
+                  >
+                    Videos
                   </button>
                   <button
                     type="button"
@@ -2217,7 +3427,7 @@ export default function TrrShowDetailPage() {
                 </div>
               </div>
 
-              {assetsView === "media" ? (
+              {assetsView === "images" ? (
                 <>
                   {/* Season filter and Import button */}
                   <div className="mb-6 flex items-center justify-between">
@@ -2407,41 +3617,6 @@ export default function TrrShowDetailPage() {
                         </section>
                       )}
 
-                      {/* Show Logos */}
-                      {filteredGalleryAssets.filter(
-                        (a) => a.type === "show" && (a.kind ?? "").toLowerCase().trim() === "logo"
-                      ).length > 0 && (
-                        <section>
-                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Logos
-                          </h4>
-                          <div className="grid grid-cols-4 gap-4">
-                            {filteredGalleryAssets
-                              .filter(
-                                (a) =>
-                                  a.type === "show" &&
-                                  (a.kind ?? "").toLowerCase().trim() === "logo"
-                              )
-                              .map((asset, i, arr) => (
-                                <button
-                                  key={`${asset.id}-${i}`}
-                                  onClick={(e) =>
-                                    openAssetLightbox(asset, i, arr, e.currentTarget)
-                                  }
-                                  className="relative aspect-[2/1] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                  <GalleryImage
-                                    src={asset.hosted_url}
-                                    alt={asset.caption || "Show logo"}
-                                    sizes="250px"
-                                    className="object-contain"
-                                  />
-                                </button>
-                              ))}
-                          </div>
-                        </section>
-                      )}
-
                       {/* Season Posters */}
                       {filteredGalleryAssets.filter((a) => a.type === "season").length > 0 && (
                         <section>
@@ -2536,14 +3711,162 @@ export default function TrrShowDetailPage() {
                     </div>
                   )}
                 </>
+              ) : assetsView === "videos" ? (
+                <div className="space-y-4">
+                  {(bravoError || bravoLoading) && (
+                    <p className={`text-sm ${bravoError ? "text-red-600" : "text-zinc-500"}`}>
+                      {bravoError || "Loading Bravo videos..."}
+                    </p>
+                  )}
+                  {!bravoLoading && bravoVideos.length === 0 && !bravoError && (
+                    <p className="text-sm text-zinc-500">No persisted Bravo videos found for this show.</p>
+                  )}
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {bravoVideos.map((video, index) => (
+                      <article key={`${video.clip_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                        <a
+                          href={video.clip_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group block"
+                        >
+                          <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
+                            {video.image_url ? (
+                              <GalleryImage
+                                src={video.image_url}
+                                alt={video.title || "Bravo video"}
+                                sizes="400px"
+                                className="object-cover transition group-hover:scale-105"
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
+                            )}
+                          </div>
+                          <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
+                            {video.title || "Untitled video"}
+                          </h4>
+                        </a>
+                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                          {video.runtime && <span>{video.runtime}</span>}
+                          {typeof video.season_number === "number" && <span>Season {video.season_number}</span>}
+                          {video.kicker && <span>{video.kicker}</span>}
+                          {formatBravoPublishedDate(video.published_at) && (
+                            <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
               ) : (
-                <ShowBrandEditor
-                  trrShowId={showId}
-                  trrShowName={show.name}
-                  trrSeasons={seasons}
-                  trrCast={cast}
-                />
+                <div className="space-y-6">
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Logos</h4>
+                    {brandLogoAssets.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No show logos found.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                        {brandLogoAssets.map((asset, i) => (
+                          <button
+                            key={`${asset.id}-${i}`}
+                            onClick={(e) =>
+                              openAssetLightbox(asset, i, brandLogoAssets, e.currentTarget)
+                            }
+                            className="relative aspect-[2/1] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <GalleryImage
+                              src={asset.hosted_url}
+                              alt={asset.caption || "Show logo"}
+                              sizes="250px"
+                              className="object-contain"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <ShowBrandEditor
+                    trrShowId={showId}
+                    trrShowName={show.name}
+                    trrSeasons={seasons}
+                    trrCast={cast}
+                  />
+                </div>
               )}
+            </div>
+          )}
+
+          {/* NEWS Tab */}
+          {activeTab === "news" && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Bravo News
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadBravoData}
+                  disabled={bravoLoading}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {bravoLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+
+              {bravoError && <p className="mb-4 text-sm text-red-600">{bravoError}</p>}
+              {!bravoLoading && bravoNews.length === 0 && !bravoError && (
+                <p className="text-sm text-zinc-500">No persisted Bravo news found for this show.</p>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                {bravoNews.map((item, index) => (
+                  <article key={`${item.article_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                    <a
+                      href={item.article_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group block"
+                    >
+                      <div className="relative mb-3 aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200">
+                        {item.image_url ? (
+                          <GalleryImage
+                            src={item.image_url}
+                            alt={item.headline || "Bravo news"}
+                            sizes="400px"
+                            className="object-cover transition group-hover:scale-105"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
+                        )}
+                      </div>
+                      <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
+                        {item.headline || "Untitled story"}
+                      </h4>
+                    </a>
+                    {Array.isArray(item.person_tags) && item.person_tags.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {item.person_tags.map((tag, tagIndex) => (
+                          <span
+                            key={`${tag.person_id || tag.person_name || "tag"}-${tagIndex}`}
+                            className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700"
+                          >
+                            {tag.person_name || "Person"}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {formatBravoPublishedDate(item.published_at) && (
+                      <p className="mt-2 text-xs text-zinc-500">
+                        Posted {formatBravoPublishedDate(item.published_at)}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
             </div>
           )}
 
@@ -2610,11 +3933,15 @@ export default function TrrShowDetailPage() {
                       href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
                       className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                     >
-                      <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-zinc-200">
+                      <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
                         {thumbnailUrl ? (
                           <CastPhoto
                             src={thumbnailUrl}
                             alt={member.full_name || member.cast_member_name || "Cast member"}
+                            thumbnail_focus_x={member.thumbnail_focus_x}
+                            thumbnail_focus_y={member.thumbnail_focus_y}
+                            thumbnail_zoom={member.thumbnail_zoom}
+                            thumbnail_crop_mode={member.thumbnail_crop_mode}
                           />
                         ) : (
                           <div className="flex h-full items-center justify-center text-zinc-400">
@@ -2659,7 +3986,55 @@ export default function TrrShowDetailPage() {
                   );
                 })}
               </div>
-              {cast.length === 0 && (
+              {archiveFootageCast.length > 0 && (
+                <div className="mt-8">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                    Archive Footage
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {archiveFootageCast.map((member) => {
+                      const thumbnailUrl = member.cover_photo_url || member.photo_url;
+                      const archiveLabel =
+                        typeof member.archive_episode_count === "number"
+                          ? `${member.archive_episode_count} archive footage episodes`
+                          : "Archive footage appearance";
+
+                      return (
+                        <Link
+                          key={`archive-${member.id}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                          className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 transition hover:border-amber-300 hover:bg-amber-100/40"
+                        >
+                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                            {thumbnailUrl ? (
+                              <CastPhoto
+                                src={thumbnailUrl}
+                                alt={member.full_name || member.cast_member_name || "Cast member"}
+                                thumbnail_focus_x={member.thumbnail_focus_x}
+                                thumbnail_focus_y={member.thumbnail_focus_y}
+                                thumbnail_zoom={member.thumbnail_zoom}
+                                thumbnail_crop_mode={member.thumbnail_crop_mode}
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-zinc-400">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                          <p className="font-semibold text-zinc-900">
+                            {member.full_name || member.cast_member_name || "Unknown"}
+                          </p>
+                          <p className="text-sm text-amber-700">{archiveLabel}</p>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {cast.length === 0 && archiveFootageCast.length === 0 && (
                 <p className="text-sm text-zinc-500">
                   No cast members found for this show.
                 </p>
@@ -2678,7 +4053,58 @@ export default function TrrShowDetailPage() {
 
           {/* Social Media Tab */}
           {activeTab === "social" && (
-            <SocialPostsSection showId={showId} showName={show.name} />
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                      Social Scope
+                    </p>
+                    <p className="text-sm text-zinc-600">
+                      Defaulting to the most recent aired/airing season.
+                    </p>
+                  </div>
+                  {socialSeasonOptions.length > 1 ? (
+                    <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Season
+                      <select
+                        value={selectedSocialSeasonId ?? ""}
+                        onChange={(event) =>
+                          setSelectedSocialSeasonId(event.target.value || null)
+                        }
+                        className="mt-1 block min-w-[220px] rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                      >
+                        {socialSeasonOptions.map((season) => (
+                          <option key={season.id} value={season.id}>
+                            Season {season.season_number}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="text-sm font-semibold text-zinc-700">
+                      {selectedSocialSeason
+                        ? `Season ${selectedSocialSeason.season_number}`
+                        : "All Seasons"}
+                    </p>
+                  )}
+                </div>
+              </div>
+              {selectedSocialSeason ? (
+                <SeasonSocialAnalyticsSection
+                  showId={showId}
+                  seasonNumber={selectedSocialSeason.season_number}
+                  seasonId={selectedSocialSeason.id}
+                  showName={show.name}
+                />
+              ) : (
+                <SocialPostsSection
+                  showId={showId}
+                  showName={show.name}
+                  seasonId={selectedSocialSeasonId}
+                />
+              )}
+            </div>
           )}
 
           {/* Details Tab - External IDs */}
@@ -2918,6 +4344,35 @@ export default function TrrShowDetailPage() {
                     {show.id}
                   </code>
                 </div>
+
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Show Visibility
+                  </p>
+                  {isCovered ? (
+                    <button
+                      onClick={removeFromCoveredShows}
+                      disabled={coverageLoading}
+                      className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50"
+                    >
+                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                      {coverageLoading ? "..." : "Remove from Shows"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={addToCoveredShows}
+                      disabled={coverageLoading}
+                      className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      {coverageLoading ? "..." : "Add to Shows"}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -2985,11 +4440,482 @@ export default function TrrShowDetailPage() {
             entityContext={scrapeDrawerContext}
             onImportComplete={() => {
               // Refresh gallery after import
-              if (activeTab === "assets" && assetsView === "media") {
+              if (activeTab === "assets" && assetsView === "images") {
                 loadGalleryAssets(selectedGallerySeason);
               }
             }}
           />
+        )}
+
+        {syncBravoOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl">
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-zinc-900">Import by Bravo</h3>
+                  <p className="text-sm text-zinc-500">Preview and commit persisted Bravo snapshots for this show.</p>
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
+                    Step {syncBravoStep === "preview" ? "1" : "2"} of 2
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSyncBravoOpen(false);
+                    setSyncBravoStep("preview");
+                  }}
+                  disabled={syncBravoLoading}
+                  className="rounded-md border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                  Sync Season
+                  <select
+                    value={syncBravoTargetSeasonNumber ?? ""}
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      const parsed = Number.parseInt(raw, 10);
+                      setSyncBravoTargetSeasonNumber(
+                        Number.isFinite(parsed) ? parsed : defaultSyncBravoSeasonNumber
+                      );
+                    }}
+                    disabled={syncBravoLoading || syncBravoSeasonOptions.length === 0}
+                    className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold normal-case tracking-normal text-zinc-800 disabled:opacity-50"
+                  >
+                    {syncBravoSeasonOptions.length === 0 ? (
+                      <option value="">No eligible seasons</option>
+                    ) : (
+                      syncBravoSeasonOptions.map((seasonNumber) => (
+                        <option key={seasonNumber} value={seasonNumber}>
+                          Season {seasonNumber}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+                <p className="mt-2 text-xs text-zinc-500">
+                  Bravo profile images from this run will be assigned as season promos for the selected season. Eligible seasons require more than 1 episode or a premiere date.
+                </p>
+              </div>
+
+              {syncBravoStep === "preview" ? (
+                <>
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Show Name
+                  </p>
+                  <p className="text-sm font-semibold text-zinc-900">{show.name}</p>
+                  <p className="mt-2 mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Bravo Show URL
+                  </p>
+                  {autoGeneratedBravoUrl ? (
+                    <a
+                      href={autoGeneratedBravoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block break-all text-xs text-blue-700 hover:underline"
+                    >
+                      {autoGeneratedBravoUrl}
+                    </a>
+                  ) : (
+                    <p className="text-xs text-zinc-500">Could not infer URL yet.</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void previewSyncByBravo()}
+                  disabled={syncBravoLoading}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {syncBravoPreviewLoading ? "Refreshing..." : "Refresh Preview"}
+                </button>
+              </div>
+
+              {(syncBravoError || syncBravoNotice) && (
+                <p className={`mb-4 text-sm ${syncBravoError ? "text-red-600" : "text-zinc-600"}`}>
+                  {syncBravoError || syncBravoNotice}
+                </p>
+              )}
+
+              <div className="mb-4 grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Description
+                  </span>
+                  <textarea
+                    value={syncBravoDescription}
+                    onChange={(event) => setSyncBravoDescription(event.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Airs / Tune-In
+                  </span>
+                  <textarea
+                    value={syncBravoAirs}
+                    onChange={(event) => setSyncBravoAirs(event.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                  />
+                </label>
+              </div>
+
+              <div className="mb-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                  Show Images
+                </p>
+                {syncBravoImages.length === 0 ? (
+                  <p className="text-sm text-zinc-500">Run preview to load image candidates.</p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {syncBravoImages.map((image) => {
+                      const checked = syncBravoSelectedImages.has(image.url);
+                      const selectedKind = syncBravoImageKinds[image.url] ?? inferBravoImportImageKind(image);
+                      return (
+                        <div key={image.url} className="flex items-start gap-3 rounded-lg border border-zinc-200 p-3">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) =>
+                              setSyncBravoSelectedImages((prev) => {
+                                const next = new Set(prev);
+                                if (event.target.checked) next.add(image.url);
+                                else next.delete(image.url);
+                                return next;
+                              })
+                            }
+                            className="mt-1"
+                          />
+                          <div className="relative h-16 w-28 overflow-hidden rounded bg-zinc-100">
+                            <GalleryImage src={image.url} alt={image.alt || "Bravo image"} sizes="120px" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="line-clamp-2 text-xs text-zinc-600">{image.alt || image.url}</span>
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                Type
+                              </span>
+                              <select
+                                value={selectedKind}
+                                onChange={(event) =>
+                                  setSyncBravoImageKinds((prev) => ({
+                                    ...prev,
+                                    [image.url]: event.target.value as BravoImportImageKind,
+                                  }))
+                                }
+                                className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                              >
+                                {BRAVO_IMPORT_IMAGE_KIND_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                  Cast Member URLs
+                </p>
+                {syncBravoPreviewCastLinks.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No cast member URLs found in this preview.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {syncBravoPreviewCastLinks.map((person, index) => (
+                      <article
+                        key={`${person.url}-${index}`}
+                        className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                      >
+                        <p className="text-sm font-semibold text-zinc-900">
+                          {person.name || "Unresolved cast member"}
+                        </p>
+                        <a
+                          href={person.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 block break-all text-xs text-blue-700 hover:underline"
+                        >
+                          {person.url}
+                        </a>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                  News
+                </p>
+                {syncBravoPreviewNews.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No news items found in this preview.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {syncBravoPreviewNews.map((item, index) => (
+                      <article
+                        key={`${item.article_url}-${index}`}
+                        className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                      >
+                        <div className="flex gap-3">
+                          <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
+                            {item.image_url ? (
+                              <GalleryImage
+                                src={item.image_url}
+                                alt={item.headline || "Bravo news"}
+                                sizes="120px"
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-xs text-zinc-400">
+                                No image
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <a
+                              href={item.article_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:text-blue-700"
+                            >
+                              {item.headline || "Untitled story"}
+                            </a>
+                            {formatBravoPublishedDate(item.published_at) && (
+                              <p className="mt-1 text-xs text-zinc-500">
+                                Posted {formatBravoPublishedDate(item.published_at)}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Videos
+                  </p>
+                  {syncBravoPreviewSeasonOptions.length > 0 && (
+                    <label className="flex items-center gap-2 text-xs text-zinc-600">
+                      <span>Season</span>
+                      <select
+                        value={syncBravoPreviewSeasonFilter}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setSyncBravoPreviewSeasonFilter(
+                            nextValue === "all" ? "all" : Number.parseInt(nextValue, 10)
+                          );
+                        }}
+                        className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                      >
+                        <option value="all">All</option>
+                        {syncBravoPreviewSeasonOptions.map((season) => (
+                          <option key={season} value={season}>
+                            Season {season}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </div>
+                {syncBravoFilteredPreviewVideos.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No videos found for this preview/season filter.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {syncBravoFilteredPreviewVideos.map((video, index) => (
+                      <article
+                        key={`${video.clip_url}-${index}`}
+                        className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                      >
+                        <div className="flex gap-3">
+                          <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
+                            {video.image_url ? (
+                              <GalleryImage
+                                src={video.image_url}
+                                alt={video.title || "Bravo video"}
+                                sizes="120px"
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-xs text-zinc-400">
+                                No image
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <a
+                              href={video.clip_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:text-blue-700"
+                            >
+                              {video.title || "Untitled video"}
+                            </a>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                              {video.runtime && <span>{video.runtime}</span>}
+                              {typeof video.season_number === "number" && (
+                                <span>Season {video.season_number}</span>
+                              )}
+                              {formatBravoPublishedDate(video.published_at) && (
+                                <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Show Name
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-zinc-800">{show.name}</p>
+                    <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Bravo Show URL
+                    </p>
+                    {autoGeneratedBravoUrl ? (
+                      <a
+                        href={autoGeneratedBravoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block break-all text-xs text-blue-700 hover:underline"
+                      >
+                        {autoGeneratedBravoUrl}
+                      </a>
+                    ) : (
+                      <p className="mt-1 text-xs text-zinc-500">Could not infer URL yet.</p>
+                    )}
+                    {syncBravoDescription.trim() && (
+                      <>
+                        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Description
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-700">{syncBravoDescription.trim()}</p>
+                      </>
+                    )}
+                    {syncBravoAirs.trim() && (
+                      <>
+                        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Airs / Tune-In
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-700">{syncBravoAirs.trim()}</p>
+                      </>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Cast Members Being Synced ({syncBravoPreviewCastLinks.length})
+                    </p>
+                    {syncBravoPreviewCastLinks.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No cast member URLs found in this preview.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {syncBravoPreviewCastLinks.map((person, index) => (
+                          <article
+                            key={`${person.url}-${index}`}
+                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                          >
+                            <p className="text-sm font-semibold text-zinc-900">
+                              {person.name || "Unresolved cast member"}
+                            </p>
+                            <p className="mt-1 break-all text-xs text-zinc-600">{person.url}</p>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Show Images Being Synced ({syncBravoSelectedImageSummaries.length})
+                    </p>
+                    {syncBravoSelectedImageSummaries.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No show images selected for sync.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {syncBravoSelectedImageSummaries.map((image) => (
+                          <article
+                            key={image.url}
+                            className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                          >
+                            <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
+                              <GalleryImage src={image.url} alt={image.alt || "Selected show image"} sizes="120px" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="line-clamp-2 text-sm font-semibold text-zinc-900">
+                                {image.alt || "Show image"}
+                              </p>
+                              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-zinc-500">
+                                Type: {image.kind}
+                              </p>
+                              <p className="mt-1 break-all text-xs text-zinc-600">{image.url}</p>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {syncBravoStep === "confirm" && (syncBravoError || syncBravoNotice) && (
+                <p className={`mb-4 text-sm ${syncBravoError ? "text-red-600" : "text-zinc-600"}`}>
+                  {syncBravoError || syncBravoNotice}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (syncBravoStep === "confirm") {
+                      setSyncBravoStep("preview");
+                      return;
+                    }
+                    setSyncBravoOpen(false);
+                    setSyncBravoStep("preview");
+                  }}
+                  disabled={syncBravoLoading}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                >
+                  {syncBravoStep === "confirm" ? "Back" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={syncBravoStep === "confirm" ? commitSyncByBravo : openSyncBravoConfirmStep}
+                  disabled={syncBravoLoading}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                >
+                  {syncBravoStep === "confirm"
+                    ? syncBravoCommitLoading
+                      ? "Syncing..."
+                      : "Sync by Bravo"
+                    : "Next"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         <AdvancedFilterDrawer
