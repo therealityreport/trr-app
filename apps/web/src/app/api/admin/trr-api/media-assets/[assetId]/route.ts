@@ -27,12 +27,20 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
 
+    const url = new URL(backendUrl);
+    for (const [key, value] of request.nextUrl.searchParams.entries()) {
+      url.searchParams.set(key, value);
+    }
+    if (!url.searchParams.has("exclude")) {
+      url.searchParams.set("exclude", "true");
+    }
+
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }
 
-    const backendResponse = await fetch(backendUrl, {
+    const backendResponse = await fetch(url.toString(), {
       method: "DELETE",
       headers: { Authorization: `Bearer ${serviceRoleKey}` },
     });
@@ -58,4 +66,3 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: message }, { status });
   }
 }
-
