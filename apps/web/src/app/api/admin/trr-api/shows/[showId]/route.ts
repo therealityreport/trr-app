@@ -95,7 +95,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "showId must be a UUID" }, { status: 400 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
 
     const name = normalizeText(body.name);
     const description = normalizeText(body.description);
@@ -120,6 +125,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
           { status: 400 }
         );
       } else {
+        const parsed = new Date(premiereDateRaw + "T00:00:00");
+        if (Number.isNaN(parsed.getTime())) {
+          return NextResponse.json(
+            { error: "premiere_date is not a valid calendar date" },
+            { status: 400 }
+          );
+        }
         premiereDate = premiereDateRaw;
       }
     }
