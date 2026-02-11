@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
-import { QuestionBuilder } from "@/components/admin/QuestionBuilder";
+import { SurveyQuestionsEditor } from "@/components/admin/SurveyQuestionsEditor";
 import { SurveyRunManager } from "@/components/admin/SurveyRunManager";
 import type { SurveyWithQuestions } from "@/lib/surveys/normalized-types";
 
@@ -282,7 +282,7 @@ export default function NormalizedSurveyEditorPage() {
           )}
 
           {activeTab === "questions" && (
-            <QuestionBuilder
+            <SurveyQuestionsEditor
               surveySlug={surveySlug}
               questions={survey.questions}
               onRefresh={fetchSurvey}
