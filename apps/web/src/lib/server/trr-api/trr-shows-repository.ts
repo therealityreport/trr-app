@@ -1094,7 +1094,7 @@ interface ImdbNameFilmographyCredit {
 const IMDB_NAME_FULLCREDITS_BASE_URL = "https://m.imdb.com/name";
 const IMDB_TITLE_BASE_URL = "https://www.imdb.com/title";
 const IMDB_TITLE_ANCHOR_RE =
-  /<a[^>]+href="(\/title\/(tt\d+)\/\?ref_=([^"]+))"[^>]*>(.*?)<\/a>/gis;
+  /<a[^>]+href="(\/title\/(tt\d+)\/\?ref_=([^"]+))"[^>]*>([\s\S]*?)<\/a>/gi;
 
 function stripHtml(value: string): string {
   return value.replace(/<[^>]*>/g, " ");
