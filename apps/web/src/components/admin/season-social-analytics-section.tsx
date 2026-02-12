@@ -335,6 +335,7 @@ export default function SeasonSocialAnalyticsSection({
       setRunningIngest(false);
       setIngestingWeek(null);
       setIngestingPlatform(null);
+      setActiveRunId(null);
       await fetchJobs(activeRunId);
       await fetchAnalytics();
     } catch (err) {
@@ -388,6 +389,8 @@ export default function SeasonSocialAnalyticsSection({
         if (weekWindow) {
           payload.date_start = weekWindow.start;
           payload.date_end = weekWindow.end;
+        } else {
+          throw new Error(`Could not resolve date range for week ${effectiveWeek}. Try refreshing the page.`);
         }
       }
 

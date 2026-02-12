@@ -28,7 +28,11 @@ export async function POST(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
 
   // Allow in development without auth, but require in production
-  if (process.env.NODE_ENV === "production" && cronSecret) {
+  if (process.env.NODE_ENV === "production") {
+    if (!cronSecret) {
+      console.error("[cron] CRON_SECRET not configured");
+      return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
+    }
     if (authHeader !== `Bearer ${cronSecret}`) {
       console.error("[cron] Unauthorized survey run creation attempt");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
