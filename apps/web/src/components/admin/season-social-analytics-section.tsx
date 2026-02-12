@@ -216,13 +216,11 @@ export default function SeasonSocialAnalyticsSection({
   }, [getAuthHeaders, scope, seasonNumber, showId]);
 
   const fetchJobs = useCallback(async (runId?: string | null) => {
-    if (!runId) {
-      setJobs([]);
-      return;
-    }
     const headers = await getAuthHeaders();
     const params = new URLSearchParams({ limit: "250" });
-    params.set("run_id", runId);
+    if (runId) {
+      params.set("run_id", runId);
+    }
     const response = await fetch(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?${params.toString()}`,
       { headers, cache: "no-store" }
@@ -236,13 +234,13 @@ export default function SeasonSocialAnalyticsSection({
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([fetchAnalytics(), fetchTargets()]);
+      await Promise.all([fetchAnalytics(), fetchTargets(), fetchJobs()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load social dashboard");
     } finally {
       setLoading(false);
     }
-  }, [fetchAnalytics, fetchTargets]);
+  }, [fetchAnalytics, fetchTargets, fetchJobs]);
 
   useEffect(() => {
     refreshAll();
@@ -255,8 +253,9 @@ export default function SeasonSocialAnalyticsSection({
 
   const hasRunningJobs = useMemo(() => {
     const runningStatuses = new Set(["queued", "pending", "retrying", "running"]);
-    return runScopedJobs.some((job) => runningStatuses.has(job.status));
-  }, [runScopedJobs]);
+    const source = activeRunId ? runScopedJobs : jobs;
+    return source.some((job) => runningStatuses.has(job.status));
+  }, [activeRunId, runScopedJobs, jobs]);
 
   useEffect(() => {
     if (!activeRunId) {
@@ -335,6 +334,7 @@ export default function SeasonSocialAnalyticsSection({
       setRunningIngest(false);
       setIngestingWeek(null);
       setIngestingPlatform(null);
+      setActiveRunId(null);
       await fetchJobs(activeRunId);
       await fetchAnalytics();
     } catch (err) {
@@ -388,6 +388,8 @@ export default function SeasonSocialAnalyticsSection({
         if (weekWindow) {
           payload.date_start = weekWindow.start;
           payload.date_end = weekWindow.end;
+        } else {
+          throw new Error(`Could not resolve date range for week ${effectiveWeek}. Try refreshing the page.`);
         }
       }
 

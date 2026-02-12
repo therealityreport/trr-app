@@ -349,10 +349,21 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
 
   if (rows.rows.length === 0) return null;
 
-  const candidate =
-    (requestedPrefix
-      ? rows.rows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix))
-      : null) ?? rows.rows[0];
+  if (requestedPrefix) {
+    const prefixMatch = rows.rows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix));
+    if (!prefixMatch) return null;
+    const canonicalSlug = rows.rows.length > 1
+      ? `${baseSlug}--${prefixMatch.id.slice(0, 8).toLowerCase()}`
+      : baseSlug;
+    return {
+      show_id: prefixMatch.id,
+      slug: baseSlug,
+      canonical_slug: canonicalSlug,
+      show_name: prefixMatch.name,
+    };
+  }
+
+  const candidate = rows.rows[0];
 
   const hasCollision = rows.rows.length > 1;
   const canonicalSlug = hasCollision
