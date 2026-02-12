@@ -1089,3 +1089,19 @@ Cast member External IDs now render Bravo profile socials (this session, 2026-02
   - Link builder now prefers stored `*_url` when present; otherwise derives URL from handle/ID.
 - Validation:
   - `pnpm -C apps/web exec eslint 'src/components/admin/ExternalLinks.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx'` (pass)
+
+PR stabilization + CI fixes (this session, 2026-02-12):
+- Merged `origin/main` into `feat/admin-ui-gallery-fonts-surveys`.
+- Fixed CI TypeScript build incompatibility in IMDb parsing regex:
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+- Addressed review thread regression for manual tag edits:
+  - `apps/web/src/app/api/admin/trr-api/cast-photos/[photoId]/tags/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/media-links/[linkId]/tags/route.ts`
+  - Added tests: `apps/web/tests/tags-people-count-source-route.test.ts`
+- Fixed Vercel deployment failure by capping serverless function timeout values:
+  - `apps/web/src/app/api/admin/trr-api/people/[personId]/refresh-images/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route.ts`
+- Validation:
+  - `pnpm -C apps/web run test:ci -- --coverage` (109 passed)
+  - `DATABASE_URL="" NEXT_PUBLIC_FIREBASE_API_KEY="placeholder-api-key-for-build" NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="placeholder.firebaseapp.com" NEXT_PUBLIC_FIREBASE_PROJECT_ID="demo-build" pnpm -C apps/web run build` (pass)
+- PR #33 now has resolved review thread, passing checks, and clean merge state.
