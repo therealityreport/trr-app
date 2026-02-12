@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getCoverPhotosMock, getShowCastWithStatsMock, getShowArchiveFootageCastMock } = vi.hoisted(() => ({
+const {
+  requireAdminMock,
+  getCoverPhotosMock,
+  getShowCastWithStatsMock,
+  getShowArchiveFootageCastMock,
+  getCastByShowIdMock,
+} = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getCoverPhotosMock: vi.fn(),
   getShowCastWithStatsMock: vi.fn(),
   getShowArchiveFootageCastMock: vi.fn(),
+  getCastByShowIdMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -17,6 +24,7 @@ vi.mock("@/lib/server/admin/person-cover-photos-repository", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
+  getCastByShowId: getCastByShowIdMock,
   getShowCastWithStats: getShowCastWithStatsMock,
   getShowArchiveFootageCast: getShowArchiveFootageCastMock,
 }));
@@ -29,10 +37,12 @@ describe("show cast route default minEpisodes behavior", () => {
     getCoverPhotosMock.mockReset();
     getShowCastWithStatsMock.mockReset();
     getShowArchiveFootageCastMock.mockReset();
+    getCastByShowIdMock.mockReset();
 
     requireAdminMock.mockResolvedValue(undefined);
     getCoverPhotosMock.mockResolvedValue(new Map());
     getShowArchiveFootageCastMock.mockResolvedValue([]);
+    getCastByShowIdMock.mockResolvedValue([]);
   });
 
   it("filters out cast entries with zero total episodes by default", async () => {
@@ -69,6 +79,36 @@ describe("show cast route default minEpisodes behavior", () => {
     expect(getShowCastWithStatsMock).toHaveBeenCalledWith("show-1", { limit: 500, offset: 0 });
     expect(payload.cast).toHaveLength(1);
     expect(payload.cast[0].person_id).toBe("p2");
+    expect(payload.cast_source).toBe("episode_evidence");
+    expect(payload.eligibility_warning).toBeNull();
+  });
+
+  it("falls back to show membership when default eligibility returns no cast", async () => {
+    getShowCastWithStatsMock.mockResolvedValue([]);
+    getCastByShowIdMock.mockResolvedValue([
+      {
+        id: "fallback-c1",
+        person_id: "fallback-p1",
+        full_name: "Fallback Person",
+        cast_member_name: "Fallback Person",
+        role: "Self",
+        billing_order: 1,
+        credit_category: "cast",
+        photo_url: null,
+        total_episodes: null,
+      },
+    ]);
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/cast?limit=500");
+    const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(getCastByShowIdMock).toHaveBeenCalledWith("show-1", { limit: 500, offset: 0 });
+    expect(payload.cast).toHaveLength(1);
+    expect(payload.cast[0].person_id).toBe("fallback-p1");
+    expect(payload.cast_source).toBe("show_fallback");
+    expect(typeof payload.eligibility_warning).toBe("string");
   });
 
   it("respects explicit minEpisodes query", async () => {
@@ -82,7 +122,7 @@ describe("show cast route default minEpisodes behavior", () => {
         billing_order: 1,
         credit_category: "cast",
         photo_url: null,
-        total_episodes: 1,
+        total_episodes: 0,
       },
       {
         id: "c2",
@@ -93,7 +133,13 @@ describe("show cast route default minEpisodes behavior", () => {
         billing_order: 2,
         credit_category: "cast",
         photo_url: null,
-        total_episodes: 2,
+        total_episodes: 1,
+      },
+    ]);
+    getCastByShowIdMock.mockResolvedValue([
+      {
+        id: "fallback-c1",
+        person_id: "fallback-p1",
       },
     ]);
 
@@ -102,7 +148,9 @@ describe("show cast route default minEpisodes behavior", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.cast).toHaveLength(1);
-    expect(payload.cast[0].person_id).toBe("p2");
+    expect(payload.cast).toHaveLength(0);
+    expect(getCastByShowIdMock).not.toHaveBeenCalled();
+    expect(payload.cast_source).toBe("episode_evidence");
+    expect(payload.eligibility_warning).toBeNull();
   });
 });

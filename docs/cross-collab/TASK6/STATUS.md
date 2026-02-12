@@ -1,7 +1,7 @@
 # Status — Task 6 (Bravo Import + Cast Eligibility + Videos/News)
 
 Repo: TRR-APP
-Last updated: February 11, 2026
+Last updated: February 12, 2026
 
 ## Phase Status
 
@@ -20,6 +20,64 @@ None.
 
 ## Recent Activity
 
+- February 12, 2026: Added person canonical-profile source-order controls (`tmdb -> fandom -> manual`) on the person admin page.
+  - Added reorder UI (`Up`/`Down`) with `Save Order` / `Reset`.
+  - Added persistence via `PATCH /api/admin/trr-api/people/[personId]` with repository update to `core.people.external_ids.canonical_profile_source_order`.
+  - Canonical field resolution now uses saved source order instead of hardcoded priority.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/api/admin/trr-api/people/[personId]/route.ts' 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass; warning-only)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+- February 12, 2026: Fixed slow show-detail load by removing Bravo data from initial blocking fetch path.
+  - Show page initial load no longer waits on `bravo/videos` + `bravo/news` requests.
+  - Bravo data now lazy-loads only when needed (`NEWS` tab, `ASSETS -> VIDEOS`, or Health Center open), with in-flight request dedupe and manual force-refresh.
+  - File:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Validation:
+    - `npm run lint -- 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only)
+    - `npx tsc --noEmit --pretty false` (pass)
+
+- February 12, 2026: Removed cast photo lookup dependency on missing legacy columns.
+  - `getPreferredCastPhotoMap` no longer selects `thumbnail_focus_x|y|zoom|crop_mode` from `core.v_cast_photos`, preventing repeated DB errors (`column ... does not exist`) and stabilizing cast fetch performance.
+  - File:
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - Validation:
+    - `npm run lint -- 'src/lib/server/trr-api/trr-shows-repository.ts'` (warning-only)
+
+- February 12, 2026: Moved show-page health tooling into a dedicated popup launched by a health icon button under `Sync by Bravo`.
+  - Popup includes `Content Health`, `Sync Pipeline`, `Operations Inbox`, and `Refresh Log`.
+  - Removed inline health/pipeline/inbox sections from main show content area to reduce clutter.
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+
+- February 12, 2026: Implemented image-variant consumption + slug/breadcrumb routing layer updates from plan docs.
+  - Show/season galleries now prefer persisted variant URLs (`crop_display_url/display_url` for cards, `crop_detail_url/detail_url` for lightbox) with original fallback.
+  - Added server slug resolver endpoint:
+    - `GET /api/admin/trr-api/shows/resolve-slug?slug=...`
+  - Show + season pages now resolve non-UUID show URL slugs before API calls (supports `/admin/trr-shows/the-valley-persian-style` path shape).
+  - Added breadcrumb alias routes:
+    - `/admin/trr-shows/[showId]/media-gallery|media-videos|media-brand`
+    - `/admin/trr-shows/[showId]/season-{n}/{tab}`
+  - Added show-page ops UX slice:
+    - `Content Health` strip
+    - deterministic `Sync Pipeline` panel
+    - `Operations Inbox` task queue.
+
+- February 11, 2026: Improved image-import auto tagging and duplicate-link source attribution.
+  - For `Cast Photos` + `OFFICIAL SEASON ANNOUNCEMENT`, import now auto-tags cast members when caption/context text includes their names (used when no explicit cast dropdown selection is set).
+  - Duplicate linking now stores `source_url/source_domain` context from the active scrape URL.
+  - Existing duplicate links now merge incoming context metadata when re-linked (instead of no-op), so source attribution can be repaired without unlinking.
+  - `Link`/`Link All` now verifies media assets via direct SQL instead of Supabase PostgREST to avoid false failures.
+  - Drawer now surfaces duplicate-link errors inline (not only console logs) when a link fails.
+  - Show/season/person asset source normalization now prefers link-context source URL so source filters (e.g. `deadline.com`) include linked duplicates as expected.
+  - Files:
+    - `apps/web/src/components/admin/ImageScrapeDrawer.tsx`
+    - `apps/web/src/lib/server/trr-api/media-links-repository.ts`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+- February 11, 2026: Tightened image-import cast dropdown eligibility.
+  - Cast member options now require `episodes_in_season > (season_episode_count / 2)`.
+  - Applied to season/show image import drawer cast dropdown generation.
+  - Group Picture continues to map to all eligible Full-time cast under this rule.
+  - File: `apps/web/src/components/admin/ImageScrapeDrawer.tsx`
 - February 11, 2026: Sync-by-Bravo season selector now excludes placeholder seasons without eligibility evidence.
   - Eligible season rule: `episode_count > 1` OR known premiere date.
   - Updated show page modal dropdown/default season logic so placeholder seasons (e.g., RHOSLC S7 with no premiere and no episode evidence) are not selectable.
@@ -96,3 +154,39 @@ None.
   - Removed manual `Bravo Show URL` input from Step 1.
   - Step 1 now starts with `Show Name` and data sections (Description/Airs/Images/News/Videos) plus `Refresh Preview` button.
   - Step 2 header block now shows `Show Name` (no raw URL field).
+- February 12, 2026: Show gallery image bucketing and source-domain visibility fix for imported/link-only assets.
+  - `Assets > Images` now classifies sections with explicit buckets: `Backdrops`, `Show Posters`, `Season Posters`, `Episode Stills`, `Cast Photos & Promos`, and `Other`.
+  - `Cast Photos & Promos` now shows only assets tagged `kind=cast` or `kind=promo` (official cast/promo media).
+  - Generic cast portraits/headshots and non-official cast rows are moved into the new `Other` section instead of polluting Cast Photos.
+  - Added domain normalization fallback in scrape source parsing so `source_domain`/domain-like values normalize to host form (e.g. `deadline.com`) for source filtering and display.
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - Validation:
+    - `pnpm -C apps/web lint 'src/app/admin/trr-shows/[showId]/page.tsx' src/lib/server/trr-api/trr-shows-repository.ts` (pass; pre-existing warnings only)
+
+- February 12, 2026: Finished remaining Image Storage + Admin Suggestions plan items in app layer.
+  - Person gallery now consumes persisted variant URLs (`display/detail/crop`) for cards + lightbox, with original fallback.
+  - Season page now includes:
+    - season eligibility guardrail (`Eligible` vs `Placeholder`) with explicit override toggle,
+    - episode coverage matrix (still/description/air date/runtime),
+    - archive-footage cast split section (excluded from active episode count),
+    - gallery diagnostics panel (missing variants, oversized, unclassified, top sources) with quick filters.
+  - Season cast API proxy now supports `include_archive_only=true` to return archive-footage-only cast rows for UI.
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route.ts`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route.ts' 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass; warning-only)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+- February 12, 2026: Implemented Show Admin overhaul pass in app layer.
+  - Show page now defaults to `Overview`, with edit gating (`Edit` -> `Save/Cancel`) for show metadata.
+  - Added Links intelligence UI with grouped link sections and pending review actions (discover/approve/reject/edit/delete).
+  - Added Cast intelligence controls (sort/filter by episodes/season/name, has image, credit, role chips, role assignment + role catalog management).
+  - Added inline `Clear Filters` action in show gallery toolbar and corrected heading to `Show Gallery`.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/gallery-diagnostics.ts' 'tests/gallery-diagnostics.test.ts'` (warnings only)
+    - `pnpm -C apps/web exec vitest run tests/gallery-diagnostics.test.ts` (5 passed)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)

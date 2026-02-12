@@ -70,9 +70,53 @@ type ResolvedField = {
   sources: Array<{ source: string; value: string }>;
 };
 
-const CANONICAL_SOURCE_ORDER = ["tmdb", "fandom", "manual"] as const;
+const DEFAULT_CANONICAL_SOURCE_ORDER = ["tmdb", "fandom", "manual"] as const;
+type CanonicalSource = (typeof DEFAULT_CANONICAL_SOURCE_ORDER)[number];
+type CanonicalSourceOrder = CanonicalSource[];
 
-const resolveMultiSourceField = (field: MultiSourceField): ResolvedField => {
+const isCanonicalSource = (value: string): value is CanonicalSource =>
+  (DEFAULT_CANONICAL_SOURCE_ORDER as readonly string[]).includes(value);
+
+const normalizeCanonicalSourceOrder = (value: unknown): CanonicalSourceOrder => {
+  if (!Array.isArray(value)) {
+    return [...DEFAULT_CANONICAL_SOURCE_ORDER];
+  }
+
+  const collected: CanonicalSourceOrder = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const normalized = entry.trim().toLowerCase();
+    if (!isCanonicalSource(normalized)) continue;
+    if (!collected.includes(normalized)) {
+      collected.push(normalized);
+    }
+  }
+
+  for (const source of DEFAULT_CANONICAL_SOURCE_ORDER) {
+    if (!collected.includes(source)) {
+      collected.push(source);
+    }
+  }
+
+  return collected;
+};
+
+const readCanonicalSourceOrderFromExternalIds = (
+  externalIds: Record<string, unknown> | null | undefined
+): CanonicalSourceOrder => {
+  if (!externalIds || typeof externalIds !== "object") {
+    return [...DEFAULT_CANONICAL_SOURCE_ORDER];
+  }
+  return normalizeCanonicalSourceOrder(externalIds.canonical_profile_source_order);
+};
+
+const formatCanonicalSourceLabel = (source: CanonicalSource): string =>
+  source === "tmdb" ? "TMDB" : source === "fandom" ? "Fandom" : "Manual";
+
+const resolveMultiSourceField = (
+  field: MultiSourceField,
+  sourceOrder: CanonicalSourceOrder
+): ResolvedField => {
   if (!field || typeof field !== "object") {
     return { value: null, source: null, sources: [] };
   }
@@ -94,7 +138,7 @@ const resolveMultiSourceField = (field: MultiSourceField): ResolvedField => {
     return { value: null, source: null, sources: [] };
   }
 
-  for (const preferred of CANONICAL_SOURCE_ORDER) {
+  for (const preferred of sourceOrder) {
     const hit = entries.find((e) => e.source === preferred);
     if (hit) {
       return { value: hit.value, source: hit.source, sources: entries };
@@ -112,6 +156,11 @@ interface TrrPersonPhoto {
   source: string;
   url: string | null;
   hosted_url: string | null;
+  original_url?: string | null;
+  display_url?: string | null;
+  detail_url?: string | null;
+  crop_display_url?: string | null;
+  crop_detail_url?: string | null;
   hosted_content_type?: string | null;
   caption: string | null;
   width: number | null;
@@ -262,6 +311,24 @@ const resolvePhotoDimensions = (
     height: parseDimensionValue(photo.height) ?? metaHeight,
   };
 };
+
+const pickNonEmptyUrl = (...values: Array<string | null | undefined>): string | null => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+};
+
+const getPersonPhotoCardUrl = (photo: TrrPersonPhoto): string | null =>
+  pickNonEmptyUrl(photo.crop_display_url, photo.display_url, photo.hosted_url, photo.url);
+
+const getPersonPhotoDetailUrl = (photo: TrrPersonPhoto): string | null =>
+  pickNonEmptyUrl(photo.crop_detail_url, photo.detail_url, photo.hosted_url, photo.url);
+
+const getPersonPhotoOriginalUrl = (photo: TrrPersonPhoto): string | null =>
+  pickNonEmptyUrl(photo.original_url, photo.hosted_url, photo.url);
 
 const buildThumbnailCropPreview = (
   photo: TrrPersonPhoto | null | undefined
@@ -464,7 +531,15 @@ function GalleryPhoto({
   settingCover?: boolean;
 }) {
   const [hasError, setHasError] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState<string | null>(photo.hosted_url || photo.url || null);
+  const primarySrc = useMemo(
+    () => getPersonPhotoCardUrl(photo),
+    [photo]
+  );
+  const originalSrc = useMemo(
+    () => getPersonPhotoOriginalUrl(photo),
+    [photo]
+  );
+  const [currentSrc, setCurrentSrc] = useState<string | null>(primarySrc);
   const triedFallbackRef = useRef(false);
   const [naturalDimensions, setNaturalDimensions] = useState<{
     width: number;
@@ -497,9 +572,9 @@ function GalleryPhoto({
   useEffect(() => {
     setHasError(false);
     triedFallbackRef.current = false;
-    setCurrentSrc(photo.hosted_url || photo.url || null);
+    setCurrentSrc(primarySrc);
     setNaturalDimensions(null);
-  }, [photo.hosted_url, photo.url]);
+  }, [primarySrc]);
 
   const focusPoint = useMemo(() => {
     const match = presentation.objectPosition.match(
@@ -545,9 +620,9 @@ function GalleryPhoto({
   }, [viewportRect]);
 
   const handleError = () => {
-    if (!triedFallbackRef.current && photo.url && currentSrc !== photo.url) {
+    if (!triedFallbackRef.current && originalSrc && currentSrc !== originalSrc) {
       triedFallbackRef.current = true;
-      setCurrentSrc(photo.url);
+      setCurrentSrc(originalSrc);
       return;
     }
     setHasError(true);
@@ -1658,6 +1733,15 @@ export default function PersonProfilePage() {
   const { user, checking, hasAccess } = useAdminGuard();
 
   const [person, setPerson] = useState<TrrPerson | null>(null);
+  const [canonicalSourceOrder, setCanonicalSourceOrder] = useState<CanonicalSourceOrder>([
+    ...DEFAULT_CANONICAL_SOURCE_ORDER,
+  ]);
+  const [initialCanonicalSourceOrder, setInitialCanonicalSourceOrder] = useState<CanonicalSourceOrder>([
+    ...DEFAULT_CANONICAL_SOURCE_ORDER,
+  ]);
+  const [canonicalSourceOrderSaving, setCanonicalSourceOrderSaving] = useState(false);
+  const [canonicalSourceOrderError, setCanonicalSourceOrderError] = useState<string | null>(null);
+  const [canonicalSourceOrderNotice, setCanonicalSourceOrderNotice] = useState<string | null>(null);
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
   const [credits, setCredits] = useState<TrrPersonCredit[]>([]);
   const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
@@ -1732,6 +1816,10 @@ export default function PersonProfilePage() {
   );
   const [selectedOtherShowKey, setSelectedOtherShowKey] = useState<string>("all");
   const [seasonPremiereMap, setSeasonPremiereMap] = useState<Record<number, string>>({});
+  const canonicalSourceOrderDirty = useMemo(
+    () => canonicalSourceOrder.join("|") !== initialCanonicalSourceOrder.join("|"),
+    [canonicalSourceOrder, initialCanonicalSourceOrder]
+  );
 
   useEffect(() => {
     if (!showIdParam) {
@@ -2091,10 +2179,93 @@ export default function PersonProfilePage() {
       if (!response.ok) throw new Error("Failed to fetch person");
       const data = await response.json();
       setPerson(data.person);
+      const nextSourceOrder = readCanonicalSourceOrderFromExternalIds(
+        data.person?.external_ids as Record<string, unknown> | null | undefined
+      );
+      setCanonicalSourceOrder(nextSourceOrder);
+      setInitialCanonicalSourceOrder(nextSourceOrder);
+      setCanonicalSourceOrderError(null);
+      setCanonicalSourceOrderNotice(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load person");
     }
   }, [personId, getAuthHeaders]);
+
+  const moveCanonicalSource = useCallback(
+    (source: CanonicalSource, direction: "up" | "down") => {
+      setCanonicalSourceOrder((prev) => {
+        const index = prev.indexOf(source);
+        if (index < 0) return prev;
+        const targetIndex = direction === "up" ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+        const next = [...prev];
+        const [item] = next.splice(index, 1);
+        next.splice(targetIndex, 0, item);
+        return next;
+      });
+      setCanonicalSourceOrderError(null);
+      setCanonicalSourceOrderNotice(null);
+    },
+    []
+  );
+
+  const resetCanonicalSourceOrder = useCallback(() => {
+    setCanonicalSourceOrder([...initialCanonicalSourceOrder]);
+    setCanonicalSourceOrderError(null);
+    setCanonicalSourceOrderNotice(null);
+  }, [initialCanonicalSourceOrder]);
+
+  const saveCanonicalSourceOrder = useCallback(async () => {
+    if (!canonicalSourceOrderDirty || canonicalSourceOrderSaving) {
+      return;
+    }
+    try {
+      setCanonicalSourceOrderSaving(true);
+      setCanonicalSourceOrderError(null);
+      setCanonicalSourceOrderNotice(null);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/people/${personId}`, {
+        method: "PATCH",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          canonicalProfileSourceOrder: canonicalSourceOrder,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        person?: TrrPerson;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to update canonical source order");
+      }
+      if (data.person) {
+        setPerson(data.person);
+        const persistedSourceOrder = readCanonicalSourceOrderFromExternalIds(
+          data.person.external_ids as Record<string, unknown> | null | undefined
+        );
+        setCanonicalSourceOrder(persistedSourceOrder);
+        setInitialCanonicalSourceOrder(persistedSourceOrder);
+      } else {
+        setInitialCanonicalSourceOrder([...canonicalSourceOrder]);
+      }
+      setCanonicalSourceOrderNotice("Saved source order.");
+    } catch (err) {
+      setCanonicalSourceOrderError(
+        err instanceof Error ? err.message : "Failed to update source order"
+      );
+    } finally {
+      setCanonicalSourceOrderSaving(false);
+    }
+  }, [
+    canonicalSourceOrder,
+    canonicalSourceOrderDirty,
+    canonicalSourceOrderSaving,
+    getAuthHeaders,
+    personId,
+  ]);
 
   // Fetch photos
   const fetchPhotos = useCallback(async (): Promise<TrrPersonPhoto[]> => {
@@ -3092,7 +3263,10 @@ export default function PersonProfilePage() {
       : null;
   // Get primary photo - cover photo first, then Bravo profile fallback, then first hosted photo.
   const primaryPhotoUrl =
-    coverPhoto?.photo_url || bravoProfileImage || photos.find((p) => p.hosted_url)?.hosted_url;
+    coverPhoto?.photo_url ||
+    bravoProfileImage ||
+    (photos.length > 0 ? getPersonPhotoCardUrl(photos[0]) : null) ||
+    photos.find((p) => p.hosted_url)?.hosted_url;
 
   const formatBravoPublishedDate = (value: string | null | undefined): string | null => {
     if (!value || typeof value !== "string") return null;
@@ -3115,14 +3289,14 @@ export default function PersonProfilePage() {
 
   const canonical = useMemo(() => {
     return {
-      birthday: resolveMultiSourceField(person?.birthday),
-      gender: resolveMultiSourceField(person?.gender),
-      biography: resolveMultiSourceField(person?.biography),
-      placeOfBirth: resolveMultiSourceField(person?.place_of_birth),
-      homepage: resolveMultiSourceField(person?.homepage),
-      profileImageUrl: resolveMultiSourceField(person?.profile_image_url),
+      birthday: resolveMultiSourceField(person?.birthday, canonicalSourceOrder),
+      gender: resolveMultiSourceField(person?.gender, canonicalSourceOrder),
+      biography: resolveMultiSourceField(person?.biography, canonicalSourceOrder),
+      placeOfBirth: resolveMultiSourceField(person?.place_of_birth, canonicalSourceOrder),
+      homepage: resolveMultiSourceField(person?.homepage, canonicalSourceOrder),
+      profileImageUrl: resolveMultiSourceField(person?.profile_image_url, canonicalSourceOrder),
     };
-  }, [person]);
+  }, [person, canonicalSourceOrder]);
 
   if (checking) {
     return (
@@ -3308,11 +3482,67 @@ export default function PersonProfilePage() {
 
               {/* Canonical Profile (multi-source fields on core.people) */}
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
-                <div className="mb-4 flex items-center justify-between gap-4">
+                <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <h3 className="text-lg font-bold text-zinc-900">Canonical Profile</h3>
-                  <span className="text-xs text-zinc-400">
-                    Source order: tmdb → fandom → manual
-                  </span>
+                  <div className="w-full rounded-xl border border-zinc-200 bg-zinc-50 p-4 lg:max-w-md">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Source priority
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      {canonicalSourceOrder.map((source, index) => (
+                        <div
+                          key={source}
+                          className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2"
+                        >
+                          <span className="text-sm text-zinc-800">
+                            {index + 1}. {formatCanonicalSourceLabel(source)}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => moveCanonicalSource(source, "up")}
+                              disabled={index === 0 || canonicalSourceOrderSaving}
+                              className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Up
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveCanonicalSource(source, "down")}
+                              disabled={index === canonicalSourceOrder.length - 1 || canonicalSourceOrderSaving}
+                              className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Down
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={saveCanonicalSourceOrder}
+                        disabled={!canonicalSourceOrderDirty || canonicalSourceOrderSaving}
+                        className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {canonicalSourceOrderSaving ? "Saving..." : "Save Order"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetCanonicalSourceOrder}
+                        disabled={!canonicalSourceOrderDirty || canonicalSourceOrderSaving}
+                        className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    {canonicalSourceOrderError && (
+                      <p className="mt-2 text-xs text-red-600">{canonicalSourceOrderError}</p>
+                    )}
+                    {!canonicalSourceOrderError && canonicalSourceOrderNotice && (
+                      <p className="mt-2 text-xs text-emerald-700">{canonicalSourceOrderNotice}</p>
+                    )}
+                  </div>
                 </div>
 
                 {(() => {
@@ -4027,10 +4257,8 @@ export default function PersonProfilePage() {
         {/* Lightbox with metadata and navigation */}
         {lightboxPhoto && (
           <ImageLightbox
-            src={lightboxPhoto.photo.hosted_url || lightboxPhoto.photo.url || ""}
-            fallbackSrc={
-              lightboxPhoto.photo.hosted_url ? lightboxPhoto.photo.url : null
-            }
+            src={getPersonPhotoDetailUrl(lightboxPhoto.photo) || ""}
+            fallbackSrc={getPersonPhotoOriginalUrl(lightboxPhoto.photo)}
             alt={lightboxPhoto.photo.caption || person.full_name}
             isOpen={lightboxOpen}
             onClose={closeLightbox}

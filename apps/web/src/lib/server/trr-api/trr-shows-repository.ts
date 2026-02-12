@@ -134,6 +134,9 @@ export interface TrrPerson {
   updated_at: string;
 }
 
+const CANONICAL_PROFILE_SOURCES = ["tmdb", "fandom", "manual"] as const;
+type CanonicalProfileSource = (typeof CANONICAL_PROFILE_SOURCES)[number];
+
 export interface TrrCastFandom {
   id: string;
   person_id: string;
@@ -281,6 +284,87 @@ export async function getShowById(id: string): Promise<TrrShow | null> {
     [id]
   );
   return result.rows[0] ?? null;
+}
+
+export const toShowSlug = (value: string): string => {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+};
+
+export interface ResolvedShowSlug {
+  show_id: string;
+  slug: string;
+  canonical_slug: string;
+  show_name: string;
+}
+
+/**
+ * Resolve a human-readable show slug to a show_id.
+ * Supports collision-safe slugs with optional `--{showIdPrefix}` suffix.
+ */
+export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | null> {
+  // Extract the optional --{showIdPrefix} suffix BEFORE normalizing, because
+  // toShowSlug collapses repeated dashes (e.g. "show-name--1a2b3c4d" → "show-name-1a2b3c4d").
+  const rawSuffix = slug.match(/--([0-9a-f]{8})$/i);
+  const requestedPrefix = rawSuffix?.[1]?.toLowerCase() || null;
+  const rawBase = rawSuffix ? slug.slice(0, -rawSuffix[0].length) : slug;
+
+  const normalizedInput = toShowSlug(rawBase);
+  if (!normalizedInput) return null;
+
+  const baseSlug = normalizedInput;
+
+  const rows = await pgQuery<{ id: string; name: string; slug: string }>(
+    `SELECT
+       s.id::text AS id,
+       s.name,
+       lower(
+         trim(
+           both '-' FROM regexp_replace(
+             regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
+             '[^a-z0-9]+',
+             '-',
+             'gi'
+           )
+         )
+       ) AS slug
+     FROM core.shows AS s
+     WHERE lower(
+       trim(
+         both '-' FROM regexp_replace(
+           regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
+           '[^a-z0-9]+',
+           '-',
+           'gi'
+         )
+       )
+     ) = $1
+     ORDER BY s.id ASC`,
+    [baseSlug]
+  );
+
+  if (rows.rows.length === 0) return null;
+
+  const candidate =
+    (requestedPrefix
+      ? rows.rows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix))
+      : null) ?? rows.rows[0];
+
+  const hasCollision = rows.rows.length > 1;
+  const canonicalSlug = hasCollision
+    ? `${baseSlug}--${candidate.id.slice(0, 8).toLowerCase()}`
+    : baseSlug;
+
+  return {
+    show_id: candidate.id,
+    slug: baseSlug,
+    canonical_slug: canonicalSlug,
+    show_name: candidate.name,
+  };
 }
 
 /**
@@ -553,7 +637,15 @@ async function getPreferredCastPhotoMap(
            THEN 0
            WHEN LOWER(COALESCE(ml.context->>'context_section', '')) = 'bravo_profile'
            THEN 1
-           ELSE 2
+           WHEN LOWER(COALESCE(ml.context->>'context_section', '')) IN (
+             'official season announcement',
+             'official_season_announcement'
+           )
+           THEN 2
+           WHEN COALESCE(ml.context->>'people_count', '') ~ '^[0-9]+$'
+             AND (ml.context->>'people_count')::int = 1
+           THEN 3
+           ELSE 4
          END,
          COALESCE(ml.position, 2147483647) ASC,
          ml.created_at DESC`,
@@ -659,12 +751,6 @@ export async function getCastByShowId(
   >(
     `SELECT vsc.*
      FROM core.v_show_cast AS vsc
-     JOIN (
-       SELECT DISTINCT person_id
-       FROM core.v_person_show_seasons
-       WHERE show_id = $1::uuid
-         AND COALESCE(total_episodes, 0) > 0
-     ) eligible ON eligible.person_id = vsc.person_id
      WHERE vsc.show_id = $1::uuid
      ORDER BY billing_order ASC NULLS LAST
      LIMIT $2 OFFSET $3`,
@@ -715,10 +801,15 @@ export async function getShowCastWithStats(
   options?: PaginationOptions
 ): Promise<TrrCastMember[]> {
   const { limit, offset } = normalizePagination(options);
+  type ShowCastWithEligibleCountRow = Omit<
+    TrrCastMember,
+    "full_name" | "known_for" | "photo_url" | "total_episodes" | "archive_episode_count"
+  > & { eligible_total_episodes: number | null };
   const castResult = await pgQuery<
-    Omit<TrrCastMember, "full_name" | "known_for" | "photo_url" | "total_episodes" | "archive_episode_count">
+    ShowCastWithEligibleCountRow
   >(
-    `SELECT vsc.*
+    `SELECT vsc.*,
+            eligible.total_episodes AS eligible_total_episodes
      FROM core.v_show_cast AS vsc
      JOIN (
        SELECT person_id,
@@ -796,19 +887,21 @@ export async function getShowCastWithStats(
   const preferredPhotos = await getPreferredCastPhotoMap(personIds);
 
   return castResult.rows.map((cast) => {
-    const person = peopleMap.get(cast.person_id);
-    const photo = preferredPhotos.get(cast.person_id);
+    const { eligible_total_episodes, ...castRow } = cast;
+    const person = peopleMap.get(castRow.person_id);
+    const photo = preferredPhotos.get(castRow.person_id);
     return {
-      ...cast,
-      full_name: person?.full_name ?? cast.cast_member_name ?? nameFallbackMap.get(cast.person_id) ?? null,
+      ...castRow,
+      full_name:
+        person?.full_name ?? castRow.cast_member_name ?? nameFallbackMap.get(castRow.person_id) ?? null,
       known_for: person?.known_for ?? null,
       photo_url: photo?.url ?? null,
       thumbnail_focus_x: photo?.thumbnail_focus_x ?? null,
       thumbnail_focus_y: photo?.thumbnail_focus_y ?? null,
       thumbnail_zoom: photo?.thumbnail_zoom ?? null,
       thumbnail_crop_mode: photo?.thumbnail_crop_mode ?? null,
-      total_episodes: totalsMap.get(cast.person_id) ?? null,
-      archive_episode_count: archiveTotalsMap.get(cast.person_id) ?? null,
+      total_episodes: totalsMap.get(castRow.person_id) ?? eligible_total_episodes ?? null,
+      archive_episode_count: archiveTotalsMap.get(castRow.person_id) ?? null,
     } as TrrCastMember;
   });
 }
@@ -931,6 +1024,38 @@ export async function getPersonById(personId: string): Promise<TrrPerson | null>
   return result.rows[0] ?? null;
 }
 
+export async function updatePersonCanonicalProfileSourceOrder(
+  personId: string,
+  sourceOrder: string[]
+): Promise<TrrPerson | null> {
+  if (sourceOrder.length !== CANONICAL_PROFILE_SOURCES.length) {
+    throw new Error("source_order_must_include_all_sources");
+  }
+  const deduped = [...new Set(sourceOrder)];
+  if (deduped.length !== CANONICAL_PROFILE_SOURCES.length) {
+    throw new Error("source_order_contains_duplicates");
+  }
+  const normalized = deduped.map((value) => value.trim().toLowerCase()) as CanonicalProfileSource[];
+  if (normalized.some((value) => !CANONICAL_PROFILE_SOURCES.includes(value))) {
+    throw new Error("source_order_contains_invalid_source");
+  }
+
+  const result = await pgQuery<TrrPerson>(
+    `UPDATE core.people
+     SET external_ids = jsonb_set(
+       COALESCE(external_ids, '{}'::jsonb),
+       '{canonical_profile_source_order}',
+       to_jsonb($2::text[]),
+       true
+     ),
+     updated_at = now()
+     WHERE id = $1::uuid
+     RETURNING *`,
+    [personId, normalized]
+  );
+  return result.rows[0] ?? null;
+}
+
 /**
  * Search people by name using PREFIX match (index-friendly).
  * Uses `query%` pattern instead of `%query%` for better performance.
@@ -971,6 +1096,25 @@ const normalizeScrapeSource = (
   url: string | null | undefined,
   metadata?: Record<string, unknown> | null
 ): string => {
+  const toDomain = (value: string | null | undefined): string | null => {
+    if (!value) return null;
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) return null;
+    try {
+      const hostname = new URL(trimmed).hostname.toLowerCase();
+      const normalizedHost = hostname.replace(/^www\./, "");
+      return normalizedHost || null;
+    } catch {
+      const normalized = trimmed
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .split("/")[0]
+        .trim();
+      if (!normalized || !normalized.includes(".") || /\s/.test(normalized)) return null;
+      return normalized;
+    }
+  };
+
   const rawSource = source ?? "";
   const lower = rawSource.toLowerCase();
   if (!lower.startsWith("web_scrape") && !lower.startsWith("webscrape")) {
@@ -983,7 +1127,17 @@ const normalizeScrapeSource = (
     getMetadataString(metadata, "source_page_url") ??
     getMetadataString(metadata, "sourcePageUrl") ??
     null;
-  const candidateUrl = url ?? metadataUrl;
+  const metadataDomain =
+    getMetadataString(metadata, "source_domain") ??
+    getMetadataString(metadata, "sourceDomain") ??
+    null;
+
+  const candidateUrl = url ?? metadataUrl ?? metadataDomain;
+  const normalizedDomain = toDomain(candidateUrl);
+  if (normalizedDomain) {
+    return normalizedDomain;
+  }
+
   if (!candidateUrl) {
     const cleaned = lower.replace(/^web[_-]?scrape[:]?/, "").replace(/^www\./, "");
     if (cleaned && cleaned.includes(".")) {
@@ -991,14 +1145,7 @@ const normalizeScrapeSource = (
     }
     return rawSource;
   }
-
-  try {
-    const hostname = new URL(candidateUrl).hostname.toLowerCase();
-    const normalized = hostname.replace(/^www\./, "");
-    return normalized || rawSource;
-  } catch {
-    return rawSource;
-  }
+  return rawSource;
 };
 
 const normalizeFandomSource = (
@@ -1042,6 +1189,11 @@ export interface TrrPersonPhoto {
   source_asset_id?: string | null;
   url: string | null;
   hosted_url: string | null;
+  original_url?: string | null;
+  display_url?: string | null;
+  detail_url?: string | null;
+  crop_display_url?: string | null;
+  crop_detail_url?: string | null;
   hosted_sha256?: string | null;
   hosted_content_type?: string | null;
   caption: string | null;
@@ -1189,6 +1341,87 @@ const toThumbnailCropFields = (value: unknown): ThumbnailCropFields => {
     thumbnail_focus_y: parsed.y,
     thumbnail_zoom: parsed.zoom,
     thumbnail_crop_mode: parsed.mode,
+  };
+};
+
+type PersonPhotoVariantUrls = Pick<
+  TrrPersonPhoto,
+  "original_url" | "display_url" | "detail_url" | "crop_display_url" | "crop_detail_url"
+>;
+
+const pickPersonPhotoVariantUrl = (
+  metadata: Record<string, unknown>,
+  signature: string,
+  variantKey: string
+): string | null => {
+  const variants = metadata.variants;
+  if (!variants || typeof variants !== "object") return null;
+  const signatureBucket = (variants as Record<string, unknown>)[signature];
+  if (!signatureBucket || typeof signatureBucket !== "object") return null;
+  const variantBucket = (signatureBucket as Record<string, unknown>)[variantKey];
+  if (!variantBucket || typeof variantBucket !== "object") return null;
+
+  const asRecord = variantBucket as Record<string, unknown>;
+  const webp = asRecord.webp;
+  if (webp && typeof webp === "object" && typeof (webp as Record<string, unknown>).url === "string") {
+    return (webp as Record<string, unknown>).url as string;
+  }
+  const jpg = asRecord.jpg;
+  if (jpg && typeof jpg === "object" && typeof (jpg as Record<string, unknown>).url === "string") {
+    return (jpg as Record<string, unknown>).url as string;
+  }
+  return null;
+};
+
+const resolvePersonPhotoVariantUrls = (
+  metadata: Record<string, unknown> | null | undefined,
+  hostedUrl: string | null | undefined
+): PersonPhotoVariantUrls => {
+  const fallbackUrl = hostedUrl ?? null;
+  const md = metadata && typeof metadata === "object" ? metadata : null;
+  if (!md) {
+    return {
+      original_url: fallbackUrl,
+      display_url: fallbackUrl,
+      detail_url: fallbackUrl,
+      crop_display_url: null,
+      crop_detail_url: null,
+    };
+  }
+
+  const directDisplay =
+    typeof md.display_url === "string" && md.display_url.trim().length > 0 ? md.display_url.trim() : null;
+  const directDetail =
+    typeof md.detail_url === "string" && md.detail_url.trim().length > 0 ? md.detail_url.trim() : null;
+  const directCropDisplay =
+    typeof md.crop_display_url === "string" && md.crop_display_url.trim().length > 0
+      ? md.crop_display_url.trim()
+      : null;
+  const directCropDetail =
+    typeof md.crop_detail_url === "string" && md.crop_detail_url.trim().length > 0
+      ? md.crop_detail_url.trim()
+      : null;
+
+  const activeCropSignature =
+    typeof md.active_crop_signature === "string" && md.active_crop_signature.trim().length > 0
+      ? md.active_crop_signature.trim()
+      : null;
+
+  const variantDisplay = pickPersonPhotoVariantUrl(md, "base", "card") ?? directDisplay;
+  const variantDetail = pickPersonPhotoVariantUrl(md, "base", "detail") ?? directDetail;
+  const variantCropDisplay =
+    (activeCropSignature ? pickPersonPhotoVariantUrl(md, activeCropSignature, "crop_card") : null) ??
+    directCropDisplay;
+  const variantCropDetail =
+    (activeCropSignature ? pickPersonPhotoVariantUrl(md, activeCropSignature, "crop_detail") : null) ??
+    directCropDetail;
+
+  return {
+    original_url: fallbackUrl,
+    display_url: variantDisplay ?? fallbackUrl,
+    detail_url: variantDetail ?? fallbackUrl,
+    crop_display_url: variantCropDisplay,
+    crop_detail_url: variantCropDetail,
   };
 };
 
@@ -1412,6 +1645,10 @@ export async function getPhotosByPersonId(
     const mdPeopleCountSource =
       typeof mdPeopleCountSourceRaw === "string" ? mdPeopleCountSourceRaw : null;
     const thumbnailCropFields = toThumbnailCropFields(md.thumbnail_crop);
+    const variantUrls = resolvePersonPhotoVariantUrls(
+      normalizedFandom.metadata,
+      photo.hosted_url ?? photo.url
+    );
     return {
       ...photo,
       source: normalizedFandom.source,
@@ -1425,6 +1662,7 @@ export async function getPhotosByPersonId(
       link_id: null,
       media_asset_id: null,
       facebank_seed: false,
+      ...variantUrls,
       ...thumbnailCropFields,
     };
   });
@@ -1527,8 +1765,27 @@ export async function getPhotosByPersonId(
           ? ((row.metadata as { people_names: unknown }).people_names as string[])
           : null;
         const peopleNames = contextPeopleNames ?? metadataPeopleNames ?? null;
-        const normalizedScrape = normalizeScrapeSource(row.source || "web_scrape", row.source_url, row.metadata);
-        const normalizedFandom = normalizeFandomSource(normalizedScrape, row.metadata);
+        const mergedMetadataForSource =
+          row.metadata && typeof row.metadata === "object"
+            ? ({
+                ...(row.metadata as Record<string, unknown>),
+                ...(context && typeof context === "object"
+                  ? (context as Record<string, unknown>)
+                  : {}),
+              } as Record<string, unknown>)
+            : context && typeof context === "object"
+              ? ({ ...(context as Record<string, unknown>) } as Record<string, unknown>)
+              : null;
+        const sourceUrlForNormalization =
+          getMetadataString(mergedMetadataForSource, "source_url") ??
+          getMetadataString(mergedMetadataForSource, "source_page_url") ??
+          row.source_url;
+        const normalizedScrape = normalizeScrapeSource(
+          row.source || "web_scrape",
+          sourceUrlForNormalization,
+          mergedMetadataForSource
+        );
+        const normalizedFandom = normalizeFandomSource(normalizedScrape, mergedMetadataForSource);
         const contextThumbnailCrop =
           context && typeof context === "object"
             ? (context as { thumbnail_crop?: unknown }).thumbnail_crop
@@ -1539,6 +1796,10 @@ export async function getPhotosByPersonId(
             : null;
         const thumbnailCropFields = toThumbnailCropFields(
           contextThumbnailCrop ?? metadataThumbnailCrop,
+        );
+        const variantUrls = resolvePersonPhotoVariantUrls(
+          normalizedFandom.metadata,
+          row.hosted_url,
         );
 
         return {
@@ -1569,6 +1830,7 @@ export async function getPhotosByPersonId(
           link_id: row.link_id,
           media_asset_id: row.media_asset_id,
           facebank_seed: Boolean(row.facebank_seed),
+          ...variantUrls,
           ...thumbnailCropFields,
         } as TrrPersonPhoto;
       })
@@ -1821,9 +2083,13 @@ export async function getCastByShowSeason(
 export async function getSeasonCastWithEpisodeCounts(
   showId: string,
   seasonNumber: number,
-  options?: PaginationOptions
+  options?: PaginationOptions & { includeArchiveOnly?: boolean }
 ): Promise<SeasonCastEpisodeCount[]> {
   const { limit, offset } = normalizePagination(options);
+  const includeArchiveOnly =
+    typeof (options as { includeArchiveOnly?: unknown } | undefined)?.includeArchiveOnly === "boolean"
+      ? Boolean((options as { includeArchiveOnly?: boolean }).includeArchiveOnly)
+      : false;
 
   const season = await getSeasonByShowAndNumber(showId, seasonNumber);
   if (!season) return [];
@@ -1877,7 +2143,10 @@ export async function getSeasonCastWithEpisodeCounts(
     try {
       const result = await pgQuery<SeasonCastCountRow>(
         `SELECT person_id,
-                COUNT(DISTINCT episode_id)::int AS episodes_in_season
+                COUNT(DISTINCT CASE
+                  WHEN COALESCE(appearance_type, 'appears') <> 'archive_footage'
+                  THEN episode_id
+                END)::int AS episodes_in_season
          FROM core.v_episode_credits
          WHERE show_id = $1::uuid
            AND season_number = $2::int
@@ -1897,10 +2166,78 @@ export async function getSeasonCastWithEpisodeCounts(
     return [];
   }
 
-  seasonCastCounts = seasonCastCounts.filter((row) => (row.episodes_in_season ?? 0) > 0);
-  if (seasonCastCounts.length === 0) return [];
+  const evidenceByPerson = new Map<
+    string,
+    { regular_episodes_in_season: number; archive_episodes_in_season: number }
+  >();
+  try {
+    const evidenceResult = await pgQuery<{
+      person_id: string;
+      regular_episodes_in_season: number | null;
+      archive_episodes_in_season: number | null;
+    }>(
+      `SELECT person_id,
+              COUNT(DISTINCT CASE
+                WHEN COALESCE(appearance_type, 'appears') <> 'archive_footage'
+                THEN episode_id
+              END)::int AS regular_episodes_in_season,
+              COUNT(DISTINCT CASE
+                WHEN COALESCE(appearance_type, '') = 'archive_footage'
+                THEN episode_id
+              END)::int AS archive_episodes_in_season
+       FROM core.v_episode_credits
+       WHERE show_id = $1::uuid
+         AND season_number = $2::int
+       GROUP BY person_id`,
+      [showId, seasonNumber]
+    );
 
-  const personIds = seasonCastCounts.map((row) => row.person_id);
+    for (const row of evidenceResult.rows) {
+      evidenceByPerson.set(row.person_id, {
+        regular_episodes_in_season:
+          typeof row.regular_episodes_in_season === "number" ? row.regular_episodes_in_season : 0,
+        archive_episodes_in_season:
+          typeof row.archive_episodes_in_season === "number" ? row.archive_episodes_in_season : 0,
+      });
+    }
+  } catch {
+    // Best effort; keep existing season cast counts.
+  }
+
+  if (evidenceByPerson.size > 0) {
+    seasonCastCounts = seasonCastCounts.map((row) => {
+      const evidence = evidenceByPerson.get(row.person_id);
+      if (!evidence) return row;
+      return {
+        ...row,
+        episodes_in_season: evidence.regular_episodes_in_season,
+      };
+    });
+  }
+
+  const archiveOnlyRows: SeasonCastCountRow[] = includeArchiveOnly
+    ? Array.from(evidenceByPerson.entries())
+        .filter(
+          ([personId, evidence]) =>
+            evidence.regular_episodes_in_season <= 0 &&
+            evidence.archive_episodes_in_season > 0 &&
+            !seasonCastCounts?.some((row) => row.person_id === personId)
+        )
+        .map(([personId]) => ({ person_id: personId, episodes_in_season: 0 }))
+    : [];
+
+  const normalizedCounts = [...seasonCastCounts, ...archiveOnlyRows];
+  const filteredCounts = includeArchiveOnly
+    ? normalizedCounts.filter((row) => {
+        const evidence = evidenceByPerson.get(row.person_id);
+        const regular = evidence?.regular_episodes_in_season ?? row.episodes_in_season ?? 0;
+        const archive = evidence?.archive_episodes_in_season ?? 0;
+        return regular > 0 || archive > 0;
+      })
+    : normalizedCounts.filter((row) => (row.episodes_in_season ?? 0) > 0);
+  if (filteredCounts.length === 0) return [];
+
+  const personIds = filteredCounts.map((row) => row.person_id);
 
   const fallbackNames = new Map<string, string | null>();
   const totalsMap = new Map<string, number>();
@@ -1946,17 +2283,24 @@ export async function getSeasonCastWithEpisodeCounts(
 
   const preferredPhotos = await getPreferredCastPhotoMap(personIds, { seasonNumber });
 
-  return seasonCastCounts.map((member) => ({
+  return filteredCounts.map((member) => {
+    const evidence = evidenceByPerson.get(member.person_id);
+    const regularEpisodes =
+      evidence?.regular_episodes_in_season ??
+      (Number.isFinite(member.episodes_in_season) ? member.episodes_in_season : 0);
+    return {
     person_id: member.person_id,
     person_name: peopleMap.get(member.person_id) ?? fallbackNames.get(member.person_id) ?? null,
-    episodes_in_season: Number.isFinite(member.episodes_in_season) ? member.episodes_in_season : 0,
+    episodes_in_season: regularEpisodes,
     total_episodes: totalsMap.get(member.person_id) ?? null,
     photo_url: preferredPhotos.get(member.person_id)?.url ?? null,
     thumbnail_focus_x: preferredPhotos.get(member.person_id)?.thumbnail_focus_x ?? null,
     thumbnail_focus_y: preferredPhotos.get(member.person_id)?.thumbnail_focus_y ?? null,
     thumbnail_zoom: preferredPhotos.get(member.person_id)?.thumbnail_zoom ?? null,
     thumbnail_crop_mode: preferredPhotos.get(member.person_id)?.thumbnail_crop_mode ?? null,
-  }));
+    archive_episodes_in_season: evidence?.archive_episodes_in_season ?? 0,
+  };
+  });
 }
 
 // ============================================================================
@@ -1971,6 +2315,11 @@ export interface SeasonAsset {
   source: string;
   kind: string;
   hosted_url: string;
+  original_url?: string;
+  display_url?: string | null;
+  detail_url?: string | null;
+  crop_display_url?: string | null;
+  crop_detail_url?: string | null;
   width: number | null;
   height: number | null;
   caption: string | null;
@@ -1987,6 +2336,84 @@ export interface SeasonAsset {
   metadata?: Record<string, unknown> | null;
   hosted_content_type?: string | null;
 }
+
+type SeasonAssetVariantUrls = Pick<
+  SeasonAsset,
+  "original_url" | "display_url" | "detail_url" | "crop_display_url" | "crop_detail_url"
+>;
+
+const pickVariantUrlFromSignature = (
+  metadata: Record<string, unknown>,
+  signature: string,
+  variantKey: string
+): string | null => {
+  const variants = metadata.variants;
+  if (!variants || typeof variants !== "object") return null;
+  const signatureBucket = (variants as Record<string, unknown>)[signature];
+  if (!signatureBucket || typeof signatureBucket !== "object") return null;
+  const variantBucket = (signatureBucket as Record<string, unknown>)[variantKey];
+  if (!variantBucket || typeof variantBucket !== "object") return null;
+
+  const asRecord = variantBucket as Record<string, unknown>;
+  const webp = asRecord.webp;
+  if (webp && typeof webp === "object" && typeof (webp as Record<string, unknown>).url === "string") {
+    return (webp as Record<string, unknown>).url as string;
+  }
+  const jpg = asRecord.jpg;
+  if (jpg && typeof jpg === "object" && typeof (jpg as Record<string, unknown>).url === "string") {
+    return (jpg as Record<string, unknown>).url as string;
+  }
+  return null;
+};
+
+const resolveSeasonAssetVariantUrls = (
+  metadata: Record<string, unknown> | null | undefined,
+  hostedUrl: string
+): SeasonAssetVariantUrls => {
+  const md = metadata && typeof metadata === "object" ? metadata : null;
+  const directDisplay =
+    typeof md?.display_url === "string" && md.display_url.trim().length > 0
+      ? md.display_url.trim()
+      : null;
+  const directDetail =
+    typeof md?.detail_url === "string" && md.detail_url.trim().length > 0
+      ? md.detail_url.trim()
+      : null;
+  const directCropDisplay =
+    typeof md?.crop_display_url === "string" && md.crop_display_url.trim().length > 0
+      ? md.crop_display_url.trim()
+      : null;
+  const directCropDetail =
+    typeof md?.crop_detail_url === "string" && md.crop_detail_url.trim().length > 0
+      ? md.crop_detail_url.trim()
+      : null;
+
+  const activeCropSignature =
+    typeof md?.active_crop_signature === "string" && md.active_crop_signature.trim().length > 0
+      ? md.active_crop_signature.trim()
+      : null;
+
+  const variantDisplay =
+    (md && pickVariantUrlFromSignature(md, "base", "card")) ?? directDisplay;
+  const variantDetail =
+    (md && pickVariantUrlFromSignature(md, "base", "detail")) ?? directDetail;
+  const variantCropDisplay =
+    (activeCropSignature && md
+      ? pickVariantUrlFromSignature(md, activeCropSignature, "crop_card")
+      : null) ?? directCropDisplay;
+  const variantCropDetail =
+    (activeCropSignature && md
+      ? pickVariantUrlFromSignature(md, activeCropSignature, "crop_detail")
+      : null) ?? directCropDetail;
+
+  return {
+    original_url: hostedUrl,
+    display_url: variantDisplay ?? hostedUrl,
+    detail_url: variantDetail ?? hostedUrl,
+    crop_display_url: variantCropDisplay,
+    crop_detail_url: variantCropDetail,
+  };
+};
 
 /**
  * Get all media assets for a show/season.
@@ -2157,9 +2584,14 @@ export async function getAssetsByShowSeason(
                 unknown
               >)
             : ({ ...(ctx as Record<string, unknown>) } as Record<string, unknown>);
+        const sourceUrlForNormalization =
+          getMetadataString(mergedMetadata, "source_url") ??
+          getMetadataString(mergedMetadata, "source_page_url") ??
+          row.source_url ??
+          null;
         const normalizedScrape = normalizeScrapeSource(
           row.source ?? "unknown",
-          row.source_url ?? null,
+          sourceUrlForNormalization,
           mergedMetadata
         );
 
@@ -2179,6 +2611,7 @@ export async function getAssetsByShowSeason(
           source: normalizedScrape,
           kind: row.link_kind ?? "other",
           hosted_url: hostedUrl,
+          ...resolveSeasonAssetVariantUrls(mergedMetadata, hostedUrl),
           width: row.width ?? null,
           height: row.height ?? null,
           caption: row.caption ?? `Season ${seasonNumber}`,
@@ -2231,6 +2664,7 @@ export async function getAssetsByShowSeason(
         source: img.source,
         kind: imageKind,
         hosted_url: img.hosted_url,
+        ...resolveSeasonAssetVariantUrls(img.metadata, img.hosted_url),
         width: img.width,
         height: img.height,
         caption: `Season ${seasonNumber}`,
@@ -2280,6 +2714,7 @@ export async function getAssetsByShowSeason(
         source: img.source,
         kind: imageKind,
         hosted_url: img.hosted_url,
+        ...resolveSeasonAssetVariantUrls(img.metadata, img.hosted_url),
         width: img.width,
         height: img.height,
         caption: `Episode ${img.episode_number}`,
@@ -2387,6 +2822,7 @@ export async function getAssetsByShowSeason(
           source: photo.source,
           kind: "profile",
           hosted_url: photo.hosted_url,
+          ...resolveSeasonAssetVariantUrls(photo.metadata, photo.hosted_url),
           width: photo.width,
           height: photo.height,
           caption: photo.caption,
@@ -2500,9 +2936,14 @@ export async function getAssetsByShowId(
               ...(ctx as Record<string, unknown>),
             } as Record<string, unknown>)
           : ({ ...(ctx as Record<string, unknown>) } as Record<string, unknown>);
+      const sourceUrlForNormalization =
+        getMetadataString(mergedMetadata, "source_url") ??
+        getMetadataString(mergedMetadata, "source_page_url") ??
+        row.source_url ??
+        null;
       const normalizedScrape = normalizeScrapeSource(
         row.source ?? "unknown",
-        row.source_url ?? null,
+        sourceUrlForNormalization,
         mergedMetadata
       );
 
@@ -2522,6 +2963,7 @@ export async function getAssetsByShowId(
         source: normalizedScrape,
         kind: row.link_kind ?? "other",
         hosted_url: hostedUrl,
+        ...resolveSeasonAssetVariantUrls(mergedMetadata, hostedUrl),
         width: row.width ?? null,
         height: row.height ?? null,
         caption: row.caption ?? null,
@@ -2571,6 +3013,7 @@ export async function getAssetsByShowId(
         source: img.source,
         kind: imageKind,
         hosted_url: img.hosted_url,
+        ...resolveSeasonAssetVariantUrls(img.metadata, img.hosted_url),
         width: img.width,
         height: img.height,
         caption: null,

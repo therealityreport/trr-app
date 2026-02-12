@@ -142,7 +142,30 @@ export async function createMediaLink(
     [media_asset_id, entity_type, entity_id, kind]
   );
   if (existing.rows[0]) {
-    return { link: existing.rows[0], already_exists: true };
+    const existingLink = existing.rows[0];
+    const existingContext =
+      existingLink.context && typeof existingLink.context === "object"
+        ? (existingLink.context as Record<string, unknown>)
+        : {};
+    const nextContext = { ...existingContext, ...(context ?? {}) };
+    const contextChanged =
+      JSON.stringify(existingContext) !== JSON.stringify(nextContext);
+
+    if (contextChanged) {
+      const updated = await query<MediaLinkRow>(
+        `UPDATE core.media_links
+         SET context = $2::jsonb
+         WHERE id = $1::uuid
+         RETURNING ${MEDIA_LINK_FIELDS}`,
+        [existingLink.id, JSON.stringify(nextContext)]
+      );
+      const updatedLink = updated.rows[0];
+      if (updatedLink) {
+        return { link: updatedLink, already_exists: true };
+      }
+    }
+
+    return { link: existingLink, already_exists: true };
   }
 
   // Create new link

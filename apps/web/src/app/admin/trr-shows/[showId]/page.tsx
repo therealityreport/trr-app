@@ -17,6 +17,8 @@ import { ImageScrapeDrawer, type EntityContext } from "@/components/admin/ImageS
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { mapSeasonAssetToMetadata } from "@/lib/photo-metadata";
 import {
+  clearAdvancedFilters,
+  countActiveAdvancedFilters,
   readAdvancedFilters,
   writeAdvancedFilters,
   type AdvancedFilterState,
@@ -49,6 +51,8 @@ interface TrrShow {
   tmdb_vote_average: number | null;
   imdb_rating_value: number | null;
   logo_url?: string | null;
+  streaming_providers?: string[] | null;
+  watch_providers?: string[] | null;
 }
 
 interface TrrSeason {
@@ -80,8 +84,40 @@ interface TrrCastMember {
   thumbnail_crop_mode?: "manual" | "auto" | null;
   total_episodes?: number | null;
   archive_episode_count?: number | null;
+  latest_season?: number | null;
+  seasons_appeared?: number[] | null;
 }
 
+type EntityLinkType = "show" | "season" | "person";
+type EntityLinkGroup = "official" | "social" | "knowledge" | "cast_announcements" | "other";
+type EntityLinkStatus = "pending" | "approved" | "rejected";
+
+interface EntityLink {
+  id: string;
+  show_id: string;
+  entity_type: EntityLinkType;
+  entity_id: string;
+  season_number: number;
+  link_group: EntityLinkGroup;
+  link_kind: string;
+  label: string | null;
+  url: string;
+  status: EntityLinkStatus;
+  confidence: number | null;
+  source: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+interface ShowRole {
+  id: string;
+  show_id: string;
+  name: string;
+  normalized_name: string;
+  sort_order: number;
+  is_active: boolean;
+}
 interface BravoPersonTag {
   person_id?: string | null;
   person_name?: string | null;
@@ -124,6 +160,7 @@ type BravoImportImageKind =
   | "other";
 
 type TabId = "seasons" | "assets" | "news" | "cast" | "surveys" | "social" | "details";
+type ShowCastSource = "episode_evidence" | "show_fallback";
 type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
 type ShowTab = { id: TabId; label: string };
 type RefreshProgressState = {
@@ -161,6 +198,8 @@ type RefreshLogTopicDefinition = {
   description: string;
 };
 
+type HealthStatus = "ready" | "missing" | "stale";
+
 const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
   { key: "shows", label: "SHOWS", description: "Show info, entities, providers" },
   { key: "seasons", label: "SEASONS", description: "Season-level sync progress" },
@@ -171,13 +210,29 @@ const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
 ];
 
 const SHOW_PAGE_TABS: ShowTab[] = [
+  { id: "details", label: "Overview" },
   { id: "seasons", label: "Seasons" },
   { id: "assets", label: "Assets" },
   { id: "news", label: "News" },
   { id: "cast", label: "Cast" },
   { id: "surveys", label: "Surveys" },
   { id: "social", label: "Social" },
-  { id: "details", label: "Details" },
+];
+
+const ENTITY_LINK_GROUP_LABELS: Record<EntityLinkGroup, string> = {
+  official: "Official",
+  social: "Social",
+  knowledge: "Knowledge",
+  cast_announcements: "Cast Announcements",
+  other: "Other",
+};
+
+const ENTITY_LINK_GROUP_ORDER: EntityLinkGroup[] = [
+  "official",
+  "social",
+  "knowledge",
+  "cast_announcements",
+  "other",
 ];
 
 const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
@@ -546,6 +601,30 @@ function CastPhoto({
   );
 }
 
+const getAssetDisplayUrl = (asset: SeasonAsset): string => {
+  const cropDisplay =
+    typeof asset.crop_display_url === "string" && asset.crop_display_url.trim().length > 0
+      ? asset.crop_display_url.trim()
+      : null;
+  const display =
+    typeof asset.display_url === "string" && asset.display_url.trim().length > 0
+      ? asset.display_url.trim()
+      : null;
+  return cropDisplay ?? display ?? asset.hosted_url;
+};
+
+const getAssetDetailUrl = (asset: SeasonAsset): string => {
+  const cropDetail =
+    typeof asset.crop_detail_url === "string" && asset.crop_detail_url.trim().length > 0
+      ? asset.crop_detail_url.trim()
+      : null;
+  const detail =
+    typeof asset.detail_url === "string" && asset.detail_url.trim().length > 0
+      ? asset.detail_url.trim()
+      : null;
+  return cropDetail ?? detail ?? asset.hosted_url;
+};
+
 const NETWORK_LOGO_DOMAIN_BY_NAME: Record<string, string> = {
   bravo: "bravotv.com",
   nbc: "nbc.com",
@@ -691,20 +770,43 @@ export default function TrrShowDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const showId = params.showId as string;
+  const showRouteParam = params.showId as string;
+  const [resolvedShowId, setResolvedShowId] = useState<string | null>(
+    looksLikeUuid(showRouteParam) ? showRouteParam : null
+  );
+  const [slugResolutionLoading, setSlugResolutionLoading] = useState(!looksLikeUuid(showRouteParam));
+  const [slugResolutionError, setSlugResolutionError] = useState<string | null>(null);
+  const showId = resolvedShowId ?? "";
   const { user, checking, hasAccess } = useAdminGuard();
 
   const [show, setShow] = useState<TrrShow | null>(null);
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
   const [cast, setCast] = useState<TrrCastMember[]>([]);
+  const [castSource, setCastSource] = useState<ShowCastSource>("episode_evidence");
+  const [castEligibilityWarning, setCastEligibilityWarning] = useState<string | null>(null);
+  const [castRoleMembers, setCastRoleMembers] = useState<
+    Array<{
+      person_id: string;
+      person_name: string | null;
+      total_episodes: number | null;
+      seasons_appeared: number | null;
+      latest_season: number | null;
+      roles: string[];
+      photo_url: string | null;
+    }>
+  >([]);
+  const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
+  const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
   const [archiveFootageCast, setArchiveFootageCast] = useState<TrrCastMember[]>([]);
-  const [activeTab, setActiveTab] = useState<TabId>("seasons");
+  const [activeTab, setActiveTab] = useState<TabId>("details");
   const [selectedSocialSeasonId, setSelectedSocialSeasonId] = useState<string | null>(null);
   const [assetsView, setAssetsView] = useState<"images" | "videos" | "brand">("images");
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
   const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
   const [bravoLoading, setBravoLoading] = useState(false);
   const [bravoError, setBravoError] = useState<string | null>(null);
+  const [bravoLoaded, setBravoLoaded] = useState(false);
+  const bravoLoadInFlightRef = useRef<Promise<void> | null>(null);
   const [syncBravoOpen, setSyncBravoOpen] = useState(false);
   const [syncBravoUrl, setSyncBravoUrl] = useState("");
   const [syncBravoDescription, setSyncBravoDescription] = useState("");
@@ -747,6 +849,24 @@ export default function TrrShowDetailPage() {
   const [detailsSaving, setDetailsSaving] = useState(false);
   const [detailsNotice, setDetailsNotice] = useState<string | null>(null);
   const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [detailsEditing, setDetailsEditing] = useState(false);
+
+  const [showLinks, setShowLinks] = useState<EntityLink[]>([]);
+  const [linksLoading, setLinksLoading] = useState(false);
+  const [linksError, setLinksError] = useState<string | null>(null);
+  const [linksNotice, setLinksNotice] = useState<string | null>(null);
+
+  const [showRoles, setShowRoles] = useState<ShowRole[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesError, setRolesError] = useState<string | null>(null);
+  const [newRoleName, setNewRoleName] = useState("");
+
+  const [castSortBy, setCastSortBy] = useState<"episodes" | "season" | "name">("episodes");
+  const [castSortOrder, setCastSortOrder] = useState<"desc" | "asc">("desc");
+  const [castSeasonFilters, setCastSeasonFilters] = useState<number[]>([]);
+  const [castRoleFilters, setCastRoleFilters] = useState<string[]>([]);
+  const [castCreditFilters, setCastCreditFilters] = useState<string[]>([]);
+  const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
 
   // Lightbox state (for cast photos)
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -779,6 +899,15 @@ export default function TrrShowDetailPage() {
     },
     [router, searchParams]
   );
+
+  const activeAdvancedFilterCount = useMemo(
+    () => countActiveAdvancedFilters(advancedFilters, { sort: "newest" }),
+    [advancedFilters]
+  );
+  const hasActiveAdvancedFilters = activeAdvancedFilterCount > 0;
+  const clearGalleryFilters = useCallback(() => {
+    setAdvancedFilters(clearAdvancedFilters({ sort: "newest" }));
+  }, [setAdvancedFilters]);
 
   const availableGallerySources = useMemo(() => {
     const sources = new Set(galleryAssets.map((a) => a.source).filter(Boolean));
@@ -845,6 +974,7 @@ export default function TrrShowDetailPage() {
   >({});
 
   const tabParam = searchParams.get("tab");
+  const assetsParam = searchParams.get("assets");
   useEffect(() => {
     const allowedTabs: TabId[] = ["seasons", "assets", "news", "cast", "surveys", "social", "details"];
     if (!tabParam) return;
@@ -855,17 +985,42 @@ export default function TrrShowDetailPage() {
       setAssetsView("images");
       return;
     }
+    if (tabParam === "overview") {
+      setActiveTab("details");
+      return;
+    }
 
     if (allowedTabs.includes(tabParam as TabId)) {
       setActiveTab(tabParam as TabId);
     }
   }, [tabParam]);
 
+  useEffect(() => {
+    if (!assetsParam) return;
+    if (assetsParam === "images" || assetsParam === "videos" || assetsParam === "brand") {
+      setAssetsView(assetsParam);
+    }
+  }, [assetsParam]);
+
   const setTab = useCallback(
     (tab: TabId) => {
       setActiveTab(tab);
       const next = new URLSearchParams(searchParams.toString());
       next.set("tab", tab);
+      if (tab !== "assets") {
+        next.delete("assets");
+      }
+      router.replace(`?${next.toString()}`, { scroll: false });
+    },
+    [router, searchParams]
+  );
+
+  const setAssetsSubTab = useCallback(
+    (view: "images" | "videos" | "brand") => {
+      setAssetsView(view);
+      const next = new URLSearchParams(searchParams.toString());
+      next.set("tab", "assets");
+      next.set("assets", view);
       router.replace(`?${next.toString()}`, { scroll: false });
     },
     [router, searchParams]
@@ -877,6 +1032,63 @@ export default function TrrShowDetailPage() {
     if (!token) throw new Error("Not authenticated");
     return { Authorization: `Bearer ${token}` };
   }, []);
+
+  useEffect(() => {
+    if (checking || !hasAccess) return;
+    const raw = typeof showRouteParam === "string" ? showRouteParam.trim() : "";
+    if (!raw) {
+      setResolvedShowId(null);
+      setSlugResolutionLoading(false);
+      setSlugResolutionError("Missing show identifier.");
+      return;
+    }
+    if (looksLikeUuid(raw)) {
+      setResolvedShowId(raw);
+      setSlugResolutionLoading(false);
+      setSlugResolutionError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const resolveSlug = async () => {
+      setSlugResolutionLoading(true);
+      setSlugResolutionError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
+          { headers, cache: "no-store" }
+        );
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          resolved?: { show_id?: string | null };
+        };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to resolve show slug");
+        }
+        const nextShowId =
+          typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
+            ? data.resolved.show_id
+            : null;
+        if (!nextShowId) throw new Error("Resolved show slug did not return a valid show id.");
+        if (cancelled) return;
+        setResolvedShowId(nextShowId);
+      } catch (err) {
+        if (cancelled) return;
+        setResolvedShowId(null);
+        setSlugResolutionError(
+          err instanceof Error ? err.message : "Could not resolve show URL slug."
+        );
+      } finally {
+        if (!cancelled) setSlugResolutionLoading(false);
+      }
+    };
+
+    void resolveSlug();
+    return () => {
+      cancelled = true;
+    };
+  }, [checking, getAuthHeaders, hasAccess, showRouteParam]);
 
   const appendRefreshLog = useCallback(
     (entry: { category: string; message: string; current?: number | null; total?: number | null }) => {
@@ -1195,6 +1407,7 @@ export default function TrrShowDetailPage() {
 
   // Fetch show details
   const fetchShow = useCallback(async () => {
+    if (!showId) return;
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`/api/admin/trr-api/shows/${showId}`, { headers });
@@ -1249,6 +1462,7 @@ export default function TrrShowDetailPage() {
         setShow(nextShow);
       }
       setDetailsNotice("Show details saved.");
+      setDetailsEditing(false);
     } catch (err) {
       setDetailsError(err instanceof Error ? err.message : "Failed to save show details");
     } finally {
@@ -1271,8 +1485,34 @@ export default function TrrShowDetailPage() {
     });
   }, [show]);
 
+  const startDetailsEdit = useCallback(() => {
+    setDetailsNotice(null);
+    setDetailsError(null);
+    setDetailsEditing(true);
+  }, []);
+
+  const cancelDetailsEdit = useCallback(() => {
+    if (show) {
+      const alternatives = Array.isArray(show.alternative_names)
+        ? show.alternative_names.filter((name) => typeof name === "string" && name.trim().length > 0)
+        : [];
+      const [nickname = "", ...restAlt] = alternatives;
+      setDetailsForm({
+        displayName: show.name ?? "",
+        nickname,
+        altNamesText: restAlt.join("\n"),
+        description: show.description ?? "",
+        premiereDate: show.premiere_date ?? "",
+      });
+    }
+    setDetailsNotice(null);
+    setDetailsError(null);
+    setDetailsEditing(false);
+  }, [show]);
+
   // Fetch seasons
   const fetchSeasons = useCallback(async () => {
+    if (!showId) return;
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
@@ -1366,6 +1606,7 @@ export default function TrrShowDetailPage() {
 
   // Fetch cast
   const fetchCast = useCallback(async (): Promise<TrrCastMember[]> => {
+    if (!showId) return [];
     try {
       const headers = await getAuthHeaders();
       // Fetch all cast without filters - photo filtering done client-side if needed
@@ -1383,63 +1624,440 @@ export default function TrrShowDetailPage() {
       }
       const castRaw = (data as { cast?: unknown }).cast;
       const archiveCastRaw = (data as { archive_footage_cast?: unknown }).archive_footage_cast;
+      const castSourceRaw = (data as { cast_source?: unknown }).cast_source;
+      const eligibilityWarningRaw = (data as { eligibility_warning?: unknown }).eligibility_warning;
       const nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
       const nextArchiveCast = Array.isArray(archiveCastRaw)
         ? (archiveCastRaw as TrrCastMember[])
         : [];
       setCast(nextCast);
       setArchiveFootageCast(nextArchiveCast);
+      setCastSource(castSourceRaw === "show_fallback" ? "show_fallback" : "episode_evidence");
+      setCastEligibilityWarning(
+        typeof eligibilityWarningRaw === "string" && eligibilityWarningRaw.trim()
+          ? eligibilityWarningRaw
+          : null
+      );
       return nextCast;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch cast";
       console.warn("Failed to fetch cast:", message);
       setError(message);
       setArchiveFootageCast([]);
+      setCastSource("episode_evidence");
+      setCastEligibilityWarning(null);
       return [];
     }
   }, [showId, getAuthHeaders]);
 
-  const loadBravoData = useCallback(async () => {
+  const fetchShowLinks = useCallback(async () => {
+    if (!showId) return;
+    setLinksLoading(true);
+    setLinksError(null);
     try {
-      setBravoLoading(true);
-      setBravoError(null);
       const headers = await getAuthHeaders();
-
-      const [videosResponse, newsResponse] = await Promise.all([
-        fetch(`/api/admin/trr-api/shows/${showId}/bravo/videos?merge_person_sources=true`, {
-          headers,
-          cache: "no-store",
-        }),
-        fetch(`/api/admin/trr-api/shows/${showId}/bravo/news`, {
-          headers,
-          cache: "no-store",
-        }),
-      ]);
-
-      const videosData = (await videosResponse.json().catch(() => ({}))) as {
-        videos?: BravoVideoItem[];
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/links?status=all`, {
+        headers,
+        cache: "no-store",
+      });
+      const data = (await response.json().catch(() => ({}))) as {
         error?: string;
-      };
-      const newsData = (await newsResponse.json().catch(() => ({}))) as {
-        news?: BravoNewsItem[];
-        error?: string;
-      };
-
-      if (!videosResponse.ok) {
-        throw new Error(videosData.error || "Failed to fetch Bravo videos");
+      } & { 0?: EntityLink };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load links");
       }
-      if (!newsResponse.ok) {
-        throw new Error(newsData.error || "Failed to fetch Bravo news");
-      }
-
-      setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
-      setBravoNews(Array.isArray(newsData.news) ? newsData.news : []);
+      setShowLinks(Array.isArray(data) ? (data as EntityLink[]) : []);
     } catch (err) {
-      setBravoError(err instanceof Error ? err.message : "Failed to load Bravo data");
+      setLinksError(err instanceof Error ? err.message : "Failed to load links");
     } finally {
-      setBravoLoading(false);
+      setLinksLoading(false);
     }
   }, [getAuthHeaders, showId]);
+
+  const discoverShowLinks = useCallback(async () => {
+    if (!showId) return;
+    setLinksNotice(null);
+    setLinksError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/links/discover`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ include_seasons: true, include_people: true }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        discovered?: number;
+      };
+      if (!response.ok) throw new Error(data.error || "Failed to discover links");
+      setLinksNotice(
+        `Discovered ${typeof data.discovered === "number" ? data.discovered : 0} links. Review pending items before publish.`
+      );
+      await fetchShowLinks();
+    } catch (err) {
+      setLinksError(err instanceof Error ? err.message : "Failed to discover links");
+    }
+  }, [fetchShowLinks, getAuthHeaders, showId]);
+
+  const patchShowLink = useCallback(
+    async (linkId: string, payload: Record<string, unknown>) => {
+      if (!showId) return false;
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/links/${linkId}`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Failed to update link");
+      return true;
+    },
+    [getAuthHeaders, showId]
+  );
+
+  const setShowLinkStatus = useCallback(
+    async (linkId: string, status: EntityLinkStatus) => {
+      setLinksError(null);
+      try {
+        await patchShowLink(linkId, { status });
+        await fetchShowLinks();
+      } catch (err) {
+        setLinksError(err instanceof Error ? err.message : "Failed to update link");
+      }
+    },
+    [fetchShowLinks, patchShowLink]
+  );
+
+  const editShowLink = useCallback(
+    async (link: EntityLink) => {
+      const nextLabel = window.prompt("Link label", link.label ?? "") ?? link.label ?? "";
+      const nextUrl = window.prompt("Link URL", link.url) ?? link.url;
+      if (!nextUrl || nextUrl.trim().length === 0) return;
+      setLinksError(null);
+      try {
+        await patchShowLink(link.id, {
+          label: nextLabel.trim() || null,
+          url: nextUrl.trim(),
+        });
+        await fetchShowLinks();
+      } catch (err) {
+        setLinksError(err instanceof Error ? err.message : "Failed to edit link");
+      }
+    },
+    [fetchShowLinks, patchShowLink]
+  );
+
+  const deleteShowLink = useCallback(
+    async (linkId: string) => {
+      if (!showId) return;
+      setLinksError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(`/api/admin/trr-api/shows/${showId}/links/${linkId}`, {
+          method: "DELETE",
+          headers,
+        });
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) throw new Error(data.error || "Failed to delete link");
+        await fetchShowLinks();
+      } catch (err) {
+        setLinksError(err instanceof Error ? err.message : "Failed to delete link");
+      }
+    },
+    [fetchShowLinks, getAuthHeaders, showId]
+  );
+
+  const fetchShowRoles = useCallback(async () => {
+    if (!showId) return;
+    setRolesLoading(true);
+    setRolesError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
+        headers,
+        cache: "no-store",
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Failed to load roles");
+      setShowRoles(Array.isArray(data) ? (data as ShowRole[]) : []);
+    } catch (err) {
+      setRolesError(err instanceof Error ? err.message : "Failed to load roles");
+    } finally {
+      setRolesLoading(false);
+    }
+  }, [getAuthHeaders, showId]);
+
+  const createShowRole = useCallback(async () => {
+    const roleName = newRoleName.trim();
+    if (!roleName || !showId) return;
+    setRolesError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: roleName }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Failed to create role");
+      setNewRoleName("");
+      await fetchShowRoles();
+    } catch (err) {
+      setRolesError(err instanceof Error ? err.message : "Failed to create role");
+    }
+  }, [fetchShowRoles, getAuthHeaders, newRoleName, showId]);
+
+  const patchShowRole = useCallback(
+    async (roleId: string, payload: Record<string, unknown>) => {
+      if (!showId) return;
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/roles/${roleId}`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Failed to update role");
+    },
+    [getAuthHeaders, showId]
+  );
+
+  const fetchCastRoleMembers = useCallback(async () => {
+    if (!showId) return;
+    setCastRoleMembersLoading(true);
+    setCastRoleMembersError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      params.set("sort_by", castSortBy);
+      params.set("order", castSortOrder);
+      if (castSeasonFilters.length > 0) {
+        params.set("seasons", castSeasonFilters.join(","));
+      }
+      if (castRoleFilters.length > 0) {
+        params.set("roles", castRoleFilters.join(","));
+      }
+      if (castHasImageFilter === "yes") params.set("has_image", "true");
+      if (castHasImageFilter === "no") params.set("has_image", "false");
+
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
+        { headers, cache: "no-store" }
+      );
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Failed to load cast role members");
+      setCastRoleMembers(
+        (Array.isArray(data) ? data : []).map((row) => {
+          const roles = Array.isArray((row as { roles?: unknown }).roles)
+            ? ((row as { roles: unknown[] }).roles.filter(
+                (value): value is string => typeof value === "string" && value.trim().length > 0
+              ) as string[])
+            : [];
+          return {
+            person_id: String((row as { person_id?: unknown }).person_id ?? ""),
+            person_name:
+              typeof (row as { person_name?: unknown }).person_name === "string"
+                ? (row as { person_name: string }).person_name
+                : null,
+            total_episodes:
+              typeof (row as { total_episodes?: unknown }).total_episodes === "number"
+                ? (row as { total_episodes: number }).total_episodes
+                : null,
+            seasons_appeared:
+              typeof (row as { seasons_appeared?: unknown }).seasons_appeared === "number"
+                ? (row as { seasons_appeared: number }).seasons_appeared
+                : null,
+            latest_season:
+              typeof (row as { latest_season?: unknown }).latest_season === "number"
+                ? (row as { latest_season: number }).latest_season
+                : null,
+            roles,
+            photo_url:
+              typeof (row as { photo_url?: unknown }).photo_url === "string"
+                ? (row as { photo_url: string }).photo_url
+                : null,
+          };
+        })
+      );
+    } catch (err) {
+      setCastRoleMembers([]);
+      setCastRoleMembersError(err instanceof Error ? err.message : "Failed to load cast role members");
+    } finally {
+      setCastRoleMembersLoading(false);
+    }
+  }, [
+    castHasImageFilter,
+    castRoleFilters,
+    castSeasonFilters,
+    castSortBy,
+    castSortOrder,
+    getAuthHeaders,
+    showId,
+  ]);
+
+  const renameShowRole = useCallback(
+    async (role: ShowRole) => {
+      const nextName = window.prompt("Rename role", role.name);
+      if (!nextName || nextName.trim().length === 0 || nextName.trim() === role.name) return;
+      try {
+        setRolesError(null);
+        await patchShowRole(role.id, { name: nextName.trim() });
+        await fetchShowRoles();
+        await fetchCastRoleMembers();
+      } catch (err) {
+        setRolesError(err instanceof Error ? err.message : "Failed to rename role");
+      }
+    },
+    [fetchCastRoleMembers, fetchShowRoles, patchShowRole]
+  );
+
+  const toggleShowRoleActive = useCallback(
+    async (role: ShowRole) => {
+      try {
+        setRolesError(null);
+        await patchShowRole(role.id, { is_active: !role.is_active });
+        await fetchShowRoles();
+        await fetchCastRoleMembers();
+      } catch (err) {
+        setRolesError(err instanceof Error ? err.message : "Failed to update role");
+      }
+    },
+    [fetchCastRoleMembers, fetchShowRoles, patchShowRole]
+  );
+
+  const assignRolesToCastMember = useCallback(
+    async (personId: string, personName: string) => {
+      if (!showId) return;
+      const currentRoles =
+        castRoleMembers.find((member) => member.person_id === personId)?.roles ?? [];
+      const input = window.prompt(
+        `Assign roles for ${personName}. Enter comma-separated role names.`,
+        currentRoles.join(", ")
+      );
+      if (input === null) return;
+      const roleNames = Array.from(
+        new Set(
+          input
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean)
+        )
+      );
+      try {
+        setRolesError(null);
+        setCastRoleMembersError(null);
+        const headers = await getAuthHeaders();
+        let nextRoles = [...showRoles];
+        for (const roleName of roleNames) {
+          if (nextRoles.some((role) => role.name.toLowerCase() === roleName.toLowerCase())) continue;
+          const createResponse = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ name: roleName }),
+          });
+          const created = (await createResponse.json().catch(() => ({}))) as {
+            error?: string;
+            id?: string;
+          };
+          if (!createResponse.ok) {
+            throw new Error(created.error || `Failed to create role "${roleName}"`);
+          }
+        }
+
+        await fetchShowRoles();
+        nextRoles = await (async () => {
+          const response = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
+            headers,
+            cache: "no-store",
+          });
+          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          if (!response.ok) throw new Error(data.error || "Failed to refresh roles");
+          return Array.isArray(data) ? (data as ShowRole[]) : [];
+        })();
+
+        const roleIds = nextRoles
+          .filter((role) => roleNames.some((name) => name.toLowerCase() === role.name.toLowerCase()))
+          .map((role) => role.id);
+        const seasonNumber = castSeasonFilters.length === 1 ? castSeasonFilters[0] : 0;
+        const assignResponse = await fetch(
+          `/api/admin/trr-api/shows/${showId}/cast/${personId}/roles`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ season_number: seasonNumber, role_ids: roleIds }),
+          }
+        );
+        const assigned = (await assignResponse.json().catch(() => ({}))) as { error?: string };
+        if (!assignResponse.ok) throw new Error(assigned.error || "Failed to assign roles");
+        await fetchCastRoleMembers();
+      } catch (err) {
+        setCastRoleMembersError(err instanceof Error ? err.message : "Failed to assign roles");
+      }
+    },
+    [castRoleMembers, castSeasonFilters, fetchCastRoleMembers, fetchShowRoles, getAuthHeaders, showId, showRoles]
+  );
+
+  const loadBravoData = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    if (!showId) return;
+    if (!force && bravoLoaded) return;
+    if (bravoLoadInFlightRef.current) {
+      await bravoLoadInFlightRef.current;
+      return;
+    }
+
+    const request = (async () => {
+      try {
+        setBravoLoading(true);
+        setBravoError(null);
+        const headers = await getAuthHeaders();
+
+        const [videosResponse, newsResponse] = await Promise.all([
+          fetch(`/api/admin/trr-api/shows/${showId}/bravo/videos?merge_person_sources=true`, {
+            headers,
+            cache: "no-store",
+          }),
+          fetch(`/api/admin/trr-api/shows/${showId}/bravo/news`, {
+            headers,
+            cache: "no-store",
+          }),
+        ]);
+
+        const videosData = (await videosResponse.json().catch(() => ({}))) as {
+          videos?: BravoVideoItem[];
+          error?: string;
+        };
+        const newsData = (await newsResponse.json().catch(() => ({}))) as {
+          news?: BravoNewsItem[];
+          error?: string;
+        };
+
+        if (!videosResponse.ok) {
+          throw new Error(videosData.error || "Failed to fetch Bravo videos");
+        }
+        if (!newsResponse.ok) {
+          throw new Error(newsData.error || "Failed to fetch Bravo news");
+        }
+
+        setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
+        setBravoNews(Array.isArray(newsData.news) ? newsData.news : []);
+        setBravoLoaded(true);
+      } catch (err) {
+        setBravoLoaded(false);
+        setBravoError(err instanceof Error ? err.message : "Failed to load Bravo data");
+      } finally {
+        setBravoLoading(false);
+      }
+    })();
+
+    bravoLoadInFlightRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (bravoLoadInFlightRef.current === request) {
+        bravoLoadInFlightRef.current = null;
+      }
+    }
+  }, [bravoLoaded, getAuthHeaders, showId]);
 
   const syncBravoSeasonOptions = useMemo(() => {
     const numbers = seasons
@@ -1714,7 +2332,9 @@ export default function TrrShowDetailPage() {
         message: `Bravo sync complete: ${data.counts?.people_updated ?? 0} people updated, ${data.counts?.imported_show_images ?? 0} show images imported.`,
       });
 
-      await Promise.all([fetchShow(), loadBravoData(), fetchCast()]);
+      await Promise.all([fetchShow(), fetchCast()]);
+      setBravoLoaded(false);
+      void loadBravoData({ force: true });
     } catch (err) {
       appendRefreshLog({
         category: "BravoTV",
@@ -1746,6 +2366,7 @@ export default function TrrShowDetailPage() {
 
   // Check if show is covered
   const checkCoverage = useCallback(async () => {
+    if (!showId) return;
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`/api/admin/covered-shows/${showId}`, { headers });
@@ -1757,7 +2378,7 @@ export default function TrrShowDetailPage() {
 
   // Add show to covered shows
   const addToCoveredShows = async () => {
-    if (!show) return;
+    if (!show || !showId) return;
     setCoverageLoading(true);
     try {
       const headers = await getAuthHeaders();
@@ -1778,6 +2399,7 @@ export default function TrrShowDetailPage() {
 
   // Remove show from covered shows
   const removeFromCoveredShows = async () => {
+    if (!showId) return;
     setCoverageLoading(true);
     try {
       const headers = await getAuthHeaders();
@@ -1798,6 +2420,7 @@ export default function TrrShowDetailPage() {
   // Initial load
   useEffect(() => {
     if (!hasAccess) return;
+    if (!showId) return;
 
     const loadData = async () => {
       setLoading(true);
@@ -1807,7 +2430,45 @@ export default function TrrShowDetailPage() {
     };
 
     loadData();
-  }, [hasAccess, fetchShow, fetchSeasons, fetchCast, checkCoverage, loadBravoData]);
+  }, [hasAccess, showId, fetchShow, fetchSeasons, fetchCast, checkCoverage]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId || activeTab !== "details") return;
+    void fetchShowLinks();
+  }, [activeTab, fetchShowLinks, hasAccess, showId]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId || activeTab !== "cast") return;
+    void fetchShowRoles();
+  }, [activeTab, fetchShowRoles, hasAccess, showId]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId || activeTab !== "cast") return;
+    void fetchCastRoleMembers();
+  }, [activeTab, fetchCastRoleMembers, hasAccess, showId]);
+
+  useEffect(() => {
+    setBravoVideos([]);
+    setBravoNews([]);
+    setBravoError(null);
+    setBravoLoaded(false);
+    bravoLoadInFlightRef.current = null;
+    setShowLinks([]);
+    setShowRoles([]);
+    setCastRoleMembers([]);
+    setCastRoleMembersError(null);
+    setLinksError(null);
+    setLinksNotice(null);
+    setDetailsEditing(false);
+  }, [showId]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId) return;
+    const shouldLoadBravo =
+      refreshLogOpen || activeTab === "news" || (activeTab === "assets" && assetsView === "videos");
+    if (!shouldLoadBravo) return;
+    void loadBravoData();
+  }, [activeTab, assetsView, hasAccess, loadBravoData, refreshLogOpen, showId]);
 
   useEffect(() => {
     if (seasons.length > 0) {
@@ -1830,9 +2491,153 @@ export default function TrrShowDetailPage() {
     return `${formatDate(premiere)} – ${formatDate(finale)}`;
   };
 
-  const isSeasonBackdrop = (asset: SeasonAsset) => {
-    return (asset.kind ?? "").toLowerCase().trim() === "backdrop";
-  };
+  const castRoleMemberByPersonId = useMemo(
+    () => new Map(castRoleMembers.map((member) => [member.person_id, member] as const)),
+    [castRoleMembers]
+  );
+
+  const availableCastRoles = useMemo(() => {
+    const values = new Set<string>();
+    for (const role of showRoles) {
+      if (role.is_active) values.add(role.name);
+    }
+    for (const member of castRoleMembers) {
+      for (const role of member.roles) values.add(role);
+    }
+    for (const member of cast) {
+      if (typeof member.role === "string" && member.role.trim()) values.add(member.role.trim());
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [cast, castRoleMembers, showRoles]);
+
+  const availableCastCreditCategories = useMemo(() => {
+    const values = new Set<string>();
+    for (const member of cast) {
+      if (typeof member.credit_category === "string" && member.credit_category.trim()) {
+        values.add(member.credit_category.trim());
+      }
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [cast]);
+
+  const availableCastSeasons = useMemo(() => {
+    const values = new Set<number>();
+    for (const member of castRoleMembers) {
+      if (typeof member.latest_season === "number" && Number.isFinite(member.latest_season)) {
+        values.add(member.latest_season);
+      }
+    }
+    return Array.from(values).sort((a, b) => b - a);
+  }, [castRoleMembers]);
+
+  const castDisplayMembers = useMemo(() => {
+    const merged = cast.map((member) => {
+      const enriched = castRoleMemberByPersonId.get(member.person_id);
+      const mergedRoles =
+        enriched && enriched.roles.length > 0
+          ? enriched.roles
+          : typeof member.role === "string" && member.role.trim().length > 0
+            ? [member.role.trim()]
+            : [];
+      const mergedLatestSeason =
+        enriched && typeof enriched.latest_season === "number" ? enriched.latest_season : null;
+      const mergedTotalEpisodes =
+        enriched && typeof enriched.total_episodes === "number"
+          ? enriched.total_episodes
+          : typeof member.total_episodes === "number"
+            ? member.total_episodes
+            : null;
+      const mergedPhotoUrl =
+        enriched?.photo_url || member.photo_url || member.cover_photo_url || null;
+      return {
+        ...member,
+        roles: mergedRoles,
+        latest_season: mergedLatestSeason,
+        total_episodes: mergedTotalEpisodes,
+        merged_photo_url: mergedPhotoUrl,
+      };
+    });
+
+    const filtered = merged.filter((member) => {
+      if (
+        castSeasonFilters.length > 0 &&
+        (!member.latest_season || !castSeasonFilters.includes(member.latest_season))
+      ) {
+        return false;
+      }
+      if (
+        castRoleFilters.length > 0 &&
+        !member.roles.some((role) =>
+          castRoleFilters.some((selected) => selected.toLowerCase() === role.toLowerCase())
+        )
+      ) {
+        return false;
+      }
+      if (
+        castCreditFilters.length > 0 &&
+        !castCreditFilters.some(
+          (value) => value.toLowerCase() === (member.credit_category ?? "").toLowerCase()
+        )
+      ) {
+        return false;
+      }
+      if (castHasImageFilter === "yes" && !member.merged_photo_url) return false;
+      if (castHasImageFilter === "no" && member.merged_photo_url) return false;
+      return true;
+    });
+
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (castSortBy === "name") {
+        const aName = (a.full_name || a.cast_member_name || "").toLowerCase();
+        const bName = (b.full_name || b.cast_member_name || "").toLowerCase();
+        return castSortOrder === "asc" ? aName.localeCompare(bName) : bName.localeCompare(aName);
+      }
+      if (castSortBy === "season") {
+        const aSeason = a.latest_season ?? -1;
+        const bSeason = b.latest_season ?? -1;
+        return castSortOrder === "asc" ? aSeason - bSeason : bSeason - aSeason;
+      }
+      const aEpisodes = a.total_episodes ?? 0;
+      const bEpisodes = b.total_episodes ?? 0;
+      return castSortOrder === "asc" ? aEpisodes - bEpisodes : bEpisodes - aEpisodes;
+    });
+    return sorted;
+  }, [
+    cast,
+    castCreditFilters,
+    castHasImageFilter,
+    castRoleFilters,
+    castRoleMemberByPersonId,
+    castSeasonFilters,
+    castSortBy,
+    castSortOrder,
+  ]);
+
+  const linksByGroup = useMemo(() => {
+    const grouped = new Map<EntityLinkGroup, EntityLink[]>();
+    for (const group of ENTITY_LINK_GROUP_ORDER) grouped.set(group, []);
+    for (const link of showLinks) {
+      const list = grouped.get(link.link_group as EntityLinkGroup);
+      if (!list) continue;
+      list.push(link);
+    }
+    for (const group of ENTITY_LINK_GROUP_ORDER) {
+      const list = grouped.get(group) ?? [];
+      list.sort((a, b) => {
+        if (group === "cast_announcements") {
+          if (a.season_number !== b.season_number) return b.season_number - a.season_number;
+        }
+        return (a.label || a.url).localeCompare(b.label || b.url);
+      });
+    }
+    return grouped;
+  }, [showLinks]);
+
+  const pendingLinkCount = useMemo(
+    () => showLinks.filter((link) => link.status === "pending").length,
+    [showLinks]
+  );
 
   const filteredGalleryAssets = useMemo(() => {
     return applyAdvancedFiltersToSeasonAssets(galleryAssets, advancedFilters, {
@@ -1845,6 +2650,63 @@ export default function TrrShowDetailPage() {
           : selectedGallerySeason,
     });
   }, [galleryAssets, advancedFilters, selectedGallerySeason, show?.name]);
+
+  const gallerySectionAssets = useMemo(() => {
+    const showBackdrops: SeasonAsset[] = [];
+    const showPosters: SeasonAsset[] = [];
+    const seasonPosters: SeasonAsset[] = [];
+    const episodeStills: SeasonAsset[] = [];
+    const castAndPromos: SeasonAsset[] = [];
+    const other: SeasonAsset[] = [];
+
+    for (const asset of filteredGalleryAssets) {
+      const normalizedKind = (asset.kind ?? "").toLowerCase().trim();
+      const normalizedSource = (asset.source ?? "").toLowerCase().trim();
+      const isBackdropKind = normalizedKind === "backdrop";
+      const isTmdbBackdrop =
+        asset.type === "show" &&
+        isBackdropKind &&
+        normalizedSource === "tmdb";
+      const isShowPoster =
+        asset.type === "show" &&
+        !isBackdropKind &&
+        normalizedKind === "poster";
+      const isLogo = normalizedKind === "logo";
+      const isCastOrPromo = normalizedKind === "cast" || normalizedKind === "promo";
+
+      if (isTmdbBackdrop) {
+        showBackdrops.push(asset);
+        continue;
+      }
+      if (isShowPoster) {
+        showPosters.push(asset);
+        continue;
+      }
+      if (asset.type === "season") {
+        seasonPosters.push(asset);
+        continue;
+      }
+      if (asset.type === "episode") {
+        episodeStills.push(asset);
+        continue;
+      }
+      if (isCastOrPromo) {
+        castAndPromos.push(asset);
+        continue;
+      }
+      if (isLogo) continue;
+      other.push(asset);
+    }
+
+    return {
+      showBackdrops,
+      showPosters,
+      seasonPosters,
+      episodeStills,
+      castAndPromos,
+      other,
+    };
+  }, [filteredGalleryAssets]);
 
   const brandLogoAssets = useMemo(
     () =>
@@ -2069,6 +2931,7 @@ export default function TrrShowDetailPage() {
   // Load gallery assets for a season (or all seasons)
   const loadGalleryAssets = useCallback(
     async (seasonNumber: number | "all") => {
+      if (!showId) return;
       setGalleryLoading(true);
       try {
         const headers = await getAuthHeaders();
@@ -2565,6 +3428,7 @@ export default function TrrShowDetailPage() {
   );
 
   const refreshAllShowData = useCallback(async () => {
+    if (!showId) return;
     if (refreshingShowAll) return;
 
     setRefreshLogEntries([]);
@@ -2661,7 +3525,7 @@ export default function TrrShowDetailPage() {
       setRefreshingShowAll(false);
       setRefreshAllProgress(null);
     }
-  }, [appendRefreshLog, refreshShow, refreshingShowAll]);
+  }, [appendRefreshLog, refreshShow, refreshingShowAll, showId]);
 
   const refreshShowCast = useCallback(async () => {
     if (refreshingShowAll || Object.values(refreshingTargets).some(Boolean)) return;
@@ -2866,6 +3730,33 @@ export default function TrrShowDetailPage() {
     return null;
   }
 
+  if (slugResolutionLoading || (!showId && !slugResolutionError)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
+          <p className="text-sm text-zinc-600">Resolving show URL...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (slugResolutionError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-red-600">{slugResolutionError}</p>
+          <Link
+            href="/admin/trr-shows"
+            className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
+          >
+            ← Back to Shows
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -2943,6 +3834,178 @@ export default function TrrShowDetailPage() {
     : `Sync seasons, episodes, and cast first (missing: ${syncBravoReadinessIssues.join(", ")}).`;
   const autoGeneratedBravoUrl = inferBravoShowUrl(show?.name) || syncBravoUrl.trim() || "";
 
+  const refreshTopicStatusByKey = new Map(
+    refreshLogTopicGroups.map((group) => [group.topic.key, group.status] as const)
+  );
+
+  const pipelineSteps = REFRESH_LOG_TOPIC_DEFINITIONS.map((topic) => {
+    const status = refreshTopicStatusByKey.get(topic.key) ?? "pending";
+    const latest = refreshLogTopicGroups.find((group) => group.topic.key === topic.key)?.latest ?? null;
+    return { topic, status, latest };
+  });
+
+  const healthBadgeClassName = (status: HealthStatus): string => {
+    if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    if (status === "stale") return "border-amber-200 bg-amber-50 text-amber-700";
+    return "border-rose-200 bg-rose-50 text-rose-700";
+  };
+
+  const showHealthStatus: HealthStatus = refreshingTargets.details
+    ? "stale"
+    : show.description || show.tmdb_id || show.imdb_id
+      ? "ready"
+      : "missing";
+  const seasonsHealthStatus: HealthStatus = refreshingTargets.seasons_episodes
+    ? "stale"
+    : visibleSeasons.length > 0
+      ? "ready"
+      : "missing";
+  const episodesHealthStatus: HealthStatus = refreshingTargets.seasons_episodes
+    ? "stale"
+    : syncedEpisodeCount > 0
+      ? "ready"
+      : "missing";
+  const castHealthStatus: HealthStatus = refreshingTargets.cast_credits
+    ? "stale"
+    : cast.length > 0
+      ? "ready"
+      : "missing";
+  const imageHealthStatus: HealthStatus = refreshingTargets.photos || galleryLoading
+    ? "stale"
+    : galleryAssets.length > 0
+      ? "ready"
+      : "missing";
+  const videoHealthStatus: HealthStatus = bravoLoading
+    ? "stale"
+    : bravoVideos.length > 0
+      ? "ready"
+      : "missing";
+  const newsHealthStatus: HealthStatus = bravoLoading
+    ? "stale"
+    : bravoNews.length > 0
+      ? "ready"
+      : "missing";
+
+  const contentHealthItems: Array<{
+    key: string;
+    label: string;
+    countLabel: string;
+    status: HealthStatus;
+    onClick: () => void;
+  }> = [
+    {
+      key: "show",
+      label: "Show",
+      countLabel: show.description?.trim() ? "Info set" : "Info missing",
+      status: showHealthStatus,
+      onClick: () => setTab("details"),
+    },
+    {
+      key: "seasons",
+      label: "Seasons",
+      countLabel: `${visibleSeasons.length}`,
+      status: seasonsHealthStatus,
+      onClick: () => setTab("seasons"),
+    },
+    {
+      key: "episodes",
+      label: "Episodes",
+      countLabel: `${syncedEpisodeCount}`,
+      status: episodesHealthStatus,
+      onClick: () => setTab("seasons"),
+    },
+    {
+      key: "cast",
+      label: "Cast",
+      countLabel: `${cast.length}`,
+      status: castHealthStatus,
+      onClick: () => setTab("cast"),
+    },
+    {
+      key: "images",
+      label: "Images",
+      countLabel: `${galleryAssets.length}`,
+      status: imageHealthStatus,
+      onClick: () => {
+        setTab("assets");
+        setAssetsSubTab("images");
+      },
+    },
+    {
+      key: "videos",
+      label: "Videos",
+      countLabel: `${bravoVideos.length}`,
+      status: videoHealthStatus,
+      onClick: () => {
+        setTab("assets");
+        setAssetsSubTab("videos");
+      },
+    },
+    {
+      key: "news",
+      label: "News",
+      countLabel: `${bravoNews.length}`,
+      status: newsHealthStatus,
+      onClick: () => setTab("news"),
+    },
+  ];
+
+  const operationsInboxItems: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    onClick: () => void;
+  }> = [];
+  if (!canSyncByBravo) {
+    operationsInboxItems.push({
+      id: "bravo-readiness",
+      title: "Sync prerequisites missing",
+      detail:
+        syncBravoReadinessMessage ??
+        "Run Show Info, Seasons/Episodes, and Cast sync before Bravo import.",
+      onClick: refreshAllShowData,
+    });
+  }
+  if (galleryAssets.length === 0) {
+    operationsInboxItems.push({
+      id: "no-gallery-assets",
+      title: "No gallery images imported",
+      detail: "Import or sync images so show/season galleries can render.",
+      onClick: () => {
+        setTab("assets");
+        setAssetsSubTab("images");
+      },
+    });
+  }
+  if (bravoVideos.length === 0) {
+    operationsInboxItems.push({
+      id: "no-bravo-videos",
+      title: "No Bravo videos persisted",
+      detail: "Run Sync by Bravo and verify the target season has watch/videos content.",
+      onClick: () => {
+        setTab("assets");
+        setAssetsSubTab("videos");
+      },
+    });
+  }
+  if (bravoNews.length === 0) {
+    operationsInboxItems.push({
+      id: "no-bravo-news",
+      title: "No Bravo news persisted",
+      detail: "Run Sync by Bravo so show and person news can be tagged and displayed.",
+      onClick: () => setTab("news"),
+    });
+  }
+  if (cast.length === 0) {
+    operationsInboxItems.push({
+      id: "cast-missing",
+      title: "Cast has no eligible members",
+      detail:
+        "Cast eligibility requires real episode evidence. Check episode credits sync and appearance types.",
+      onClick: () => setTab("cast"),
+    });
+  }
+
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
@@ -3013,7 +4076,7 @@ export default function TrrShowDetailPage() {
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                 >
                   {isShowRefreshBusy
-                    ? `Refreshing... ${refreshLogOpen ? "(Hide Log)" : "(View Log)"}`
+                    ? `Refreshing... ${refreshLogOpen ? "(Hide Health)" : "(View Health)"}`
                     : "Refresh"}
                 </button>
                 <button
@@ -3043,6 +4106,26 @@ export default function TrrShowDetailPage() {
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Sync by Bravo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRefreshLogOpen(true)}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                  title="Open Health Center"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M22 12h-4l-3 8-4-16-3 8H2" />
+                  </svg>
+                  Health
                 </button>
                 {syncBravoReadinessMessage && (
                   <p className="max-w-xs text-right text-[11px] text-amber-700">
@@ -3385,7 +4468,7 @@ export default function TrrShowDetailPage() {
               <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  {assetsView === "images" ? "Season Gallery" : assetsView === "videos" ? "Videos" : "Brand"}
+                  {assetsView === "images" ? "Show Gallery" : assetsView === "videos" ? "Videos" : "Brand"}
                 </p>
                 <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
                 </div>
@@ -3393,7 +4476,7 @@ export default function TrrShowDetailPage() {
                 <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
                   <button
                     type="button"
-                    onClick={() => setAssetsView("images")}
+                    onClick={() => setAssetsSubTab("images")}
                     className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
                       assetsView === "images"
                         ? "bg-white text-zinc-900 shadow-sm"
@@ -3404,7 +4487,7 @@ export default function TrrShowDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAssetsView("videos")}
+                    onClick={() => setAssetsSubTab("videos")}
                     className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
                       assetsView === "videos"
                         ? "bg-white text-zinc-900 shadow-sm"
@@ -3415,7 +4498,7 @@ export default function TrrShowDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAssetsView("brand")}
+                    onClick={() => setAssetsSubTab("brand")}
                     className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
                       assetsView === "brand"
                         ? "bg-white text-zinc-900 shadow-sm"
@@ -3479,6 +4562,15 @@ export default function TrrShowDetailPage() {
                         </svg>
                         Filters
                       </button>
+                      {hasActiveAdvancedFilters && (
+                        <button
+                          type="button"
+                          onClick={clearGalleryFilters}
+                          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                        >
+                          Clear Filters ({activeAdvancedFilterCount})
+                        </button>
+                      )}
 
                       <button
                         onClick={() => {
@@ -3544,24 +4636,14 @@ export default function TrrShowDetailPage() {
                     </p>
                   ) : (
                     <div className="space-y-8">
-                  {/* Show Backdrops (TMDb backdrops) */}
-                  {filteredGalleryAssets.filter(
-                    (a) => a.type === "show" && isSeasonBackdrop(a) && (a.source ?? "").toLowerCase() === "tmdb"
-                  )
-                    .length > 0 && (
+                      {/* Show Backdrops (TMDb backdrops) */}
+                      {gallerySectionAssets.showBackdrops.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Backdrops
                           </h4>
                           <div className="grid grid-cols-3 gap-4">
-                            {filteredGalleryAssets
-                              .filter(
-                                (a) =>
-                                  a.type === "show" &&
-                                  isSeasonBackdrop(a) &&
-                                  (a.source ?? "").toLowerCase() === "tmdb"
-                              )
-                              .map((asset, i, arr) => (
+                            {gallerySectionAssets.showBackdrops.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -3570,7 +4652,7 @@ export default function TrrShowDetailPage() {
                                   className="relative aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                   <GalleryImage
-                                    src={asset.hosted_url}
+                                    src={getAssetDisplayUrl(asset)}
                                     alt={asset.caption || "Season backdrop"}
                                     sizes="300px"
                                     className="object-cover"
@@ -3582,23 +4664,13 @@ export default function TrrShowDetailPage() {
                       )}
 
                       {/* Show Posters */}
-                      {filteredGalleryAssets.filter(
-                        (a) =>
-                          a.type === "show" && !isSeasonBackdrop(a) && (a.kind ?? "").toLowerCase().trim() === "poster"
-                      ).length > 0 && (
+                      {gallerySectionAssets.showPosters.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Show Posters
                           </h4>
                           <div className="grid grid-cols-4 gap-4">
-                            {filteredGalleryAssets
-                              .filter(
-                                (a) =>
-                                  a.type === "show" &&
-                                  !isSeasonBackdrop(a) &&
-                                  (a.kind ?? "").toLowerCase().trim() === "poster"
-                              )
-                              .map((asset, i, arr) => (
+                            {gallerySectionAssets.showPosters.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -3607,7 +4679,7 @@ export default function TrrShowDetailPage() {
                                   className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                   <GalleryImage
-                                    src={asset.hosted_url}
+                                    src={getAssetDisplayUrl(asset)}
                                     alt={asset.caption || "Show poster"}
                                     sizes="200px"
                                   />
@@ -3618,15 +4690,13 @@ export default function TrrShowDetailPage() {
                       )}
 
                       {/* Season Posters */}
-                      {filteredGalleryAssets.filter((a) => a.type === "season").length > 0 && (
+                      {gallerySectionAssets.seasonPosters.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Season Posters
                           </h4>
                           <div className="grid grid-cols-4 gap-4">
-                            {filteredGalleryAssets
-                              .filter((a) => a.type === "season")
-                              .map((asset, i, arr) => (
+                            {gallerySectionAssets.seasonPosters.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -3635,7 +4705,7 @@ export default function TrrShowDetailPage() {
                                   className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                   <GalleryImage
-                                    src={asset.hosted_url}
+                                    src={getAssetDisplayUrl(asset)}
                                     alt={asset.caption || "Season poster"}
                                     sizes="200px"
                                   />
@@ -3646,16 +4716,13 @@ export default function TrrShowDetailPage() {
                       )}
 
                       {/* Episode Stills */}
-                      {filteredGalleryAssets.filter((a) => a.type === "episode").length >
-                        0 && (
+                      {gallerySectionAssets.episodeStills.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Episode Stills
                           </h4>
                           <div className="grid grid-cols-6 gap-3">
-                            {filteredGalleryAssets
-                              .filter((a) => a.type === "episode")
-                              .map((asset, i, arr) => (
+                            {gallerySectionAssets.episodeStills.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -3664,7 +4731,7 @@ export default function TrrShowDetailPage() {
                                   className="relative aspect-video overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                   <GalleryImage
-                                    src={asset.hosted_url}
+                                    src={getAssetDisplayUrl(asset)}
                                     alt={asset.caption || "Episode still"}
                                     sizes="150px"
                                   />
@@ -3674,16 +4741,14 @@ export default function TrrShowDetailPage() {
                         </section>
                       )}
 
-                      {/* Cast Photos */}
-                      {filteredGalleryAssets.filter((a) => a.type === "cast").length > 0 && (
+                      {/* Cast Photos / Promos */}
+                      {gallerySectionAssets.castAndPromos.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Cast Photos
+                            Cast Photos & Promos
                           </h4>
                           <div className="grid grid-cols-5 gap-4">
-                            {filteredGalleryAssets
-                              .filter((a) => a.type === "cast")
-                              .map((asset, i, arr) => (
+                            {gallerySectionAssets.castAndPromos.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -3692,7 +4757,7 @@ export default function TrrShowDetailPage() {
                                   className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                   <GalleryImage
-                                    src={asset.hosted_url}
+                                    src={getAssetDisplayUrl(asset)}
                                     alt={asset.caption || "Cast photo"}
                                     sizes="180px"
                                   />
@@ -3705,6 +4770,39 @@ export default function TrrShowDetailPage() {
                                   )}
                                 </button>
                               ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {/* Other */}
+                      {gallerySectionAssets.other.length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Other
+                          </h4>
+                          <div className="grid grid-cols-5 gap-4">
+                            {gallerySectionAssets.other.map((asset, i, arr) => (
+                              <button
+                                key={`${asset.id}-${i}`}
+                                onClick={(e) =>
+                                  openAssetLightbox(asset, i, arr, e.currentTarget)
+                                }
+                                className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <GalleryImage
+                                  src={getAssetDisplayUrl(asset)}
+                                  alt={asset.caption || "Gallery image"}
+                                  sizes="180px"
+                                />
+                                {asset.person_name && (
+                                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                                    <p className="truncate text-xs text-white">
+                                      {asset.person_name}
+                                    </p>
+                                  </div>
+                                )}
+                              </button>
+                            ))}
                           </div>
                         </section>
                       )}
@@ -3775,7 +4873,7 @@ export default function TrrShowDetailPage() {
                             className="relative aspect-[2/1] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <GalleryImage
-                              src={asset.hosted_url}
+                              src={getAssetDisplayUrl(asset)}
                               alt={asset.caption || "Show logo"}
                               sizes="250px"
                               className="object-contain"
@@ -3809,7 +4907,7 @@ export default function TrrShowDetailPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={loadBravoData}
+                  onClick={() => void loadBravoData({ force: true })}
                   disabled={bravoLoading}
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                 >
@@ -3884,7 +4982,7 @@ export default function TrrShowDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {cast.length} members
+                    {castDisplayMembers.length} shown · {cast.length} total
                   </span>
                   <button
                     type="button"
@@ -3919,9 +5017,241 @@ export default function TrrShowDetailPage() {
                   {refreshError || refreshNotice}
                 </p>
               )}
+              {(castRoleMembersError || rolesError) && (
+                <p className="mb-4 text-sm text-red-600">
+                  {castRoleMembersError || rolesError}
+                </p>
+              )}
+              {castSource === "show_fallback" && castEligibilityWarning && (
+                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {castEligibilityWarning}
+                </div>
+              )}
+              <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                <div className="grid gap-3 md:grid-cols-5">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Sort By
+                    <select
+                      value={castSortBy}
+                      onChange={(event) =>
+                        setCastSortBy(event.target.value as "episodes" | "season" | "name")
+                      }
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    >
+                      <option value="episodes">Episodes</option>
+                      <option value="season">Season Recency</option>
+                      <option value="name">Name</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Order
+                    <select
+                      value={castSortOrder}
+                      onChange={(event) => setCastSortOrder(event.target.value as "desc" | "asc")}
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    >
+                      <option value="desc">Desc</option>
+                      <option value="asc">Asc</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Has Image
+                    <select
+                      value={castHasImageFilter}
+                      onChange={(event) =>
+                        setCastHasImageFilter(event.target.value as "all" | "yes" | "no")
+                      }
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    >
+                      <option value="all">All</option>
+                      <option value="yes">With Image</option>
+                      <option value="no">Without Image</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    New Role
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        value={newRoleName}
+                        onChange={(event) => setNewRoleName(event.target.value)}
+                        placeholder="Housewife"
+                        className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm normal-case tracking-normal text-zinc-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={createShowRole}
+                        disabled={rolesLoading}
+                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCastSeasonFilters([]);
+                      setCastRoleFilters([]);
+                      setCastCreditFilters([]);
+                      setCastHasImageFilter("all");
+                      setCastSortBy("episodes");
+                      setCastSortOrder("desc");
+                    }}
+                    className="self-end rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Seasons
+                    </span>
+                    {availableCastSeasons.length === 0 ? (
+                      <span className="text-xs text-zinc-500">No season recency data yet.</span>
+                    ) : (
+                      availableCastSeasons.map((seasonNumber) => {
+                        const active = castSeasonFilters.includes(seasonNumber);
+                        return (
+                          <button
+                            key={`season-filter-${seasonNumber}`}
+                            type="button"
+                            onClick={() =>
+                              setCastSeasonFilters((prev) =>
+                                prev.includes(seasonNumber)
+                                  ? prev.filter((value) => value !== seasonNumber)
+                                  : [...prev, seasonNumber]
+                              )
+                            }
+                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                              active
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-white text-zinc-600"
+                            }`}
+                          >
+                            S{seasonNumber}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Roles
+                    </span>
+                    {availableCastRoles.length === 0 ? (
+                      <span className="text-xs text-zinc-500">No roles configured.</span>
+                    ) : (
+                      availableCastRoles.map((role) => {
+                        const active = castRoleFilters.some(
+                          (value) => value.toLowerCase() === role.toLowerCase()
+                        );
+                        return (
+                          <button
+                            key={`role-filter-${role}`}
+                            type="button"
+                            onClick={() =>
+                              setCastRoleFilters((prev) =>
+                                active
+                                  ? prev.filter((value) => value.toLowerCase() !== role.toLowerCase())
+                                  : [...prev, role]
+                              )
+                            }
+                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                              active
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-white text-zinc-600"
+                            }`}
+                          >
+                            {role}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Credit
+                    </span>
+                    {availableCastCreditCategories.length === 0 ? (
+                      <span className="text-xs text-zinc-500">No categories.</span>
+                    ) : (
+                      availableCastCreditCategories.map((category) => {
+                        const active = castCreditFilters.some(
+                          (value) => value.toLowerCase() === category.toLowerCase()
+                        );
+                        return (
+                          <button
+                            key={`credit-filter-${category}`}
+                            type="button"
+                            onClick={() =>
+                              setCastCreditFilters((prev) =>
+                                active
+                                  ? prev.filter((value) => value.toLowerCase() !== category.toLowerCase())
+                                  : [...prev, category]
+                              )
+                            }
+                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                              active
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-white text-zinc-600"
+                            }`}
+                          >
+                            {category}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Role Catalog
+                    </span>
+                    {showRoles.length === 0 ? (
+                      <span className="text-xs text-zinc-500">No roles yet.</span>
+                    ) : (
+                      showRoles.map((role) => (
+                        <div
+                          key={`role-catalog-${role.id}`}
+                          className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1"
+                        >
+                          <span
+                            className={`text-xs font-semibold ${
+                              role.is_active ? "text-zinc-700" : "text-zinc-400 line-through"
+                            }`}
+                          >
+                            {role.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void renameShowRole(role)}
+                            className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700"
+                          >
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void toggleShowRoleActive(role)}
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                              role.is_active
+                                ? "border border-amber-200 bg-amber-50 text-amber-700"
+                                : "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                            }`}
+                          >
+                            {role.is_active ? "Deactivate" : "Activate"}
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+              {castRoleMembersLoading && (
+                <p className="mb-4 text-sm text-zinc-500">Refreshing cast intelligence...</p>
+              )}
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {cast.map((member) => {
-                  const thumbnailUrl = member.cover_photo_url || member.photo_url;
+                {castDisplayMembers.map((member) => {
+                  const thumbnailUrl = member.merged_photo_url;
                   const episodeLabel =
                     typeof member.total_episodes === "number"
                       ? `${member.total_episodes} episodes`
@@ -3958,6 +5288,21 @@ export default function TrrShowDetailPage() {
                       {episodeLabel && (
                         <p className="text-sm text-zinc-600">{episodeLabel}</p>
                       )}
+                      {member.latest_season && (
+                        <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
+                      )}
+                      {member.roles.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {member.roles.map((role) => (
+                            <span
+                              key={`${member.person_id}-${role}`}
+                              className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                            >
+                              {role}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={(event) => {
@@ -3974,6 +5319,20 @@ export default function TrrShowDetailPage() {
                         {refreshingPersonIds[member.person_id]
                           ? "Refreshing..."
                           : "Refresh Person"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void assignRolesToCastMember(
+                            member.person_id,
+                            member.full_name || member.cast_member_name || "Cast member"
+                          );
+                        }}
+                        className="mt-2 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                      >
+                        Edit Roles
                       </button>
                       <RefreshProgressBar
                         show={Boolean(refreshingPersonIds[member.person_id])}
@@ -4113,21 +5472,41 @@ export default function TrrShowDetailPage() {
               <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Show Information
+                    Show Overview
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
-                    Details & External IDs
+                    Details, Links, and Metadata
                   </h3>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={saveShowDetails}
-                    disabled={detailsSaving}
-                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-                  >
-                    {detailsSaving ? "Saving..." : "Save Info"}
-                  </button>
+                  {detailsEditing ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={cancelDetailsEdit}
+                        disabled={detailsSaving}
+                        className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={saveShowDetails}
+                        disabled={detailsSaving}
+                        className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+                      >
+                        {detailsSaving ? "Saving..." : "Save"}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={startDetailsEdit}
+                      className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                    >
+                      Edit
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={refreshAllShowData}
@@ -4176,7 +5555,8 @@ export default function TrrShowDetailPage() {
                           onChange={(e) =>
                             setDetailsForm((prev) => ({ ...prev, displayName: e.target.value }))
                           }
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
                           placeholder="Real Housewives of Beverly Hills"
                         />
                       </label>
@@ -4191,7 +5571,8 @@ export default function TrrShowDetailPage() {
                           onChange={(e) =>
                             setDetailsForm((prev) => ({ ...prev, nickname: e.target.value }))
                           }
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
                           placeholder="RHOBH"
                         />
                       </label>
@@ -4206,7 +5587,8 @@ export default function TrrShowDetailPage() {
                           onChange={(e) =>
                             setDetailsForm((prev) => ({ ...prev, premiereDate: e.target.value }))
                           }
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
                         />
                       </label>
 
@@ -4220,7 +5602,8 @@ export default function TrrShowDetailPage() {
                             setDetailsForm((prev) => ({ ...prev, altNamesText: e.target.value }))
                           }
                           rows={3}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
                           placeholder={"One per line (or comma-separated)\nThe Real Housewives of Beverly Hills"}
                         />
                       </label>
@@ -4235,7 +5618,8 @@ export default function TrrShowDetailPage() {
                             setDetailsForm((prev) => ({ ...prev, description: e.target.value }))
                           }
                           rows={4}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
                           placeholder="Short show description"
                         />
                       </label>
@@ -4281,24 +5665,57 @@ export default function TrrShowDetailPage() {
                   </div>
                 )}
 
-                {/* Networks */}
-                {show.networks && show.networks.length > 0 && (
-                  <div>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-700">
+                <div>
+                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">
+                    Networks & Streaming
+                  </h4>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                       Networks
-                    </h4>
+                    </p>
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      {(show.networks ?? []).length > 0 ? (
+                        show.networks.map((network) => (
+                          <span
+                            key={network}
+                            className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
+                          >
+                            {network}
+                          </span>
+                        ))
+                      ) : (
+                        <p className="text-sm text-zinc-500">No network metadata.</p>
+                      )}
+                    </div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Streaming
+                    </p>
                     <div className="flex flex-wrap gap-2">
-                      {show.networks.map((network) => (
-                        <span
-                          key={network}
-                          className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700"
-                        >
-                          {network}
-                        </span>
-                      ))}
+                      {(
+                        (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
+                        (Array.isArray(show.watch_providers) ? show.watch_providers : []) ??
+                        []
+                      ).length > 0 ? (
+                        (
+                          (Array.isArray(show.streaming_providers)
+                            ? show.streaming_providers
+                            : Array.isArray(show.watch_providers)
+                              ? show.watch_providers
+                              : []) ?? []
+                        ).map((provider) => (
+                          <span
+                            key={provider}
+                            className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
+                          >
+                            {provider}
+                          </span>
+                        ))
+                      ) : (
+                        <p className="text-sm text-zinc-500">No streaming providers on this record.</p>
+                      )}
                     </div>
                   </div>
-                )}
+                </div>
 
                 {/* Tags */}
                 {show.tags && show.tags.length > 0 && (
@@ -4334,6 +5751,193 @@ export default function TrrShowDetailPage() {
                     </p>
                   </div>
                 )}
+
+                <div>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-zinc-700">Links</h4>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">
+                        Pending {pendingLinkCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={discoverShowLinks}
+                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                      >
+                        Discover
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void fetchShowLinks()}
+                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    {(linksError || linksNotice) && (
+                      <p className={`mb-3 text-xs ${linksError ? "text-red-600" : "text-zinc-600"}`}>
+                        {linksError || linksNotice}
+                      </p>
+                    )}
+                    {linksLoading ? (
+                      <p className="text-sm text-zinc-500">Loading links...</p>
+                    ) : showLinks.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No links yet. Run discovery or add links manually.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {ENTITY_LINK_GROUP_ORDER.map((group) => {
+                          const groupLinks = linksByGroup.get(group) ?? [];
+                          if (groupLinks.length === 0) return null;
+                          const linksBySeason = new Map<number, EntityLink[]>();
+                          if (group === "cast_announcements") {
+                            for (const link of groupLinks) {
+                              const key = link.season_number > 0 ? link.season_number : 0;
+                              const list = linksBySeason.get(key) ?? [];
+                              list.push(link);
+                              linksBySeason.set(key, list);
+                            }
+                          }
+
+                          return (
+                            <section key={group}>
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                                {ENTITY_LINK_GROUP_LABELS[group]}
+                              </p>
+
+                              {group === "cast_announcements" && linksBySeason.size > 0 ? (
+                                <div className="space-y-2">
+                                  {Array.from(linksBySeason.entries())
+                                    .sort((a, b) => b[0] - a[0])
+                                    .map(([seasonNumber, seasonLinks]) => (
+                                      <div
+                                        key={`season-${seasonNumber}`}
+                                        className="rounded-md border border-zinc-200 bg-white p-2"
+                                      >
+                                        <p className="mb-1 text-xs font-semibold text-zinc-600">
+                                          {seasonNumber > 0 ? `Season ${seasonNumber}` : "General"}
+                                        </p>
+                                        <div className="space-y-1">
+                                          {seasonLinks.map((link) => (
+                                            <div
+                                              key={link.id}
+                                              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-100 px-2 py-1.5"
+                                            >
+                                              <a
+                                                href={link.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="min-w-0 flex-1 truncate text-sm font-medium text-blue-700 hover:underline"
+                                              >
+                                                {link.label || link.url}
+                                              </a>
+                                              <div className="flex flex-wrap items-center gap-1">
+                                                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                                  {link.status}
+                                                </span>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void setShowLinkStatus(link.id, "approved")}
+                                                  className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                                >
+                                                  Approve
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void setShowLinkStatus(link.id, "rejected")}
+                                                  className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+                                                >
+                                                  Reject
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void editShowLink(link)}
+                                                  className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                                >
+                                                  Edit
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void deleteShowLink(link.id)}
+                                                  className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
+                                                >
+                                                  Delete
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  {groupLinks.map((link) => (
+                                    <div
+                                      key={link.id}
+                                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5"
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <a
+                                          href={link.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="block truncate text-sm font-medium text-blue-700 hover:underline"
+                                        >
+                                          {link.label || link.url}
+                                        </a>
+                                        <p className="text-[11px] text-zinc-500">
+                                          {link.link_kind}
+                                          {link.season_number > 0 ? ` · Season ${link.season_number}` : ""}
+                                          {link.entity_type !== "show" ? ` · ${link.entity_type}` : ""}
+                                        </p>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                          {link.status}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => void setShowLinkStatus(link.id, "approved")}
+                                          className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                        >
+                                          Approve
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void setShowLinkStatus(link.id, "rejected")}
+                                          className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+                                        >
+                                          Reject
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void editShowLink(link)}
+                                          className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void deleteShowLink(link.id)}
+                                          className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </section>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 {/* Internal ID */}
                 <div>
@@ -4394,7 +5998,8 @@ export default function TrrShowDetailPage() {
         {/* Lightbox for gallery assets */}
         {assetLightbox && (
           <ImageLightbox
-            src={assetLightbox.asset.hosted_url}
+            src={getAssetDetailUrl(assetLightbox.asset)}
+            fallbackSrc={assetLightbox.asset.original_url ?? assetLightbox.asset.hosted_url}
             alt={assetLightbox.asset.caption || "Gallery image"}
             isOpen={true}
             onClose={closeAssetLightbox}
@@ -4445,6 +6050,249 @@ export default function TrrShowDetailPage() {
               }
             }}
           />
+        )}
+
+        {refreshLogOpen && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+            <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl">
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-zinc-900">Health Center</h3>
+                  <p className="text-sm text-zinc-500">
+                    Content Health, Sync Pipeline, Operations Inbox, and Refresh Log.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRefreshLogOpen(false)}
+                  className="rounded-md border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
+                >
+                  Close
+                </button>
+              </div>
+
+              <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                  Content Health
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+                  {contentHealthItems.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={item.onClick}
+                      className={`rounded-xl border px-3 py-2 text-left transition hover:shadow-sm ${healthBadgeClassName(
+                        item.status
+                      )}`}
+                    >
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">
+                        {item.label}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold">
+                        {item.status === "ready"
+                          ? "Ready"
+                          : item.status === "stale"
+                            ? "Stale"
+                            : "Missing"}
+                      </p>
+                      <p className="mt-1 text-xs opacity-80">{item.countLabel}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="mb-6 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Sync Pipeline
+                  </p>
+                  <div className="space-y-2">
+                    {pipelineSteps.map((step) => {
+                      const statusPillClass =
+                        step.status === "done"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : step.status === "active"
+                            ? "border-blue-200 bg-blue-50 text-blue-700"
+                            : step.status === "failed"
+                              ? "border-rose-200 bg-rose-50 text-rose-700"
+                              : "border-zinc-200 bg-zinc-50 text-zinc-600";
+                      const statusText =
+                        step.status === "done"
+                          ? "Done"
+                          : step.status === "active"
+                            ? "Running"
+                            : step.status === "failed"
+                              ? "Failed"
+                              : "Queued";
+                      return (
+                        <div
+                          key={step.topic.key}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-700">
+                              {step.topic.label}
+                            </p>
+                            <p className="truncate text-[11px] text-zinc-500">{step.topic.description}</p>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusPillClass}`}>
+                              {statusText}
+                            </span>
+                            {step.latest && (
+                              <p className="mt-1 text-[10px] text-zinc-400">
+                                {new Date(step.latest.at).toLocaleTimeString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Operations Inbox
+                  </p>
+                  {operationsInboxItems.length === 0 ? (
+                    <p className="mt-3 text-sm text-emerald-700">No blocking tasks.</p>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      {operationsInboxItems.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={item.onClick}
+                          className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left transition hover:bg-amber-100"
+                        >
+                          <p className="text-sm font-semibold text-amber-800">{item.title}</p>
+                          <p className="mt-1 text-xs text-amber-700">{item.detail}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                  Refresh Log
+                </p>
+                {refreshLogEntries.length === 0 ? (
+                  <p className="text-xs text-zinc-500">No refresh activity yet.</p>
+                ) : (
+                  <div className="max-h-[44vh] space-y-3 overflow-y-auto pr-1">
+                    {refreshLogTopicGroups.map(({ topic, entries, entriesForView, latest, status }) => {
+                      const latestParts = latest ? extractRefreshLogSubJob(latest) : null;
+                      const latestPercent =
+                        latest &&
+                        typeof latest.current === "number" &&
+                        typeof latest.total === "number" &&
+                        latest.total > 0
+                          ? Math.min(100, Math.round((latest.current / latest.total) * 100))
+                          : null;
+
+                      if (status === "done") {
+                        return (
+                          <article
+                            key={topic.key}
+                            className="rounded-lg border border-green-200 bg-green-50 px-3 py-2"
+                          >
+                            <p className="text-xs font-semibold text-green-800">
+                              {topic.label}: Done ✔️
+                            </p>
+                          </article>
+                        );
+                      }
+
+                      return (
+                        <article key={topic.key} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+                                {topic.label}
+                              </p>
+                              <p className="text-[11px] text-zinc-500">{topic.description}</p>
+                            </div>
+                            {latest && (
+                              <p className="text-[10px] text-zinc-400">
+                                {new Date(latest.at).toLocaleTimeString()}
+                              </p>
+                            )}
+                          </div>
+
+                          {status === "failed" && (
+                            <p className="mt-2 text-xs font-semibold text-red-700">
+                              {topic.label}: Failed ✖
+                            </p>
+                          )}
+
+                          {latest ? (
+                            <div className="mt-2 rounded-md border border-zinc-200 bg-white p-2">
+                              <p className="text-xs font-semibold text-zinc-800">{latestParts?.subJob}</p>
+                              <p className="mt-1 text-xs text-zinc-600">{latestParts?.details}</p>
+                              {typeof latest.current === "number" &&
+                                typeof latest.total === "number" && (
+                                  <p className="mt-1 text-[11px] text-zinc-500">
+                                    {latest.current.toLocaleString()}/{latest.total.toLocaleString()}
+                                    {latestPercent !== null ? ` (${latestPercent}%)` : ""}
+                                  </p>
+                                )}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-xs text-zinc-500">No updates yet.</p>
+                          )}
+
+                          {entries.length > 0 && (
+                            <details className="mt-2" open={entries.length <= 3}>
+                              <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                Sub-jobs ({entries.length})
+                              </summary>
+                              <div className="mt-2 space-y-1">
+                                {entriesForView.slice(0, 30).map((entry) => {
+                                  const parts = extractRefreshLogSubJob(entry);
+                                  const percent =
+                                    typeof entry.current === "number" &&
+                                    typeof entry.total === "number" &&
+                                    entry.total > 0
+                                      ? Math.min(100, Math.round((entry.current / entry.total) * 100))
+                                      : null;
+                                  return (
+                                    <div
+                                      key={entry.id}
+                                      className="rounded border border-zinc-100 bg-white px-2 py-1.5"
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <p className="text-[11px] font-semibold text-zinc-700">
+                                          {parts.subJob}
+                                        </p>
+                                        <p className="text-[10px] text-zinc-400">
+                                          {new Date(entry.at).toLocaleTimeString()}
+                                        </p>
+                                      </div>
+                                      <p className="mt-0.5 text-[11px] text-zinc-600">{parts.details}</p>
+                                      {typeof entry.current === "number" &&
+                                        typeof entry.total === "number" && (
+                                          <p className="mt-0.5 text-[10px] text-zinc-500">
+                                            {entry.current.toLocaleString()}/{entry.total.toLocaleString()}
+                                            {percent !== null ? ` (${percent}%)` : ""}
+                                          </p>
+                                        )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </details>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
         )}
 
         {syncBravoOpen && (

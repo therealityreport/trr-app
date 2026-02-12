@@ -9,14 +9,17 @@ type Scope = "bravo" | "creator" | "community";
 
 type SocialJob = {
   id: string;
+  run_id?: string | null;
   platform: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "queued" | "pending" | "retrying" | "running" | "completed" | "failed" | "cancelled";
+  job_type?: string;
   items_found?: number;
   error_message?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
   created_at?: string;
   config?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 };
 
 type SocialTarget = {
@@ -156,7 +159,13 @@ export default function SeasonSocialAnalyticsSection({
   const [jobs, setJobs] = useState<SocialJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ingestMessage, setIngestMessage] = useState<string | null>(null);
   const [runningIngest, setRunningIngest] = useState(false);
+  const [cancellingRun, setCancellingRun] = useState(false);
+  const [ingestingWeek, setIngestingWeek] = useState<number | null>(null);
+  const [ingestingPlatform, setIngestingPlatform] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [hasObservedRunJobs, setHasObservedRunJobs] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
 
@@ -189,7 +198,6 @@ export default function SeasonSocialAnalyticsSection({
     }
     const data = (await response.json()) as AnalyticsResponse;
     setAnalytics(data);
-    setJobs(data.jobs ?? []);
     setLastUpdated(new Date());
   }, [getAuthHeaders, queryString, seasonNumber, showId]);
 
@@ -207,10 +215,16 @@ export default function SeasonSocialAnalyticsSection({
     setTargets(data.targets ?? []);
   }, [getAuthHeaders, scope, seasonNumber, showId]);
 
-  const fetchJobs = useCallback(async () => {
+  const fetchJobs = useCallback(async (runId?: string | null) => {
+    if (!runId) {
+      setJobs([]);
+      return;
+    }
     const headers = await getAuthHeaders();
+    const params = new URLSearchParams({ limit: "250" });
+    params.set("run_id", runId);
     const response = await fetch(
-      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?limit=25`,
+      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?${params.toString()}`,
       { headers, cache: "no-store" }
     );
     if (!response.ok) return;
@@ -234,23 +248,115 @@ export default function SeasonSocialAnalyticsSection({
     refreshAll();
   }, [refreshAll]);
 
-  const hasRunningJobs = useMemo(
-    () => jobs.some((job) => job.status === "pending" || job.status === "running"),
-    [jobs]
-  );
+  const runScopedJobs = useMemo(() => {
+    if (!activeRunId) return [];
+    return jobs.filter((job) => job.run_id === activeRunId);
+  }, [activeRunId, jobs]);
+
+  const hasRunningJobs = useMemo(() => {
+    const runningStatuses = new Set(["queued", "pending", "retrying", "running"]);
+    return runScopedJobs.some((job) => runningStatuses.has(job.status));
+  }, [runScopedJobs]);
 
   useEffect(() => {
-    if (!hasRunningJobs) return;
+    if (!activeRunId) {
+      setHasObservedRunJobs(false);
+      return;
+    }
+    if (runScopedJobs.length > 0) {
+      setHasObservedRunJobs(true);
+    }
+  }, [activeRunId, runScopedJobs.length]);
+
+  // When polling detects no more running jobs, clear the ingest UI state
+  useEffect(() => {
+    if (!runningIngest) return;
+    if (!activeRunId) return;
+    if (!hasObservedRunJobs) return;
+    if (hasRunningJobs) return;
+    // Jobs finished — summarize from the latest jobs list
+    const recentJobs = runScopedJobs.filter(
+      (j) => j.status === "completed" || j.status === "failed"
+    ).slice(0, 10);
+    const completed = recentJobs.filter((j) => j.status === "completed");
+    const failed = recentJobs.filter((j) => j.status === "failed");
+    const totalItems = completed.reduce((s, j) => s + (j.items_found ?? 0), 0);
+
+    let msg = `Ingest complete: ${completed.length} job(s) finished, ${totalItems} items`;
+    if (failed.length > 0) {
+      msg += ` (${failed.length} failed)`;
+    }
+    setIngestMessage(msg);
+    setRunningIngest(false);
+    setIngestingWeek(null);
+    setIngestingPlatform(null);
+    setActiveRunId(null);
+    // Refresh analytics to reflect new data
+    fetchAnalytics().catch(() => {});
+  }, [activeRunId, hasObservedRunJobs, hasRunningJobs, runningIngest, runScopedJobs, fetchAnalytics]);
+
+  // Poll for job updates when there are running jobs or an active ingest
+  useEffect(() => {
+    if (!activeRunId) return;
+    if (!hasRunningJobs && !runningIngest) return;
+    const interval = runningIngest ? 3000 : 5000;
     const timer = window.setInterval(async () => {
-      await fetchJobs();
-      await fetchAnalytics();
-    }, 5000);
+      try {
+        await fetchJobs(activeRunId);
+        if (!runningIngest) {
+          await fetchAnalytics();
+        }
+      } catch {
+        // Polling errors are transient; silently retry on next interval
+      }
+    }, interval);
     return () => window.clearInterval(timer);
-  }, [fetchAnalytics, fetchJobs, hasRunningJobs]);
+  }, [activeRunId, fetchAnalytics, fetchJobs, hasRunningJobs, runningIngest]);
+
+  const cancelActiveRun = useCallback(async () => {
+    if (!activeRunId) return;
+    setCancellingRun(true);
+    setError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest/runs/${activeRunId}/cancel`,
+        {
+          method: "POST",
+          headers,
+        }
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Failed to cancel run");
+      }
+
+      setIngestMessage(`Run ${activeRunId.slice(0, 8)} cancelled.`);
+      setRunningIngest(false);
+      setIngestingWeek(null);
+      setIngestingPlatform(null);
+      await fetchJobs(activeRunId);
+      await fetchAnalytics();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to cancel run");
+    } finally {
+      setCancellingRun(false);
+    }
+  }, [activeRunId, fetchAnalytics, fetchJobs, getAuthHeaders, seasonNumber, showId]);
 
   const runIngest = useCallback(async (override?: { week?: number; platform?: "all" | Platform }) => {
     setRunningIngest(true);
     setError(null);
+    setIngestMessage(null);
+    setJobs([]);
+    setActiveRunId(null);
+    setHasObservedRunJobs(false);
+
+    const effectivePlatform = override?.platform ?? platformFilter;
+    const effectiveWeek = override?.week ?? (weekFilter === "all" ? null : weekFilter);
+    setIngestingWeek(effectiveWeek);
+    setIngestingPlatform(effectivePlatform);
+
     try {
       const headers = await getAuthHeaders();
       const payload: {
@@ -258,18 +364,19 @@ export default function SeasonSocialAnalyticsSection({
         platforms?: Platform[];
         max_posts_per_target: number;
         max_comments_per_post: number;
+        max_replies_per_post: number;
         fetch_replies: boolean;
+        ingest_mode: "posts_only" | "posts_and_comments";
         date_start?: string;
         date_end?: string;
       } = {
         source_scope: scope,
-        max_posts_per_target: 25,
-        max_comments_per_post: 100,
+        max_posts_per_target: 100000,
+        max_comments_per_post: 100000,
+        max_replies_per_post: 100000,
         fetch_replies: true,
-      };
-
-      const effectivePlatform = override?.platform ?? platformFilter;
-      const effectiveWeek = override?.week ?? (weekFilter === "all" ? null : weekFilter);
+        ingest_mode: "posts_and_comments",
+      }
 
       if (effectivePlatform !== "all") {
         payload.platforms = [effectivePlatform];
@@ -283,6 +390,14 @@ export default function SeasonSocialAnalyticsSection({
           payload.date_end = weekWindow.end;
         }
       }
+
+      const label = effectiveWeek !== null
+        ? (effectiveWeek === 0 ? "Pre-Season" : `Week ${effectiveWeek}`)
+        : "Full Season";
+      const platformLabel = effectivePlatform === "all" ? "all platforms" : (PLATFORM_LABELS[effectivePlatform] ?? effectivePlatform);
+      setIngestMessage(`Starting ${label} · ${platformLabel}...`);
+
+      console.log("[social-ingest] Sending payload:", JSON.stringify(payload, null, 2));
 
       const response = await fetch(
         `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest`,
@@ -300,13 +415,40 @@ export default function SeasonSocialAnalyticsSection({
         throw new Error(data.error ?? "Failed to run social ingest");
       }
 
-      await Promise.all([fetchJobs(), fetchAnalytics()]);
+      const result = (await response.json().catch(() => ({}))) as {
+        status?: string;
+        message?: string;
+        run_id?: string;
+        stages?: string[];
+        queued_or_started_jobs?: number;
+      };
+      console.log("[social-ingest] Response:", JSON.stringify(result, null, 2));
+      const runId = typeof result.run_id === "string" && result.run_id ? result.run_id : null;
+      if (!runId) {
+        throw new Error(result.message ?? "Ingest started without a run id");
+      }
+      setActiveRunId(runId);
+
+      // Backend returns queued/staged run metadata immediately.
+      const stages = (result.stages ?? []).join(" -> ") || "posts -> comments";
+      const jobCount = result.queued_or_started_jobs ?? 0;
+      setIngestMessage(`${label} · ${platformLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
+
+      // Immediately fetch jobs to pick up the newly created running jobs
+      await fetchJobs(runId);
+
+      // The hasRunningJobs polling effect will handle ongoing updates.
+      // We keep runningIngest=true until polling detects no more running jobs.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to run social ingest");
-    } finally {
+      setIngestMessage(null);
       setRunningIngest(false);
+      setCancellingRun(false);
+      setIngestingWeek(null);
+      setIngestingPlatform(null);
+      setActiveRunId(null);
     }
-  }, [analytics, fetchAnalytics, fetchJobs, getAuthHeaders, platformFilter, scope, seasonNumber, showId, weekFilter]);
+  }, [analytics, fetchJobs, getAuthHeaders, platformFilter, scope, seasonNumber, showId, weekFilter]);
 
   const downloadExport = useCallback(
     async (format: "csv" | "pdf") => {
@@ -428,6 +570,44 @@ export default function SeasonSocialAnalyticsSection({
         </div>
       )}
 
+      {ingestMessage && !error && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${
+          runningIngest
+            ? "animate-pulse border-blue-200 bg-blue-50 text-blue-700"
+            : "border-green-200 bg-green-50 text-green-700"
+        }`}>
+              <p>{ingestMessage}</p>
+              {runningIngest && hasObservedRunJobs && (
+                <div className="mt-2 space-y-1 text-xs">
+                  {runScopedJobs.filter((j) => ["queued", "pending", "retrying", "running"].includes(j.status)).map((j) => {
+                    const stage =
+                      (typeof j.config?.stage === "string" ? j.config.stage : undefined) ??
+                      (typeof j.metadata?.stage === "string" ? j.metadata.stage : "stage");
+                    return (
+                    <div key={j.id} className="flex items-center gap-2">
+                      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                      <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
+                      <span className="text-blue-500">{stage} {j.status} — {j.items_found ?? 0} items so far</span>
+                    </div>
+                    );
+                  })}
+                  {runScopedJobs.filter((j) => j.status === "completed").slice(0, 5).map((j) => {
+                    const stage =
+                      (typeof j.config?.stage === "string" ? j.config.stage : undefined) ??
+                      (typeof j.metadata?.stage === "string" ? j.metadata.stage : "stage");
+                    return (
+                    <div key={j.id} className="flex items-center gap-2 text-green-700">
+                      <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+                      <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
+                      <span>{stage} done — {j.items_found ?? 0} items</span>
+                    </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
       {loading && !analytics ? (
         <div className="rounded-2xl border border-zinc-200 bg-white p-10 text-center text-sm text-zinc-500 shadow-sm">
           Loading social analytics...
@@ -507,8 +687,37 @@ export default function SeasonSocialAnalyticsSection({
                   disabled={runningIngest}
                   className="w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {runningIngest ? "Running Ingest..." : "Run Season Ingest"}
+                  {runningIngest ? "Running Ingest..." : "Run Season Ingest (All)"}
                 </button>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["instagram", "youtube", "tiktok", "twitter"] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => runIngest({ platform: p })}
+                      disabled={runningIngest}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        runningIngest && ingestingPlatform === p
+                          ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
+                          : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      {runningIngest && ingestingPlatform === p ? `${PLATFORM_LABELS[p]}...` : PLATFORM_LABELS[p]}
+                    </button>
+                  ))}
+                </div>
+                {activeRunId && hasRunningJobs && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void cancelActiveRun();
+                    }}
+                    disabled={cancellingRun}
+                    className="w-full rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {cancellingRun ? "Cancelling Run..." : `Cancel Active Run (${activeRunId.slice(0, 8)})`}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => downloadExport("csv")}
@@ -527,12 +736,18 @@ export default function SeasonSocialAnalyticsSection({
               <p className="mt-3 text-xs text-zinc-500">
                 Run scope:{" "}
                 <span className="font-semibold text-zinc-700">
-                  {weekFilter === "all" ? "All Weeks" : `Week ${weekFilter}`}
+                  {weekFilter === "all" ? "All Weeks" : weekFilter === 0 ? "Pre-Season" : `Week ${weekFilter}`}
                 </span>
                 {" · "}
                 <span className="font-semibold text-zinc-700">
                   {platformFilter === "all" ? "All Platforms" : PLATFORM_LABELS[platformFilter]}
                 </span>
+                {activeRunId && (
+                  <>
+                    {" · "}
+                    <span className="font-semibold text-zinc-700">Run {activeRunId.slice(0, 8)}</span>
+                  </>
+                )}
               </p>
               <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
                 <p className="font-semibold text-zinc-700">Configured Targets</p>
@@ -571,7 +786,7 @@ export default function SeasonSocialAnalyticsSection({
                 <tbody>
                   {weeklyPlatformRows.map((week) => (
                     <tr key={`table-week-${week.week_index}`} className="border-b border-zinc-100 text-zinc-700">
-                      <td className="px-3 py-2 font-semibold text-zinc-900">Week {week.week_index}</td>
+                      <td className="px-3 py-2 font-semibold text-zinc-900">{week.label ?? (week.week_index === 0 ? "Pre-Season" : `Week ${week.week_index}`)}</td>
                       <td className="px-3 py-2 text-xs text-zinc-500">
                         {formatDateTime(week.start)} to {formatDateTime(week.end)}
                       </td>
@@ -585,9 +800,13 @@ export default function SeasonSocialAnalyticsSection({
                           type="button"
                           onClick={() => runIngest({ week: week.week_index })}
                           disabled={runningIngest}
-                          className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            runningIngest && ingestingWeek === week.week_index
+                              ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
+                              : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+                          }`}
                         >
-                          Run Week
+                          {runningIngest && ingestingWeek === week.week_index ? "Ingesting..." : "Run Week"}
                         </button>
                       </td>
                     </tr>
@@ -715,14 +934,16 @@ export default function SeasonSocialAnalyticsSection({
               <h4 className="text-lg font-semibold text-zinc-900">Ingest Job Status</h4>
               <button
                 type="button"
-                onClick={fetchJobs}
+                onClick={() => {
+                  void fetchJobs(activeRunId);
+                }}
                 className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Refresh Jobs
               </button>
             </div>
             <div className="space-y-2">
-              {jobs.slice(0, 10).map((job) => (
+              {runScopedJobs.slice(0, 10).map((job) => (
                 <div key={job.id} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                     <span className="font-semibold text-zinc-900">
@@ -737,7 +958,7 @@ export default function SeasonSocialAnalyticsSection({
                   {job.error_message && <p className="mt-1 text-xs text-red-600">{job.error_message}</p>}
                 </div>
               ))}
-              {jobs.length === 0 && <p className="text-sm text-zinc-500">No jobs found for this season.</p>}
+              {runScopedJobs.length === 0 && <p className="text-sm text-zinc-500">No jobs found for this season.</p>}
             </div>
           </section>
 

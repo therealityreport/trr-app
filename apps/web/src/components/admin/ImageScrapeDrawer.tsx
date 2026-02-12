@@ -44,6 +44,17 @@ function parseCastContext(input: { context: string | null; alt_text: string | nu
   return { name: null, caption: single.trim() || null };
 }
 
+function extractDomain(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    const normalized = hostname.replace(/^www\./, "");
+    return normalized || null;
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -112,11 +123,15 @@ interface ShowCastMemberApi {
 interface SeasonCastMemberApi {
   person_id: string;
   person_name?: string | null;
+  episodes_in_season?: number | null;
 }
+
+type SeasonCastSource = "season_evidence" | "show_fallback";
 
 interface CastDropdownOption {
   value: string;
   label: string;
+  matchName: string;
   personIds: string[];
   isFriend: boolean;
 }
@@ -245,6 +260,7 @@ export function ImageScrapeDrawer({
   // Cast/logo tagging
   const [castOptions, setCastOptions] = useState<CastDropdownOption[]>([]);
   const [castOptionsLoading, setCastOptionsLoading] = useState(false);
+  const [seasonCastFallbackUsed, setSeasonCastFallbackUsed] = useState(false);
   const [castSelectionByImage, setCastSelectionByImage] = useState<Record<string, string>>({});
   const [logoScopeByImage, setLogoScopeByImage] = useState<Record<string, string>>({});
 
@@ -276,21 +292,58 @@ export function ImageScrapeDrawer({
     return null;
   }, [entityContext, selectedShowSeason]);
 
+  const resolveTargetSeasonId = useCallback(async (): Promise<string | null> => {
+    if (entityContext.type === "season") {
+      return entityContext.seasonId ?? null;
+    }
+    if (entityContext.type !== "show") return null;
+    const targetSeason = resolveTargetSeasonNumber();
+    if (targetSeason === null) return null;
+
+    const selected = (entityContext.seasons ?? []).find((season) => season.seasonNumber === targetSeason);
+    if (selected?.seasonId) return selected.seasonId;
+
+    try {
+      const headers = await getAuthHeaders();
+      const seasonsResponse = await fetch(`/api/admin/trr-api/shows/${entityContext.showId}/seasons?limit=500`, {
+        headers,
+      });
+      if (!seasonsResponse.ok) return null;
+      const seasonsData = (await seasonsResponse.json().catch(() => ({}))) as {
+        seasons?: Array<{ id?: string; season_number?: number | null }>;
+      };
+      const rows = Array.isArray(seasonsData.seasons) ? seasonsData.seasons : [];
+      const match = rows.find((row) => Number(row.season_number) === targetSeason);
+      return typeof match?.id === "string" && match.id ? match.id : null;
+    } catch {
+      return null;
+    }
+  }, [entityContext, getAuthHeaders, resolveTargetSeasonNumber]);
+
   const loadCastOptions = useCallback(async () => {
     if (entityContext.type === "person") {
       setCastOptions([]);
+      setSeasonCastFallbackUsed(false);
       return;
     }
 
     const targetSeason = resolveTargetSeasonNumber();
     if (entityContext.type === "show" && targetSeason === null) {
       setCastOptions([]);
+      setSeasonCastFallbackUsed(false);
       return;
     }
 
     try {
       setCastOptionsLoading(true);
       const headers = await getAuthHeaders();
+      const seasonId = await resolveTargetSeasonId();
+      if (!seasonId) {
+        setCastOptions([]);
+        setSeasonCastFallbackUsed(false);
+        return;
+      }
+
 
       const showCastPromise = fetch(`/api/admin/trr-api/shows/${entityContext.showId}/cast?limit=500`, { headers });
       const seasonCastPromise =
@@ -300,24 +353,55 @@ export function ImageScrapeDrawer({
               { headers }
             )
           : null;
+      const seasonEpisodesPromise = fetch(`/api/admin/trr-api/seasons/${seasonId}/episodes?limit=500`, {
+        headers,
+      });
 
-      const [showCastResponse, seasonCastResponse] = await Promise.all([showCastPromise, seasonCastPromise]);
+      const [showCastResponse, seasonCastResponse, seasonEpisodesResponse] = await Promise.all([
+        showCastPromise,
+        seasonCastPromise,
+        seasonEpisodesPromise,
+      ]);
       if (!showCastResponse.ok) throw new Error("Failed to load cast roles");
       if (seasonCastResponse && !seasonCastResponse.ok) throw new Error("Failed to load season cast");
+      if (!seasonEpisodesResponse.ok) throw new Error("Failed to load season episodes");
 
       const showCastData = (await showCastResponse.json().catch(() => ({}))) as {
         cast?: ShowCastMemberApi[];
       };
       const seasonCastData = seasonCastResponse
-        ? ((await seasonCastResponse.json().catch(() => ({}))) as { cast?: SeasonCastMemberApi[] })
+        ? ((await seasonCastResponse.json().catch(() => ({}))) as {
+            cast?: SeasonCastMemberApi[];
+            cast_source?: SeasonCastSource;
+          })
         : { cast: undefined };
+      const seasonEpisodesData = (await seasonEpisodesResponse.json().catch(() => ({}))) as {
+        episodes?: Array<{ id?: string }>;
+      };
 
       const showCastRows = Array.isArray(showCastData.cast) ? showCastData.cast : [];
       const seasonCastRows = Array.isArray(seasonCastData.cast) ? seasonCastData.cast : [];
-      const seasonIds = new Set(seasonCastRows.map((row) => row.person_id).filter(Boolean));
+      const usingSeasonFallback = seasonCastData.cast_source === "show_fallback";
+      setSeasonCastFallbackUsed(usingSeasonFallback);
+      const seasonEpisodeCount = Array.isArray(seasonEpisodesData.episodes)
+        ? seasonEpisodesData.episodes.length
+        : 0;
+      if (seasonEpisodeCount <= 0 && !usingSeasonFallback) {
+        setCastOptions([]);
+        return;
+      }
+
+      const eligibleSeasonRows = usingSeasonFallback
+        ? seasonCastRows.filter((row) => Boolean(row.person_id))
+        : seasonCastRows.filter((row) => {
+            const episodesInSeason =
+              typeof row.episodes_in_season === "number" ? row.episodes_in_season : 0;
+            return episodesInSeason > seasonEpisodeCount / 2;
+          });
+      const eligibleIds = new Set(eligibleSeasonRows.map((row) => row.person_id).filter(Boolean));
 
       const filteredShowCast =
-        targetSeason !== null ? showCastRows.filter((row) => seasonIds.has(row.person_id)) : showCastRows;
+        targetSeason !== null ? showCastRows.filter((row) => eligibleIds.has(row.person_id)) : showCastRows;
 
       let entries = filteredShowCast
         .map((row) => {
@@ -328,6 +412,7 @@ export function ImageScrapeDrawer({
           return {
             value: personId,
             label: `${name}${friend ? " (Friend)" : " (Full-time)"}`,
+            matchName: name,
             personIds: [personId],
             isFriend: friend,
           } as CastDropdownOption;
@@ -338,8 +423,8 @@ export function ImageScrapeDrawer({
           return a.label.localeCompare(b.label);
         });
 
-      if (entries.length === 0 && seasonCastRows.length > 0) {
-        entries = seasonCastRows
+      if (entries.length === 0 && eligibleSeasonRows.length > 0) {
+        entries = eligibleSeasonRows
           .map((row) => {
             const personId = row.person_id;
             const name = (row.person_name ?? "").trim();
@@ -347,6 +432,7 @@ export function ImageScrapeDrawer({
             return {
               value: personId,
               label: `${name} (Full-time)`,
+              matchName: name,
               personIds: [personId],
               isFriend: false,
             } as CastDropdownOption;
@@ -360,6 +446,7 @@ export function ImageScrapeDrawer({
         entries.unshift({
           value: GROUP_PICTURE_OPTION_VALUE,
           label: "Group Picture (All Full-time)",
+          matchName: "",
           personIds: fullTimeIds,
           isFriend: false,
         });
@@ -369,10 +456,11 @@ export function ImageScrapeDrawer({
     } catch (err) {
       console.error("Failed to load cast options for image import:", err);
       setCastOptions([]);
+      setSeasonCastFallbackUsed(false);
     } finally {
       setCastOptionsLoading(false);
     }
-  }, [entityContext, getAuthHeaders, isFriendRole, resolveTargetSeasonNumber]);
+  }, [entityContext, getAuthHeaders, isFriendRole, resolveTargetSeasonId, resolveTargetSeasonNumber]);
 
   const autoFillCastFromContext = useCallback(
     (imageIds: Iterable<string>) => {
@@ -385,7 +473,7 @@ export function ImageScrapeDrawer({
       const castByNormalizedName = new Map<string, CastDropdownOption>();
       for (const option of castOptions) {
         if (option.value === GROUP_PICTURE_OPTION_VALUE) continue;
-        const normalized = normalizePersonName(option.label.replace(/\s+\((Friend|Full-time)\)\s*$/i, ""));
+        const normalized = normalizePersonName(option.matchName);
         if (normalized && !castByNormalizedName.has(normalized)) {
           castByNormalizedName.set(normalized, option);
         }
@@ -457,6 +545,8 @@ export function ImageScrapeDrawer({
         if (entityContext.type === "season" && !entityId) {
           throw new Error("Missing seasonId for season import context");
         }
+        const sourceUrl = url.trim() || null;
+        const sourceDomain = extractDomain(sourceUrl);
         const selectedSeason =
           entityContext.type === "show" && selectedShowSeason !== "na"
             ? (entityContext.seasons ?? []).find(
@@ -485,6 +575,8 @@ export function ImageScrapeDrawer({
                 ? {
                     show_id: entityContext.showId,
                     season_number: entityContext.seasonNumber,
+                    ...(sourceUrl ? { source_url: sourceUrl, source_page_url: sourceUrl } : {}),
+                    ...(sourceDomain ? { source_domain: sourceDomain } : {}),
                   }
                 : entityContext.type === "show"
                   ? {
@@ -497,13 +589,23 @@ export function ImageScrapeDrawer({
                               : {}),
                           }
                         : {}),
+                      ...(sourceUrl ? { source_url: sourceUrl, source_page_url: sourceUrl } : {}),
+                      ...(sourceDomain ? { source_domain: sourceDomain } : {}),
                     }
-                : {},
+                : {
+                    ...(sourceUrl ? { source_url: sourceUrl, source_page_url: sourceUrl } : {}),
+                    ...(sourceDomain ? { source_domain: sourceDomain } : {}),
+                  },
           }),
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
+          let errorData: { error?: string } = {};
+          try {
+            errorData = (await response.json()) as { error?: string };
+          } catch {
+            // ignore parse failure and use generic message below
+          }
           throw new Error(errorData.error || "Failed to link image");
         }
 
@@ -517,6 +619,7 @@ export function ImageScrapeDrawer({
         );
       } catch (err) {
         console.error("Failed to link duplicate:", err);
+        setError(err instanceof Error ? err.message : "Failed to link image");
         // Reset linking state on error
         setDuplicates((prev) =>
           prev.map((d) =>
@@ -527,7 +630,7 @@ export function ImageScrapeDrawer({
         );
       }
     },
-    [entityContext, getAuthHeaders, selectedShowSeason]
+    [entityContext, getAuthHeaders, selectedShowSeason, url]
   );
 
   // Link all unlinked duplicates
@@ -550,6 +653,7 @@ export function ImageScrapeDrawer({
       setImageKinds({});
       setLogoScopeByImage({});
       setCastOptions([]);
+      setSeasonCastFallbackUsed(false);
       setSelectedShowSeason("na");
       setImportProgress(null);
       setImportResult(null);
@@ -577,6 +681,24 @@ export function ImageScrapeDrawer({
     if (entityContext.type === "person") return;
     void loadCastOptions();
   }, [entityContext, isOpen, loadCastOptions, selectedShowSeason]);
+
+  useEffect(() => {
+    if (castOptions.length === 0) {
+      setCastSelectionByImage({});
+      return;
+    }
+    const validValues = new Set(castOptions.map((option) => option.value));
+    setCastSelectionByImage((prev) => {
+      const next: Record<string, string> = {};
+      for (const [imageId, selection] of Object.entries(prev)) {
+        if (validValues.has(selection)) {
+          next[imageId] = selection;
+        }
+      }
+      return next;
+    });
+  }, [castOptions]);
+
 
   // Body scroll lock
   useEffect(() => {
@@ -695,6 +817,27 @@ export function ImageScrapeDrawer({
     [castOptions, castSelectionByImage]
   );
 
+  const inferCastPersonIdsFromCaption = useCallback(
+    (caption: string | null | undefined): string[] => {
+      const normalizedCaption = normalizePersonName(caption ?? "");
+      if (!normalizedCaption) return [];
+      const matchedIds = new Set<string>();
+      for (const option of castOptions) {
+        if (option.value === GROUP_PICTURE_OPTION_VALUE) continue;
+        const normalizedName = normalizePersonName(option.matchName);
+        if (!normalizedName) continue;
+        if (normalizedCaption.includes(normalizedName)) {
+          for (const personId of option.personIds) {
+            matchedIds.add(personId);
+          }
+        }
+      }
+      return [...matchedIds];
+    },
+    [castOptions]
+  );
+
+
   // Import selected images with SSE streaming progress
   const handleImport = async () => {
     if (selectedImages.size === 0) {
@@ -716,22 +859,29 @@ export function ImageScrapeDrawer({
         .filter((img) => selectedImages.has(img.id))
         .map((img) => {
           const imageKind = imageKinds[img.id] || "other";
+          const explicitPersonIds = imageKind === "cast" ? resolveCastPersonIds(img.id) : [];
+          const autoPersonIds =
+            imageKind === "cast" &&
+            importMode === "season_announcement" &&
+            explicitPersonIds.length === 0
+              ? inferCastPersonIdsFromCaption(captions[img.id] || img.alt_text || img.context || "")
+              : [];
           return {
-          candidate_id: img.id,
-          url: img.best_url,
-          caption: captions[img.id] || null,
-          kind: imageKind,
-          person_ids: imageKind === "cast" ? resolveCastPersonIds(img.id) : [],
-          context_section:
-            entityContext.type !== "person" && importMode === "season_announcement"
-              ? "Cast Portraits"
-              : null,
-          context_type:
-            entityContext.type !== "person" && importMode === "season_announcement"
-              ? "OFFICIAL SEASON ANNOUNCEMENT"
-              : null,
-          source_logo: imageKind === "logo" ? logoScopeByImage[img.id] || null : null,
-          asset_name: null,
+            candidate_id: img.id,
+            url: img.best_url,
+            caption: captions[img.id] || null,
+            kind: imageKind,
+            person_ids: explicitPersonIds.length > 0 ? explicitPersonIds : autoPersonIds,
+            context_section:
+              entityContext.type !== "person" && importMode === "season_announcement"
+                ? "Cast Portraits"
+                : null,
+            context_type:
+              entityContext.type !== "person" && importMode === "season_announcement"
+                ? "OFFICIAL SEASON ANNOUNCEMENT"
+                : null,
+            source_logo: imageKind === "logo" ? logoScopeByImage[img.id] || null : null,
+            asset_name: null,
           };
         });
 
@@ -1043,16 +1193,6 @@ export function ImageScrapeDrawer({
                         onChange={(e) => {
                           const value = e.target.value as ImportMode;
                           setImportMode(value);
-                          if (value === "season_announcement") {
-                            // Defaults: Promo kind + Cast Portraits section + Season Announcement context.
-                            setImageKinds((prev) => {
-                              const next = { ...prev };
-                              for (const imgId of selectedImages) {
-                                next[imgId] = "promo";
-                              }
-                              return next;
-                            });
-                          }
                         }}
                         className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                       >
@@ -1061,7 +1201,7 @@ export function ImageScrapeDrawer({
                       </select>
                       {importMode === "season_announcement" && (
                         <span className="text-xs text-zinc-500">
-                          Defaults to Promo + Cast Portraits; set captions to storylines.
+                          Uses OFFICIAL SEASON ANNOUNCEMENT metadata; cast photos can auto-tag by caption names.
                         </span>
                       )}
                     </div>
@@ -1105,9 +1245,11 @@ export function ImageScrapeDrawer({
                       <span className="text-xs text-zinc-600">
                         {castOptionsLoading
                           ? "Loading season cast options..."
-                          : castOptions.length > 0
-                            ? "Cast images use Full-time/Friend dropdown. Group Picture tags all Full-time."
-                            : "Select a season to load cast options for cast-image tagging."}
+                          : seasonCastFallbackUsed && castOptions.length > 0
+                            ? "Season episode evidence is unavailable. Using approximate show-level cast options."
+                            : castOptions.length > 0
+                            ? "Cast images include only members in more than half of season episodes. Group Picture tags all eligible Full-time."
+                            : "No eligible cast for this season yet (must appear in more than half the episodes)."}
                       </span>
                     </div>
                   )}
