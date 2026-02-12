@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { createMediaLink, getAllLinksForAsset } from "@/lib/server/trr-api/media-links-repository";
-import { getSupabaseTrrCore } from "@/lib/server/supabase-trr-core";
+import { query } from "@/lib/server/postgres";
 
 /**
  * POST /api/admin/trr-api/media-links
@@ -43,15 +43,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify media asset exists
-    const supabase = getSupabaseTrrCore();
-    const { data: asset, error: assetError } = await supabase
-      .from("media_assets")
-      .select("id, hosted_url")
-      .eq("id", media_asset_id)
-      .single();
-
-    if (assetError || !asset) {
+    // Verify media asset exists using direct SQL (avoids PostgREST drift issues).
+    const assetResult = await query<{ id: string }>(
+      `SELECT id
+       FROM core.media_assets
+       WHERE id = $1::uuid
+       LIMIT 1`,
+      [media_asset_id]
+    );
+    if (!assetResult.rows[0]) {
       return NextResponse.json(
         { error: "Media asset not found" },
         { status: 404 }

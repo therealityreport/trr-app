@@ -24,6 +24,11 @@ import {
   inferHasTextOverlay,
   matchesContentTypesForSeasonAsset,
 } from "@/lib/gallery-filter-utils";
+import {
+  buildMissingVariantBreakdown,
+  getMissingVariantKeys,
+  hasMissingVariants,
+} from "@/lib/admin/gallery-diagnostics";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
 import {
   isThumbnailCropMode,
@@ -72,6 +77,7 @@ interface SeasonCastMember {
   person_id: string;
   person_name: string | null;
   episodes_in_season: number;
+  archive_episodes_in_season?: number | null;
   total_episodes: number | null;
   photo_url: string | null;
   thumbnail_focus_x?: number | null;
@@ -101,11 +107,23 @@ interface BravoVideoItem {
 }
 
 type TabId = "episodes" | "assets" | "videos" | "cast" | "surveys" | "social" | "details";
+type SeasonCastSource = "season_evidence" | "show_fallback";
+type GalleryDiagnosticFilter = "all" | "missing-variants" | "oversized" | "unclassified";
 type RefreshProgressState = {
   stage?: string | null;
   message?: string | null;
   current: number | null;
   total: number | null;
+};
+
+type EpisodeCoverageRow = {
+  episodeId: string;
+  episodeNumber: number;
+  title: string | null;
+  hasStill: boolean;
+  hasDescription: boolean;
+  hasAirDate: boolean;
+  hasRuntime: boolean;
 };
 
 const SEASON_REFRESH_STAGE_LABELS: Record<string, string> = {
@@ -141,6 +159,10 @@ const toFiniteNumber = (value: unknown): number | null => {
   }
   return null;
 };
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const looksLikeUuid = (value: string): boolean => UUID_RE.test(value);
 
 const formatFixed1 = (value: unknown): string | null => {
   const parsed = toFiniteNumber(value);
@@ -281,6 +303,30 @@ function CastPhoto({
   );
 }
 
+const getAssetDisplayUrl = (asset: SeasonAsset): string => {
+  const cropDisplay =
+    typeof asset.crop_display_url === "string" && asset.crop_display_url.trim().length > 0
+      ? asset.crop_display_url.trim()
+      : null;
+  const display =
+    typeof asset.display_url === "string" && asset.display_url.trim().length > 0
+      ? asset.display_url.trim()
+      : null;
+  return cropDisplay ?? display ?? asset.hosted_url;
+};
+
+const getAssetDetailUrl = (asset: SeasonAsset): string => {
+  const cropDetail =
+    typeof asset.crop_detail_url === "string" && asset.crop_detail_url.trim().length > 0
+      ? asset.crop_detail_url.trim()
+      : null;
+  const detail =
+    typeof asset.detail_url === "string" && asset.detail_url.trim().length > 0
+      ? asset.detail_url.trim()
+      : null;
+  return cropDetail ?? detail ?? asset.hosted_url;
+};
+
 function RefreshProgressBar({
   show,
   stage,
@@ -371,7 +417,13 @@ export default function SeasonDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const showId = params.showId as string;
+  const showRouteParam = params.showId as string;
+  const [resolvedShowId, setResolvedShowId] = useState<string | null>(
+    looksLikeUuid(showRouteParam) ? showRouteParam : null
+  );
+  const [slugResolutionLoading, setSlugResolutionLoading] = useState(!looksLikeUuid(showRouteParam));
+  const [slugResolutionError, setSlugResolutionError] = useState<string | null>(null);
+  const showId = resolvedShowId ?? "";
   const seasonNumberParam = params.seasonNumber as string;
   const seasonNumber = Number.parseInt(seasonNumberParam, 10);
   const { user, checking, hasAccess } = useAdminGuard();
@@ -382,11 +434,18 @@ export default function SeasonDetailPage() {
   const [episodes, setEpisodes] = useState<TrrEpisode[]>([]);
   const [assets, setAssets] = useState<SeasonAsset[]>([]);
   const [cast, setCast] = useState<SeasonCastMember[]>([]);
+  const [seasonCastSource, setSeasonCastSource] = useState<SeasonCastSource>("season_evidence");
+  const [seasonCastEligibilityWarning, setSeasonCastEligibilityWarning] = useState<string | null>(null);
+  const [archiveCast, setArchiveCast] = useState<SeasonCastMember[]>([]);
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
   const [bravoVideosLoading, setBravoVideosLoading] = useState(false);
   const [bravoVideosError, setBravoVideosError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("episodes");
   const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
+  const [allowPlaceholderMediaOverride, setAllowPlaceholderMediaOverride] = useState(false);
+  const [galleryDiagnosticFilter, setGalleryDiagnosticFilter] =
+    useState<GalleryDiagnosticFilter>("all");
+  const [galleryDiagnosticsOpen, setGalleryDiagnosticsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshingAssets, setRefreshingAssets] = useState(false);
@@ -495,7 +554,65 @@ export default function SeasonDetailPage() {
     return { Authorization: `Bearer ${token}` };
   }, []);
 
+  useEffect(() => {
+    if (checking || !hasAccess) return;
+    const raw = typeof showRouteParam === "string" ? showRouteParam.trim() : "";
+    if (!raw) {
+      setResolvedShowId(null);
+      setSlugResolutionLoading(false);
+      setSlugResolutionError("Missing show identifier.");
+      return;
+    }
+    if (looksLikeUuid(raw)) {
+      setResolvedShowId(raw);
+      setSlugResolutionLoading(false);
+      setSlugResolutionError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const resolveSlug = async () => {
+      setSlugResolutionLoading(true);
+      setSlugResolutionError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
+          { headers, cache: "no-store" }
+        );
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          resolved?: { show_id?: string | null };
+        };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to resolve show slug");
+        }
+        const nextShowId =
+          typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
+            ? data.resolved.show_id
+            : null;
+        if (!nextShowId) throw new Error("Resolved show slug did not return a valid show id.");
+        if (cancelled) return;
+        setResolvedShowId(nextShowId);
+      } catch (err) {
+        if (cancelled) return;
+        setResolvedShowId(null);
+        setSlugResolutionError(
+          err instanceof Error ? err.message : "Could not resolve show URL slug."
+        );
+      } finally {
+        if (!cancelled) setSlugResolutionLoading(false);
+      }
+    };
+
+    void resolveSlug();
+    return () => {
+      cancelled = true;
+    };
+  }, [checking, getAuthHeaders, hasAccess, showRouteParam]);
+
   const fetchShowCastForBrand = useCallback(async () => {
+    if (!showId) return;
     setTrrShowCastError(null);
     setTrrShowCastLoading(true);
     try {
@@ -521,6 +638,7 @@ export default function SeasonDetailPage() {
   }, [getAuthHeaders, showId]);
 
   const fetchSeasonBravoVideos = useCallback(async () => {
+    if (!showId) return;
     if (!Number.isFinite(seasonNumber)) return;
     setBravoVideosLoading(true);
     setBravoVideosError(null);
@@ -549,6 +667,7 @@ export default function SeasonDetailPage() {
   }, [getAuthHeaders, seasonNumber, showId]);
 
   const loadSeasonData = useCallback(async () => {
+    if (!showId) return;
     if (!Number.isFinite(seasonNumber)) {
       setError("Invalid season number");
       setLoading(false);
@@ -586,33 +705,62 @@ export default function SeasonDetailPage() {
         setEpisodes([]);
         setAssets([]);
         setCast([]);
+        setSeasonCastSource("season_evidence");
+        setSeasonCastEligibilityWarning(null);
+        setArchiveCast([]);
         setLoading(false);
         return;
       }
 
       setSeason(foundSeason);
 
-      const [episodesResponse, assetsResponse, castResponse] = await Promise.all([
+      const [episodesResponse, assetsResponse, castResponse, castWithArchiveResponse] = await Promise.all([
         fetch(`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`, { headers }),
         fetch(`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`, { headers }),
         fetch(`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500`, { headers }),
+        fetch(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
+          { headers }
+        ),
       ]);
 
       if (!episodesResponse.ok) throw new Error("Failed to fetch episodes");
       if (!assetsResponse.ok) throw new Error("Failed to fetch season media");
       if (!castResponse.ok) throw new Error("Failed to fetch season cast");
+      if (!castWithArchiveResponse.ok) throw new Error("Failed to fetch season archive cast");
 
       const episodesData = await episodesResponse.json();
       const assetsData = await assetsResponse.json();
       const castData = await castResponse.json();
+      const castWithArchiveData = await castWithArchiveResponse.json();
 
       setEpisodes(episodesData.episodes ?? []);
       setAssets(assetsData.assets ?? []);
       setCast(castData.cast ?? []);
+      setSeasonCastSource(
+        castData.cast_source === "show_fallback" ? "show_fallback" : "season_evidence"
+      );
+      setSeasonCastEligibilityWarning(
+        typeof castData.eligibility_warning === "string" && castData.eligibility_warning.trim()
+          ? castData.eligibility_warning
+          : null
+      );
+      const allSeasonCast = Array.isArray(castWithArchiveData.cast)
+        ? (castWithArchiveData.cast as SeasonCastMember[])
+        : [];
+      setArchiveCast(
+        allSeasonCast.filter(
+          (member) =>
+            (member.episodes_in_season ?? 0) <= 0 &&
+            ((member.archive_episodes_in_season as number | null | undefined) ?? 0) > 0
+        )
+      );
       await fetchSeasonBravoVideos();
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load season");
+      setSeasonCastSource("season_evidence");
+      setSeasonCastEligibilityWarning(null);
     } finally {
       setLoading(false);
     }
@@ -620,8 +768,14 @@ export default function SeasonDetailPage() {
 
   useEffect(() => {
     if (!hasAccess) return;
+    if (!showId) return;
     loadSeasonData();
-  }, [hasAccess, loadSeasonData]);
+  }, [hasAccess, loadSeasonData, showId]);
+
+  useEffect(() => {
+    setAllowPlaceholderMediaOverride(false);
+    setGalleryDiagnosticFilter("all");
+  }, [season?.id]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -631,6 +785,7 @@ export default function SeasonDetailPage() {
   }, [hasAccess, activeTab, assetsView, fetchShowCastForBrand]);
 
   const fetchAssets = useCallback(async () => {
+    if (!showId) return;
     const headers = await getAuthHeaders();
     const response = await fetch(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`,
@@ -642,6 +797,7 @@ export default function SeasonDetailPage() {
   }, [showId, seasonNumber, getAuthHeaders]);
 
   const handleRefreshImages = useCallback(async () => {
+    if (!showId) return;
     if (refreshingAssets) return;
     setRefreshingAssets(true);
     setAssetsRefreshError(null);
@@ -797,6 +953,7 @@ export default function SeasonDetailPage() {
   }, [refreshingAssets, fetchAssets, getAuthHeaders, showId]);
 
   const refreshSeasonCast = useCallback(async () => {
+    if (!showId) return;
     if (refreshingCast) return;
 
     setRefreshingCast(true);
@@ -938,10 +1095,43 @@ export default function SeasonDetailPage() {
       }
 
       const refreshedCast = (castData as { cast?: unknown }).cast;
+      const refreshedCastSource = (castData as { cast_source?: unknown }).cast_source;
+      const refreshedCastWarning = (castData as { eligibility_warning?: unknown }).eligibility_warning;
       const refreshedCastMembers = Array.isArray(refreshedCast)
         ? (refreshedCast as SeasonCastMember[])
         : [];
       setCast(refreshedCastMembers);
+      setSeasonCastSource(
+        refreshedCastSource === "show_fallback" ? "show_fallback" : "season_evidence"
+      );
+      setSeasonCastEligibilityWarning(
+        typeof refreshedCastWarning === "string" && refreshedCastWarning.trim()
+          ? refreshedCastWarning
+          : null
+      );
+
+      const archiveCastResponse = await fetch(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
+        { headers }
+      );
+      const archiveCastData = await archiveCastResponse.json().catch(() => ({}));
+      if (!archiveCastResponse.ok) {
+        const message =
+          typeof (archiveCastData as { error?: unknown }).error === "string"
+            ? (archiveCastData as { error: string }).error
+            : "Failed to fetch archive-footage cast";
+        throw new Error(message);
+      }
+      const archiveRows = Array.isArray((archiveCastData as { cast?: unknown }).cast)
+        ? ((archiveCastData as { cast: unknown[] }).cast as SeasonCastMember[])
+        : [];
+      setArchiveCast(
+        archiveRows.filter(
+          (member) =>
+            (member.episodes_in_season ?? 0) <= 0 &&
+            ((member.archive_episodes_in_season as number | null | undefined) ?? 0) > 0
+        )
+      );
 
       const castMembersToSync = Array.from(
         new Map(
@@ -1101,6 +1291,17 @@ export default function SeasonDetailPage() {
 
   const openAddBackdrops = useCallback(async () => {
     if (!season?.id) return;
+    const mediaEligible =
+      Boolean(
+        (season.premiere_date && season.premiere_date.trim()) ||
+          (season.air_date && season.air_date.trim())
+      ) || episodes.length > 1;
+    if (!mediaEligible && !allowPlaceholderMediaOverride) {
+      setBackdropsError(
+        "Season is marked as placeholder. Add a premiere date or more than one episode, or enable override to continue."
+      );
+      return;
+    }
     setAddBackdropsOpen(true);
     setBackdropsError(null);
     setBackdropsLoading(true);
@@ -1122,7 +1323,14 @@ export default function SeasonDetailPage() {
     } finally {
       setBackdropsLoading(false);
     }
-  }, [season?.id, getAuthHeaders]);
+  }, [
+    allowPlaceholderMediaOverride,
+    episodes.length,
+    getAuthHeaders,
+    season?.air_date,
+    season?.id,
+    season?.premiere_date,
+  ]);
 
   const assignSelectedBackdrops = useCallback(async () => {
     if (!season?.id) return;
@@ -1290,6 +1498,46 @@ export default function SeasonDetailPage() {
   );
 
   const totalEpisodes = episodes.length;
+  const seasonHasPremiereDate = Boolean(
+    (season?.premiere_date && season.premiere_date.trim()) ||
+      (season?.air_date && season.air_date.trim())
+  );
+  const seasonEligibleForMedia = seasonHasPremiereDate || totalEpisodes > 1;
+  const seasonEligibilityReason = seasonEligibleForMedia
+    ? seasonHasPremiereDate
+      ? "Eligible: season has a premiere/air date."
+      : "Eligible: season has more than one episode."
+    : "Placeholder season: requires a premiere date or more than one episode before media assignment.";
+
+  const episodeCoverageRows = useMemo<EpisodeCoverageRow[]>(
+    () =>
+      episodes
+        .map((episode) => ({
+          episodeId: episode.id,
+          episodeNumber: episode.episode_number,
+          title: episode.title,
+          hasStill: Boolean(episode.url_original_still),
+          hasDescription: Boolean((episode.synopsis ?? episode.overview ?? "").trim()),
+          hasAirDate: Boolean(episode.air_date),
+          hasRuntime: typeof episode.runtime === "number" && episode.runtime > 0,
+        }))
+        .sort((a, b) => a.episodeNumber - b.episodeNumber),
+    [episodes]
+  );
+
+  const coverageSummary = useMemo(() => {
+    const total = episodeCoverageRows.length;
+    const count = (selector: (row: EpisodeCoverageRow) => boolean): number =>
+      episodeCoverageRows.reduce((acc, row) => (selector(row) ? acc + 1 : acc), 0);
+    return {
+      total,
+      stills: count((row) => row.hasStill),
+      descriptions: count((row) => row.hasDescription),
+      airDates: count((row) => row.hasAirDate),
+      runtimes: count((row) => row.hasRuntime),
+    };
+  }, [episodeCoverageRows]);
+
   const groupedCast = useMemo(() => {
     const main: SeasonCastMember[] = [];
     const recurring: SeasonCastMember[] = [];
@@ -1332,12 +1580,70 @@ export default function SeasonDetailPage() {
     return (asset.kind ?? "").toLowerCase().trim() === "backdrop";
   }, []);
 
-  const filteredMediaAssets = useMemo(() => {
+  const advancedFilteredMediaAssets = useMemo(() => {
     return applyAdvancedFiltersToSeasonAssets(assets, advancedFilters, {
       showName: show?.name ?? undefined,
       getSeasonNumber: () => seasonNumber,
     });
   }, [assets, advancedFilters, seasonNumber, show?.name]);
+
+  const galleryDiagnostics = useMemo(() => {
+    const sourceCounts = new Map<string, number>();
+    let missingVariants = 0;
+    let oversized = 0;
+    let unclassified = 0;
+
+    for (const asset of advancedFilteredMediaAssets) {
+      const sourceKey = (asset.source || "unknown").trim().toLowerCase() || "unknown";
+      sourceCounts.set(sourceKey, (sourceCounts.get(sourceKey) ?? 0) + 1);
+
+      const missingKeys = getMissingVariantKeys(asset.metadata ?? null);
+      if (missingKeys.length > 0) {
+        missingVariants += 1;
+      }
+      const pixelCount =
+        typeof asset.width === "number" && typeof asset.height === "number"
+          ? asset.width * asset.height
+          : 0;
+      if (pixelCount > 6_000_000) oversized += 1;
+      if (!asset.kind || asset.kind.trim().toLowerCase() === "other") unclassified += 1;
+    }
+
+    const topSources = Array.from(sourceCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+
+    return {
+      total: advancedFilteredMediaAssets.length,
+      missingVariants,
+      missingVariantBreakdown: buildMissingVariantBreakdown(
+        advancedFilteredMediaAssets.map((asset) => asset.metadata ?? null)
+      ),
+      oversized,
+      unclassified,
+      topSources,
+    };
+  }, [advancedFilteredMediaAssets]);
+
+  const filteredMediaAssets = useMemo(() => {
+    if (galleryDiagnosticFilter === "all") return advancedFilteredMediaAssets;
+    return advancedFilteredMediaAssets.filter((asset) => {
+      if (galleryDiagnosticFilter === "missing-variants") {
+        return hasMissingVariants(asset.metadata ?? null);
+      }
+      if (galleryDiagnosticFilter === "oversized") {
+        const pixelCount =
+          typeof asset.width === "number" && typeof asset.height === "number"
+            ? asset.width * asset.height
+            : 0;
+        return pixelCount > 6_000_000;
+      }
+      if (galleryDiagnosticFilter === "unclassified") {
+        return !asset.kind || asset.kind.trim().toLowerCase() === "other";
+      }
+      return true;
+    });
+  }, [advancedFilteredMediaAssets, galleryDiagnosticFilter]);
 
   const mediaSections = useMemo(() => {
     const backdrops: SeasonAsset[] = [];
@@ -1393,9 +1699,6 @@ export default function SeasonDetailPage() {
     return assets.filter((a) => inferHasTextOverlay(a.metadata ?? null) === null).length;
   }, [isTextFilterActive, assets]);
 
-  const looksLikeUuid = (value: string) =>
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-
   const detectTextOverlayForUnknown = useCallback(async () => {
     const targets = assets
       .filter((a) => looksLikeUuid(a.id) && inferHasTextOverlay(a.metadata ?? null) === null)
@@ -1445,6 +1748,33 @@ export default function SeasonDetailPage() {
 
   if (!user || !hasAccess) {
     return null;
+  }
+
+  if (slugResolutionLoading || (!showId && !slugResolutionError)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
+          <p className="text-sm text-zinc-600">Resolving show URL...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (slugResolutionError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-red-600">{slugResolutionError}</p>
+          <Link
+            href="/admin/trr-shows"
+            className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
+          >
+            ← Back to Shows
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   if (loading) {
@@ -1497,6 +1827,18 @@ export default function SeasonDetailPage() {
                 <h1 className="text-3xl font-bold text-zinc-900">
                   {show.name} · Season {season.season_number}
                 </h1>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                      seasonEligibleForMedia
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-amber-200 bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    {seasonEligibleForMedia ? "Eligible Season" : "Placeholder Season"}
+                  </span>
+                  <span className="text-xs text-zinc-500">{seasonEligibilityReason}</span>
+                </div>
                 {season.overview && (
                   <p className="mt-2 text-sm text-zinc-600 max-w-3xl">
                     {season.overview}
@@ -1644,6 +1986,74 @@ export default function SeasonDetailPage() {
                   <p className="text-sm text-zinc-500">No episodes found for this season.</p>
                 )}
               </div>
+
+              <section className="mt-8 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Episode Coverage Matrix
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      Missing data is surfaced per episode for stills, copy, air date, and runtime.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                      Stills {coverageSummary.stills}/{coverageSummary.total}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                      Descriptions {coverageSummary.descriptions}/{coverageSummary.total}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                      Air Dates {coverageSummary.airDates}/{coverageSummary.total}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                      Runtime {coverageSummary.runtimes}/{coverageSummary.total}
+                    </span>
+                  </div>
+                </div>
+                {episodeCoverageRows.length > 0 ? (
+                  <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+                    <table className="min-w-full text-left text-xs">
+                      <thead className="bg-zinc-100 text-zinc-600">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">Episode</th>
+                          <th className="px-3 py-2 font-semibold">Still</th>
+                          <th className="px-3 py-2 font-semibold">Description</th>
+                          <th className="px-3 py-2 font-semibold">Air Date</th>
+                          <th className="px-3 py-2 font-semibold">Runtime</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {episodeCoverageRows.map((row) => (
+                          <tr key={row.episodeId} className="border-t border-zinc-100">
+                            <td className="px-3 py-2 text-zinc-700">
+                              E{row.episodeNumber} {row.title ? `· ${row.title}` : ""}
+                            </td>
+                            {[row.hasStill, row.hasDescription, row.hasAirDate, row.hasRuntime].map(
+                              (ok, idx) => (
+                                <td key={`${row.episodeId}-${idx}`} className="px-3 py-2">
+                                  <span
+                                    className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${
+                                      ok
+                                        ? "bg-emerald-100 text-emerald-700"
+                                        : "bg-amber-100 text-amber-700"
+                                    }`}
+                                  >
+                                    {ok ? "Ready" : "Missing"}
+                                  </span>
+                                </td>
+                              )
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-500">No episodes available for coverage matrix.</p>
+                )}
+              </section>
             </div>
           )}
 
@@ -1707,7 +2117,8 @@ export default function SeasonDetailPage() {
                       </button>
                       <button
                         onClick={openAddBackdrops}
-                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                        disabled={!seasonEligibleForMedia && !allowPlaceholderMediaOverride}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1716,7 +2127,8 @@ export default function SeasonDetailPage() {
                       </button>
                       <button
                         onClick={() => setScrapeDrawerOpen(true)}
-                        className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                        disabled={!seasonEligibleForMedia && !allowPlaceholderMediaOverride}
+                        className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -1745,8 +2157,125 @@ export default function SeasonDetailPage() {
                 total={assetsRefreshProgress?.total}
               />
 
+              {!seasonEligibleForMedia && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm font-semibold text-amber-800">Placeholder season guardrail</p>
+                  <p className="mt-1 text-xs text-amber-700">
+                    This season has no premiere date and not enough episodes yet. Media imports are blocked by
+                    default to avoid assigning assets to placeholder seasons.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAllowPlaceholderMediaOverride((prev) => !prev)}
+                    className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                  >
+                    {allowPlaceholderMediaOverride ? "Disable Override" : "Enable Override"}
+                  </button>
+                </div>
+              )}
+
               {assetsView === "media" ? (
                 <div className="space-y-8">
+                <section className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                  <button
+                    type="button"
+                    onClick={() => setGalleryDiagnosticsOpen((prev) => !prev)}
+                    className="flex w-full flex-wrap items-center justify-between gap-3 text-left"
+                    aria-expanded={galleryDiagnosticsOpen}
+                  >
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Gallery Diagnostics
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        Source quality, variant status, and quick risk filters.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap justify-end gap-2 text-xs">
+                        <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                          Assets {galleryDiagnostics.total}
+                        </span>
+                        <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                          Missing variants {galleryDiagnostics.missingVariants}
+                        </span>
+                        <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                          Oversized {galleryDiagnostics.oversized}
+                        </span>
+                        <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                          Unclassified {galleryDiagnostics.unclassified}
+                        </span>
+                      </div>
+                      <svg
+                        className={`h-4 w-4 text-zinc-500 transition-transform ${
+                          galleryDiagnosticsOpen ? "rotate-180" : ""
+                        }`}
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.75"
+                      >
+                        <path d="m5 7 5 6 5-6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </div>
+                  </button>
+                  {galleryDiagnosticsOpen && (
+                    <>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(
+                          [
+                            { key: "all", label: "All" },
+                            { key: "missing-variants", label: "Missing Variants" },
+                            { key: "oversized", label: "Oversized" },
+                            { key: "unclassified", label: "Unclassified" },
+                          ] as const
+                        ).map((option) => (
+                          <button
+                            key={option.key}
+                            type="button"
+                            onClick={() => setGalleryDiagnosticFilter(option.key)}
+                            className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                              galleryDiagnosticFilter === option.key
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      {galleryDiagnostics.topSources.length > 0 && (
+                        <p className="mt-3 text-xs text-zinc-500">
+                          Top sources:{" "}
+                          {galleryDiagnostics.topSources
+                            .map(([source, count]) => `${source} (${count})`)
+                            .join(", ")}
+                        </p>
+                      )}
+                      <div className="mt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Missing Variant Breakdown
+                        </p>
+                        {galleryDiagnostics.missingVariantBreakdown.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {galleryDiagnostics.missingVariantBreakdown.map((item) => (
+                              <span
+                                key={item.key}
+                                className="rounded-full bg-white px-2 py-1 text-xs text-zinc-700"
+                              >
+                                {item.key} ({item.count})
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-xs text-zinc-500">
+                            No missing variants detected.
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </section>
                 {mediaSections.backdrops.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Backdrops</h4>
@@ -1758,7 +2287,7 @@ export default function SeasonDetailPage() {
                             className="relative aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <GalleryImage
-                              src={asset.hosted_url}
+                              src={getAssetDisplayUrl(asset)}
                               alt={asset.caption || "Season backdrop"}
                               sizes="300px"
                               className="object-cover"
@@ -1780,7 +2309,7 @@ export default function SeasonDetailPage() {
                             className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <GalleryImage
-                              src={asset.hosted_url}
+                              src={getAssetDisplayUrl(asset)}
                               alt={asset.caption || "Season poster"}
                               sizes="180px"
                             />
@@ -1801,7 +2330,7 @@ export default function SeasonDetailPage() {
                             className="relative aspect-video overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <GalleryImage
-                              src={asset.hosted_url}
+                              src={getAssetDisplayUrl(asset)}
                               alt={asset.caption || "Episode still"}
                               sizes="150px"
                             />
@@ -1822,7 +2351,7 @@ export default function SeasonDetailPage() {
                             className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <GalleryImage
-                              src={asset.hosted_url}
+                              src={getAssetDisplayUrl(asset)}
                               alt={asset.caption || "Cast photo"}
                               sizes="180px"
                             />
@@ -1946,7 +2475,7 @@ export default function SeasonDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {cast.length} members
+                    {cast.length} active{archiveCast.length > 0 ? ` · ${archiveCast.length} archive-only` : ""}
                   </span>
                   <button
                     type="button"
@@ -1962,6 +2491,11 @@ export default function SeasonDetailPage() {
                 <p className={`mb-4 text-sm ${castRefreshError ? "text-red-600" : "text-zinc-500"}`}>
                   {castRefreshError || castRefreshNotice}
                 </p>
+              )}
+              {seasonCastSource === "show_fallback" && seasonCastEligibilityWarning && (
+                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {seasonCastEligibilityWarning}
+                </div>
               )}
               <RefreshProgressBar
                 show={refreshingCast}
@@ -2156,7 +2690,58 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {cast.length === 0 && (
+                {archiveCast.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                      Archive Footage Credits
+                    </h4>
+                    <p className="mb-3 text-xs text-zinc-500">
+                      These credits are excluded from actual season-episode counts.
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {archiveCast.map((member) => (
+                        <Link
+                          key={`archive-${member.person_id}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
+                          className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 transition hover:border-amber-300 hover:bg-amber-100/50"
+                        >
+                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                            {member.photo_url ? (
+                              <CastPhoto
+                                src={member.photo_url}
+                                alt={member.person_name || "Cast"}
+                                thumbnail_focus_x={member.thumbnail_focus_x}
+                                thumbnail_focus_y={member.thumbnail_focus_y}
+                                thumbnail_zoom={member.thumbnail_zoom}
+                                thumbnail_crop_mode={member.thumbnail_crop_mode}
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-zinc-400">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                          <p className="font-semibold text-zinc-900">
+                            {member.person_name || "Unknown"}
+                          </p>
+                          <p className="text-sm text-amber-800">
+                            {((member.archive_episodes_in_season as number | null | undefined) ?? 0)} archive credits
+                          </p>
+                          {typeof member.total_episodes === "number" && (
+                            <p className="text-xs text-zinc-500">
+                              {member.total_episodes} total episodes
+                            </p>
+                          )}
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {cast.length === 0 && archiveCast.length === 0 && (
                   <p className="text-sm text-zinc-500">No cast found for this season.</p>
                 )}
               </div>
@@ -2265,7 +2850,8 @@ export default function SeasonDetailPage() {
 
         {assetLightbox && (
           <ImageLightbox
-            src={assetLightbox.asset.hosted_url}
+            src={getAssetDetailUrl(assetLightbox.asset)}
+            fallbackSrc={assetLightbox.asset.original_url ?? assetLightbox.asset.hosted_url}
             alt={assetLightbox.asset.caption || "Gallery image"}
             isOpen={true}
             onClose={closeAssetLightbox}

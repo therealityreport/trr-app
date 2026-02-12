@@ -2,11 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getCoverPhotos } from "@/lib/server/admin/person-cover-photos-repository";
 import {
+  getCastByShowId,
   getShowArchiveFootageCast,
   getShowCastWithStats,
 } from "@/lib/server/trr-api/trr-shows-repository";
 
 export const dynamic = "force-dynamic";
+
+const DEFAULT_MIN_EPISODES = 1;
+const SHOW_FALLBACK_WARNING =
+  "Episode-credit evidence is missing or stale. Showing approximate show-level cast until cast/credits sync succeeds.";
+
+type CastSource = "episode_evidence" | "show_fallback";
 
 interface RouteParams {
   params: Promise<{ showId: string }>;
@@ -42,37 +49,53 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const limit = parseInt(searchParams.get("limit") ?? "20", 10);
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
     const minEpisodes = searchParams.get("minEpisodes");
+    const hasExplicitMinEpisodes = searchParams.has("minEpisodes");
     const requireImage = searchParams.get("requireImage");
 
-    const parsedMinEpisodes = minEpisodes ? parseInt(minEpisodes, 10) : 1;
+    const parsedMinEpisodes = minEpisodes ? parseInt(minEpisodes, 10) : DEFAULT_MIN_EPISODES;
     const minEpisodesValue =
-      Number.isFinite(parsedMinEpisodes) && parsedMinEpisodes >= 0 ? parsedMinEpisodes : 1;
+      Number.isFinite(parsedMinEpisodes) && parsedMinEpisodes >= 0
+        ? parsedMinEpisodes
+        : DEFAULT_MIN_EPISODES;
 
-    const [cast, archiveCast] = await Promise.all([
+    const [episodeEvidenceCast, archiveCast] = await Promise.all([
       getShowCastWithStats(showId, { limit, offset }),
       getShowArchiveFootageCast(showId, { limit, offset }),
     ]);
 
-    let filteredCast = cast;
+    let cast = episodeEvidenceCast;
+    let castSource: CastSource = "episode_evidence";
+    let eligibilityWarning: string | null = null;
+
     if (Number.isFinite(minEpisodesValue)) {
-      filteredCast = filteredCast.filter(
+      cast = cast.filter(
         (member) => (member.total_episodes ?? 0) >= minEpisodesValue
       );
     }
-    if (requireImage === "true" || requireImage === "1") {
-      filteredCast = filteredCast.filter((member) => Boolean(member.photo_url));
+
+    if (!hasExplicitMinEpisodes && cast.length === 0) {
+      const fallbackCast = await getCastByShowId(showId, { limit, offset });
+      if (fallbackCast.length > 0) {
+        cast = fallbackCast;
+        castSource = "show_fallback";
+        eligibilityWarning = SHOW_FALLBACK_WARNING;
+      }
     }
 
-    let castWithCover = filteredCast;
+    if (requireImage === "true" || requireImage === "1") {
+      cast = cast.filter((member) => Boolean(member.photo_url));
+    }
+
+    let castWithCover = cast;
     let archiveCastWithCover = archiveCast;
 
-    if (filteredCast.length > 0 || archiveCast.length > 0) {
+    if (cast.length > 0 || archiveCast.length > 0) {
       const personIds = [
-        ...new Set([...filteredCast, ...archiveCast].map((member) => member.person_id)),
+        ...new Set([...cast, ...archiveCast].map((member) => member.person_id)),
       ];
       try {
         const coverPhotos = await getCoverPhotos(personIds);
-        castWithCover = filteredCast.map((member) => ({
+        castWithCover = cast.map((member) => ({
           ...member,
           cover_photo_url: coverPhotos.get(member.person_id)?.photo_url ?? null,
         }));
@@ -82,7 +105,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }));
       } catch (error) {
         console.error("[api] Failed to load cover photos for cast", error);
-        castWithCover = filteredCast.map((member) => ({
+        castWithCover = cast.map((member) => ({
           ...member,
           cover_photo_url: null,
         }));
@@ -100,6 +123,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({
       cast: castWithCover,
       archive_footage_cast: archiveCastWithCover,
+      cast_source: castSource,
+      eligibility_warning: eligibilityWarning,
       pagination: {
         limit,
         offset,

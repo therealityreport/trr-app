@@ -4,6 +4,116 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-11)
 
+- February 12, 2026: Implemented responsive Figma-style circle rank-order UI (`figma-rank-circles`) for survey rank questions.
+  - Circle ranking (`uiVariant: circle-ranking`) now uses a dedicated layout preset in `RankOrderInput`:
+    - `apps/web/src/components/survey/RankOrderInput.tsx`
+  - `FlashbackRanker` now supports `layoutPreset?: "legacy" | "figma-rank-circles"`:
+    - New responsive 2/3/4-column numbered slot grid (mobile/tablet/desktop)
+    - Bottom unranked tray with mobile horizontal scroll + snap
+    - Viewport-aware picker (mobile bottom sheet, desktop popover)
+    - Legacy behavior preserved for non-Figma preset and rectangle/classic ranking
+    - File: `apps/web/src/components/flashback-ranker.tsx`
+  - Rank-order catalog copy updated to reflect grid + responsive tray behavior:
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - Tests added:
+    - `apps/web/tests/rank-order-input.test.tsx`
+    - `apps/web/tests/flashback-ranker.test.tsx`
+  - Test setup improved to strip `unoptimized` from mocked `next/image` props:
+    - `apps/web/tests/setup.ts`
+  - Validation:
+    - `pnpm -C apps/web run lint` (pass, warnings only)
+    - `pnpm -C apps/web run test:ci` (pass)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+
+- February 12, 2026: Added cast fallback + warning behavior when episode-credit evidence is missing/stale.
+  - Show cast API now supports fallback metadata and behavior:
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast/route.ts`
+    - Returns `cast_source` (`episode_evidence` or `show_fallback`) and `eligibility_warning`.
+    - Falls back to `getCastByShowId` only when default eligibility yields empty and `minEpisodes` is not explicitly provided.
+  - Season cast API now supports fallback metadata and behavior:
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route.ts`
+    - Returns `cast_source` (`season_evidence` or `show_fallback`) and `eligibility_warning`.
+    - Falls back to show-level cast when season evidence is empty and `include_archive_only=false`.
+  - Repository robustness update:
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - `getShowCastWithStats` now includes `eligible_total_episodes` in the initial query and uses it as a fallback total.
+  - Show and season cast tabs now render warning banners in fallback mode:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - Image import cast options now honor season fallback mode (do not enforce >50% season-episode threshold when fallback is active):
+    - `apps/web/src/components/admin/ImageScrapeDrawer.tsx`
+  - Tests added/updated:
+    - `apps/web/tests/show-cast-route-default-min-episodes.test.ts`
+    - `apps/web/tests/season-cast-route-fallback.test.ts`
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/show-cast-route-default-min-episodes.test.ts tests/season-cast-route-fallback.test.ts` (5 tests passed)
+    - `pnpm -C apps/web exec eslint ...` on touched files (warnings only; no errors)
+
+- February 12, 2026: Fixed slow `/admin/trr-shows/[showId]` page load caused by blocking Bravo reads.
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx` now lazy-loads Bravo videos/news only when needed (`NEWS`, `ASSETS -> VIDEOS`, or Health Center open).
+  - Initial page load path no longer waits for Bravo endpoints; request dedupe added for concurrent Bravo loads; manual refresh now force-fetches.
+  - Validation:
+    - `npm run lint -- 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only)
+    - `npx tsc --noEmit --pretty false` (pass)
+
+- February 12, 2026: Removed fragile cast-photo view column dependency.
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts` no longer selects missing `thumbnail_focus_*` fields from `core.v_cast_photos`, eliminating recurring DB errors in cast fetches.
+  - Validation:
+    - `npm run lint -- 'src/lib/server/trr-api/trr-shows-repository.ts'` (warning-only)
+
+- February 12, 2026: Show page health UX moved into a dedicated popup launched by a health icon button under `Sync by Bravo`.
+  - Popup now contains:
+    - Content Health
+    - Sync Pipeline
+    - Operations Inbox
+    - Refresh Log
+  - Removed the inline Content Health/Pipeline/Inbox blocks from the main show page content area.
+  - File: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Validation: `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (warnings only, no errors)
+
+- February 12, 2026: Implemented plan-driven image-variant consumption, slug resolution, and breadcrumb alias routing.
+  - `SeasonAsset` payload now carries variant URL fields (`display_url`, `detail_url`, `crop_display_url`, `crop_detail_url`, `original_url`) resolved from media metadata.
+  - Show/season admin galleries now render variant URLs by default and keep original as lightbox fallback.
+  - Added slug resolver API:
+    - `apps/web/src/app/api/admin/trr-api/shows/resolve-slug/route.ts`
+  - Show + season pages now resolve non-UUID route values before loading data.
+  - Added readable alias routes:
+    - `apps/web/src/app/admin/trr-shows/[showId]/[showSection]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/[seasonSlug]/[seasonTab]/page.tsx`
+  - Added show-page ops UX enhancements:
+    - Content Health strip
+    - Sync Pipeline status panel
+    - Operations Inbox queue.
+  - Validation:
+    - `pnpm -C apps/web run lint` (warnings only)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+
+- February 12, 2026: season social dashboard ingest defaults updated for Instagram backfill reliability.
+  - In `apps/web/src/components/admin/season-social-analytics-section.tsx`, `runIngest` payload now:
+    - raises default `max_posts_per_target` from `25` to `1500`
+    - for Instagram specifically, uses `max_posts_per_target=5000`
+    - for Instagram specifically, uses `max_comments_per_post=0` (post-count backfill first)
+  - Goal: avoid artificial 25-post cap and unblock full Instagram post population on Social tab.
+  - Validation: `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx --max-warnings=0`
+
+- Image import improvements for season announcements + duplicate linking:
+  - For `Cast Photos` with `season_announcement` mode (`OFFICIAL SEASON ANNOUNCEMENT` context), import now auto-tags cast when caption/context text contains cast names and no explicit cast selection is set.
+  - Duplicate-link requests now send source metadata (`source_url`, `source_page_url`, `source_domain`) from the current scrape URL.
+  - Existing links now merge incoming context metadata when link already exists, so source attribution can be updated on re-link.
+  - `Link`/`Link All` media-asset existence verification now uses direct SQL (`core.media_assets`) instead of Supabase PostgREST, preventing false link failures in local/workspace environments.
+  - Duplicate-link failures now show as inline drawer errors (not just console logs).
+  - Asset source normalization now prefers link-context source URL for media-links rows so source-domain filters (e.g., `deadline.com`) include linked duplicates.
+  - Files:
+    - `apps/web/src/components/admin/ImageScrapeDrawer.tsx`
+    - `apps/web/src/app/api/admin/trr-api/media-links/route.ts`
+    - `apps/web/src/lib/server/trr-api/media-links-repository.ts`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - Validation: `pnpm -C apps/web run lint -- src/app/api/admin/trr-api/media-links/route.ts src/components/admin/ImageScrapeDrawer.tsx src/lib/server/trr-api/media-links-repository.ts src/lib/server/trr-api/trr-shows-repository.ts` (1 pre-existing warning in repository)
+- Image import cast-dropdown eligibility update:
+  - Cast dropdown now includes only members appearing in more than half of the selected season's episodes (`episodes_in_season > total_episodes/2`).
+  - Enforced in season/show import drawer by combining season-cast counts with season episode totals.
+  - File: `apps/web/src/components/admin/ImageScrapeDrawer.tsx`
+  - Validation: `pnpm -C apps/web run lint -- src/components/admin/ImageScrapeDrawer.tsx`
 - Sync-by-Bravo season eligibility guard update on show page:
   - Season dropdown/default now includes only seasons with `>1` episodes or a known premiere date.
   - Placeholder seasons with no premiere/episode evidence are excluded from selection.
@@ -1105,3 +1215,127 @@ PR stabilization + CI fixes (this session, 2026-02-12):
   - `pnpm -C apps/web run test:ci -- --coverage` (109 passed)
   - `DATABASE_URL="" NEXT_PUBLIC_FIREBASE_API_KEY="placeholder-api-key-for-build" NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="placeholder.firebaseapp.com" NEXT_PUBLIC_FIREBASE_PROJECT_ID="demo-build" pnpm -C apps/web run build` (pass)
 - PR #33 now has resolved review thread, passing checks, and clean merge state.
+
+Show gallery cast/promo bucketing + Deadline source visibility (this session, 2026-02-12):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+- Changes:
+  - Reworked `Assets > Images` grouping so only `kind=cast` and `kind=promo` appear in `Cast Photos & Promos`.
+  - Added `Other` section for remaining images (including non-official cast portraits/headshots).
+  - Fixed scrape source normalization to honor `source_domain`/domain-like metadata when URL fields are absent, improving source filters such as `deadline.com` on linked duplicates.
+- Validation:
+  - `pnpm -C apps/web lint 'src/app/admin/trr-shows/[showId]/page.tsx' src/lib/server/trr-api/trr-shows-repository.ts` (pass; pre-existing warnings only).
+
+Plan closure: image variants + season health/coverage/archive diagnostics (this session, 2026-02-12):
+- Files:
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route.ts`
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+- Changes:
+  - Added person photo variant URL support (`original_url`, `display_url`, `detail_url`, `crop_display_url`, `crop_detail_url`) in repository responses and person page rendering.
+  - Season cast data now supports archive-footage evidence (`archive_episodes_in_season`) and optional `include_archive_only=true` route behavior.
+  - Season page now includes:
+    - `Eligible Season` / `Placeholder Season` guardrail with override for media assignment.
+    - Episode coverage matrix section (still/description/air date/runtime).
+    - Archive-footage cast section separated from active cast counts.
+    - Gallery diagnostics summary + quick filters for missing variants/oversized/unclassified assets.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route.ts' 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass; warning-only)
+  - `pnpm -C apps/web exec next build --webpack` (pass)
+
+Show Admin overhaul + season diagnostics implementation pass (this session, 2026-02-12):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/src/lib/admin/gallery-diagnostics.ts`
+  - `apps/web/tests/gallery-diagnostics.test.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/links/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/links/discover/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/links/[linkId]/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/roles/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/roles/[roleId]/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast/[personId]/roles/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast-role-members/route.ts`
+- Changes:
+  - Show page IA updates:
+    - default landing tab now `Overview` (details tab id retained for URL compatibility)
+    - `?tab=overview` alias support added
+    - details fields are now read-only until `Edit`; added explicit `Edit / Save / Cancel` flow
+  - Overview details expansion:
+    - added `Networks & Streaming` panel
+    - added API-backed `Links` section with grouping (`Official`, `Social`, `Knowledge`, `Cast Announcements`, `Other`)
+    - added pending link review controls (`Approve`, `Reject`, `Edit`, `Delete`) and discovery action
+  - Assets updates:
+    - show assets heading corrected from `Season Gallery` -> `Show Gallery`
+    - added inline `Clear Filters` button in gallery toolbar when advanced filters are active
+  - Cast intelligence updates:
+    - added sort controls (`Episodes`, `Season Recency`, `Name`) with asc/desc
+    - added filter controls (`Seasons`, `Roles`, `Credit`, `Has Image`)
+    - wired role catalog + assignment UX (`Add` role, `Edit Roles` per person)
+    - preserves thumbnail priority by preferring `cover_photo_url`, then existing cast photo fallbacks
+  - Season gallery diagnostics enhancement:
+    - diagnostics module added with locked missing-variant rule:
+      - require `base.card`, `base.detail`
+      - require `crop_card`, `crop_detail` only when active crop signature exists
+    - diagnostics card is now collapsible (collapsed by default)
+    - added unique missing-variant breakdown list with counts, sorted by count desc then key asc
+    - missing-variants quick filter now uses same rule as breakdown
+    - empty state `No missing variants detected.` added
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/gallery-diagnostics.ts' 'tests/gallery-diagnostics.test.ts'` (pass; warning-only on pre-existing `no-img-element`)
+  - `pnpm -C apps/web exec vitest run tests/gallery-diagnostics.test.ts` (5 passed)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Stability follow-up (this session, 2026-02-12):
+- File:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+- Change:
+  - Fixed TypeScript event-handler mismatch by wrapping `fetchJobs` button click in a zero-arg callback (`onClick={() => void fetchJobs()}`).
+- Validation:
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Season social ingest run-aware UI update (this session, 2026-02-12):
+- File:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+- Changes:
+  - Updated ingest UX to align with backend run/stage contract:
+    - adds `depth_preset` selector (`quick|balanced|deep`)
+    - sends unified ingest payload with `ingest_mode=posts_and_comments`, `depth_preset`, `max_replies_per_post`
+    - tracks active `run_id` returned by ingest endpoint
+    - polls jobs filtered by `run_id` while ingest is active
+    - stage-aware progress/status rendering (posts/comments)
+    - run-scoped completion summary before resetting ingest state.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+- Follow-up validation note:
+  - full workspace `tsc --noEmit` currently fails on unrelated pre-existing show admin page symbols in `apps/web/src/app/admin/trr-shows/[showId]/page.tsx` (`renameShowRole`, `toggleShowRoleActive`).
+  - social-ingest changes validated with targeted ESLint on touched files.
+
+Show page cast-role management + thumbnail precedence refinements (this session, 2026-02-12):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+- Changes:
+  - Added role catalog admin actions in Cast UI:
+    - rename role
+    - activate/deactivate role
+  - Cast UI thumbnail default now prefers cast-intelligence/photo pipeline result first, then existing cast photo fallback, then manual cover fallback.
+  - Updated preferred person gallery photo ordering in repository to prioritize:
+    - Bravo profile (season-matched first)
+    - official season announcement
+    - images marked `people_count=1`
+    - remaining gallery order fallback
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/lib/server/trr-api/trr-shows-repository.ts'` (warning-only)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+- Added admin proxy route for run cancellation:
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/runs/[runId]/cancel/route.ts`
+- Validation re-run (same session):
+  - `pnpm -C apps/web exec tsc --noEmit` now passes after sync with latest local state.
+- Small UX follow-up (same session):
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - Added `Cancel Active Run` control in Ingest panel, wired to run cancel proxy endpoint and run-scoped job refresh.
+  - Validation: `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx` and `pnpm -C apps/web exec tsc --noEmit` (pass).

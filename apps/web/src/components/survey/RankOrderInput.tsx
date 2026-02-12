@@ -22,6 +22,7 @@ export default function RankOrderInput({
   const config = question.config as unknown as CircleRankingConfig | RectangleRankingConfig;
   // Determine variant from uiVariant: circle-ranking = grid, rectangle-ranking = classic
   const variant = config.uiVariant === "circle-ranking" ? "grid" : "classic";
+  const layoutPreset = config.uiVariant === "circle-ranking" ? "figma-rank-circles" : "legacy";
   const lineLabelTop = config.lineLabelTop ?? "BEST";
   const lineLabelBottom = config.lineLabelBottom ?? "WORST";
 
@@ -63,6 +64,7 @@ export default function RankOrderInput({
           lineLabelTop={lineLabelTop}
           lineLabelBottom={lineLabelBottom}
           variant={variant}
+          layoutPreset={layoutPreset}
         />
       </div>
     );
@@ -76,6 +78,7 @@ export default function RankOrderInput({
       lineLabelBottom={lineLabelBottom}
       onChange={handleRankingChange}
       variant={variant}
+      layoutPreset={layoutPreset}
     />
   );
 }

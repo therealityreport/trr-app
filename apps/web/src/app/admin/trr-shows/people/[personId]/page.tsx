@@ -112,6 +112,11 @@ interface TrrPersonPhoto {
   source: string;
   url: string | null;
   hosted_url: string | null;
+  original_url?: string | null;
+  display_url?: string | null;
+  detail_url?: string | null;
+  crop_display_url?: string | null;
+  crop_detail_url?: string | null;
   hosted_content_type?: string | null;
   caption: string | null;
   width: number | null;
@@ -262,6 +267,24 @@ const resolvePhotoDimensions = (
     height: parseDimensionValue(photo.height) ?? metaHeight,
   };
 };
+
+const pickNonEmptyUrl = (...values: Array<string | null | undefined>): string | null => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+};
+
+const getPersonPhotoCardUrl = (photo: TrrPersonPhoto): string | null =>
+  pickNonEmptyUrl(photo.crop_display_url, photo.display_url, photo.hosted_url, photo.url);
+
+const getPersonPhotoDetailUrl = (photo: TrrPersonPhoto): string | null =>
+  pickNonEmptyUrl(photo.crop_detail_url, photo.detail_url, photo.hosted_url, photo.url);
+
+const getPersonPhotoOriginalUrl = (photo: TrrPersonPhoto): string | null =>
+  pickNonEmptyUrl(photo.original_url, photo.hosted_url, photo.url);
 
 const buildThumbnailCropPreview = (
   photo: TrrPersonPhoto | null | undefined
@@ -464,7 +487,15 @@ function GalleryPhoto({
   settingCover?: boolean;
 }) {
   const [hasError, setHasError] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState<string | null>(photo.hosted_url || photo.url || null);
+  const primarySrc = useMemo(
+    () => getPersonPhotoCardUrl(photo),
+    [photo]
+  );
+  const originalSrc = useMemo(
+    () => getPersonPhotoOriginalUrl(photo),
+    [photo]
+  );
+  const [currentSrc, setCurrentSrc] = useState<string | null>(primarySrc);
   const triedFallbackRef = useRef(false);
   const [naturalDimensions, setNaturalDimensions] = useState<{
     width: number;
@@ -497,9 +528,9 @@ function GalleryPhoto({
   useEffect(() => {
     setHasError(false);
     triedFallbackRef.current = false;
-    setCurrentSrc(photo.hosted_url || photo.url || null);
+    setCurrentSrc(primarySrc);
     setNaturalDimensions(null);
-  }, [photo.hosted_url, photo.url]);
+  }, [primarySrc]);
 
   const focusPoint = useMemo(() => {
     const match = presentation.objectPosition.match(
@@ -545,9 +576,9 @@ function GalleryPhoto({
   }, [viewportRect]);
 
   const handleError = () => {
-    if (!triedFallbackRef.current && photo.url && currentSrc !== photo.url) {
+    if (!triedFallbackRef.current && originalSrc && currentSrc !== originalSrc) {
       triedFallbackRef.current = true;
-      setCurrentSrc(photo.url);
+      setCurrentSrc(originalSrc);
       return;
     }
     setHasError(true);
@@ -3092,7 +3123,10 @@ export default function PersonProfilePage() {
       : null;
   // Get primary photo - cover photo first, then Bravo profile fallback, then first hosted photo.
   const primaryPhotoUrl =
-    coverPhoto?.photo_url || bravoProfileImage || photos.find((p) => p.hosted_url)?.hosted_url;
+    coverPhoto?.photo_url ||
+    bravoProfileImage ||
+    (photos.length > 0 ? getPersonPhotoCardUrl(photos[0]) : null) ||
+    photos.find((p) => p.hosted_url)?.hosted_url;
 
   const formatBravoPublishedDate = (value: string | null | undefined): string | null => {
     if (!value || typeof value !== "string") return null;
@@ -4027,10 +4061,8 @@ export default function PersonProfilePage() {
         {/* Lightbox with metadata and navigation */}
         {lightboxPhoto && (
           <ImageLightbox
-            src={lightboxPhoto.photo.hosted_url || lightboxPhoto.photo.url || ""}
-            fallbackSrc={
-              lightboxPhoto.photo.hosted_url ? lightboxPhoto.photo.url : null
-            }
+            src={getPersonPhotoDetailUrl(lightboxPhoto.photo) || ""}
+            fallbackSrc={getPersonPhotoOriginalUrl(lightboxPhoto.photo)}
             alt={lightboxPhoto.photo.caption || person.full_name}
             isOpen={lightboxOpen}
             onClose={closeLightbox}

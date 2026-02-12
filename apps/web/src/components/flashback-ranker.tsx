@@ -25,6 +25,11 @@ const MIN_SLOT_HEIGHT = 8;
 const MAX_SLOT_HEIGHT = 64;
 const GRID_CIRCLE_SIZE = 96;
 const GRID_TOKEN_SIZE = 72;
+const FIGMA_SLOT_SIZE = "clamp(92px, 23vw, 156px)";
+const FIGMA_TOKEN_SIZE = "clamp(80px, 20vw, 144px)";
+const FIGMA_TRAY_TOKEN_SIZE = "clamp(72px, 18vw, 92px)";
+
+type FlashbackRankerLayoutPreset = "legacy" | "figma-rank-circles";
 
 export interface FlashbackRankerProps {
   items: SurveyRankingItem[];
@@ -33,6 +38,7 @@ export interface FlashbackRankerProps {
   lineLabelBottom?: string;
   onChange?(ranking: SurveyRankingItem[]): void;
   variant?: "classic" | "grid";
+  layoutPreset?: FlashbackRankerLayoutPreset;
 }
 
 type LineMetrics = { slotHeight: number; tokenSize: number };
@@ -44,8 +50,10 @@ export default function FlashbackRanker({
   lineLabelBottom = "WORST",
   onChange,
   variant = "classic",
+  layoutPreset = "legacy",
 }: FlashbackRankerProps) {
   const isGridMode = variant === "grid";
+  const isFigmaRankCircles = isGridMode && layoutPreset === "figma-rank-circles";
   const itemMap = React.useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const syncedRankingRef = React.useRef<string[] | null>(null);
 
@@ -310,7 +318,13 @@ export default function FlashbackRanker({
     () => lineItems.some((entry) => entry.id === activeId),
     [activeId, lineItems],
   );
-  const activeOverlaySize = isGridMode ? GRID_TOKEN_SIZE : activeIsOnLine ? lineMetrics.tokenSize : TOKEN_BASE_SIZE;
+  const activeOverlaySize: number | string = isFigmaRankCircles
+    ? FIGMA_TOKEN_SIZE
+    : isGridMode
+      ? GRID_TOKEN_SIZE
+      : activeIsOnLine
+        ? lineMetrics.tokenSize
+        : TOKEN_BASE_SIZE;
   const totalSlots = items.length;
   const slotItems = slots;
   const gridBench = React.useMemo(() => {
@@ -328,14 +342,35 @@ export default function FlashbackRanker({
 
   return (
     <div className="w-full max-w-[1440px] mx-auto">
-      <div className="flex items-center justify-center sm:justify-between gap-4 px-4 py-3">
-        <div className="text-sm font-semibold text-gray-600">{donePct}% Done</div>
-        <Progress value={donePct} />
-        <div className="text-sm font-semibold text-gray-600">100%</div>
-      </div>
+      {!isFigmaRankCircles && (
+        <div className="flex items-center justify-center sm:justify-between gap-4 px-4 py-3">
+          <div className="text-sm font-semibold text-gray-600">{donePct}% Done</div>
+          <Progress value={donePct} />
+          <div className="text-sm font-semibold text-gray-600">100%</div>
+        </div>
+      )}
 
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragOver={handleDragOver}>
-        {isGridMode ? (
+        {isFigmaRankCircles ? (
+          <>
+            <FigmaRankingGrid
+              totalSlots={totalSlots}
+              slotItems={slotItems}
+              activeId={activeId}
+              onSlotClick={handleSlotClick}
+              onRemoveItem={handleSlotClear}
+            />
+            <FigmaBench items={benchItems} />
+            <SelectionPicker
+              open={pickerSlotIndex !== null}
+              onClose={closePicker}
+              items={gridBench}
+              onSelect={handlePickerSelect}
+              position={pickerPosition}
+              mobileSheet
+            />
+          </>
+        ) : isGridMode ? (
           <>
             <Bench items={benchItems} className="hidden sm:block" />
             <RankingGrid
@@ -387,6 +422,73 @@ function Bench({ items, className = "" }: { items: SurveyRankingItem[]; classNam
         ))}
       </div>
     </div>
+  );
+}
+
+function FigmaBench({ items }: { items: SurveyRankingItem[] }) {
+  const { setNodeRef, isOver } = useDroppable({ id: "bench" });
+
+  return (
+    <section className="mx-auto mt-6 w-full max-w-[880px] px-3 pb-1 sm:px-4">
+      <div
+        ref={setNodeRef}
+        className={`rounded-2xl border px-3 py-3 transition sm:px-4 ${
+          isOver ? "border-black bg-black/5" : "border-black/10 bg-white"
+        }`}
+        aria-label="Unranked cast members"
+        data-testid="figma-unranked-tray"
+      >
+        <p
+          className="text-[12px] font-semibold uppercase tracking-[0.22em] text-black/70"
+          style={{ fontFamily: "var(--font-plymouth-serial)" }}
+        >
+          Unranked
+        </p>
+        <div className="mt-3 flex gap-3 overflow-x-auto pb-1 snap-x snap-mandatory sm:flex-wrap sm:overflow-visible sm:pb-0">
+          {items.map((item) => (
+            <div key={item.id} className="shrink-0 snap-start">
+              <Token item={item} size={FIGMA_TRAY_TOKEN_SIZE} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FigmaRankingGrid({
+  totalSlots,
+  slotItems,
+  activeId,
+  onSlotClick,
+  onRemoveItem,
+}: {
+  totalSlots: number;
+  slotItems: (SurveyRankingItem | null)[];
+  activeId: string | null;
+  onSlotClick?(index: number, anchor?: DOMRect): void;
+  onRemoveItem?(item: SurveyRankingItem): void;
+}) {
+  return (
+    <section className="mx-auto w-full max-w-[920px] overflow-hidden px-3 sm:px-4" data-testid="figma-rank-grid-wrap">
+      <div
+        className="grid grid-cols-2 place-items-center gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-4"
+        data-testid="figma-rank-grid"
+      >
+        {Array.from({ length: totalSlots }, (_, index) => (
+          <GridSlot
+            key={index}
+            index={index}
+            number={index + 1}
+            item={slotItems[index] ?? null}
+            activeId={activeId}
+            onSlotClick={onSlotClick}
+            onRemoveItem={onRemoveItem}
+            preset="figma-rank-circles"
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -474,7 +576,7 @@ function Token({
   dragging?: boolean;
   overlay?: boolean;
   asPlaceholder?: boolean;
-  size?: number;
+  size?: number | string;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: item.id,
@@ -492,7 +594,7 @@ function Token({
   const base =
     "rounded-full overflow-hidden ring-2 ring-transparent transition shadow-sm bg-white select-none touch-none";
   const state = dragging || isDragging ? "ring-blue-600 scale-[1.05]" : "hover:ring-gray-300";
-  const imageSize = Math.max(1, Math.round(size));
+  const imageSize = typeof size === "number" ? Math.max(1, Math.round(size)) : 512;
 
   const fallback = (
     <div className="flex h-full w-full items-center justify-center bg-rose-200 text-xs font-bold uppercase text-rose-700">
@@ -564,6 +666,7 @@ function GridSlot({
   activeId,
   onSlotClick,
   onRemoveItem,
+  preset = "legacy",
 }: {
   index: number;
   number: number;
@@ -571,9 +674,51 @@ function GridSlot({
   activeId: string | null;
   onSlotClick?(index: number, anchor?: DOMRect): void;
   onRemoveItem?(item: SurveyRankingItem): void;
+  preset?: FlashbackRankerLayoutPreset;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `slot-${index}` });
   const isActive = Boolean(item && item.id === activeId);
+  const isFigmaPreset = preset === "figma-rank-circles";
+
+  if (isFigmaPreset) {
+    return (
+      <div ref={setNodeRef} className="relative flex min-w-0 flex-col items-center">
+        <span
+          className="mb-1.5 text-base font-bold leading-none text-black sm:text-lg"
+          style={{ fontFamily: "var(--font-rude-slab)" }}
+        >
+          {number}
+        </span>
+        <div
+          className={`relative flex items-center justify-center rounded-full border-2 transition ${
+            isOver || isActive ? "border-black shadow-[0_0_0_3px_rgba(0,0,0,0.08)]" : "border-black/70"
+          } ${item ? "bg-black/5" : "bg-black"}`}
+          style={{ width: FIGMA_SLOT_SIZE, height: FIGMA_SLOT_SIZE }}
+        >
+          {item ? (
+            <>
+              <Token item={item} size={FIGMA_TOKEN_SIZE} />
+              <button
+                type="button"
+                onClick={() => onRemoveItem?.(item)}
+                className="absolute -right-2 -top-2 inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-lg font-bold text-black shadow ring-1 ring-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                aria-label={`Remove ${item.label} from rank ${number}`}
+              >
+                ×
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="absolute inset-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              onClick={(event) => onSlotClick?.(index, event.currentTarget.getBoundingClientRect())}
+              aria-label={`Select cast member for rank ${number}`}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={setNodeRef} className="relative flex flex-col items-center">
@@ -622,16 +767,82 @@ function SelectionPicker({
   onSelect,
   onClose,
   position,
+  mobileSheet = false,
 }: {
   open: boolean;
   items: SurveyRankingItem[];
   onSelect?(item: SurveyRankingItem): void;
   onClose(): void;
   position: { top: number; left: number } | null;
+  mobileSheet?: boolean;
 }) {
-  if (!open || !position) return null;
+  if (!open) return null;
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
+  const showMobileSheet = mobileSheet && viewportWidth > 0 && viewportWidth < 640;
+
+  if (showMobileSheet) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/35" onClick={onClose}>
+        <div
+          className="absolute bottom-0 left-0 right-0 rounded-t-3xl border border-black/10 bg-white px-4 pt-4 shadow-2xl"
+          style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
+          onClick={(event) => event.stopPropagation()}
+          data-testid="selection-picker-mobile"
+        >
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-black/15" />
+          <div className="mb-3 flex items-center justify-between">
+            <p
+              className="text-xs font-semibold uppercase tracking-[0.24em] text-black/70"
+              style={{ fontFamily: "var(--font-plymouth-serial)" }}
+            >
+              Pick a cast member
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/5 text-lg font-bold text-black"
+              aria-label="Close picker"
+            >
+              ×
+            </button>
+          </div>
+          {items.length === 0 ? (
+            <p className="pb-3 text-sm text-gray-600">Everyone is placed. Drag a portrait out to swap someone else in.</p>
+          ) : (
+            <div className="grid max-h-[60vh] grid-cols-2 gap-3 overflow-y-auto pb-1">
+              {items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onSelect?.(item)}
+                  className="flex min-h-11 items-center gap-3 rounded-2xl border border-black/10 bg-white px-2 py-2 text-left shadow-sm transition hover:border-black/40"
+                >
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-black">
+                    {item.img ? (
+                      <Image
+                        src={item.img}
+                        alt={item.label}
+                        width={48}
+                        height={48}
+                        className="h-full w-full object-cover"
+                        unoptimized
+                      />
+                    ) : (
+                      <span className="text-sm font-semibold text-white">{item.label.slice(0, 2)}</span>
+                    )}
+                  </span>
+                  <span className="text-sm font-semibold text-black">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (!position) return null;
   const cardWidth = viewportWidth ? Math.min(320, Math.max(240, viewportWidth * 0.9)) : 320;
   const rows = Math.ceil(items.length / 2);
   const estimatedHeight = Math.max(160, Math.min(360, rows * 72 + 80));
@@ -659,6 +870,7 @@ function SelectionPicker({
           overflowY: items.length > 4 ? "auto" : "hidden",
         }}
         onClick={(event) => event.stopPropagation()}
+        data-testid="selection-picker-popover"
       >
         <div className="mb-3 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[#5C0F4F]/70">Pick a cast member</p>
