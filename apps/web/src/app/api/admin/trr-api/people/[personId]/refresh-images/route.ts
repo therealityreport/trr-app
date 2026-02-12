@@ -3,11 +3,13 @@ import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 1800;
+export const maxDuration = 800;
 
 interface RouteParams {
   params: Promise<{ personId: string }>;
 }
+
+const BACKEND_REFRESH_TIMEOUT_MS = 12 * 60 * 1000;
 
 const getErrorDetail = (error: unknown): string => {
   if (typeof error === "string" && error.trim()) return error.trim();
@@ -101,7 +103,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     let data: Record<string, unknown> = {};
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30 * 60 * 1000);
+      const timeout = setTimeout(() => controller.abort(), BACKEND_REFRESH_TIMEOUT_MS);
       try {
         backendResponse = await fetch(backendUrl, {
           method: "POST",
@@ -129,7 +131,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return NextResponse.json(
           {
             error: "Refresh timed out",
-            detail: "Timed out waiting for backend person refresh response (30m).",
+            detail: "Timed out waiting for backend person refresh response (12m).",
           },
           { status: 504 }
         );
