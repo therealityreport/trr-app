@@ -113,8 +113,13 @@ export interface TrrCastMember {
   known_for: string | null;
   // Photo URL (from view or joined)
   photo_url: string | null;
+  thumbnail_focus_x?: number | null;
+  thumbnail_focus_y?: number | null;
+  thumbnail_zoom?: number | null;
+  thumbnail_crop_mode?: "manual" | "auto" | null;
   // Stats
   total_episodes?: number | null;
+  archive_episode_count?: number | null;
   // Timestamps
   created_at: string;
   updated_at: string;
@@ -477,6 +482,169 @@ export async function getEpisodeById(episodeId: string): Promise<TrrEpisode | nu
 // Cast Functions
 // ============================================================================
 
+type CastThumbnailFields = Pick<
+  TrrCastMember,
+  "thumbnail_focus_x" | "thumbnail_focus_y" | "thumbnail_zoom" | "thumbnail_crop_mode"
+>;
+
+type PreferredCastPhoto = CastThumbnailFields & {
+  url: string;
+};
+
+const EMPTY_CAST_THUMBNAIL_FIELDS: CastThumbnailFields = {
+  thumbnail_focus_x: null,
+  thumbnail_focus_y: null,
+  thumbnail_zoom: null,
+  thumbnail_crop_mode: null,
+};
+
+const toCastThumbnailFields = (value: unknown): CastThumbnailFields => {
+  const parsed = parseThumbnailCrop(value, { clamp: true });
+  if (!parsed) return EMPTY_CAST_THUMBNAIL_FIELDS;
+  return {
+    thumbnail_focus_x: parsed.x,
+    thumbnail_focus_y: parsed.y,
+    thumbnail_zoom: parsed.zoom,
+    thumbnail_crop_mode: parsed.mode,
+  };
+};
+
+async function getPreferredCastPhotoMap(
+  personIds: string[],
+  options?: { seasonNumber?: number | null }
+): Promise<Map<string, PreferredCastPhoto>> {
+  const map = new Map<string, PreferredCastPhoto>();
+  if (personIds.length === 0) return map;
+
+  const requestedSeason =
+    typeof options?.seasonNumber === "number" && Number.isFinite(options.seasonNumber)
+      ? Math.trunc(options.seasonNumber)
+      : null;
+
+  try {
+    const personLinksResult = await pgQuery<{
+      person_id: string;
+      hosted_url: string | null;
+      hosted_content_type: string | null;
+      context: Record<string, unknown> | null;
+      position: number | null;
+      created_at: string | null;
+    }>(
+      `SELECT
+         ml.entity_id::text AS person_id,
+         ma.hosted_url,
+         ma.hosted_content_type,
+         ml.context,
+         ml.position,
+         ml.created_at
+       FROM core.media_links ml
+       JOIN core.media_assets ma ON ma.id = ml.media_asset_id
+       WHERE ml.entity_type = 'person'
+         AND ml.entity_id = ANY($1::uuid[])
+         AND ml.kind = 'gallery'
+         AND ma.hosted_url IS NOT NULL
+       ORDER BY
+         ml.entity_id,
+         CASE
+           WHEN LOWER(COALESCE(ml.context->>'context_section', '')) = 'bravo_profile'
+             AND $2::int IS NOT NULL
+             AND COALESCE(ml.context->>'season_number', '') ~ '^[0-9]+$'
+             AND (ml.context->>'season_number')::int = $2::int
+           THEN 0
+           WHEN LOWER(COALESCE(ml.context->>'context_section', '')) = 'bravo_profile'
+           THEN 1
+           ELSE 2
+         END,
+         COALESCE(ml.position, 2147483647) ASC,
+         ml.created_at DESC`,
+      [personIds, requestedSeason]
+    );
+
+    for (const row of personLinksResult.rows) {
+      if (map.has(row.person_id)) continue;
+      if (!row.hosted_url || !isLikelyImage(row.hosted_content_type, row.hosted_url)) continue;
+      const context = row.context ?? null;
+      const thumbnailCrop =
+        context && typeof context === "object"
+          ? (context as { thumbnail_crop?: unknown }).thumbnail_crop
+          : null;
+      map.set(row.person_id, {
+        url: row.hosted_url,
+        ...toCastThumbnailFields(thumbnailCrop),
+      });
+    }
+  } catch (error) {
+    console.warn("[trr-shows-repository] getPreferredCastPhotoMap media_links lookup failed", error);
+  }
+
+  const remainingPersonIds = personIds.filter((personId) => !map.has(personId));
+  if (remainingPersonIds.length === 0) return map;
+
+  try {
+    const castPhotosResult = await pgQuery<{
+      person_id: string;
+      display_url: string | null;
+      hosted_url: string | null;
+      url: string | null;
+      thumbnail_focus_x: number | null;
+      thumbnail_focus_y: number | null;
+      thumbnail_zoom: number | null;
+      thumbnail_crop_mode: "manual" | "auto" | null;
+      context_section: string | null;
+      season: number | null;
+      gallery_index: number | null;
+    }>(
+      `SELECT
+         person_id,
+         display_url,
+         hosted_url,
+         url,
+         thumbnail_focus_x,
+         thumbnail_focus_y,
+         thumbnail_zoom,
+         thumbnail_crop_mode,
+         context_section,
+         season,
+         gallery_index
+       FROM core.v_cast_photos
+       WHERE person_id = ANY($1::uuid[])
+       ORDER BY
+         person_id,
+         CASE
+           WHEN LOWER(COALESCE(context_section, '')) = 'bravo_profile'
+             AND $2::int IS NOT NULL
+             AND season = $2::int
+           THEN 0
+           WHEN LOWER(COALESCE(context_section, '')) = 'bravo_profile'
+           THEN 1
+           ELSE 2
+         END,
+         gallery_index ASC NULLS LAST`,
+      [remainingPersonIds, requestedSeason]
+    );
+
+    for (const row of castPhotosResult.rows) {
+      if (map.has(row.person_id)) continue;
+      const candidateUrl = row.display_url ?? row.hosted_url ?? row.url;
+      if (!candidateUrl || !isLikelyImage(null, candidateUrl)) continue;
+      map.set(row.person_id, {
+        url: candidateUrl,
+        thumbnail_focus_x: row.thumbnail_focus_x,
+        thumbnail_focus_y: row.thumbnail_focus_y,
+        thumbnail_zoom: row.thumbnail_zoom,
+        thumbnail_crop_mode:
+          row.thumbnail_crop_mode === "manual" || row.thumbnail_crop_mode === "auto"
+            ? row.thumbnail_crop_mode
+            : null,
+      });
+    }
+  } catch (error) {
+    console.warn("[trr-shows-repository] getPreferredCastPhotoMap cast_photos lookup failed", error);
+  }
+
+  return map;
+}
+
 /**
  * Get cast members for a show, ordered by billing_order ASC.
  * Joins with people table to get full_name and with cast_photos for photo URL.
@@ -489,9 +657,15 @@ export async function getCastByShowId(
   const castResult = await pgQuery<
     Omit<TrrCastMember, "full_name" | "known_for" | "photo_url" | "total_episodes">
   >(
-    `SELECT *
-     FROM core.v_show_cast
-     WHERE show_id = $1::uuid
+    `SELECT vsc.*
+     FROM core.v_show_cast AS vsc
+     JOIN (
+       SELECT DISTINCT person_id
+       FROM core.v_person_show_seasons
+       WHERE show_id = $1::uuid
+         AND COALESCE(total_episodes, 0) > 0
+     ) eligible ON eligible.person_id = vsc.person_id
+     WHERE vsc.show_id = $1::uuid
      ORDER BY billing_order ASC NULLS LAST
      LIMIT $2 OFFSET $3`,
     [showId, limit, offset]
@@ -514,33 +688,20 @@ export async function getCastByShowId(
     console.warn("[trr-shows-repository] getCastByShowId people lookup failed", error);
   }
 
-  const photosMap: Map<string, string> = new Map();
-  try {
-    const photosResult = await pgQuery<{ person_id: string; hosted_url: string | null }>(
-      `SELECT person_id, hosted_url
-       FROM core.cast_photos
-       WHERE person_id = ANY($1::uuid[])
-         AND hosted_url IS NOT NULL
-       ORDER BY person_id, gallery_index ASC NULLS LAST`,
-      [personIds]
-    );
-    for (const row of photosResult.rows) {
-      const url = row.hosted_url;
-      if (url && isLikelyImage(null, url) && !photosMap.has(row.person_id)) {
-        photosMap.set(row.person_id, url);
-      }
-    }
-  } catch (error) {
-    console.warn("[trr-shows-repository] getCastByShowId cast_photos lookup failed", error);
-  }
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds);
 
   return castResult.rows.map((cast) => {
     const person = peopleMap.get(cast.person_id);
+    const photo = preferredPhotos.get(cast.person_id);
     return {
       ...cast,
       full_name: person?.full_name ?? cast.cast_member_name ?? null,
       known_for: person?.known_for ?? null,
-      photo_url: photosMap.get(cast.person_id) ?? null,
+      photo_url: photo?.url ?? null,
+      thumbnail_focus_x: photo?.thumbnail_focus_x ?? null,
+      thumbnail_focus_y: photo?.thumbnail_focus_y ?? null,
+      thumbnail_zoom: photo?.thumbnail_zoom ?? null,
+      thumbnail_crop_mode: photo?.thumbnail_crop_mode ?? null,
     } as TrrCastMember;
   });
 }
@@ -555,11 +716,20 @@ export async function getShowCastWithStats(
 ): Promise<TrrCastMember[]> {
   const { limit, offset } = normalizePagination(options);
   const castResult = await pgQuery<
-    Omit<TrrCastMember, "full_name" | "known_for" | "photo_url" | "total_episodes">
+    Omit<TrrCastMember, "full_name" | "known_for" | "photo_url" | "total_episodes" | "archive_episode_count">
   >(
-    `SELECT *
-     FROM core.v_show_cast
-     WHERE show_id = $1::uuid
+    `SELECT vsc.*
+     FROM core.v_show_cast AS vsc
+     JOIN (
+       SELECT person_id,
+              COUNT(DISTINCT episode_id)::int AS total_episodes
+       FROM core.v_episode_credits
+       WHERE show_id = $1::uuid
+         AND COALESCE(appearance_type, 'appears') <> 'archive_footage'
+       GROUP BY person_id
+       HAVING COUNT(DISTINCT episode_id) > 0
+     ) eligible ON eligible.person_id = vsc.person_id
+     WHERE vsc.show_id = $1::uuid
      ORDER BY billing_order ASC NULLS LAST
      LIMIT $2 OFFSET $3`,
     [showId, limit, offset]
@@ -583,18 +753,37 @@ export async function getShowCastWithStats(
   }
 
   const totalsMap: Map<string, number> = new Map();
+  const archiveTotalsMap: Map<string, number> = new Map();
   const nameFallbackMap: Map<string, string> = new Map();
   try {
-    const totalsResult = await pgQuery<{ person_id: string; total_episodes: number | null; person_name: string | null }>(
-      `SELECT person_id, total_episodes, person_name
-       FROM core.v_person_show_seasons
+    const totalsResult = await pgQuery<{
+      person_id: string;
+      total_episodes: number | null;
+      archive_episodes: number | null;
+      person_name: string | null;
+    }>(
+      `SELECT person_id,
+              COUNT(DISTINCT CASE
+                WHEN COALESCE(appearance_type, 'appears') <> 'archive_footage'
+                THEN episode_id
+              END)::int AS total_episodes,
+              COUNT(DISTINCT CASE
+                WHEN COALESCE(appearance_type, '') = 'archive_footage'
+                THEN episode_id
+              END)::int AS archive_episodes,
+              MAX(person_name) AS person_name
+       FROM core.v_episode_credits
        WHERE show_id = $1::uuid
-         AND person_id = ANY($2::uuid[])`,
+         AND person_id = ANY($2::uuid[])
+       GROUP BY person_id`,
       [showId, personIds]
     );
     for (const row of totalsResult.rows) {
       if (typeof row.total_episodes === "number") {
         totalsMap.set(row.person_id, row.total_episodes);
+      }
+      if (typeof row.archive_episodes === "number") {
+        archiveTotalsMap.set(row.person_id, row.archive_episodes);
       }
       if (row.person_name) {
         nameFallbackMap.set(row.person_id, row.person_name);
@@ -604,50 +793,126 @@ export async function getShowCastWithStats(
     console.warn("[trr-shows-repository] getShowCastWithStats totals lookup failed", error);
   }
 
-  const pickPhotoUrl = (row: {
-    display_url?: string | null;
-    hosted_url?: string | null;
-    url?: string | null;
-  }): string | null => {
-    const candidates = [row.display_url, row.hosted_url, row.url];
-    for (const candidate of candidates) {
-      if (candidate && isLikelyImage(null, candidate)) return candidate;
-    }
-    return null;
-  };
-
-  const photosMap: Map<string, string> = new Map();
-  try {
-    const photosResult = await pgQuery<{
-      person_id: string;
-      display_url: string | null;
-      hosted_url: string | null;
-      url: string | null;
-    }>(
-      `SELECT person_id, display_url, hosted_url, url
-       FROM core.v_cast_photos
-       WHERE person_id = ANY($1::uuid[])
-       ORDER BY person_id, gallery_index ASC NULLS LAST`,
-      [personIds]
-    );
-    for (const row of photosResult.rows) {
-      const picked = pickPhotoUrl(row);
-      if (picked && !photosMap.has(row.person_id)) {
-        photosMap.set(row.person_id, picked);
-      }
-    }
-  } catch (error) {
-    console.warn("[trr-shows-repository] getShowCastWithStats photo lookup failed", error);
-  }
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds);
 
   return castResult.rows.map((cast) => {
     const person = peopleMap.get(cast.person_id);
+    const photo = preferredPhotos.get(cast.person_id);
     return {
       ...cast,
       full_name: person?.full_name ?? cast.cast_member_name ?? nameFallbackMap.get(cast.person_id) ?? null,
       known_for: person?.known_for ?? null,
-      photo_url: photosMap.get(cast.person_id) ?? null,
+      photo_url: photo?.url ?? null,
+      thumbnail_focus_x: photo?.thumbnail_focus_x ?? null,
+      thumbnail_focus_y: photo?.thumbnail_focus_y ?? null,
+      thumbnail_zoom: photo?.thumbnail_zoom ?? null,
+      thumbnail_crop_mode: photo?.thumbnail_crop_mode ?? null,
       total_episodes: totalsMap.get(cast.person_id) ?? null,
+      archive_episode_count: archiveTotalsMap.get(cast.person_id) ?? null,
+    } as TrrCastMember;
+  });
+}
+
+/**
+ * Get show cast members that only have archive-footage episode evidence.
+ */
+export async function getShowArchiveFootageCast(
+  showId: string,
+  options?: PaginationOptions
+): Promise<TrrCastMember[]> {
+  const { limit, offset } = normalizePagination(options);
+  const castResult = await pgQuery<
+    Omit<TrrCastMember, "full_name" | "known_for" | "photo_url" | "total_episodes" | "archive_episode_count">
+  >(
+    `SELECT vsc.*
+     FROM core.v_show_cast AS vsc
+     JOIN (
+       SELECT person_id,
+              COUNT(DISTINCT CASE
+                WHEN COALESCE(appearance_type, 'appears') <> 'archive_footage'
+                THEN episode_id
+              END)::int AS regular_episodes,
+              COUNT(DISTINCT CASE
+                WHEN COALESCE(appearance_type, '') = 'archive_footage'
+                THEN episode_id
+              END)::int AS archive_episodes
+       FROM core.v_episode_credits
+       WHERE show_id = $1::uuid
+       GROUP BY person_id
+     ) episode_counts ON episode_counts.person_id = vsc.person_id
+     WHERE vsc.show_id = $1::uuid
+       AND COALESCE(episode_counts.regular_episodes, 0) = 0
+       AND COALESCE(episode_counts.archive_episodes, 0) > 0
+     ORDER BY billing_order ASC NULLS LAST
+     LIMIT $2 OFFSET $3`,
+    [showId, limit, offset]
+  );
+
+  if (castResult.rows.length === 0) return [];
+
+  const personIds = [...new Set(castResult.rows.map((row) => row.person_id))];
+
+  let peopleMap = new Map<string, { full_name: string | null; known_for: string | null }>();
+  try {
+    const peopleResult = await pgQuery<{ id: string; full_name: string | null; known_for: string | null }>(
+      `SELECT id, full_name, known_for
+       FROM core.people
+       WHERE id = ANY($1::uuid[])`,
+      [personIds]
+    );
+    peopleMap = new Map(peopleResult.rows.map((p) => [p.id, { full_name: p.full_name, known_for: p.known_for }]));
+  } catch (error) {
+    console.warn("[trr-shows-repository] getShowArchiveFootageCast people lookup failed", error);
+  }
+
+  const archiveTotalsMap: Map<string, number> = new Map();
+  const nameFallbackMap: Map<string, string> = new Map();
+  try {
+    const totalsResult = await pgQuery<{
+      person_id: string;
+      archive_episodes: number | null;
+      person_name: string | null;
+    }>(
+      `SELECT person_id,
+              COUNT(DISTINCT CASE
+                WHEN COALESCE(appearance_type, '') = 'archive_footage'
+                THEN episode_id
+              END)::int AS archive_episodes,
+              MAX(person_name) AS person_name
+       FROM core.v_episode_credits
+       WHERE show_id = $1::uuid
+         AND person_id = ANY($2::uuid[])
+       GROUP BY person_id`,
+      [showId, personIds]
+    );
+    for (const row of totalsResult.rows) {
+      if (typeof row.archive_episodes === "number") {
+        archiveTotalsMap.set(row.person_id, row.archive_episodes);
+      }
+      if (row.person_name) {
+        nameFallbackMap.set(row.person_id, row.person_name);
+      }
+    }
+  } catch (error) {
+    console.warn("[trr-shows-repository] getShowArchiveFootageCast totals lookup failed", error);
+  }
+
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds);
+
+  return castResult.rows.map((cast) => {
+    const person = peopleMap.get(cast.person_id);
+    const photo = preferredPhotos.get(cast.person_id);
+    return {
+      ...cast,
+      full_name: person?.full_name ?? cast.cast_member_name ?? nameFallbackMap.get(cast.person_id) ?? null,
+      known_for: person?.known_for ?? null,
+      photo_url: photo?.url ?? null,
+      thumbnail_focus_x: photo?.thumbnail_focus_x ?? null,
+      thumbnail_focus_y: photo?.thumbnail_focus_y ?? null,
+      thumbnail_zoom: photo?.thumbnail_zoom ?? null,
+      thumbnail_crop_mode: photo?.thumbnail_crop_mode ?? null,
+      total_episodes: 0,
+      archive_episode_count: archiveTotalsMap.get(cast.person_id) ?? null,
     } as TrrCastMember;
   });
 }
@@ -809,12 +1074,99 @@ export interface TrrPersonPhoto {
 
 export interface TrrPersonCredit {
   id: string;
-  show_id: string;
+  show_id: string | null;
   person_id: string;
   show_name: string | null;
   role: string | null;
   billing_order: number | null;
   credit_category: string;
+  source_type?: string | null;
+  external_imdb_id?: string | null;
+  external_url?: string | null;
+}
+
+interface ImdbNameFilmographyCredit {
+  imdb_title_id: string;
+  show_name: string;
+  external_url: string;
+}
+
+const IMDB_NAME_FULLCREDITS_BASE_URL = "https://m.imdb.com/name";
+const IMDB_TITLE_BASE_URL = "https://www.imdb.com/title";
+const IMDB_TITLE_ANCHOR_RE =
+  /<a[^>]+href="(\/title\/(tt\d+)\/\?ref_=([^"]+))"[^>]*>([\s\S]*?)<\/a>/gi;
+
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, " ");
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&apos;|&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_, digits: string) => {
+      const parsed = Number.parseInt(digits, 10);
+      return Number.isFinite(parsed) ? String.fromCharCode(parsed) : _;
+    });
+}
+
+async function fetchImdbNameFilmographyCredits(
+  imdbPersonId: string
+): Promise<ImdbNameFilmographyCredit[]> {
+  const trimmedId = imdbPersonId.trim();
+  if (!/^nm\d+$/i.test(trimmedId)) return [];
+
+  const url = `${IMDB_NAME_FULLCREDITS_BASE_URL}/${trimmedId}/fullcredits`;
+  let html = "";
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "user-agent": "Mozilla/5.0",
+        "accept-language": "en-US,en;q=0.9",
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      console.warn("[trr-shows-repository] IMDb fullcredits fetch failed", {
+        imdbPersonId: trimmedId,
+        status: response.status,
+      });
+      return [];
+    }
+    html = await response.text();
+  } catch (error) {
+    console.warn("[trr-shows-repository] IMDb fullcredits request error", {
+      imdbPersonId: trimmedId,
+      error,
+    });
+    return [];
+  }
+
+  if (!html.trim()) return [];
+
+  const byTitleId = new Map<string, ImdbNameFilmographyCredit>();
+  for (const match of html.matchAll(IMDB_TITLE_ANCHOR_RE)) {
+    const imdbTitleId = (match[2] ?? "").trim().toLowerCase();
+    const ref = (match[3] ?? "").trim();
+    if (!imdbTitleId || byTitleId.has(imdbTitleId)) continue;
+    if (!ref.includes("nm_flmg_job_")) continue;
+    if (!/_cdt_t_\d+/i.test(ref)) continue;
+
+    const title = decodeHtmlEntities(stripHtml(match[4] ?? "")).replace(/\s+/g, " ").trim();
+    if (!title) continue;
+
+    byTitleId.set(imdbTitleId, {
+      imdb_title_id: imdbTitleId,
+      show_name: title,
+      external_url: `${IMDB_TITLE_BASE_URL}/${imdbTitleId}/`,
+    });
+  }
+
+  return Array.from(byTitleId.values());
 }
 
 type ThumbnailCropFields = Pick<
@@ -1250,16 +1602,140 @@ export async function getCreditsByPersonId(
   options?: PaginationOptions
 ): Promise<TrrPersonCredit[]> {
   const { limit, offset } = normalizePagination(options);
-  const result = await pgQuery<TrrPersonCredit>(
-    `SELECT id, show_id, person_id, show_name, role, billing_order, credit_category
-     FROM core.v_show_cast
-     WHERE person_id = $1::uuid
-     ORDER BY billing_order ASC NULLS LAST
-     LIMIT $2 OFFSET $3`,
-    [personId, limit, offset]
+  const localResult = await pgQuery<{
+    id: string;
+    show_id: string;
+    person_id: string;
+    show_name: string | null;
+    role: string | null;
+    billing_order: number | null;
+    credit_category: string;
+    source_type: string | null;
+    show_imdb_id: string | null;
+  }>(
+    `SELECT
+       vsc.id,
+       vsc.show_id,
+       vsc.person_id,
+       vsc.show_name,
+       vsc.role,
+       vsc.billing_order,
+       vsc.credit_category,
+       vsc.source_type,
+       COALESCE(s.imdb_id, sei.external_id) AS show_imdb_id
+     FROM core.v_show_cast AS vsc
+     LEFT JOIN core.shows AS s
+       ON s.id = vsc.show_id
+     LEFT JOIN LATERAL (
+       SELECT external_id
+       FROM core.show_external_ids
+       WHERE show_id = vsc.show_id
+         AND source_id = 'imdb'
+       ORDER BY is_primary DESC, observed_at DESC NULLS LAST, id DESC
+       LIMIT 1
+     ) AS sei ON TRUE
+     WHERE vsc.person_id = $1::uuid
+     ORDER BY vsc.billing_order ASC NULLS LAST, vsc.show_name ASC NULLS LAST, vsc.id ASC`,
+    [personId]
   );
 
-  return result.rows;
+  const localCredits: TrrPersonCredit[] = localResult.rows.map((row) => ({
+    id: row.id,
+    show_id: row.show_id,
+    person_id: row.person_id,
+    show_name: row.show_name,
+    role: row.role,
+    billing_order: row.billing_order,
+    credit_category: row.credit_category,
+    source_type: row.source_type,
+    external_imdb_id: row.show_imdb_id,
+    external_url: row.show_imdb_id ? `${IMDB_TITLE_BASE_URL}/${row.show_imdb_id}/` : null,
+  }));
+
+  const personResult = await pgQuery<{ imdb_person_id: string | null }>(
+    `SELECT external_ids ->> 'imdb' AS imdb_person_id
+     FROM core.people
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [personId]
+  );
+  const imdbPersonId = (personResult.rows[0]?.imdb_person_id ?? "").trim();
+  if (!imdbPersonId) {
+    return localCredits.slice(offset, offset + limit);
+  }
+
+  const imdbCredits = await fetchImdbNameFilmographyCredits(imdbPersonId);
+  if (imdbCredits.length === 0) {
+    return localCredits.slice(offset, offset + limit);
+  }
+
+  const imdbTitleIds = imdbCredits.map((credit) => credit.imdb_title_id);
+  const mappingResult = await pgQuery<{
+    show_id: string;
+    show_name: string;
+    imdb_title_id: string;
+  }>(
+    `SELECT DISTINCT ON (imdb_title_id)
+       show_id,
+       show_name,
+       imdb_title_id
+     FROM (
+       SELECT
+         s.id AS show_id,
+         s.name AS show_name,
+         LOWER(s.imdb_id) AS imdb_title_id
+       FROM core.shows AS s
+       WHERE s.imdb_id = ANY($1::text[])
+
+       UNION ALL
+
+       SELECT
+         s.id AS show_id,
+         s.name AS show_name,
+         LOWER(sei.external_id) AS imdb_title_id
+       FROM core.show_external_ids AS sei
+       JOIN core.shows AS s
+         ON s.id = sei.show_id
+       WHERE sei.source_id = 'imdb'
+         AND LOWER(sei.external_id) = ANY($1::text[])
+     ) AS mapped
+     ORDER BY imdb_title_id, show_id`,
+    [imdbTitleIds]
+  );
+
+  const showByImdbId = new Map(
+    mappingResult.rows.map((row) => [row.imdb_title_id, { show_id: row.show_id, show_name: row.show_name }])
+  );
+
+  const localImdbIds = new Set(
+    localCredits
+      .map((credit) => (credit.external_imdb_id ?? "").trim().toLowerCase())
+      .filter((value) => value.length > 0)
+  );
+
+  const imdbOnlyCredits: TrrPersonCredit[] = [];
+  for (const credit of imdbCredits) {
+    const imdbTitleId = credit.imdb_title_id.toLowerCase();
+    if (localImdbIds.has(imdbTitleId)) continue;
+
+    const mappedShow = showByImdbId.get(imdbTitleId);
+    imdbOnlyCredits.push({
+      id: `imdb-${personId}-${imdbTitleId}`,
+      show_id: mappedShow?.show_id ?? null,
+      person_id: personId,
+      show_name: mappedShow?.show_name ?? credit.show_name,
+      role: null,
+      billing_order: null,
+      credit_category: "Self",
+      source_type: "imdb_name_fullcredits",
+      external_imdb_id: imdbTitleId,
+      external_url: credit.external_url,
+    });
+  }
+
+  imdbOnlyCredits.sort((a, b) => (a.show_name ?? "").localeCompare(b.show_name ?? ""));
+  const combined = [...localCredits, ...imdbOnlyCredits];
+  return combined.slice(offset, offset + limit);
 }
 
 // ============================================================================
@@ -1272,6 +1748,10 @@ export interface SeasonCastMember {
   seasons_appeared: number[];
   total_episodes: number;
   photo_url: string | null;
+  thumbnail_focus_x?: number | null;
+  thumbnail_focus_y?: number | null;
+  thumbnail_zoom?: number | null;
+  thumbnail_crop_mode?: "manual" | "auto" | null;
 }
 
 export interface SeasonCastEpisodeCount {
@@ -1280,6 +1760,11 @@ export interface SeasonCastEpisodeCount {
   episodes_in_season: number;
   total_episodes: number | null;
   photo_url: string | null;
+  thumbnail_focus_x?: number | null;
+  thumbnail_focus_y?: number | null;
+  thumbnail_zoom?: number | null;
+  thumbnail_crop_mode?: "manual" | "auto" | null;
+  archive_episodes_in_season?: number | null;
 }
 
 /**
@@ -1314,139 +1799,19 @@ export async function getCastByShowSeason(
   // Get person IDs for photo lookup
   const personIds = typedCastData.map((c) => c.person_id);
 
-  // Get photos
-  const photosMap: Map<string, string> = new Map();
-  try {
-    const photoResult = await pgQuery<{ person_id: string; hosted_url: string | null }>(
-      `SELECT person_id, hosted_url
-       FROM core.cast_photos
-       WHERE person_id = ANY($1::uuid[])
-         AND hosted_url IS NOT NULL
-       ORDER BY person_id, gallery_index ASC NULLS LAST`,
-      [personIds]
-    );
-    for (const photo of photoResult.rows) {
-      if (
-        photo.hosted_url &&
-        isLikelyImage(null, photo.hosted_url) &&
-        !photosMap.has(photo.person_id)
-      ) {
-        photosMap.set(photo.person_id, photo.hosted_url);
-      }
-    }
-  } catch (error) {
-    console.warn("[trr-shows-repository] getCastByShowSeason photo lookup failed", error);
-  }
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds, { seasonNumber });
 
   return typedCastData.map((cast) => ({
     person_id: cast.person_id,
     person_name: cast.person_name,
     seasons_appeared: cast.seasons_appeared,
     total_episodes: cast.total_episodes,
-    photo_url: photosMap.get(cast.person_id) ?? null,
+    photo_url: preferredPhotos.get(cast.person_id)?.url ?? null,
+    thumbnail_focus_x: preferredPhotos.get(cast.person_id)?.thumbnail_focus_x ?? null,
+    thumbnail_focus_y: preferredPhotos.get(cast.person_id)?.thumbnail_focus_y ?? null,
+    thumbnail_zoom: preferredPhotos.get(cast.person_id)?.thumbnail_zoom ?? null,
+    thumbnail_crop_mode: preferredPhotos.get(cast.person_id)?.thumbnail_crop_mode ?? null,
   }));
-}
-
-/**
- * Fallback function when season/episode-level cast views are unavailable.
- * Returns show-level cast from core.v_show_cast without per-season episode counts.
- */
-async function getSeasonCastFallbackFromShowCast(
-  showId: string,
-  options?: PaginationOptions
-): Promise<SeasonCastEpisodeCount[]> {
-  const { limit, offset } = normalizePagination(options);
-  // Query v_show_cast (credits-backed view) for all cast members of this show
-  const showCastResult = await pgQuery<{
-    person_id: string;
-    cast_member_name: string | null;
-    billing_order: number | null;
-  }>(
-    `SELECT person_id, cast_member_name, billing_order
-     FROM core.v_show_cast
-     WHERE show_id = $1::uuid
-     ORDER BY billing_order ASC NULLS LAST`,
-    [showId]
-  );
-
-  const typedShowCast = showCastResult.rows;
-
-  if (typedShowCast.length === 0) return [];
-  const personIds = [...new Set(typedShowCast.map((c) => c.person_id))];
-
-  // Get people names
-  let peopleMap = new Map<string, string | null>();
-  try {
-    const peopleResult = await pgQuery<{ id: string; full_name: string | null }>(
-      `SELECT id, full_name
-       FROM core.people
-       WHERE id = ANY($1::uuid[])`,
-      [personIds]
-    );
-    peopleMap = new Map(peopleResult.rows.map((p) => [p.id, p.full_name]));
-  } catch (error) {
-    console.warn("[trr-shows-repository] getSeasonCastFallbackFromShowCast people lookup failed", error);
-  }
-
-  // Get photos
-  const photosMap: Map<string, string> = new Map();
-
-  const pickPhotoUrl = (row: {
-    display_url?: string | null;
-    hosted_url?: string | null;
-    url?: string | null;
-  }): string | null => {
-    const candidates = [row.display_url, row.hosted_url, row.url];
-    for (const candidate of candidates) {
-      if (candidate && isLikelyImage(null, candidate)) {
-        return candidate;
-      }
-    }
-    return null;
-  };
-
-  try {
-    const viewResult = await pgQuery<{
-      person_id: string;
-      display_url: string | null;
-      hosted_url: string | null;
-      url: string | null;
-      gallery_index: number | null;
-    }>(
-      `SELECT person_id, display_url, hosted_url, url, gallery_index
-       FROM core.v_cast_photos
-       WHERE person_id = ANY($1::uuid[])
-       ORDER BY person_id, gallery_index ASC NULLS LAST`,
-      [personIds]
-    );
-    for (const photo of viewResult.rows) {
-      const photoUrl = pickPhotoUrl(photo);
-      if (photoUrl && !photosMap.has(photo.person_id)) {
-        photosMap.set(photo.person_id, photoUrl);
-      }
-    }
-  } catch (error) {
-    // Ignore - photos are optional for this fallback.
-  }
-
-  // Build results - dedupe by person_id and use first occurrence (sorted by billing_order)
-  const seen = new Set<string>();
-  const results: SeasonCastEpisodeCount[] = [];
-
-  for (const cast of typedShowCast) {
-    if (seen.has(cast.person_id)) continue;
-    seen.add(cast.person_id);
-
-    results.push({
-      person_id: cast.person_id,
-      person_name: peopleMap.get(cast.person_id) ?? cast.cast_member_name ?? null,
-      episodes_in_season: 0, // Unknown without Credits V2 data
-      total_episodes: null, // Unknown without Credits V2 data
-      photo_url: photosMap.get(cast.person_id) ?? null,
-    });
-  }
-
-  return results.slice(offset, offset + limit);
 }
 
 /**
@@ -1527,102 +1892,12 @@ export async function getSeasonCastWithEpisodeCounts(
     }
   }
 
-  // If the episode-level views aren't available (or we don't have access), fall back
-  // to membership-only results from v_person_show_seasons (no per-season counts).
   if (seasonCastCounts === null) {
-    let members: Array<{ person_id: string; person_name: string | null; total_episodes: number | null }> = [];
-    try {
-      const memberResult = await pgQuery<{
-        person_id: string;
-        person_name: string | null;
-        total_episodes: number | null;
-      }>(
-        `SELECT person_id, person_name, total_episodes
-         FROM core.v_person_show_seasons
-         WHERE show_id = $1::uuid
-           AND seasons_appeared @> ARRAY[$2]::int[]
-         ORDER BY total_episodes DESC
-         LIMIT $3 OFFSET $4`,
-        [showId, seasonNumber, limit, offset]
-      );
-      members = memberResult.rows;
-    } catch (error) {
-      if (isMissingRelationOrNoAccess(error)) {
-        return getSeasonCastFallbackFromShowCast(showId, options);
-      }
-      throw error;
-    }
-
-    if (members.length === 0) return [];
-
-    const personIds = members.map((row) => row.person_id);
-    const fallbackNames = new Map(members.map((row) => [row.person_id, row.person_name]));
-    const totalsMap = new Map<string, number>();
-    for (const row of members) {
-      if (typeof row.total_episodes === "number") {
-        totalsMap.set(row.person_id, row.total_episodes);
-      }
-    }
-
-    let peopleMap = new Map<string, string | null>();
-    try {
-      const peopleResult = await pgQuery<{ id: string; full_name: string | null }>(
-        `SELECT id, full_name
-         FROM core.people
-         WHERE id = ANY($1::uuid[])`,
-        [personIds]
-      );
-      peopleMap = new Map(peopleResult.rows.map((p) => [p.id, p.full_name]));
-    } catch (error) {
-      // Optional - fallback names will be used.
-    }
-
-    const pickPhotoUrl = (row: {
-      display_url?: string | null;
-      hosted_url?: string | null;
-      url?: string | null;
-    }): string | null => {
-      const candidates = [row.display_url, row.hosted_url, row.url];
-      for (const candidate of candidates) {
-        if (candidate && isLikelyImage(null, candidate)) return candidate;
-      }
-      return null;
-    };
-
-    const photosMap: Map<string, string> = new Map();
-    try {
-      const photosResult = await pgQuery<{
-        person_id: string;
-        display_url: string | null;
-        hosted_url: string | null;
-        url: string | null;
-        gallery_index: number | null;
-      }>(
-        `SELECT person_id, display_url, hosted_url, url, gallery_index
-         FROM core.v_cast_photos
-         WHERE person_id = ANY($1::uuid[])
-         ORDER BY person_id, gallery_index ASC NULLS LAST`,
-        [personIds]
-      );
-      for (const photo of photosResult.rows) {
-        const picked = pickPhotoUrl(photo);
-        if (picked && !photosMap.has(photo.person_id)) {
-          photosMap.set(photo.person_id, picked);
-        }
-      }
-    } catch (error) {
-      // Optional - photos are not required.
-    }
-
-    return members.map((member) => ({
-      person_id: member.person_id,
-      person_name: peopleMap.get(member.person_id) ?? fallbackNames.get(member.person_id) ?? null,
-      episodes_in_season: 0,
-      total_episodes: totalsMap.get(member.person_id) ?? null,
-      photo_url: photosMap.get(member.person_id) ?? null,
-    }));
+    // Enforce eligibility based on actual episode evidence only.
+    return [];
   }
 
+  seasonCastCounts = seasonCastCounts.filter((row) => (row.episodes_in_season ?? 0) > 0);
   if (seasonCastCounts.length === 0) return [];
 
   const personIds = seasonCastCounts.map((row) => row.person_id);
@@ -1652,7 +1927,7 @@ export async function getSeasonCastWithEpisodeCounts(
         }
       }
     }
-  } catch (error) {
+  } catch {
     // Optional - totals are best-effort.
   }
 
@@ -1665,53 +1940,22 @@ export async function getSeasonCastWithEpisodeCounts(
       [personIds]
     );
     peopleMap = new Map(peopleResult.rows.map((p) => [p.id, p.full_name]));
-  } catch (error) {
+  } catch {
     // Optional - fallback names will be used.
   }
 
-  const pickPhotoUrl = (row: {
-    display_url?: string | null;
-    hosted_url?: string | null;
-    url?: string | null;
-  }): string | null => {
-    const candidates = [row.display_url, row.hosted_url, row.url];
-    for (const candidate of candidates) {
-      if (candidate && isLikelyImage(null, candidate)) return candidate;
-    }
-    return null;
-  };
-
-  const photosMap: Map<string, string> = new Map();
-  try {
-    const photosResult = await pgQuery<{
-      person_id: string;
-      display_url: string | null;
-      hosted_url: string | null;
-      url: string | null;
-      gallery_index: number | null;
-    }>(
-      `SELECT person_id, display_url, hosted_url, url, gallery_index
-       FROM core.v_cast_photos
-       WHERE person_id = ANY($1::uuid[])
-       ORDER BY person_id, gallery_index ASC NULLS LAST`,
-      [personIds]
-    );
-    for (const photo of photosResult.rows) {
-      const picked = pickPhotoUrl(photo);
-      if (picked && !photosMap.has(photo.person_id)) {
-        photosMap.set(photo.person_id, picked);
-      }
-    }
-  } catch (error) {
-    // Optional - photos are not required.
-  }
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds, { seasonNumber });
 
   return seasonCastCounts.map((member) => ({
     person_id: member.person_id,
     person_name: peopleMap.get(member.person_id) ?? fallbackNames.get(member.person_id) ?? null,
     episodes_in_season: Number.isFinite(member.episodes_in_season) ? member.episodes_in_season : 0,
     total_episodes: totalsMap.get(member.person_id) ?? null,
-    photo_url: photosMap.get(member.person_id) ?? null,
+    photo_url: preferredPhotos.get(member.person_id)?.url ?? null,
+    thumbnail_focus_x: preferredPhotos.get(member.person_id)?.thumbnail_focus_x ?? null,
+    thumbnail_focus_y: preferredPhotos.get(member.person_id)?.thumbnail_focus_y ?? null,
+    thumbnail_zoom: preferredPhotos.get(member.person_id)?.thumbnail_zoom ?? null,
+    thumbnail_crop_mode: preferredPhotos.get(member.person_id)?.thumbnail_crop_mode ?? null,
   }));
 }
 
@@ -2353,6 +2597,61 @@ export async function getAssetsByShowId(
 export async function getFandomDataByPersonId(
   personId: string
 ): Promise<TrrCastFandom[]> {
+  const normalizeNameForMatch = (value: string | null | undefined): string => {
+    if (!value) return "";
+    const noParen = value.replace(/\(.*?\)/g, " ");
+    return noParen
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/&/g, " and ")
+      .replace(/[^a-zA-Z0-9]+/g, " ")
+      .trim()
+      .toLowerCase();
+  };
+  const namesMatch = (
+    expected: string | null | undefined,
+    candidate: string | null | undefined
+  ): boolean => {
+    const expectedNorm = normalizeNameForMatch(expected);
+    const candidateNorm = normalizeNameForMatch(candidate);
+    if (!expectedNorm || !candidateNorm) return false;
+    if (expectedNorm === candidateNorm) return true;
+    if (expectedNorm.includes(candidateNorm) || candidateNorm.includes(expectedNorm)) return true;
+    const expectedTokens = expectedNorm.split(" ").filter(Boolean);
+    const candidateTokens = candidateNorm.split(" ").filter(Boolean);
+    if (expectedTokens.length === 0 || candidateTokens.length === 0) return false;
+    if (expectedTokens[expectedTokens.length - 1] === candidateTokens[candidateTokens.length - 1]) {
+      return true;
+    }
+    return expectedTokens.some((token) => candidateTokens.includes(token));
+  };
+  const nameFromFandomUrl = (url: string | null | undefined): string | null => {
+    if (!url) return null;
+    try {
+      const parsed = new URL(url);
+      const idx = parsed.pathname.indexOf("/wiki/");
+      if (idx === -1) return null;
+      let slug = parsed.pathname.slice(idx + "/wiki/".length);
+      if (slug.includes("/")) slug = slug.split("/")[0];
+      slug = decodeURIComponent(slug).replace(/_/g, " ").trim();
+      if (slug.toLowerCase().endsWith(" gallery")) {
+        slug = slug.slice(0, -" gallery".length).trim();
+      }
+      return slug || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const personResult = await pgQuery<{ full_name: string | null }>(
+    `SELECT full_name
+     FROM core.people
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [personId]
+  );
+  const expectedPersonName = personResult.rows[0]?.full_name ?? null;
+
   const result = await pgQuery<TrrCastFandom>(
     `SELECT *
      FROM core.cast_fandom
@@ -2360,5 +2659,12 @@ export async function getFandomDataByPersonId(
      ORDER BY scraped_at DESC`,
     [personId]
   );
-  return result.rows;
+  if (!expectedPersonName) return result.rows;
+
+  const filtered = result.rows.filter((row) =>
+    namesMatch(expectedPersonName, row.full_name) ||
+    namesMatch(expectedPersonName, row.page_title) ||
+    namesMatch(expectedPersonName, nameFromFandomUrl(row.source_url))
+  );
+  return filtered;
 }

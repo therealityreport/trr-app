@@ -15,8 +15,20 @@ interface ExternalIds {
   tvrage_id?: number | null;
   wikidata_id?: string | null;
   facebook_id?: string | null;
+  facebook?: string | null;
+  facebook_url?: string | null;
   instagram_id?: string | null;
+  instagram?: string | null;
+  instagram_url?: string | null;
   twitter_id?: string | null;
+  twitter?: string | null;
+  twitter_url?: string | null;
+  tiktok_id?: string | null;
+  tiktok?: string | null;
+  tiktok_url?: string | null;
+  youtube_id?: string | null;
+  youtube?: string | null;
+  youtube_url?: string | null;
   [key: string]: unknown;
 }
 
@@ -52,6 +64,11 @@ export function ExternalLinks({
     imdb_id: rawIds.imdb_id ?? rawIds.imdb,
     tmdb_id: rawIds.tmdb_id ?? rawIds.tmdb,
     tvdb_id: rawIds.tvdb_id ?? rawIds.tvdb,
+    facebook_id: rawIds.facebook_id ?? rawIds.facebook,
+    instagram_id: rawIds.instagram_id ?? rawIds.instagram,
+    twitter_id: rawIds.twitter_id ?? rawIds.twitter,
+    tiktok_id: rawIds.tiktok_id ?? rawIds.tiktok,
+    youtube_id: rawIds.youtube_id ?? rawIds.youtube,
   };
 
   // Check if we have any IDs to display
@@ -131,26 +148,67 @@ export function ExternalLinks({
 
   // Social media
   if (ids.facebook_id) {
+    const handle = ids.facebook_id.replace(/^@+/, "");
     linkEntries.push({
       label: "Facebook",
-      url: `https://www.facebook.com/${ids.facebook_id}`,
-      value: ids.facebook_id,
+      url:
+        typeof ids.facebook_url === "string" && ids.facebook_url.trim()
+          ? ids.facebook_url.trim()
+          : `https://www.facebook.com/${handle}`,
+      value: handle,
     });
   }
 
   if (ids.instagram_id) {
+    const handle = ids.instagram_id.replace(/^@+/, "");
     linkEntries.push({
       label: "Instagram",
-      url: `https://www.instagram.com/${ids.instagram_id}`,
-      value: ids.instagram_id,
+      url:
+        typeof ids.instagram_url === "string" && ids.instagram_url.trim()
+          ? ids.instagram_url.trim()
+          : `https://www.instagram.com/${handle}`,
+      value: handle,
     });
   }
 
   if (ids.twitter_id) {
+    const handle = ids.twitter_id.replace(/^@+/, "");
     linkEntries.push({
       label: "Twitter/X",
-      url: `https://twitter.com/${ids.twitter_id}`,
-      value: ids.twitter_id,
+      url:
+        typeof ids.twitter_url === "string" && ids.twitter_url.trim()
+          ? ids.twitter_url.trim()
+          : `https://x.com/${handle}`,
+      value: handle,
+    });
+  }
+
+  if (ids.tiktok_id) {
+    const handle = ids.tiktok_id.replace(/^@+/, "");
+    linkEntries.push({
+      label: "TikTok",
+      url:
+        typeof ids.tiktok_url === "string" && ids.tiktok_url.trim()
+          ? ids.tiktok_url.trim()
+          : `https://www.tiktok.com/@${handle}`,
+      value: handle,
+    });
+  }
+
+  if (ids.youtube_id) {
+    const handle = ids.youtube_id.trim();
+    const defaultUrl = handle.startsWith("@")
+      ? `https://www.youtube.com/${handle}`
+      : handle.toUpperCase().startsWith("UC")
+      ? `https://www.youtube.com/channel/${handle}`
+      : `https://www.youtube.com/@${handle.replace(/^@+/, "")}`;
+    linkEntries.push({
+      label: "YouTube",
+      url:
+        typeof ids.youtube_url === "string" && ids.youtube_url.trim()
+          ? ids.youtube_url.trim()
+          : defaultUrl,
+      value: handle,
     });
   }
 

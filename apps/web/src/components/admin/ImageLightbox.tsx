@@ -370,12 +370,25 @@ function MetadataPanel({
               S3 MIRRORING
             </span>
           )}
-          <span
-            className="inline-block rounded px-2 py-0.5 text-xs font-medium text-black"
-            style={{ backgroundColor: metadata.sourceBadgeColor }}
-          >
-            {sourceBadgeLabel.toUpperCase()}
-          </span>
+          {metadata.sourceUrl ? (
+            <a
+              href={metadata.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-block rounded px-2 py-0.5 text-xs font-medium text-black underline decoration-black/40 underline-offset-2 hover:decoration-black"
+              style={{ backgroundColor: metadata.sourceBadgeColor }}
+              title="Open source page"
+            >
+              {sourceBadgeLabel.toUpperCase()}
+            </a>
+          ) : (
+            <span
+              className="inline-block rounded px-2 py-0.5 text-xs font-medium text-black"
+              style={{ backgroundColor: metadata.sourceBadgeColor }}
+            >
+              {sourceBadgeLabel.toUpperCase()}
+            </span>
+          )}
         </div>
       </div>
 

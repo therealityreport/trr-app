@@ -145,12 +145,15 @@ type GalleryShowFilter = "all" | "this-show" | "wwhl" | "other-shows";
 
 interface TrrPersonCredit {
   id: string;
-  show_id: string;
+  show_id: string | null;
   person_id: string;
   show_name: string | null;
   role: string | null;
   billing_order: number | null;
   credit_category: string;
+  source_type?: string | null;
+  external_imdb_id?: string | null;
+  external_url?: string | null;
 }
 
 interface CoverPhoto {
@@ -188,7 +191,32 @@ interface TrrCastFandom {
   trivia: Record<string, unknown> | null;
 }
 
-type TabId = "overview" | "gallery" | "credits" | "fandom";
+interface BravoPersonTag {
+  person_id?: string | null;
+  person_name?: string | null;
+  person_url?: string | null;
+}
+
+interface BravoVideoItem {
+  title?: string | null;
+  runtime?: string | null;
+  kicker?: string | null;
+  image_url?: string | null;
+  clip_url: string;
+  season_number?: number | null;
+  published_at?: string | null;
+  person_tags?: BravoPersonTag[];
+}
+
+interface BravoNewsItem {
+  headline?: string | null;
+  image_url?: string | null;
+  article_url: string;
+  published_at?: string | null;
+  person_tags?: BravoPersonTag[];
+}
+
+type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom";
 
 const parsePeopleCount = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -874,10 +902,10 @@ function TagPeoplePanel({
           peopleCountFromResponse !== null
             ? peopleCountFromResponse
             : peopleCountOverride ?? null;
-        const hasManualInput =
-          nextPeople.length > 0 ||
-          (peopleCountOverride !== undefined && peopleCountOverride !== null);
-        const fallbackSource = hasManualInput ? "manual" : null;
+        const fallbackSource =
+          typeof peopleCountOverride === "number" && Number.isFinite(peopleCountOverride)
+            ? "manual"
+            : null;
         const peopleCountSource =
           typeof data.people_count_source === "string"
             ? (data.people_count_source as "auto" | "manual")
@@ -999,9 +1027,7 @@ function TagPeoplePanel({
     void updateTags(taggedPeople, parsed);
   };
 
-  const canRecount =
-    photo.people_count_source !== "manual" &&
-    (isCastPhoto || Boolean(photo.media_asset_id));
+  const canRecount = isCastPhoto || Boolean(photo.media_asset_id);
 
   const canMirror = isMediaLink && Boolean(photo.media_asset_id);
   const canToggleFacebankSeed = isMediaLink && Boolean(photo.link_id);
@@ -1075,7 +1101,9 @@ function TagPeoplePanel({
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ force: false }),
+        body: JSON.stringify({
+          force: photo.people_count_source === "manual",
+        }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -1633,6 +1661,10 @@ export default function PersonProfilePage() {
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
   const [credits, setCredits] = useState<TrrPersonCredit[]>([]);
   const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
+  const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
+  const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
+  const [bravoContentLoading, setBravoContentLoading] = useState(false);
+  const [bravoContentError, setBravoContentError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2201,6 +2233,56 @@ export default function PersonProfilePage() {
     }
   }, [personId, getAuthHeaders]);
 
+  const fetchBravoContent = useCallback(async () => {
+    if (!showIdParam) {
+      setBravoVideos([]);
+      setBravoNews([]);
+      setBravoContentError(null);
+      return;
+    }
+
+    try {
+      setBravoContentLoading(true);
+      setBravoContentError(null);
+      const headers = await getAuthHeaders();
+      const [videosResponse, newsResponse] = await Promise.all([
+        fetch(
+          `/api/admin/trr-api/shows/${showIdParam}/bravo/videos?person_id=${personId}&merge_person_sources=true`,
+          {
+            headers,
+            cache: "no-store",
+          }
+        ),
+        fetch(`/api/admin/trr-api/shows/${showIdParam}/bravo/news?person_id=${personId}`, {
+          headers,
+          cache: "no-store",
+        }),
+      ]);
+
+      const videosData = (await videosResponse.json().catch(() => ({}))) as {
+        videos?: BravoVideoItem[];
+        error?: string;
+      };
+      const newsData = (await newsResponse.json().catch(() => ({}))) as {
+        news?: BravoNewsItem[];
+        error?: string;
+      };
+      if (!videosResponse.ok) {
+        throw new Error(videosData.error || "Failed to fetch person videos");
+      }
+      if (!newsResponse.ok) {
+        throw new Error(newsData.error || "Failed to fetch person news");
+      }
+
+      setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
+      setBravoNews(Array.isArray(newsData.news) ? newsData.news : []);
+    } catch (err) {
+      setBravoContentError(err instanceof Error ? err.message : "Failed to fetch Bravo content");
+    } finally {
+      setBravoContentLoading(false);
+    }
+  }, [getAuthHeaders, personId, showIdParam]);
+
   // Set cover photo
   const handleSetCover = async (photo: TrrPersonPhoto) => {
     if (!photo.hosted_url) return;
@@ -2694,6 +2776,7 @@ export default function PersonProfilePage() {
         fetchPerson(),
         fetchCredits(),
         fetchFandomData(),
+        fetchBravoContent(),
         fetchPhotos(),
         fetchCoverPhoto(),
       ]);
@@ -2712,6 +2795,7 @@ export default function PersonProfilePage() {
     fetchPerson,
     fetchCredits,
     fetchFandomData,
+    fetchBravoContent,
     fetchPhotos,
     fetchCoverPhoto,
     getAuthHeaders,
@@ -2877,12 +2961,12 @@ export default function PersonProfilePage() {
     const loadData = async () => {
       setLoading(true);
       await fetchPerson();
-      await Promise.all([fetchPhotos(), fetchCredits(), fetchCoverPhoto(), fetchFandomData()]);
+      await Promise.all([fetchPhotos(), fetchCredits(), fetchCoverPhoto(), fetchFandomData(), fetchBravoContent()]);
       setLoading(false);
     };
 
     loadData();
-  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, fetchFandomData]);
+  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, fetchFandomData, fetchBravoContent]);
 
   // Open lightbox with photo, index, and trigger element for focus restoration
   const openLightbox = (
@@ -2999,8 +3083,23 @@ export default function PersonProfilePage() {
     [getAuthHeaders]
   );
 
-  // Get primary photo - use cover photo if set, otherwise first hosted photo
-  const primaryPhotoUrl = coverPhoto?.photo_url || photos.find(p => p.hosted_url)?.hosted_url;
+  const bravoProfileImage =
+    person?.profile_image_url && typeof person.profile_image_url === "object"
+      ? (() => {
+          const candidate = (person.profile_image_url as Record<string, unknown>).bravo;
+          return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+        })()
+      : null;
+  // Get primary photo - cover photo first, then Bravo profile fallback, then first hosted photo.
+  const primaryPhotoUrl =
+    coverPhoto?.photo_url || bravoProfileImage || photos.find((p) => p.hosted_url)?.hosted_url;
+
+  const formatBravoPublishedDate = (value: string | null | undefined): string | null => {
+    if (!value || typeof value !== "string") return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString();
+  };
 
   // Extract external IDs - database uses 'imdb'/'tmdb' keys, not 'imdb_id'/'tmdb_id'
   const rawExternalIds = person?.external_ids as {
@@ -3133,6 +3232,8 @@ export default function PersonProfilePage() {
                 [
                   { id: "overview", label: "Overview" },
                   { id: "gallery", label: `Gallery (${photos.length})` },
+                  { id: "videos", label: `Videos (${bravoVideos.length})` },
+                  { id: "news", label: `News (${bravoNews.length})` },
                   { id: "credits", label: `Credits (${credits.length})` },
                   { id: "fandom", label: fandomData.length > 0 ? `Fandom (${fandomData.length})` : "Fandom" },
                 ] as const
@@ -3333,25 +3434,61 @@ export default function PersonProfilePage() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  {credits.slice(0, 5).map((credit) => (
-                    <Link
-                      key={credit.id}
-                      href={`/admin/trr-shows/${credit.show_id}`}
-                      className="flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 transition hover:bg-zinc-100"
-                    >
-                      <div>
-                        <p className="font-semibold text-zinc-900">
-                          {credit.show_name || "Unknown Show"}
-                        </p>
-                        {credit.role && (
-                          <p className="text-sm text-zinc-600">{credit.role}</p>
-                        )}
+                  {credits.slice(0, 5).map((credit) => {
+                    const rowClassName =
+                      "flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 transition hover:bg-zinc-100";
+                    const content = (
+                      <>
+                        <div>
+                          <p className="font-semibold text-zinc-900">
+                            {credit.show_name || "Unknown Show"}
+                          </p>
+                          {credit.role && (
+                            <p className="text-sm text-zinc-600">{credit.role}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                            {credit.credit_category}
+                          </span>
+                          {!credit.show_id && (
+                            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                              IMDb
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    );
+                    if (credit.show_id) {
+                      return (
+                        <Link
+                          key={credit.id}
+                          href={`/admin/trr-shows/${credit.show_id}`}
+                          className={rowClassName}
+                        >
+                          {content}
+                        </Link>
+                      );
+                    }
+                    if (credit.external_url) {
+                      return (
+                        <a
+                          key={credit.id}
+                          href={credit.external_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={rowClassName}
+                        >
+                          {content}
+                        </a>
+                      );
+                    }
+                    return (
+                      <div key={credit.id} className={rowClassName}>
+                        {content}
                       </div>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-                        {credit.credit_category}
-                      </span>
-                    </Link>
-                  ))}
+                    );
+                  })}
                 </div>
                 {credits.length === 0 && (
                   <p className="text-sm text-zinc-500">No credits available.</p>
@@ -3586,6 +3723,114 @@ export default function PersonProfilePage() {
             </div>
           )}
 
+          {/* Videos Tab */}
+          {activeTab === "videos" && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Bravo Videos
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">{person.full_name}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchBravoContent}
+                  disabled={bravoContentLoading}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {bravoContentLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+
+              {bravoContentError && <p className="mb-4 text-sm text-red-600">{bravoContentError}</p>}
+              {!bravoContentLoading && bravoVideos.length === 0 && !bravoContentError && (
+                <p className="text-sm text-zinc-500">No persisted Bravo videos found for this person.</p>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {bravoVideos.map((video, index) => (
+                  <article key={`${video.clip_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                    <a href={video.clip_url} target="_blank" rel="noopener noreferrer" className="group block">
+                      <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
+                        {video.image_url ? (
+                          <Image
+                            src={video.image_url}
+                            alt={video.title || "Bravo video"}
+                            fill
+                            className="object-cover transition group-hover:scale-105"
+                            unoptimized
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
+                        )}
+                      </div>
+                      <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
+                        {video.title || "Untitled video"}
+                      </h4>
+                    </a>
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                      {video.runtime && <span>{video.runtime}</span>}
+                      {video.kicker && <span>{video.kicker}</span>}
+                      {formatBravoPublishedDate(video.published_at) && (
+                        <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* News Tab */}
+          {activeTab === "news" && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Bravo News
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">{person.full_name}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchBravoContent}
+                  disabled={bravoContentLoading}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {bravoContentLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+              {bravoContentError && <p className="mb-4 text-sm text-red-600">{bravoContentError}</p>}
+              {!bravoContentLoading && bravoNews.length === 0 && !bravoContentError && (
+                <p className="text-sm text-zinc-500">No persisted Bravo news found for this person.</p>
+              )}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {bravoNews.map((item, index) => (
+                  <article key={`${item.article_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                    <a href={item.article_url} target="_blank" rel="noopener noreferrer" className="group block">
+                      <div className="relative mb-3 aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200">
+                        {item.image_url ? (
+                          <Image src={item.image_url} alt={item.headline || "Bravo news"} fill className="object-cover transition group-hover:scale-105" unoptimized />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
+                        )}
+                      </div>
+                      <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
+                        {item.headline || "Untitled story"}
+                      </h4>
+                    </a>
+                    {formatBravoPublishedDate(item.published_at) && (
+                      <p className="mt-2 text-xs text-zinc-500">
+                        Posted {formatBravoPublishedDate(item.published_at)}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Credits Tab */}
           {activeTab === "credits" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -3598,32 +3843,66 @@ export default function PersonProfilePage() {
                 </h3>
               </div>
               <div className="space-y-3">
-                {credits.map((credit) => (
-                  <Link
-                    key={credit.id}
-                    href={`/admin/trr-shows/${credit.show_id}`}
-                    className="flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-4 transition hover:bg-zinc-100"
-                  >
-                    <div>
-                      <p className="font-semibold text-zinc-900">
-                        {credit.show_name || "Unknown Show"}
-                      </p>
-                      {credit.role && (
-                        <p className="text-sm text-zinc-600">{credit.role}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
-                        {credit.credit_category}
-                      </span>
-                      {credit.billing_order && (
-                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
-                          #{credit.billing_order}
+                {credits.map((credit) => {
+                  const rowClassName =
+                    "flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-4 transition hover:bg-zinc-100";
+                  const content = (
+                    <>
+                      <div>
+                        <p className="font-semibold text-zinc-900">
+                          {credit.show_name || "Unknown Show"}
+                        </p>
+                        {credit.role && (
+                          <p className="text-sm text-zinc-600">{credit.role}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
+                          {credit.credit_category}
                         </span>
-                      )}
+                        {!credit.show_id && (
+                          <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
+                            IMDb
+                          </span>
+                        )}
+                        {credit.billing_order && (
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
+                            #{credit.billing_order}
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  );
+                  if (credit.show_id) {
+                    return (
+                      <Link
+                        key={credit.id}
+                        href={`/admin/trr-shows/${credit.show_id}`}
+                        className={rowClassName}
+                      >
+                        {content}
+                      </Link>
+                    );
+                  }
+                  if (credit.external_url) {
+                    return (
+                      <a
+                        key={credit.id}
+                        href={credit.external_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={rowClassName}
+                      >
+                        {content}
+                      </a>
+                    );
+                  }
+                  return (
+                    <div key={credit.id} className={rowClassName}>
+                      {content}
                     </div>
-                  </Link>
-                ))}
+                  );
+                })}
               </div>
               {credits.length === 0 && (
                 <p className="text-sm text-zinc-500">

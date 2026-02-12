@@ -154,15 +154,15 @@ export function AdvancedFilterDrawer({
               onDetectTextForVisible && (
                 <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
                   <p className="text-xs text-amber-800">
-                    {unknownTextCount} visible images are missing text-overlay
-                    classification.
+                    {unknownTextCount} visible images are still unclassified for
+                    text overlay (this is separate from failed detections).
                   </p>
                   <button
                     type="button"
                     onClick={() => onDetectTextForVisible()}
                     className="mt-2 rounded bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
                   >
-                    Detect For Visible
+                    Classify Visible Images
                   </button>
                 </div>
               )}

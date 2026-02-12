@@ -31,6 +31,7 @@ interface SocialPost {
 interface SocialPostsSectionProps {
   showId: string;
   showName: string;
+  seasonId?: string | null;
 }
 
 // ============================================================================
@@ -56,6 +57,7 @@ const getPlatformConfig = (platform: SocialPlatform) =>
 export default function SocialPostsSection({
   showId,
   showName,
+  seasonId,
 }: SocialPostsSectionProps) {
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,7 +84,11 @@ export default function SocialPostsSection({
     try {
       setLoading(true);
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${showId}/social-posts`, { headers });
+      const url = new URL(`/api/admin/trr-api/shows/${showId}/social-posts`, window.location.origin);
+      if (seasonId) {
+        url.searchParams.set("trr_season_id", seasonId);
+      }
+      const response = await fetch(url.toString(), { headers });
       if (!response.ok) throw new Error("Failed to fetch posts");
       const data = await response.json();
       setPosts(data.posts);
@@ -92,7 +98,7 @@ export default function SocialPostsSection({
     } finally {
       setLoading(false);
     }
-  }, [showId, getAuthHeaders]);
+  }, [showId, seasonId, getAuthHeaders]);
 
   useEffect(() => {
     fetchPosts();
@@ -149,6 +155,7 @@ export default function SocialPostsSection({
           body: JSON.stringify({
             platform: formPlatform,
             url: formUrl,
+            trr_season_id: seasonId ?? null,
             title: formTitle || null,
             notes: formNotes || null,
           }),

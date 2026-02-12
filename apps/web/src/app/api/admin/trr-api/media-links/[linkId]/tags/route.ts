@@ -42,6 +42,14 @@ const uniqueNames = (people: TagPerson[]): string[] => {
   return names;
 };
 
+const parseCount = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value)
+    ? Math.max(1, Math.floor(value))
+    : null;
+
+const parseCountSource = (value: unknown): "auto" | "manual" | null =>
+  value === "auto" || value === "manual" ? value : null;
+
 /**
  * PUT /api/admin/trr-api/media-links/[linkId]/tags
  *
@@ -75,21 +83,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       body as Record<string, unknown>,
       "people_count"
     );
-    const peopleCount =
-      typeof peopleCountRaw === "number" && Number.isFinite(peopleCountRaw)
-        ? Math.max(1, Math.floor(peopleCountRaw))
-        : peopleCountRaw === null
-          ? null
-          : hasExplicitCount
-            ? null
-            : peopleNames.length > 0 || peopleIds.length > 0
-              ? Math.max(peopleNames.length, peopleIds.length)
-              : null;
+    let peopleCount = parseCount(baseContext.people_count);
+    let peopleCountSource = parseCountSource(baseContext.people_count_source);
 
-    const peopleCountSource =
-      peopleNames.length > 0 || peopleIds.length > 0 || peopleCount !== null
-        ? "manual"
-        : null;
+    if (hasExplicitCount) {
+      peopleCount = parseCount(peopleCountRaw);
+      peopleCountSource = peopleCount !== null ? "manual" : null;
+    } else if (peopleNames.length > 0 || peopleIds.length > 0) {
+      // Tag edits without explicit count are still a manual tagging action.
+      peopleCountSource = "manual";
+    }
 
     const mergedContext: Record<string, unknown> = {
       ...baseContext,
