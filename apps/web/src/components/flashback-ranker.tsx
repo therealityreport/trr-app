@@ -25,9 +25,10 @@ const MIN_SLOT_HEIGHT = 8;
 const MAX_SLOT_HEIGHT = 64;
 const GRID_CIRCLE_SIZE = 96;
 const GRID_TOKEN_SIZE = 72;
-const FIGMA_SLOT_SIZE = "clamp(92px, 23vw, 156px)";
-const FIGMA_TOKEN_SIZE = "clamp(80px, 20vw, 144px)";
+const FIGMA_SLOT_SIZE = "100%";
+const FIGMA_TOKEN_SIZE = "calc(100% - 12px)";
 const FIGMA_TRAY_TOKEN_SIZE = "clamp(72px, 18vw, 92px)";
+const FIGMA_OVERLAY_TOKEN_SIZE = 120;
 
 type FlashbackRankerLayoutPreset = "legacy" | "figma-rank-circles";
 
@@ -319,7 +320,7 @@ export default function FlashbackRanker({
     [activeId, lineItems],
   );
   const activeOverlaySize: number | string = isFigmaRankCircles
-    ? FIGMA_TOKEN_SIZE
+    ? FIGMA_OVERLAY_TOKEN_SIZE
     : isGridMode
       ? GRID_TOKEN_SIZE
       : activeIsOnLine
@@ -682,7 +683,7 @@ function GridSlot({
 
   if (isFigmaPreset) {
     return (
-      <div ref={setNodeRef} className="relative flex min-w-0 flex-col items-center">
+      <div ref={setNodeRef} className="relative flex w-full min-w-0 max-w-[156px] flex-col items-center">
         <span
           className="mb-1.5 text-base font-bold leading-none text-black sm:text-lg"
           style={{ fontFamily: "var(--font-rude-slab)" }}
@@ -690,10 +691,10 @@ function GridSlot({
           {number}
         </span>
         <div
-          className={`relative flex items-center justify-center rounded-full border-2 transition ${
+          className={`relative flex aspect-square w-full items-center justify-center rounded-full border-2 transition ${
             isOver || isActive ? "border-black shadow-[0_0_0_3px_rgba(0,0,0,0.08)]" : "border-black/70"
           } ${item ? "bg-black/5" : "bg-black"}`}
-          style={{ width: FIGMA_SLOT_SIZE, height: FIGMA_SLOT_SIZE }}
+          style={{ width: FIGMA_SLOT_SIZE }}
         >
           {item ? (
             <>

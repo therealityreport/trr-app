@@ -20,6 +20,14 @@ None.
 
 ## Recent Activity
 
+- February 12, 2026: Added person canonical-profile source-order controls (`tmdb -> fandom -> manual`) on the person admin page.
+  - Added reorder UI (`Up`/`Down`) with `Save Order` / `Reset`.
+  - Added persistence via `PATCH /api/admin/trr-api/people/[personId]` with repository update to `core.people.external_ids.canonical_profile_source_order`.
+  - Canonical field resolution now uses saved source order instead of hardcoded priority.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/api/admin/trr-api/people/[personId]/route.ts' 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass; warning-only)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
 - February 12, 2026: Fixed slow show-detail load by removing Bravo data from initial blocking fetch path.
   - Show page initial load no longer waits on `bravo/videos` + `bravo/news` requests.
   - Bravo data now lazy-loads only when needed (`NEWS` tab, `ASSETS -> VIDEOS`, or Health Center open), with in-flight request dedupe and manual force-refresh.

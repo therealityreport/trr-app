@@ -33,6 +33,8 @@ interface CatalogEntry {
   authExamples?: AuthExample[];
 }
 
+type PreviewViewport = "phone" | "tablet" | "desktop";
+
 /* ------------------------------------------------------------------ */
 /*  Auth / Signup field data                                            */
 /* ------------------------------------------------------------------ */
@@ -202,6 +204,24 @@ const STANDALONE_CATALOG: CatalogEntry[] = [
   { key: "flashback-ranker", displayName: "Flashback Ranker (Drag & Drop)", description: "Drag cast members from the bench onto a ranked line. Supports classic (vertical list) and grid (circle tokens) variants.", componentPath: "components/flashback-ranker.tsx", category: "standalone" },
 ];
 
+const PREVIEW_VIEWPORTS: Array<{ key: PreviewViewport; label: string }> = [
+  { key: "phone", label: "Phone" },
+  { key: "tablet", label: "Tablet" },
+  { key: "desktop", label: "Desktop" },
+];
+
+const PREVIEW_VIEWPORT_WIDTH_CLASS: Record<PreviewViewport, string> = {
+  phone: "max-w-[390px]",
+  tablet: "max-w-[768px]",
+  desktop: "max-w-full",
+};
+
+const PREVIEW_VIEWPORT_HEIGHT_CLASS: Record<PreviewViewport, string> = {
+  phone: "h-[700px]",
+  tablet: "h-[740px]",
+  desktop: "max-h-[760px]",
+};
+
 /* ------------------------------------------------------------------ */
 /*  Shared card header                                                  */
 /* ------------------------------------------------------------------ */
@@ -232,6 +252,40 @@ function CardHeader({
   );
 }
 
+function PreviewViewportToggle({
+  value,
+  onChange,
+}: {
+  value: PreviewViewport;
+  onChange: (next: PreviewViewport) => void;
+}) {
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-400">Preview</span>
+      <div className="inline-flex rounded-full border border-zinc-200 bg-white p-1">
+        {PREVIEW_VIEWPORTS.map((option) => {
+          const active = option.key === value;
+          return (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => onChange(option.key)}
+              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${
+                active
+                  ? "bg-zinc-900 text-white"
+                  : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+              }`}
+              aria-pressed={active}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Survey Preview Card — matches NormalizedSurveyPlay styling          */
 /* ------------------------------------------------------------------ */
@@ -239,6 +293,7 @@ function CardHeader({
 function SurveyPreviewCard({ entry }: { entry: CatalogEntry }) {
   const examples = entry.examples!;
   const [exampleIdx, setExampleIdx] = useState(0);
+  const [viewport, setViewport] = useState<PreviewViewport>("phone");
   const example = examples[exampleIdx];
   const [values, setValues] = useState<Record<number, unknown>>(() => {
     const init: Record<number, unknown> = {};
@@ -270,20 +325,27 @@ function SurveyPreviewCard({ entry }: { entry: CatalogEntry }) {
             </select>
           </div>
         )}
+        <PreviewViewportToggle value={viewport} onChange={setViewport} />
       </CardHeader>
 
-      <div className="flex-1 p-4 max-h-[500px] overflow-y-auto">
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="mb-4">
-            <p className="text-lg font-semibold text-gray-900" style={{ fontFamily: "var(--font-sans)" }}>
-              {example.mockQuestion.question_text}
-            </p>
+      <div className="flex-1 p-3 sm:p-4">
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-100/70 p-2 sm:p-3">
+          <div className={`mx-auto w-full ${PREVIEW_VIEWPORT_WIDTH_CLASS[viewport]}`}>
+            <div className={`overflow-auto rounded-[24px] border border-zinc-200 bg-white shadow-sm ${PREVIEW_VIEWPORT_HEIGHT_CLASS[viewport]}`}>
+              <div className="p-4 sm:p-6">
+                <div className="mb-4">
+                  <p className="text-lg font-semibold text-gray-900" style={{ fontFamily: "var(--font-sans)" }}>
+                    {example.mockQuestion.question_text}
+                  </p>
+                </div>
+                <QuestionRenderer
+                  question={example.mockQuestion}
+                  value={values[exampleIdx]}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
           </div>
-          <QuestionRenderer
-            question={example.mockQuestion}
-            value={values[exampleIdx]}
-            onChange={handleChange}
-          />
         </div>
       </div>
     </div>
@@ -457,12 +519,22 @@ function AuthFieldPreview({ fieldKey }: { fieldKey: string }) {
 /* ------------------------------------------------------------------ */
 
 function StandalonePreviewCard({ entry }: { entry: CatalogEntry }) {
+  const [viewport, setViewport] = useState<PreviewViewport>("phone");
+
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden flex flex-col">
-      <CardHeader entry={entry} badge="Custom Survey" />
-      <div className="flex-1 p-4 max-h-[500px] overflow-y-auto">
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <StandaloneFieldPreview fieldKey={entry.key} />
+      <CardHeader entry={entry} badge="Custom Survey">
+        <PreviewViewportToggle value={viewport} onChange={setViewport} />
+      </CardHeader>
+      <div className="flex-1 p-3 sm:p-4">
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-100/70 p-2 sm:p-3">
+          <div className={`mx-auto w-full ${PREVIEW_VIEWPORT_WIDTH_CLASS[viewport]}`}>
+            <div className={`overflow-auto rounded-[24px] border border-zinc-200 bg-white shadow-sm ${PREVIEW_VIEWPORT_HEIGHT_CLASS[viewport]}`}>
+              <div className="p-4 sm:p-6">
+                <StandaloneFieldPreview fieldKey={entry.key} />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -471,7 +543,6 @@ function StandalonePreviewCard({ entry }: { entry: CatalogEntry }) {
 
 function StandaloneFieldPreview({ fieldKey }: { fieldKey: string }) {
   const [rating, setRating] = useState<number | null>(null);
-  const [ranking, setRanking] = useState<SurveyRankingItem[]>([]);
 
   switch (fieldKey) {
     case "icon-rating":
@@ -510,7 +581,6 @@ function StandaloneFieldPreview({ fieldKey }: { fieldKey: string }) {
             items={RHOSLC_CAST}
             lineLabelTop="ICONIC"
             lineLabelBottom="SNOOZE"
-            onChange={setRanking}
           />
         </div>
       );

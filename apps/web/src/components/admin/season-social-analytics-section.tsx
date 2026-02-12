@@ -6,7 +6,6 @@ import { auth } from "@/lib/firebase";
 
 type Platform = "instagram" | "tiktok" | "twitter" | "youtube";
 type Scope = "bravo" | "creator" | "community";
-type DepthPreset = "quick" | "balanced" | "deep";
 
 type SocialJob = {
   id: string;
@@ -165,8 +164,8 @@ export default function SeasonSocialAnalyticsSection({
   const [cancellingRun, setCancellingRun] = useState(false);
   const [ingestingWeek, setIngestingWeek] = useState<number | null>(null);
   const [ingestingPlatform, setIngestingPlatform] = useState<string | null>(null);
-  const [depthPreset, setDepthPreset] = useState<DepthPreset>("balanced");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [hasObservedRunJobs, setHasObservedRunJobs] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
 
@@ -199,7 +198,6 @@ export default function SeasonSocialAnalyticsSection({
     }
     const data = (await response.json()) as AnalyticsResponse;
     setAnalytics(data);
-    setJobs(data.jobs ?? []);
     setLastUpdated(new Date());
   }, [getAuthHeaders, queryString, seasonNumber, showId]);
 
@@ -218,9 +216,13 @@ export default function SeasonSocialAnalyticsSection({
   }, [getAuthHeaders, scope, seasonNumber, showId]);
 
   const fetchJobs = useCallback(async (runId?: string | null) => {
+    if (!runId) {
+      setJobs([]);
+      return;
+    }
     const headers = await getAuthHeaders();
-    const params = new URLSearchParams({ limit: "25" });
-    if (runId) params.set("run_id", runId);
+    const params = new URLSearchParams({ limit: "250" });
+    params.set("run_id", runId);
     const response = await fetch(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?${params.toString()}`,
       { headers, cache: "no-store" }
@@ -247,7 +249,7 @@ export default function SeasonSocialAnalyticsSection({
   }, [refreshAll]);
 
   const runScopedJobs = useMemo(() => {
-    if (!activeRunId) return jobs;
+    if (!activeRunId) return [];
     return jobs.filter((job) => job.run_id === activeRunId);
   }, [activeRunId, jobs]);
 
@@ -256,10 +258,21 @@ export default function SeasonSocialAnalyticsSection({
     return runScopedJobs.some((job) => runningStatuses.has(job.status));
   }, [runScopedJobs]);
 
+  useEffect(() => {
+    if (!activeRunId) {
+      setHasObservedRunJobs(false);
+      return;
+    }
+    if (runScopedJobs.length > 0) {
+      setHasObservedRunJobs(true);
+    }
+  }, [activeRunId, runScopedJobs.length]);
+
   // When polling detects no more running jobs, clear the ingest UI state
   useEffect(() => {
     if (!runningIngest) return;
     if (!activeRunId) return;
+    if (!hasObservedRunJobs) return;
     if (hasRunningJobs) return;
     // Jobs finished — summarize from the latest jobs list
     const recentJobs = runScopedJobs.filter(
@@ -280,10 +293,11 @@ export default function SeasonSocialAnalyticsSection({
     setActiveRunId(null);
     // Refresh analytics to reflect new data
     fetchAnalytics().catch(() => {});
-  }, [activeRunId, hasRunningJobs, runningIngest, runScopedJobs, fetchAnalytics]);
+  }, [activeRunId, hasObservedRunJobs, hasRunningJobs, runningIngest, runScopedJobs, fetchAnalytics]);
 
   // Poll for job updates when there are running jobs or an active ingest
   useEffect(() => {
+    if (!activeRunId) return;
     if (!hasRunningJobs && !runningIngest) return;
     const interval = runningIngest ? 3000 : 5000;
     const timer = window.setInterval(async () => {
@@ -334,6 +348,9 @@ export default function SeasonSocialAnalyticsSection({
     setRunningIngest(true);
     setError(null);
     setIngestMessage(null);
+    setJobs([]);
+    setActiveRunId(null);
+    setHasObservedRunJobs(false);
 
     const effectivePlatform = override?.platform ?? platformFilter;
     const effectiveWeek = override?.week ?? (weekFilter === "all" ? null : weekFilter);
@@ -350,21 +367,15 @@ export default function SeasonSocialAnalyticsSection({
         max_replies_per_post: number;
         fetch_replies: boolean;
         ingest_mode: "posts_only" | "posts_and_comments";
-        depth_preset: DepthPreset;
         date_start?: string;
         date_end?: string;
       } = {
         source_scope: scope,
-        max_posts_per_target: 1500,
-        max_comments_per_post: 100,
-        max_replies_per_post: 100,
+        max_posts_per_target: 100000,
+        max_comments_per_post: 100000,
+        max_replies_per_post: 100000,
         fetch_replies: true,
         ingest_mode: "posts_and_comments",
-        depth_preset: depthPreset,
-      };
-
-      if (effectivePlatform === "instagram") {
-        payload.max_posts_per_target = 5000;
       }
 
       if (effectivePlatform !== "all") {
@@ -413,12 +424,15 @@ export default function SeasonSocialAnalyticsSection({
       };
       console.log("[social-ingest] Response:", JSON.stringify(result, null, 2));
       const runId = typeof result.run_id === "string" && result.run_id ? result.run_id : null;
+      if (!runId) {
+        throw new Error(result.message ?? "Ingest started without a run id");
+      }
       setActiveRunId(runId);
 
       // Backend returns queued/staged run metadata immediately.
       const stages = (result.stages ?? []).join(" -> ") || "posts -> comments";
       const jobCount = result.queued_or_started_jobs ?? 0;
-      setIngestMessage(`${label} · ${platformLabel} — run ${runId ?? "(pending id)"} queued (${jobCount} jobs, stages: ${stages}).`);
+      setIngestMessage(`${label} · ${platformLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
 
       // Immediately fetch jobs to pick up the newly created running jobs
       await fetchJobs(runId);
@@ -434,7 +448,7 @@ export default function SeasonSocialAnalyticsSection({
       setIngestingPlatform(null);
       setActiveRunId(null);
     }
-  }, [analytics, depthPreset, fetchJobs, getAuthHeaders, platformFilter, scope, seasonNumber, showId, weekFilter]);
+  }, [analytics, fetchJobs, getAuthHeaders, platformFilter, scope, seasonNumber, showId, weekFilter]);
 
   const downloadExport = useCallback(
     async (format: "csv" | "pdf") => {
@@ -563,9 +577,9 @@ export default function SeasonSocialAnalyticsSection({
             : "border-green-200 bg-green-50 text-green-700"
         }`}>
               <p>{ingestMessage}</p>
-              {runningIngest && hasRunningJobs && (
+              {runningIngest && hasObservedRunJobs && (
                 <div className="mt-2 space-y-1 text-xs">
-                  {runScopedJobs.filter((j) => j.status === "running").map((j) => {
+                  {runScopedJobs.filter((j) => ["queued", "pending", "retrying", "running"].includes(j.status)).map((j) => {
                     const stage =
                       (typeof j.config?.stage === "string" ? j.config.stage : undefined) ??
                       (typeof j.metadata?.stage === "string" ? j.metadata.stage : "stage");
@@ -573,7 +587,7 @@ export default function SeasonSocialAnalyticsSection({
                     <div key={j.id} className="flex items-center gap-2">
                       <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
                       <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
-                      <span className="text-blue-500">{stage} running — {j.items_found ?? 0} items so far</span>
+                      <span className="text-blue-500">{stage} {j.status} — {j.items_found ?? 0} items so far</span>
                     </div>
                     );
                   })}
@@ -667,19 +681,6 @@ export default function SeasonSocialAnalyticsSection({
             <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <h4 className="mb-4 text-lg font-semibold text-zinc-900">Ingest + Export</h4>
               <div className="space-y-2 text-sm text-zinc-600">
-                <label className="block text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                  Depth Preset
-                  <select
-                    value={depthPreset}
-                    onChange={(event) => setDepthPreset(event.target.value as DepthPreset)}
-                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700"
-                    disabled={runningIngest}
-                  >
-                    <option value="quick">Quick</option>
-                    <option value="balanced">Balanced</option>
-                    <option value="deep">Deep</option>
-                  </select>
-                </label>
                 <button
                   type="button"
                   onClick={() => runIngest()}
@@ -741,8 +742,6 @@ export default function SeasonSocialAnalyticsSection({
                 <span className="font-semibold text-zinc-700">
                   {platformFilter === "all" ? "All Platforms" : PLATFORM_LABELS[platformFilter]}
                 </span>
-                {" · "}
-                <span className="font-semibold text-zinc-700">{depthPreset}</span>
                 {activeRunId && (
                   <>
                     {" · "}

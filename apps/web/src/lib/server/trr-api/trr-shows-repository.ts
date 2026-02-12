@@ -134,6 +134,9 @@ export interface TrrPerson {
   updated_at: string;
 }
 
+const CANONICAL_PROFILE_SOURCES = ["tmdb", "fandom", "manual"] as const;
+type CanonicalProfileSource = (typeof CANONICAL_PROFILE_SOURCES)[number];
+
 export interface TrrCastFandom {
   id: string;
   person_id: string;
@@ -1008,6 +1011,38 @@ export async function getPersonById(personId: string): Promise<TrrPerson | null>
      WHERE id = $1::uuid
      LIMIT 1`,
     [personId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function updatePersonCanonicalProfileSourceOrder(
+  personId: string,
+  sourceOrder: string[]
+): Promise<TrrPerson | null> {
+  if (sourceOrder.length !== CANONICAL_PROFILE_SOURCES.length) {
+    throw new Error("source_order_must_include_all_sources");
+  }
+  const deduped = [...new Set(sourceOrder)];
+  if (deduped.length !== CANONICAL_PROFILE_SOURCES.length) {
+    throw new Error("source_order_contains_duplicates");
+  }
+  const normalized = deduped.map((value) => value.trim().toLowerCase()) as CanonicalProfileSource[];
+  if (normalized.some((value) => !CANONICAL_PROFILE_SOURCES.includes(value))) {
+    throw new Error("source_order_contains_invalid_source");
+  }
+
+  const result = await pgQuery<TrrPerson>(
+    `UPDATE core.people
+     SET external_ids = jsonb_set(
+       COALESCE(external_ids, '{}'::jsonb),
+       '{canonical_profile_source_order}',
+       to_jsonb($2::text[]),
+       true
+     ),
+     updated_at = now()
+     WHERE id = $1::uuid
+     RETURNING *`,
+    [personId, normalized]
   );
   return result.rows[0] ?? null;
 }

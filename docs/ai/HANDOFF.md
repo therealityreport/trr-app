@@ -1339,3 +1339,18 @@ Show page cast-role management + thumbnail precedence refinements (this session,
   - `apps/web/src/components/admin/season-social-analytics-section.tsx`
   - Added `Cancel Active Run` control in Ingest panel, wired to run cancel proxy endpoint and run-scoped job refresh.
   - Validation: `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx` and `pnpm -C apps/web exec tsc --noEmit` (pass).
+
+Person canonical-profile source-order controls (this session, 2026-02-12):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `apps/web/src/app/api/admin/trr-api/people/[personId]/route.ts`
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `docs/cross-collab/TASK6/STATUS.md`
+- Changes:
+  - Added source-order control UI in person `Canonical Profile` (`tmdb`, `fandom`, `manual`) with `Up/Down`, `Save Order`, and `Reset`.
+  - Canonical field resolver now consumes dynamic source order rather than fixed hardcoded order.
+  - Added `PATCH /api/admin/trr-api/people/[personId]` to persist source order.
+  - Added repository method `updatePersonCanonicalProfileSourceOrder(...)` writing to `core.people.external_ids.canonical_profile_source_order`.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/api/admin/trr-api/people/[personId]/route.ts' 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass; warning-only)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
