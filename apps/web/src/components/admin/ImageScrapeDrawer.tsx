@@ -344,6 +344,7 @@ export function ImageScrapeDrawer({
         return;
       }
 
+
       const showCastPromise = fetch(`/api/admin/trr-api/shows/${entityContext.showId}/cast?limit=500`, { headers });
       const seasonCastPromise =
         targetSeason !== null
@@ -698,6 +699,7 @@ export function ImageScrapeDrawer({
     });
   }, [castOptions]);
 
+
   // Body scroll lock
   useEffect(() => {
     if (isOpen) {
@@ -834,6 +836,7 @@ export function ImageScrapeDrawer({
     },
     [castOptions]
   );
+
 
   // Import selected images with SSE streaming progress
   const handleImport = async () => {

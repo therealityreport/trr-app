@@ -674,6 +674,10 @@ async function getPreferredCastPhotoMap(
       display_url: string | null;
       hosted_url: string | null;
       url: string | null;
+      thumbnail_focus_x: number | null;
+      thumbnail_focus_y: number | null;
+      thumbnail_zoom: number | null;
+      thumbnail_crop_mode: "manual" | "auto" | null;
       context_section: string | null;
       season: number | null;
       gallery_index: number | null;
@@ -683,6 +687,10 @@ async function getPreferredCastPhotoMap(
          display_url,
          hosted_url,
          url,
+         thumbnail_focus_x,
+         thumbnail_focus_y,
+         thumbnail_zoom,
+         thumbnail_crop_mode,
          context_section,
          season,
          gallery_index
@@ -709,10 +717,13 @@ async function getPreferredCastPhotoMap(
       if (!candidateUrl || !isLikelyImage(null, candidateUrl)) continue;
       map.set(row.person_id, {
         url: candidateUrl,
-        thumbnail_focus_x: null,
-        thumbnail_focus_y: null,
-        thumbnail_zoom: null,
-        thumbnail_crop_mode: null,
+        thumbnail_focus_x: row.thumbnail_focus_x,
+        thumbnail_focus_y: row.thumbnail_focus_y,
+        thumbnail_zoom: row.thumbnail_zoom,
+        thumbnail_crop_mode:
+          row.thumbnail_crop_mode === "manual" || row.thumbnail_crop_mode === "auto"
+            ? row.thumbnail_crop_mode
+            : null,
       });
     }
   } catch (error) {

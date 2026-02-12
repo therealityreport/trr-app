@@ -1354,3 +1354,21 @@ Person canonical-profile source-order controls (this session, 2026-02-12):
 - Validation:
   - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/api/admin/trr-api/people/[personId]/route.ts' 'src/lib/server/trr-api/trr-shows-repository.ts'` (pass; warning-only)
   - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Social ingest active-run UX fix + full-ingest payload (this session, 2026-02-12):
+- File:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+- Changes:
+  - Fixed "Run Week / platform run does nothing" race:
+    - added `hasObservedRunJobs` guard so a run is not marked complete before first job rows are observed.
+  - Enforced active-run-only job rendering:
+    - no fallback to historical season jobs when no `activeRunId`
+    - `fetchJobs` now hard-requires `run_id` and clears local jobs when missing.
+  - Increased per-poll job window to `limit=250` to cover full active runs.
+  - Updated in-panel progress to include queued/pending/retrying/running states so users see immediate state transitions.
+  - Removed depth selector behavior from ingest payload and always sends full-ingest settings:
+    - `ingest_mode=posts_and_comments`
+    - high limits for `max_posts_per_target`, `max_comments_per_post`, `max_replies_per_post`.
+- Validation:
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+  - `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx` (pass)
