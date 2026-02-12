@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { upsertCastPhotoTags } from "@/lib/server/admin/cast-photo-tags-repository";
+import {
+  getTagsByPhotoIds,
+  upsertCastPhotoTags,
+} from "@/lib/server/admin/cast-photo-tags-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -66,12 +69,21 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       body as Record<string, unknown>,
       "people_count"
     );
-    const peopleCount =
-      hasExplicitCount && typeof peopleCountRaw === "number" && Number.isFinite(peopleCountRaw)
-        ? Math.max(1, Math.floor(peopleCountRaw))
-        : null;
 
-    const peopleCountSource = hasExplicitCount && peopleCount !== null ? "manual" : null;
+    const existingTags = (await getTagsByPhotoIds([photoId])).get(photoId) ?? null;
+    let peopleCount = existingTags?.people_count ?? null;
+    let peopleCountSource = existingTags?.people_count_source ?? null;
+
+    if (hasExplicitCount) {
+      peopleCount =
+        typeof peopleCountRaw === "number" && Number.isFinite(peopleCountRaw)
+          ? Math.max(1, Math.floor(peopleCountRaw))
+          : null;
+      peopleCountSource = peopleCount !== null ? "manual" : null;
+    } else if (peopleNames.length > 0 || peopleIds.length > 0) {
+      // Tag edits without explicit count are still a manual tagging action.
+      peopleCountSource = "manual";
+    }
 
     const result = await upsertCastPhotoTags({
       cast_photo_id: photoId,
