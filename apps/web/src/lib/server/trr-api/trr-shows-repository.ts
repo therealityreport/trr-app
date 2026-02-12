@@ -307,12 +307,16 @@ export interface ResolvedShowSlug {
  * Supports collision-safe slugs with optional `--{showIdPrefix}` suffix.
  */
 export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | null> {
-  const normalizedInput = toShowSlug(slug);
+  // Extract the optional --{showIdPrefix} suffix BEFORE normalizing, because
+  // toShowSlug collapses repeated dashes (e.g. "show-name--1a2b3c4d" → "show-name-1a2b3c4d").
+  const rawSuffix = slug.match(/--([0-9a-f]{8})$/i);
+  const requestedPrefix = rawSuffix?.[1]?.toLowerCase() || null;
+  const rawBase = rawSuffix ? slug.slice(0, -rawSuffix[0].length) : slug;
+
+  const normalizedInput = toShowSlug(rawBase);
   if (!normalizedInput) return null;
 
-  const withSuffix = normalizedInput.match(/^(.*)--([0-9a-f]{8})$/i);
-  const baseSlug = withSuffix?.[1]?.trim() || normalizedInput;
-  const requestedPrefix = withSuffix?.[2]?.toLowerCase() || null;
+  const baseSlug = normalizedInput;
 
   const rows = await pgQuery<{ id: string; name: string; slug: string }>(
     `SELECT
@@ -747,12 +751,6 @@ export async function getCastByShowId(
   >(
     `SELECT vsc.*
      FROM core.v_show_cast AS vsc
-     JOIN (
-       SELECT DISTINCT person_id
-       FROM core.v_person_show_seasons
-       WHERE show_id = $1::uuid
-         AND COALESCE(total_episodes, 0) > 0
-     ) eligible ON eligible.person_id = vsc.person_id
      WHERE vsc.show_id = $1::uuid
      ORDER BY billing_order ASC NULLS LAST
      LIMIT $2 OFFSET $3`,
