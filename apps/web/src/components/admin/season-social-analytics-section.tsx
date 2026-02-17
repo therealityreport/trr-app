@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
+import { buildSeasonAdminUrl } from "@/lib/admin/show-admin-routes";
 import { auth } from "@/lib/firebase";
 
 type Platform = "instagram" | "tiktok" | "twitter" | "youtube";
 type PlatformTab = "overview" | Platform | "reddit";
 type Scope = "bravo" | "creator" | "community";
+type SyncStrategy = "incremental" | "full_refresh";
 
 type SocialJob = {
   id: string;
@@ -29,12 +31,23 @@ type SocialRun = {
   id: string;
   status: "queued" | "pending" | "retrying" | "running" | "completed" | "failed" | "cancelled";
   source_scope?: string;
+  initiated_by?: string | null;
+  config?: Record<string, unknown>;
   summary?: {
     total_jobs?: number;
     completed_jobs?: number;
     failed_jobs?: number;
     active_jobs?: number;
     items_found_total?: number;
+    stage_counts?: Record<
+      string,
+      {
+        total?: number;
+        completed?: number;
+        failed?: number;
+        active?: number;
+      }
+    >;
   };
   created_at?: string | null;
   started_at?: string | null;
@@ -165,6 +178,7 @@ type AnalyticsResponse = {
 
 interface SeasonSocialAnalyticsSectionProps {
   showId: string;
+  showSlug?: string;
   seasonNumber: number;
   seasonId: string;
   showName: string;
@@ -196,6 +210,9 @@ const WEEKLY_ENGAGEMENT_BAR_CLASS: Record<Platform, string> = {
   twitter: "bg-sky-500",
 };
 
+const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running"]);
+const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
+
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
 
 const formatDateTime = (value: string | null | undefined): string => {
@@ -222,6 +239,23 @@ const normalizeIsoInstant = (value: string | null | undefined): string | null =>
   return new Date(timestamp).toISOString();
 };
 
+const formatStatusLabel = (status: SocialRun["status"]): string => {
+  if (!status) return "Unknown";
+  return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+};
+
+const formatRunProgressLabel = (run: SocialRun): string => {
+  const summary = run.summary ?? {};
+  const totalJobs = Number(summary.total_jobs ?? 0);
+  const completedJobs = Number(summary.completed_jobs ?? 0);
+  const failedJobs = Number(summary.failed_jobs ?? 0);
+  const doneJobs = completedJobs + failedJobs;
+  if (totalJobs > 0) {
+    return `${formatStatusLabel(run.status)} ${doneJobs}/${totalJobs}`;
+  }
+  return formatStatusLabel(run.status);
+};
+
 const formatDateRangeLabel = (start: string, end: string): string => {
   const startDate = new Date(start);
   const endDate = new Date(end);
@@ -242,6 +276,7 @@ const statusToLogVerb = (status: SocialJob["status"]): string => {
 
 export default function SeasonSocialAnalyticsSection({
   showId,
+  showSlug,
   seasonNumber,
   seasonId,
   showName,
@@ -271,18 +306,19 @@ export default function SeasonSocialAnalyticsSection({
   const [ingestMessage, setIngestMessage] = useState<string | null>(null);
   const [runningIngest, setRunningIngest] = useState(false);
   const [cancellingRun, setCancellingRun] = useState(false);
+  const [syncStrategy, setSyncStrategy] = useState<SyncStrategy>("incremental");
   const [ingestingWeek, setIngestingWeek] = useState<number | null>(null);
   const [ingestingPlatform, setIngestingPlatform] = useState<string | null>(null);
   const [activeRunRequest, setActiveRunRequest] = useState<{ week: number | null; platform: "all" | Platform } | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [hasObservedRunJobs, setHasObservedRunJobs] = useState(false);
-  const [noRunningJobsCount, setNoRunningJobsCount] = useState(0);
   const [ingestStartedAt, setIngestStartedAt] = useState<Date | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [elapsedTick, setElapsedTick] = useState(0);
   const [pollingStatus, setPollingStatus] = useState<"idle" | "retrying" | "recovered">("idle");
+  const pollGenerationRef = useRef(0);
+  const showRouteSlug = (showSlug || showId).trim();
 
   const getAuthHeaders = useCallback(async () => {
     const token = await auth.currentUser?.getIdToken();
@@ -355,7 +391,10 @@ export default function SeasonSocialAnalyticsSection({
     return data.targets ?? [];
   }, [getAuthHeaders, readErrorMessage, scope, seasonNumber, showId]);
 
-  const fetchJobs = useCallback(async (runId?: string | null) => {
+  const fetchJobs = useCallback(async (
+    runId?: string | null,
+    options?: { preserveLastGoodIfEmpty?: boolean },
+  ) => {
     if (!runId) {
       setJobs([]);
       return [] as SocialJob[];
@@ -371,7 +410,15 @@ export default function SeasonSocialAnalyticsSection({
     }
     const data = (await response.json()) as { jobs?: SocialJob[] };
     const nextJobs = data.jobs ?? [];
-    setJobs(nextJobs);
+    setJobs((current) => {
+      if (options?.preserveLastGoodIfEmpty && nextJobs.length === 0) {
+        const hasCurrentForRun = current.some((job) => job.run_id === runId);
+        if (hasCurrentForRun) {
+          return current;
+        }
+      }
+      return nextJobs;
+    });
     return nextJobs;
   }, [getAuthHeaders, readErrorMessage, seasonNumber, showId]);
 
@@ -403,14 +450,9 @@ export default function SeasonSocialAnalyticsSection({
     let runIdToLoad = selectedRunId;
     if (runsResult.status === "fulfilled") {
       const loadedRuns = runsResult.value;
-      const activeRun = loadedRuns.find((run) =>
-        ["queued", "pending", "retrying", "running"].includes(run.status),
-      );
+      const activeRun = loadedRuns.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
       if (activeRun) {
         setActiveRunId(activeRun.id);
-        if (!runIdToLoad) {
-          runIdToLoad = activeRun.id;
-        }
       } else if (!runningIngest) {
         setActiveRunId(null);
       }
@@ -418,8 +460,8 @@ export default function SeasonSocialAnalyticsSection({
       if (runIdToLoad && !loadedRuns.some((run) => run.id === runIdToLoad)) {
         runIdToLoad = null;
       }
-      if (runIdToLoad !== selectedRunId) {
-        setSelectedRunId(runIdToLoad);
+      if (!runIdToLoad && selectedRunId) {
+        setSelectedRunId(null);
       }
     } else {
       nextSectionErrors.runs = runsResult.reason instanceof Error ? runsResult.reason.message : "Failed to load social runs";
@@ -457,7 +499,10 @@ export default function SeasonSocialAnalyticsSection({
   }, [fetchJobs, selectedRunId]);
 
   const refreshSelectedRunJobs = useCallback(async () => {
-    const runId = selectedRunId ?? activeRunId;
+    const runId = selectedRunId;
+    if (!runId) {
+      return;
+    }
     try {
       await fetchJobs(runId);
       setSectionErrors((current) => ({ ...current, jobs: null }));
@@ -467,12 +512,21 @@ export default function SeasonSocialAnalyticsSection({
         jobs: jobsError instanceof Error ? jobsError.message : "Failed to load social jobs",
       }));
     }
-  }, [activeRunId, fetchJobs, selectedRunId]);
+  }, [fetchJobs, selectedRunId]);
 
   const runScopedJobs = useMemo(() => {
     if (!selectedRunId) return [];
     return jobs.filter((job) => job.run_id === selectedRunId);
   }, [jobs, selectedRunId]);
+
+  const selectedRun = useMemo(
+    () => (selectedRunId ? runs.find((run) => run.id === selectedRunId) ?? null : null),
+    [runs, selectedRunId],
+  );
+  const activeRun = useMemo(
+    () => (activeRunId ? runs.find((run) => run.id === activeRunId) ?? null : null),
+    [activeRunId, runs],
+  );
 
 
   const weeklyWindowLookup = useMemo(() => {
@@ -494,6 +548,50 @@ export default function SeasonSocialAnalyticsSection({
     return map;
   }, [analytics]);
 
+  const runOptionLabelById = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const run of runs) {
+      const config = (run.config ?? {}) as Record<string, unknown>;
+      const dateStartRaw = typeof config.date_start === "string" ? config.date_start : null;
+      const dateEndRaw = typeof config.date_end === "string" ? config.date_end : null;
+
+      let weekLabel = "All Weeks";
+      if (dateStartRaw && dateEndRaw) {
+        const startIso = normalizeIsoInstant(dateStartRaw);
+        const endIso = normalizeIsoInstant(dateEndRaw);
+        if (startIso && endIso) {
+          weekLabel = weeklyWindowLookup.get(`${startIso}|${endIso}`) ?? formatDateRangeLabel(dateStartRaw, dateEndRaw);
+        } else {
+          weekLabel = formatDateRangeLabel(dateStartRaw, dateEndRaw);
+        }
+      }
+
+      let platformLabel = "All Platforms";
+      const platformsRaw = config.platforms;
+      const configuredPlatforms =
+        Array.isArray(platformsRaw)
+          ? platformsRaw.map((item) => String(item).toLowerCase()).filter((item) => item in PLATFORM_LABELS)
+          : typeof platformsRaw === "string" && platformsRaw !== "all"
+            ? [platformsRaw.toLowerCase()].filter((item) => item in PLATFORM_LABELS)
+            : [];
+      if (configuredPlatforms.length === 1) {
+        platformLabel = PLATFORM_LABELS[configuredPlatforms[0]] ?? configuredPlatforms[0];
+      } else if (configuredPlatforms.length > 1 && configuredPlatforms.length < 4) {
+        platformLabel = configuredPlatforms.map((item) => PLATFORM_LABELS[item] ?? item).join(", ");
+      }
+
+      const progressLabel = formatRunProgressLabel(run);
+      const totalItems = Number(run.summary?.items_found_total ?? 0);
+      const timestamp = run.started_at ?? run.created_at ?? run.completed_at ?? run.cancelled_at;
+      const timestampLabel = formatDateTime(timestamp);
+      labels.set(
+        run.id,
+        `${weekLabel} · ${platformLabel} · ${progressLabel} · ${totalItems.toLocaleString()} items · ${timestampLabel} · ${run.id.slice(0, 8)}`,
+      );
+    }
+    return labels;
+  }, [runs, weeklyWindowLookup]);
+
   const activeRunScope = useMemo(() => {
     const fallbackWeek = activeRunRequest?.week ?? (weekFilter === "all" ? null : weekFilter);
     const fallbackPlatform = activeRunRequest?.platform ?? platformFilter;
@@ -501,6 +599,39 @@ export default function SeasonSocialAnalyticsSection({
     const fallbackPlatformLabel = formatPlatformScopeLabel(fallbackPlatform);
 
     if (!selectedRunId || runScopedJobs.length === 0) {
+      if (selectedRun?.config) {
+        const config = selectedRun.config as Record<string, unknown>;
+        const dateStartRaw = typeof config.date_start === "string" ? config.date_start : null;
+        const dateEndRaw = typeof config.date_end === "string" ? config.date_end : null;
+        let weekLabel = fallbackWeekLabel;
+        if (dateStartRaw && dateEndRaw) {
+          const dateStartIso = normalizeIsoInstant(dateStartRaw);
+          const dateEndIso = normalizeIsoInstant(dateEndRaw);
+          weekLabel =
+            dateStartIso && dateEndIso
+              ? weeklyWindowLookup.get(`${dateStartIso}|${dateEndIso}`) ?? formatDateRangeLabel(dateStartRaw, dateEndRaw)
+              : formatDateRangeLabel(dateStartRaw, dateEndRaw);
+        } else {
+          weekLabel = "All Weeks";
+        }
+
+        const platformsRaw = config.platforms;
+        const configuredPlatforms =
+          Array.isArray(platformsRaw)
+            ? platformsRaw.map((item) => String(item).toLowerCase()).filter((item) => item in PLATFORM_LABELS)
+            : typeof platformsRaw === "string" && platformsRaw !== "all"
+              ? [platformsRaw.toLowerCase()].filter((item) => item in PLATFORM_LABELS)
+              : [];
+
+        let platformLabel = "All Platforms";
+        if (configuredPlatforms.length === 1) {
+          platformLabel = PLATFORM_LABELS[configuredPlatforms[0]] ?? configuredPlatforms[0];
+        } else if (configuredPlatforms.length > 1 && configuredPlatforms.length < 4) {
+          platformLabel = configuredPlatforms.map((item) => PLATFORM_LABELS[item] ?? item).join(", ");
+        }
+
+        return { weekLabel, platformLabel };
+      }
       return {
         weekLabel: fallbackWeekLabel,
         platformLabel: fallbackPlatformLabel,
@@ -546,7 +677,7 @@ export default function SeasonSocialAnalyticsSection({
       weekLabel,
       platformLabel,
     };
-  }, [activeRunRequest, platformFilter, runScopedJobs, selectedRunId, weekFilter, weeklyWindowLookup]);
+  }, [activeRunRequest, platformFilter, runScopedJobs, selectedRun, selectedRunId, weekFilter, weeklyWindowLookup]);
 
   const liveRunLogs = useMemo(() => {
     if (!selectedRunId) return [];
@@ -580,53 +711,32 @@ export default function SeasonSocialAnalyticsSection({
   }, [runScopedJobs, selectedRunId]);
 
   const hasRunningJobs = useMemo(() => {
-    const runningStatuses = new Set(["queued", "pending", "retrying", "running"]);
-    return runScopedJobs.some((job) => runningStatuses.has(job.status));
-  }, [runScopedJobs]);
+    if (activeRun && ACTIVE_RUN_STATUSES.has(activeRun.status)) {
+      return true;
+    }
+    return runScopedJobs.some((job) => ACTIVE_RUN_STATUSES.has(job.status as SocialRun["status"]));
+  }, [activeRun, runScopedJobs]);
 
   useEffect(() => {
-    if (!activeRunId) {
-      setHasObservedRunJobs(false);
-      return;
-    }
-    if (runScopedJobs.length > 0) {
-      setHasObservedRunJobs(true);
-    }
-  }, [activeRunId, runScopedJobs.length]);
+    if (!runningIngest || !activeRunId || !activeRun) return;
+    if (!TERMINAL_RUN_STATUSES.has(activeRun.status)) return;
 
-  // Track consecutive polls with no running jobs (grace period for inter-job transitions)
-  useEffect(() => {
-    if (!runningIngest || !activeRunId || !hasObservedRunJobs) return;
-    if (hasRunningJobs) {
-      setNoRunningJobsCount(0);
-      return;
+    const summary = activeRun.summary ?? {};
+    const completedJobs = Number(summary.completed_jobs ?? 0);
+    const failedJobs = Number(summary.failed_jobs ?? 0);
+    const totalJobs = Math.max(Number(summary.total_jobs ?? 0), completedJobs + failedJobs);
+    const totalItems = Number(summary.items_found_total ?? 0);
+    const elapsed = ingestStartedAt ? ` in ${Math.round((Date.now() - ingestStartedAt.getTime()) / 1000)}s` : "";
+    const finalVerb = activeRun.status === "cancelled" ? "cancelled" : activeRun.status === "failed" ? "failed" : "complete";
+    let msg = `Ingest ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
+    if (totalJobs > 0) {
+      msg += ` of ${totalJobs}`;
     }
-    setNoRunningJobsCount((prev) => prev + 1);
-  }, [activeRunId, hasObservedRunJobs, hasRunningJobs, runningIngest]);
-
-  // When polling detects no more running jobs for 2+ consecutive polls, clear the ingest UI state
-  useEffect(() => {
-    if (!runningIngest) return;
-    if (!activeRunId) return;
-    if (!hasObservedRunJobs) return;
-    // Require 2 consecutive polls with no running jobs to avoid false positives
-    // during inter-job transitions in execute_run
-    if (noRunningJobsCount < 2) return;
-    // Jobs finished — summarize from the latest jobs list
-    const finishedJobs = runScopedJobs.filter(
-      (j) => j.status === "completed" || j.status === "failed"
-    );
-    const completed = finishedJobs.filter((j) => j.status === "completed");
-    const failed = finishedJobs.filter((j) => j.status === "failed");
-    const totalItems = completed.reduce((s, j) => s + (j.items_found ?? 0), 0);
-
-    const elapsed = ingestStartedAt
-      ? ` in ${Math.round((Date.now() - ingestStartedAt.getTime()) / 1000)}s`
-      : "";
-    let msg = `Ingest complete${elapsed}: ${completed.length} job(s) finished, ${totalItems} items`;
-    if (failed.length > 0) {
-      msg += ` · ${failed.length} failed`;
+    msg += `, ${totalItems.toLocaleString()} items`;
+    if (failedJobs > 0) {
+      msg += ` · ${failedJobs} failed`;
     }
+
     const completedRunId = activeRunId;
     setIngestMessage(msg);
     setRunningIngest(false);
@@ -634,35 +744,65 @@ export default function SeasonSocialAnalyticsSection({
     setIngestingPlatform(null);
     setActiveRunRequest(null);
     setActiveRunId(null);
-    setNoRunningJobsCount(0);
     setIngestStartedAt(null);
-    // Refresh analytics to reflect new data
-    fetchAnalytics().catch(() => {});
-    fetchRuns().catch(() => {});
-    fetchJobs(completedRunId).catch(() => {});
-  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, hasObservedRunJobs, ingestStartedAt, noRunningJobsCount, runningIngest, runScopedJobs]);
+    void fetchAnalytics().catch(() => {});
+    void fetchRuns().catch(() => {});
+    void fetchJobs(completedRunId).catch(() => {});
+  }, [activeRun, activeRunId, fetchAnalytics, fetchJobs, fetchRuns, ingestStartedAt, runningIngest]);
 
-  // Poll for job updates when there are running jobs or an active ingest
+  // Poll for job + run updates using a single-flight loop (no overlapping requests).
   useEffect(() => {
     if (!activeRunId) return;
     if (!hasRunningJobs && !runningIngest) return;
+
+    pollGenerationRef.current += 1;
+    const generation = pollGenerationRef.current;
     const interval = runningIngest ? 3000 : 5000;
-    const timer = window.setInterval(async () => {
+    let timer: number | null = null;
+    let cancelled = false;
+    let inFlight = false;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      timer = window.setTimeout(() => {
+        void poll();
+      }, interval);
+    };
+
+    const poll = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       try {
-        await fetchJobs(activeRunId);
-        await fetchRuns();
+        const nextRuns = await fetchRuns();
+        if (cancelled || generation !== pollGenerationRef.current) return;
+
+        const currentRun = nextRuns.find((run) => run.id === activeRunId);
+        const preserveJobs = Boolean(currentRun && ACTIVE_RUN_STATUSES.has(currentRun.status));
+        await fetchJobs(activeRunId, { preserveLastGoodIfEmpty: preserveJobs });
+        if (cancelled || generation !== pollGenerationRef.current) return;
+
         if (!runningIngest) {
           await fetchAnalytics();
         }
-        if (pollingStatus === "retrying") {
-          setPollingStatus("recovered");
-        }
+        setPollingStatus((current) => (current === "retrying" ? "recovered" : current));
+        setSectionErrors((current) => ({ ...current, runs: null, jobs: null }));
       } catch {
+        if (cancelled || generation !== pollGenerationRef.current) return;
         setPollingStatus("retrying");
+      } finally {
+        inFlight = false;
+        scheduleNext();
       }
-    }, interval);
-    return () => window.clearInterval(timer);
-  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, hasRunningJobs, pollingStatus, runningIngest]);
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, hasRunningJobs, runningIngest]);
 
   useEffect(() => {
     if (pollingStatus !== "recovered") return;
@@ -708,7 +848,6 @@ export default function SeasonSocialAnalyticsSection({
       setActiveRunRequest(null);
       setSelectedRunId(activeRunId);
       setActiveRunId(null);
-      setNoRunningJobsCount(0);
       setIngestStartedAt(null);
       await fetchJobs(activeRunId);
       await fetchAnalytics();
@@ -727,8 +866,6 @@ export default function SeasonSocialAnalyticsSection({
     setJobs([]);
     setSelectedRunId(null);
     setActiveRunId(null);
-    setHasObservedRunJobs(false);
-    setNoRunningJobsCount(0);
     setIngestStartedAt(new Date());
 
     const effectivePlatform = override?.platform ?? platformFilter;
@@ -747,6 +884,7 @@ export default function SeasonSocialAnalyticsSection({
         max_replies_per_post: number;
         fetch_replies: boolean;
         ingest_mode: "posts_only" | "posts_and_comments";
+        sync_strategy: SyncStrategy;
         date_start?: string;
         date_end?: string;
       } = {
@@ -756,6 +894,7 @@ export default function SeasonSocialAnalyticsSection({
         max_replies_per_post: 100000,
         fetch_replies: true,
         ingest_mode: "posts_and_comments",
+        sync_strategy: syncStrategy,
       }
 
       if (effectivePlatform !== "all") {
@@ -777,7 +916,8 @@ export default function SeasonSocialAnalyticsSection({
         ? (effectiveWeek === 0 ? "Pre-Season" : `Week ${effectiveWeek}`)
         : "Full Season";
       const platformLabel = effectivePlatform === "all" ? "all platforms" : (PLATFORM_LABELS[effectivePlatform] ?? effectivePlatform);
-      setIngestMessage(`Starting ${label} · ${platformLabel}...`);
+      const modeLabel = syncStrategy === "full_refresh" ? "Full Refresh" : "Incremental";
+      setIngestMessage(`Starting ${label} · ${platformLabel} · ${modeLabel}...`);
 
       console.log("[social-ingest] Sending payload:", JSON.stringify(payload, null, 2));
 
@@ -815,7 +955,7 @@ export default function SeasonSocialAnalyticsSection({
       // Backend returns queued/staged run metadata immediately.
       const stages = (result.stages ?? []).join(" -> ") || "posts -> comments";
       const jobCount = result.queued_or_started_jobs ?? 0;
-      setIngestMessage(`${label} · ${platformLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
+      setIngestMessage(`${label} · ${platformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
 
       // Immediately fetch jobs to pick up the newly created running jobs
       await fetchJobs(runId);
@@ -833,10 +973,9 @@ export default function SeasonSocialAnalyticsSection({
       setActiveRunRequest(null);
       setSelectedRunId(null);
       setActiveRunId(null);
-      setNoRunningJobsCount(0);
       setIngestStartedAt(null);
     }
-  }, [analytics, fetchJobs, fetchRuns, getAuthHeaders, platformFilter, scope, seasonNumber, showId, weekFilter]);
+  }, [analytics, fetchJobs, fetchRuns, getAuthHeaders, platformFilter, scope, seasonNumber, showId, syncStrategy, weekFilter]);
 
   const downloadExport = useCallback(
     async (format: "csv" | "pdf") => {
@@ -962,7 +1101,8 @@ export default function SeasonSocialAnalyticsSection({
                 <option value="">No Run Selected</option>
                 {runs.map((run) => (
                   <option key={run.id} value={run.id}>
-                    {`${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
+                    {runOptionLabelById.get(run.id) ??
+                      `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
                   </option>
                 ))}
               </select>
@@ -1379,6 +1519,18 @@ export default function SeasonSocialAnalyticsSection({
             <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <h4 className="mb-4 text-lg font-semibold text-zinc-900">Ingest + Export</h4>
               <div className="space-y-2 text-sm text-zinc-600">
+                <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                  Sync Mode
+                  <select
+                    value={syncStrategy}
+                    onChange={(event) => setSyncStrategy(event.target.value as SyncStrategy)}
+                    disabled={runningIngest}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="incremental">Incremental (Recommended)</option>
+                    <option value="full_refresh">Full Refresh</option>
+                  </select>
+                </label>
                 <button
                   type="button"
                   onClick={() => runIngest()}
@@ -1499,7 +1651,11 @@ export default function SeasonSocialAnalyticsSection({
                     <tr key={`table-week-${week.week_index}`} className="border-b border-zinc-100 text-zinc-700">
                       <td className="px-3 py-2 font-semibold">
                         <Link
-                          href={`/admin/trr-shows/${showId}/seasons/${seasonNumber}/social/week/${week.week_index}?source_scope=${scope}`}
+                          href={`${buildSeasonAdminUrl({
+                            showSlug: showRouteSlug,
+                            seasonNumber,
+                            tab: "social",
+                          })}/week/${week.week_index}?source_scope=${scope}` as "/admin/trr-shows"}
                           className="text-blue-600 hover:text-blue-800 hover:underline"
                         >
                           {week.label ?? (week.week_index === 0 ? "Pre-Season" : `Week ${week.week_index}`)}
@@ -1718,6 +1874,22 @@ export default function SeasonSocialAnalyticsSection({
                   const counters = (job.metadata as Record<string, unknown>)?.stage_counters as
                     | Record<string, number>
                     | undefined;
+                  const retrievalMeta = (job.metadata as Record<string, unknown>)?.retrieval_meta as
+                    | Record<string, unknown>
+                    | undefined;
+                  const missingMarked =
+                    typeof retrievalMeta?.comments_marked_missing === "number"
+                      ? retrievalMeta.comments_marked_missing
+                      : null;
+                  const incompleteFetches =
+                    typeof retrievalMeta?.incomplete_comment_fetches === "number"
+                      ? retrievalMeta.incomplete_comment_fetches
+                      : null;
+                  const refreshDecisionCount = (() => {
+                    const value = retrievalMeta?.comment_refresh_decisions;
+                    if (!value || typeof value !== "object") return 0;
+                    return Object.keys(value as Record<string, unknown>).length;
+                  })();
                   const duration =
                     job.started_at && job.completed_at
                       ? `${Math.round((new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 1000)}s`
@@ -1755,6 +1927,13 @@ export default function SeasonSocialAnalyticsSection({
                       </div>
                       {job.error_message && (
                         <p className="mt-1.5 rounded bg-red-100 px-2 py-1 text-xs text-red-700">{job.error_message}</p>
+                      )}
+                      {(missingMarked !== null || incompleteFetches !== null || refreshDecisionCount > 0) && (
+                        <p className="mt-1.5 text-xs text-zinc-500">
+                          {missingMarked !== null ? `Missing flagged: ${missingMarked}` : "Missing flagged: 0"}
+                          {incompleteFetches !== null ? ` · Incomplete fetches: ${incompleteFetches}` : ""}
+                          {refreshDecisionCount > 0 ? ` · Decision reasons: ${refreshDecisionCount}` : ""}
+                        </p>
                       )}
                       <p className="mt-1 text-xs text-zinc-400">
                         {job.started_at ? `Started ${formatDateTime(job.started_at)}` : `Created ${formatDateTime(job.created_at)}`}
