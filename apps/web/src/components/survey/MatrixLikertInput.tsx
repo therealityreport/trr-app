@@ -2,11 +2,7 @@
 
 import * as React from "react";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
-import type {
-  AgreeLikertScaleConfig,
-  MatrixRow,
-  ThreeChoiceSliderConfig,
-} from "@/lib/surveys/question-config-types";
+import type { AgreeLikertScaleConfig, MatrixRow } from "@/lib/surveys/question-config-types";
 import {
   isCloudfrontCdnFontCandidate,
   resolveCloudfrontCdnFont,
@@ -29,12 +25,13 @@ interface MatrixFontOverrides {
 interface LikertOptionTheme {
   bgColor: string;
   textColor: string;
+  rank: number;
 }
 
 const DEFAULT_PROMPT_TEXT = "How much do you agree with the following statement:";
-const DEFAULT_HEADING_FONT = "\"Gloucester\", var(--font-sans), sans-serif";
-const DEFAULT_STATEMENT_FONT = "\"Rude Slab Condensed\", var(--font-sans), sans-serif";
-const DEFAULT_OPTION_FONT = "\"Plymouth Serial\", var(--font-sans), sans-serif";
+const DEFAULT_HEADING_FONT = '"Gloucester", var(--font-sans), sans-serif';
+const DEFAULT_STATEMENT_FONT = '"Rude Slab Condensed", var(--font-sans), sans-serif';
+const DEFAULT_OPTION_FONT = '"Plymouth Serial", var(--font-sans), sans-serif';
 
 const FIGMA_SCALE_COLORS = ["#356A3B", "#76A34C", "#E6B903", "#C76D00", "#99060A"];
 
@@ -120,9 +117,7 @@ function resolveTemplateFontOverride(
   return fallback;
 }
 
-function collectFontOverrides(
-  config: AgreeLikertScaleConfig | ThreeChoiceSliderConfig,
-): MatrixFontOverrides {
+function collectFontOverrides(config: AgreeLikertScaleConfig): MatrixFontOverrides {
   const configRecord = config as unknown as UnknownRecord;
   const missingFonts: string[] = [];
 
@@ -251,8 +246,7 @@ function pickTextColor(backgroundHex: string): string {
 
 function resolveOptionTheme(
   option: QuestionOption,
-  index: number,
-  totalOptions: number,
+  fallbackIndex: number,
 ): LikertOptionTheme {
   const metadataColor = option.metadata && typeof option.metadata.color === "string"
     ? normalizeHexColor(option.metadata.color)
@@ -261,6 +255,7 @@ function resolveOptionTheme(
     return {
       bgColor: metadataColor,
       textColor: pickTextColor(metadataColor),
+      rank: 10 + fallbackIndex,
     };
   }
 
@@ -268,45 +263,23 @@ function resolveOptionTheme(
   const label = normalizeKey(option.option_text);
   const token = `${key}_${label}`;
 
-  if (token.includes("strongly_disagree")) return { bgColor: "#99060A", textColor: "#FFFFFF" };
-  if (token.includes("somewhat_disagree")) return { bgColor: "#C76D00", textColor: "#FFFFFF" };
-  if (token.includes("neither") || token.includes("neutral")) return { bgColor: "#E6B903", textColor: "#111111" };
-  if (token.includes("somewhat_agree")) return { bgColor: "#76A34C", textColor: "#111111" };
-  if (token.includes("strongly_agree")) return { bgColor: "#356A3B", textColor: "#FFFFFF" };
-  if (token.includes("fire")) return { bgColor: "#B3000B", textColor: "#FFFFFF" };
-  if (token.includes("demote")) return { bgColor: "#E6B903", textColor: "#FFFFFF" };
-  if (token.includes("keep")) return { bgColor: "#3A7640", textColor: "#FFFFFF" };
-  if (token.includes("disagree")) return { bgColor: "#C76D00", textColor: "#FFFFFF" };
-  if (token.includes("agree")) return { bgColor: "#76A34C", textColor: "#111111" };
+  if (token.includes("strongly_agree")) return { bgColor: "#356A3B", textColor: "#FFFFFF", rank: 0 };
+  if (token.includes("somewhat_agree")) return { bgColor: "#76A34C", textColor: "#111111", rank: 1 };
+  if (token.includes("strongly_disagree")) return { bgColor: "#99060A", textColor: "#FFFFFF", rank: 4 };
+  if (token.includes("somewhat_disagree")) return { bgColor: "#C76D00", textColor: "#FFFFFF", rank: 3 };
+  if (token.includes("agree")) return { bgColor: "#76A34C", textColor: "#111111", rank: 1 };
+  if (token.includes("neither") || token.includes("neutral")) return { bgColor: "#E6B903", textColor: "#111111", rank: 2 };
+  if (token.includes("disagree")) return { bgColor: "#C76D00", textColor: "#FFFFFF", rank: 3 };
 
-  const fallbackColor = totalOptions === 5
-    ? FIGMA_SCALE_COLORS[Math.min(Math.max(index, 0), 4)] ?? "#4B5563"
-    : "#4B5563";
+  const fallbackColor = FIGMA_SCALE_COLORS[Math.min(Math.max(fallbackIndex, 0), 4)] ?? "#4B5563";
   return {
     bgColor: fallbackColor,
     textColor: pickTextColor(fallbackColor),
+    rank: 10 + fallbackIndex,
   };
 }
 
-function buildThreeChoicePrompt(columns: QuestionOption[]): string {
-  const keys = columns.map((column) => normalizeKey(column.option_text || column.option_key));
-  if (
-    keys.some((key) => key.includes("keep")) &&
-    keys.some((key) => key.includes("fire")) &&
-    keys.some((key) => key.includes("demote"))
-  ) {
-    return "KEEP, FIRE OR DEMOTE";
-  }
-  if (columns.length === 3) {
-    const first = columns[0]?.option_text?.trim() ?? "";
-    const second = columns[1]?.option_text?.trim() ?? "";
-    const third = columns[2]?.option_text?.trim() ?? "";
-    return `${first}, ${second} OR ${third}`.replace(/\s+/g, " ").trim().toUpperCase();
-  }
-  return "RATE EACH ITEM";
-}
-
-function resolvePromptText(config: AgreeLikertScaleConfig | ThreeChoiceSliderConfig): string {
+function resolvePromptText(config: AgreeLikertScaleConfig, questionText: string): string {
   const configRecord = config as unknown as UnknownRecord;
   const candidates: unknown[] = [
     readPath(configRecord, ["promptText"]),
@@ -322,7 +295,22 @@ function resolvePromptText(config: AgreeLikertScaleConfig | ThreeChoiceSliderCon
     if (value) return value;
   }
 
+  const normalizedQuestionText = toTrimmedString(questionText);
+  if (normalizedQuestionText) return normalizedQuestionText;
+
   return DEFAULT_PROMPT_TEXT;
+}
+
+function orderedColumns(columns: QuestionOption[]): Array<QuestionOption & { theme: LikertOptionTheme }> {
+  return columns
+    .map((column, index) => ({
+      ...column,
+      theme: resolveOptionTheme(column, index),
+    }))
+    .sort((a, b) => {
+      if (a.theme.rank !== b.theme.rank) return a.theme.rank - b.theme.rank;
+      return a.display_order - b.display_order;
+    });
 }
 
 export default function MatrixLikertInput({
@@ -333,10 +321,10 @@ export default function MatrixLikertInput({
 }: MatrixLikertInputProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(390);
-  const config = question.config as unknown as AgreeLikertScaleConfig | ThreeChoiceSliderConfig;
-  const isThreeChoiceMatrix = config.uiVariant === "three-choice-slider";
-  const rows = config.rows ?? [];
+  const config = question.config as unknown as AgreeLikertScaleConfig;
+  const rows = React.useMemo(() => config.rows ?? [], [config.rows]);
   const fontOverrides = React.useMemo(() => collectFontOverrides(config), [config]);
+
   const shapeScaleFactor = React.useMemo(
     () => normalizeScalePercent(config.shapeScale, 100) / 100,
     [config.shapeScale],
@@ -344,10 +332,6 @@ export default function MatrixLikertInput({
   const buttonScaleFactor = React.useMemo(
     () => normalizeScalePercent(config.buttonScale, 100) / 100,
     [config.buttonScale],
-  );
-  const responsiveScale = React.useMemo(
-    () => clampNumber((containerWidth - 320) / 880, 0, 1),
-    [containerWidth],
   );
 
   React.useEffect(() => {
@@ -372,116 +356,139 @@ export default function MatrixLikertInput({
     return () => observer.disconnect();
   }, []);
 
-  const columns = [...question.options].sort((a, b) => a.display_order - b.display_order);
-  const promptText = React.useMemo(() => {
-    if (isThreeChoiceMatrix) {
-      return buildThreeChoicePrompt(columns);
-    }
-    const questionPrompt = question.question_text?.trim();
-    if (questionPrompt?.length) return question.question_text;
-    return resolvePromptText(config);
-  }, [columns, config, isThreeChoiceMatrix, question.question_text]);
+  const columns = React.useMemo(
+    () => orderedColumns([...question.options].sort((a, b) => a.display_order - b.display_order)),
+    [question.options],
+  );
 
-  const rootGap = React.useMemo(
-    () => Math.round(interpolate(10, 22, responsiveScale)),
-    [responsiveScale],
+  const promptText = React.useMemo(
+    () => resolvePromptText(config, question.question_text),
+    [config, question.question_text],
   );
-  const rowGap = React.useMemo(
-    () => Math.round(interpolate(16, 50, responsiveScale)),
-    [responsiveScale],
-  );
-  const rowPaddingTop = React.useMemo(
-    () => Math.round(interpolate(12, 48, responsiveScale)),
-    [responsiveScale],
-  );
-  const promptFontSize = React.useMemo(
-    () => Math.round(interpolate(12, 30, responsiveScale)),
-    [responsiveScale],
-  );
-  const promptLetterSpacing = React.useMemo(
-    () => interpolate(0.03, 0.06, responsiveScale),
-    [responsiveScale],
-  );
-  const statementFontSize = React.useMemo(
-    () => Math.round(interpolate(18, 60, responsiveScale)),
-    [responsiveScale],
-  );
-  const optionStackMarginTop = React.useMemo(
-    () => Math.round(interpolate(10, 24, responsiveScale)),
-    [responsiveScale],
-  );
-  const optionStackGap = React.useMemo(
-    () => Math.round(interpolate(6, 14, responsiveScale)),
-    [responsiveScale],
-  );
-  const optionLabelFontSize = React.useMemo(
-    () => Math.round(clampNumber(interpolate(16, 33, responsiveScale) * buttonScaleFactor, 10, 64)),
-    [buttonScaleFactor, responsiveScale],
-  );
-  const optionMinHeight = React.useMemo(
-    () => Math.round(clampNumber(interpolate(40, 72, responsiveScale) * buttonScaleFactor, 28, 130)),
-    [buttonScaleFactor, responsiveScale],
-  );
-  const optionBorderRadius = React.useMemo(
-    () => Math.round(clampNumber(interpolate(10, 14, responsiveScale) * shapeScaleFactor, 6, 26)),
-    [responsiveScale, shapeScaleFactor],
-  );
-  const optionPaddingX = React.useMemo(
-    () => Math.round(clampNumber(interpolate(12, 26, responsiveScale) * buttonScaleFactor, 8, 40)),
-    [buttonScaleFactor, responsiveScale],
-  );
-  const optionPaddingY = React.useMemo(
-    () => Math.round(clampNumber(interpolate(8, 19, responsiveScale) * buttonScaleFactor, 5, 32)),
-    [buttonScaleFactor, responsiveScale],
-  );
-  const verdictScale = React.useMemo(
+
+  const responsiveScale = React.useMemo(
     () => clampNumber((containerWidth - 320) / 1120, 0, 1),
     [containerWidth],
   );
-  const verdictPromptSize = React.useMemo(
-    () => Math.round(interpolate(18, 45, verdictScale)),
-    [verdictScale],
+
+  const rootGap = React.useMemo(
+    () => Math.round(clampNumber(interpolate(12, 34, responsiveScale), 8, 40)),
+    [responsiveScale],
   );
-  const verdictPromptTracking = React.useMemo(
-    () => interpolate(0.03, 0.05, verdictScale),
-    [verdictScale],
+  const rowGap = React.useMemo(
+    () => Math.round(clampNumber(interpolate(18, 64, responsiveScale), 12, 72)),
+    [responsiveScale],
   );
-  const verdictNameSize = React.useMemo(
-    () => Math.round(interpolate(44, 120, verdictScale)),
-    [verdictScale],
+  const rowPaddingTop = React.useMemo(
+    () => Math.round(clampNumber(interpolate(12, 44, responsiveScale), 8, 64)),
+    [responsiveScale],
   );
-  const verdictRowGap = React.useMemo(
-    () => Math.round(interpolate(24, 84, verdictScale)),
-    [verdictScale],
+  const promptFontSize = React.useMemo(
+    () => Math.round(clampNumber(interpolate(15, 30, responsiveScale), 14, 38)),
+    [responsiveScale],
   );
-  const verdictCircleGap = React.useMemo(
-    () => Math.round(interpolate(9, 26, verdictScale)),
-    [verdictScale],
+  const promptLetterSpacing = React.useMemo(
+    () => interpolate(0.03, 0.05, responsiveScale),
+    [responsiveScale],
   );
-  const verdictCircleSize = React.useMemo(() => {
-    const intrinsic = interpolate(92, 220, verdictScale) * shapeScaleFactor;
-    const count = Math.max(columns.length, 1);
-    const maxByContainer = (containerWidth - verdictCircleGap * (count - 1) - 24) / count;
-    const minSize = clampNumber(68 * shapeScaleFactor, 44, 120);
-    return Math.round(clampNumber(Math.min(intrinsic, maxByContainer), minSize, 240));
-  }, [columns.length, containerWidth, shapeScaleFactor, verdictCircleGap, verdictScale]);
-  const verdictOptionTextSize = React.useMemo(
-    () => Math.round(clampNumber(interpolate(16, 40, verdictScale) * buttonScaleFactor, 11, 58)),
-    [buttonScaleFactor, verdictScale],
+  const promptLineHeight = React.useMemo(
+    () => interpolate(1.28, 1.18, responsiveScale),
+    [responsiveScale],
   );
-  const verdictCircleMarginTop = React.useMemo(
-    () => Math.round(interpolate(14, 40, verdictScale)),
-    [verdictScale],
+  const promptToStatementGap = React.useMemo(
+    () => Math.round(clampNumber(interpolate(16, 40, responsiveScale), 12, 52)),
+    [responsiveScale],
+  );
+  const statementFontSize = React.useMemo(
+    () => Math.round(clampNumber(interpolate(30, 60, responsiveScale), 22, 68)),
+    [responsiveScale],
+  );
+  const statementLineHeight = React.useMemo(
+    () => interpolate(0.98, 0.87, responsiveScale),
+    [responsiveScale],
+  );
+  const optionStackMarginTop = React.useMemo(
+    () => Math.round(clampNumber(interpolate(20, 44, responsiveScale), 14, 56)),
+    [responsiveScale],
+  );
+  const optionStackGap = React.useMemo(
+    () => Math.round(clampNumber(interpolate(8, 18, responsiveScale), 6, 24)),
+    [responsiveScale],
+  );
+  const optionLabelFontSize = React.useMemo(
+    () => Math.round(clampNumber(interpolate(19, 33, responsiveScale) * buttonScaleFactor, 12, 52)),
+    [buttonScaleFactor, responsiveScale],
+  );
+  const optionLabelLineHeight = React.useMemo(
+    () => interpolate(1.28, 1.58, responsiveScale),
+    [responsiveScale],
+  );
+  const optionMinHeight = React.useMemo(
+    () => Math.round(clampNumber(interpolate(46, 103, responsiveScale) * buttonScaleFactor, 34, 140)),
+    [buttonScaleFactor, responsiveScale],
+  );
+  const optionBorderRadius = React.useMemo(
+    () => Math.round(clampNumber(interpolate(10, 13, responsiveScale) * shapeScaleFactor, 7, 26)),
+    [responsiveScale, shapeScaleFactor],
+  );
+  const optionPaddingX = React.useMemo(
+    () => Math.round(clampNumber(interpolate(14, 26, responsiveScale) * buttonScaleFactor, 10, 42)),
+    [buttonScaleFactor, responsiveScale],
+  );
+  const optionPaddingY = React.useMemo(
+    () => Math.round(clampNumber(interpolate(8, 17, responsiveScale) * buttonScaleFactor, 6, 30)),
+    [buttonScaleFactor, responsiveScale],
+  );
+  const continueButtonHeight = React.useMemo(
+    () => Math.round(clampNumber(interpolate(42, 66, responsiveScale) * buttonScaleFactor, 36, 92)),
+    [buttonScaleFactor, responsiveScale],
+  );
+  const continueButtonWidth = React.useMemo(
+    () => Math.round(clampNumber(interpolate(138, 212, responsiveScale) * buttonScaleFactor, 116, 300)),
+    [buttonScaleFactor, responsiveScale],
+  );
+  const continueButtonFontSize = React.useMemo(
+    () => Math.round(clampNumber(interpolate(18, 30, responsiveScale) * buttonScaleFactor, 13, 40)),
+    [buttonScaleFactor, responsiveScale],
+  );
+  const continueButtonRadius = React.useMemo(
+    () => Math.round(clampNumber(interpolate(24, 96, responsiveScale) * shapeScaleFactor, 18, 116)),
+    [responsiveScale, shapeScaleFactor],
+  );
+  const hasAnySelection = React.useMemo(
+    () => rows.some((row) => Boolean(value?.[row.id])),
+    [rows, value],
   );
 
   const handleCellSelect = React.useCallback(
     (rowId: string, optionKey: string) => {
       if (disabled) return;
-      const newValue = { ...(value ?? {}), [rowId]: optionKey };
-      onChange(newValue);
+      const nextValue = { ...(value ?? {}), [rowId]: optionKey };
+      onChange(nextValue);
     },
-    [disabled, value, onChange]
+    [disabled, onChange, value],
   );
+  const handleContinue = React.useCallback(() => {
+    if (disabled) return;
+
+    const root = containerRef.current;
+    const currentCard = root?.closest<HTMLElement>("[data-survey-question-card], [data-question-preview-card]");
+    const nextCard = currentCard?.nextElementSibling as HTMLElement | null;
+    if (nextCard) {
+      nextCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      const focusTarget = nextCard.querySelector<HTMLElement>(
+        "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      );
+      focusTarget?.focus({ preventScroll: true });
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("survey-question-continue", { detail: { questionId: question.id } }),
+      );
+    }
+  }, [disabled, question.id]);
 
   if (!rows.length || !columns.length) {
     return (
@@ -494,7 +501,7 @@ export default function MatrixLikertInput({
   return (
     <div
       ref={containerRef}
-      className={isThreeChoiceMatrix ? "flex flex-col rounded-[18px] bg-[#D9D9D9] px-3 py-5 sm:px-6 sm:py-8" : "flex flex-col"}
+      className="flex flex-col rounded-[18px] bg-[#D9D9D9] px-3 py-4 sm:px-6 sm:py-8"
       style={{ gap: `${rootGap}px` }}
     >
       {fontOverrides.missingFonts.length > 0 && (
@@ -508,17 +515,22 @@ export default function MatrixLikertInput({
 
       <p
         data-testid="agree-likert-prompt"
-        className="mx-auto max-w-5xl px-1 text-center uppercase leading-[1.3] text-black"
+        className="mx-auto max-w-5xl px-1 text-center uppercase text-black"
         style={{
           fontFamily: fontOverrides.headingFontFamily,
-          fontSize: `${isThreeChoiceMatrix ? verdictPromptSize : promptFontSize}px`,
-          letterSpacing: `${isThreeChoiceMatrix ? verdictPromptTracking : promptLetterSpacing}em`,
+          fontWeight: 700,
+          fontSize: `${promptFontSize}px`,
+          lineHeight: promptLineHeight.toFixed(2),
+          letterSpacing: `${promptLetterSpacing}em`,
         }}
       >
         {promptText}
       </p>
 
-      <div className="flex flex-col" style={{ gap: `${isThreeChoiceMatrix ? verdictRowGap : rowGap}px` }}>
+      <div
+        className="flex flex-col"
+        style={{ marginTop: `${promptToStatementGap}px`, gap: `${rowGap}px` }}
+      >
         {rows.map((row: MatrixRow, rowIndex) => (
           <section
             key={row.id}
@@ -527,62 +539,58 @@ export default function MatrixLikertInput({
             data-testid={`agree-likert-row-${row.id}`}
           >
             <h3
-              className={isThreeChoiceMatrix
-                ? "mx-auto max-w-[24ch] text-center uppercase leading-[0.95] tracking-[0.01em] text-black"
-                : "mx-auto max-w-[40ch] text-center leading-[1.02] text-black"}
+              className="mx-auto max-w-[28ch] text-center leading-[0.95] text-black"
               style={{
                 fontFamily: fontOverrides.statementFontFamily,
                 fontWeight: 800,
-                fontSize: `${isThreeChoiceMatrix ? verdictNameSize : statementFontSize}px`,
+                fontSize: `${statementFontSize}px`,
+                lineHeight: statementLineHeight.toFixed(2),
               }}
             >
               {row.label}
             </h3>
 
             <div
-              className={isThreeChoiceMatrix
-                ? "mx-auto flex w-full max-w-5xl flex-wrap items-center justify-center"
-                : "mx-auto flex w-full max-w-5xl flex-col"}
+              className="mx-auto flex w-full max-w-[913px] flex-col"
               style={{
-                marginTop: `${isThreeChoiceMatrix ? verdictCircleMarginTop : optionStackMarginTop}px`,
-                gap: `${isThreeChoiceMatrix ? verdictCircleGap : optionStackGap}px`,
+                marginTop: `${optionStackMarginTop}px`,
+                gap: `${optionStackGap}px`,
               }}
             >
-              {columns.map((col, columnIndex) => {
+              {columns.map((col) => {
                 const isSelected = value?.[row.id] === col.option_key;
-                const theme = resolveOptionTheme(col, columnIndex, columns.length);
+                const theme = col.theme;
                 return (
                   <button
                     key={`${row.id}-${col.option_key}`}
                     type="button"
                     onClick={() => handleCellSelect(row.id, col.option_key)}
                     disabled={disabled}
-                    className={`
-                      transition-transform focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/25
-                      ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:scale-[1.01] active:scale-[0.995]"}
-                    `}
+                    className={`text-left transition-transform focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/25 ${
+                      disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:scale-[1.005] active:scale-[0.995]"
+                    }`}
                     style={{
                       backgroundColor: theme.bgColor,
                       color: theme.textColor,
                       fontFamily: fontOverrides.optionFontFamily,
-                      width: isThreeChoiceMatrix ? `${verdictCircleSize}px` : "100%",
-                      minHeight: isThreeChoiceMatrix ? `${verdictCircleSize}px` : `${optionMinHeight}px`,
-                      borderRadius: isThreeChoiceMatrix ? "9999px" : `${optionBorderRadius}px`,
-                      padding: isThreeChoiceMatrix ? "0" : `${optionPaddingY}px ${optionPaddingX}px`,
+                      width: "100%",
+                      minHeight: `${optionMinHeight}px`,
+                      borderRadius: `${optionBorderRadius}px`,
+                      padding: `${optionPaddingY}px ${optionPaddingX}px`,
                       boxShadow: isSelected
-                        ? (isThreeChoiceMatrix
-                          ? "0 0 0 2px rgba(255,255,255,0.95), 0 0 0 6px rgba(16,16,16,0.18)"
-                          : "0 0 0 2px rgba(255,255,255,0.92), 0 0 0 5px rgba(18,18,18,0.14)")
+                        ? "0 0 0 2px rgba(255,255,255,0.92), 0 0 0 5px rgba(18,18,18,0.14)"
                         : "0 0 0 1px rgba(18,18,18,0.08)",
                     }}
                     aria-label={`Select ${col.option_text} for ${row.label}`}
                     aria-pressed={isSelected}
                   >
                     <span
-                      className={isThreeChoiceMatrix
-                        ? "block text-center uppercase leading-[1]"
-                        : "block leading-[1.2] tracking-[0.015em]"}
-                      style={{ fontSize: `${isThreeChoiceMatrix ? verdictOptionTextSize : optionLabelFontSize}px` }}
+                      className="block leading-[1.2] tracking-[0.015em]"
+                      style={{
+                        fontSize: `${optionLabelFontSize}px`,
+                        fontWeight: 500,
+                        lineHeight: optionLabelLineHeight.toFixed(2),
+                      }}
                     >
                       {col.option_text}
                     </span>
@@ -593,6 +601,26 @@ export default function MatrixLikertInput({
           </section>
         ))}
       </div>
+
+      {hasAnySelection && !disabled && (
+        <button
+          type="button"
+          onClick={handleContinue}
+          className="mx-auto inline-flex items-center justify-center bg-[#121212] text-[#F8F8F8] transition hover:bg-black focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/30"
+          style={{
+            minWidth: `${continueButtonWidth}px`,
+            height: `${continueButtonHeight}px`,
+            borderRadius: `${continueButtonRadius}px`,
+            fontFamily: fontOverrides.optionFontFamily,
+            fontWeight: 700,
+            fontSize: `${continueButtonFontSize}px`,
+            letterSpacing: "0.03em",
+          }}
+          data-testid="agree-likert-continue"
+        >
+          Continue
+        </button>
+      )}
     </div>
   );
 }

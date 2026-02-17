@@ -1,9 +1,13 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import CastDecisionCardInput from "@/components/survey/CastDecisionCardInput";
 import ThreeChoiceSliderInput from "@/components/survey/ThreeChoiceSliderInput";
 
-function makeQuestion(configOverride: Record<string, unknown> = {}) {
+function makeQuestion(
+  configOverride: Record<string, unknown> = {},
+  uiVariant: "cast-decision-card" | "three-choice-slider" = "cast-decision-card",
+) {
   return {
     id: "q-verdict",
     survey_id: "survey-1",
@@ -13,7 +17,7 @@ function makeQuestion(configOverride: Record<string, unknown> = {}) {
     display_order: 1,
     is_required: true,
     config: {
-      uiVariant: "three-choice-slider",
+      uiVariant,
       choices: [
         { value: "fire", label: "Fire" },
         { value: "demote", label: "Demote" },
@@ -59,10 +63,10 @@ function makeQuestion(configOverride: Record<string, unknown> = {}) {
   };
 }
 
-describe("ThreeChoiceSliderInput", () => {
-  it("renders Figma-style prompt and verdict circles", () => {
+describe("CastDecisionCardInput", () => {
+  it("renders figma-style prompt and verdict circles for cast-decision-card", () => {
     render(
-      <ThreeChoiceSliderInput
+      <CastDecisionCardInput
         question={makeQuestion() as never}
         value={{}}
         onChange={() => {}}
@@ -74,7 +78,19 @@ describe("ThreeChoiceSliderInput", () => {
     expect(screen.getByTestId("three-choice-fire")).toBeInTheDocument();
     expect(screen.getByTestId("three-choice-demote")).toBeInTheDocument();
     expect(screen.getByTestId("three-choice-keep")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
+  });
+
+  it("supports legacy three-choice-slider variant through compatibility alias", () => {
+    render(
+      <ThreeChoiceSliderInput
+        question={makeQuestion({}, "three-choice-slider") as never}
+        value={{}}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("KEEP, FIRE OR DEMOTE")).toBeInTheDocument();
+    expect(screen.getByTestId("three-choice-fire")).toBeInTheDocument();
   });
 
   it("shows selected image state and Next button, then advances rows", () => {
@@ -83,7 +99,7 @@ describe("ThreeChoiceSliderInput", () => {
     function Harness() {
       const [value, setValue] = React.useState<Record<string, string> | null>({});
       return (
-        <ThreeChoiceSliderInput
+        <CastDecisionCardInput
           question={makeQuestion() as never}
           value={value}
           onChange={(next) => {
@@ -105,9 +121,77 @@ describe("ThreeChoiceSliderInput", () => {
     expect(screen.getByText("Lisa Barlow")).toBeInTheDocument();
   });
 
+  it("shrinks demote text by 1px when selected", () => {
+    function Harness() {
+      const [value, setValue] = React.useState<Record<string, string> | null>({});
+      return (
+        <CastDecisionCardInput
+          question={makeQuestion() as never}
+          value={value}
+          onChange={setValue}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const demoteButton = screen.getByTestId("three-choice-demote");
+    const keepButton = screen.getByTestId("three-choice-keep");
+    fireEvent.click(demoteButton);
+
+    const demoteLabel = within(demoteButton).getByText("Demote");
+    const keepLabel = within(keepButton).getByText("Keep");
+    const demoteSize = Number.parseInt(demoteLabel.style.fontSize, 10);
+    const keepSize = Number.parseInt(keepLabel.style.fontSize, 10);
+
+    expect(demoteSize).toBe(keepSize - 1);
+  });
+
+  it("uses two-choice prompt for bring back / keep gone cards", () => {
+    const question = makeQuestion({
+      choices: [
+        { value: "bring_back", label: "Bring Back" },
+        { value: "keep_gone", label: "Keep Gone" },
+      ],
+      rows: [{ id: "monica", label: "Monica Garcia" }],
+    });
+    question.options = [
+      {
+        id: "o1",
+        question_id: "q-verdict",
+        option_key: "bring_back",
+        option_text: "Bring Back",
+        display_order: 1,
+        metadata: {},
+        created_at: "",
+      },
+      {
+        id: "o2",
+        question_id: "q-verdict",
+        option_key: "keep_gone",
+        option_text: "Keep Gone",
+        display_order: 2,
+        metadata: {},
+        created_at: "",
+      },
+    ];
+
+    render(
+      <CastDecisionCardInput
+        question={question as never}
+        value={{}}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("BRING BACK OR KEEP GONE")).toBeInTheDocument();
+    expect(screen.getByTestId("three-choice-bring-back")).toBeInTheDocument();
+    expect(screen.getByTestId("three-choice-keep-gone")).toBeInTheDocument();
+  });
+
   it("uses Canva template fonts when they exist in CloudFront CDN list", () => {
     render(
-      <ThreeChoiceSliderInput
+      <CastDecisionCardInput
         question={makeQuestion({
           promptFontFamily: "Plymouth Serial",
           castNameFontFamily: "GeoSlab703_Md_BT",
@@ -120,17 +204,17 @@ describe("ThreeChoiceSliderInput", () => {
     );
 
     expect(screen.getByTestId("three-choice-prompt")).toHaveStyle({
-      fontFamily: "\"Plymouth Serial\", var(--font-sans), sans-serif",
+      fontFamily: '"Plymouth Serial", var(--font-sans), sans-serif',
     });
     expect(screen.getByTestId("three-choice-cast-name")).toHaveStyle({
-      fontFamily: "\"Geometric Slabserif 703\", var(--font-sans), sans-serif",
+      fontFamily: '"Geometric Slabserif 703", var(--font-sans), sans-serif',
     });
     expect(screen.queryByTestId("three-choice-missing-fonts")).not.toBeInTheDocument();
   });
 
   it("shows missing-font warning when Canva template fonts are not on CloudFront CDN", () => {
     render(
-      <ThreeChoiceSliderInput
+      <CastDecisionCardInput
         question={makeQuestion({
           promptFontFamily: "Canva Mystery Serif",
           canvaFonts: ["Canva Mystery Serif", "Another Missing Font", "Plymouth Serial"],

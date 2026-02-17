@@ -4,6 +4,150 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-17)
 
+- February 17, 2026: Completed social admin reliability hardening across social proxy routes and season analytics run-scoped UX.
+  - Files:
+    - `apps/web/src/lib/server/trr-api/social-admin-proxy.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/runs/[runId]/cancel/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/export/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+    - `apps/web/tests/social-admin-proxy.test.ts`
+    - `apps/web/vitest.config.ts`
+    - `apps/web/tests/mocks/server-only.ts`
+  - Changes:
+    - Added shared social proxy helper with season resolution, timeout, retry policy, and standardized error envelope `{ error, code, retryable, upstream_status }`.
+    - Refactored social route handlers to use the helper and route-specific retry policies (GET=2 retries, cancel POST=1 retry, ingest POST=no auto-retry).
+    - Added new route proxy `GET /api/admin/trr-api/shows/{showId}/seasons/{seasonNumber}/social/runs`.
+    - Refactored season social analytics UI state model to decouple analytics/targets/runs/jobs fetch errors, replaced startup `Promise.all` with `Promise.allSettled`, and removed global hard-fail behavior for partial fetch errors.
+    - Enforced strict run-scoped jobs behavior with explicit empty state when no run is selected and added run-history selector (defaulting to active run only when present).
+    - Added non-blocking polling recovery messaging while preserving last-good data on transient failures.
+    - Fixed manual `Refresh Jobs` click handling to route transient failures into section-level jobs errors without unhandled promise rejections.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/lib/server/trr-api/social-admin-proxy.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/runs/[runId]/cancel/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/export/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts' 'src/components/admin/season-social-analytics-section.tsx' 'tests/season-social-analytics-section.test.tsx' 'tests/social-admin-proxy.test.ts' 'vitest.config.ts' 'tests/mocks/server-only.ts'` (pass)
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/social-admin-proxy.test.ts` (`2 files passed`, `9 tests passed`)
+
+- February 17, 2026: Reworked show cast/admin UX with a dedicated Settings tab and fixed show-level cast filtering behavior.
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Changes:
+    - Added top-level `Settings` tab to the show page navigation.
+    - Moved show links management into `Settings` and organized links by:
+      - `Show Pages`
+      - `Season Pages`
+      - `Cast Member Pages`
+    - Moved `Role Catalog` management out of the cast filter panel into `Settings` (including add/rename/activate/deactivate actions).
+    - Combined cast `Roles` and `Credit` filters into a single `Roles & Credit` filter group.
+    - Fixed show-level season chips to source from actual show season records (plus known cast season evidence), instead of only `latest_season` from cast-role-members payload.
+    - Updated details tab messaging to point link/role management to `Settings`.
+  - Validation:
+    - `pnpm -C apps/web run lint` (pass; existing unrelated warnings only)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+
+- February 17, 2026: Fixed person-page fandom ownership leakage (Henry Barlow showing John/Lisa data) and added deduced family fallback when no verified fandom page exists.
+  - Files:
+    - `apps/web/src/lib/server/trr-api/fandom-ownership.ts`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - `apps/web/src/app/api/admin/trr-api/people/[personId]/fandom/route.ts`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/tests/fandom-person-ownership.test.ts`
+    - `apps/web/tests/person-fandom-route.test.ts`
+  - Changes:
+    - Replaced permissive fandom name matching (which previously allowed last-name/token-only matches) with stricter person ownership matching.
+    - Person fandom rows now require strong identity match against `full_name`, `page_title`, or fandom page slug; mismatches are suppressed.
+    - Added show-scoped fallback deduction when no valid fandom page row exists:
+      - derives family relationships from cast-matrix role sync metadata (`Kid` + `relationship_from`) and sibling inference.
+      - returns a synthetic `deduced_relationships` row with only relationship/family content populated.
+    - Added strict fandom-photo ownership filter in person gallery fetch:
+      - fandom/fandom-gallery images whose source page resolves to another person are excluded from person gallery responses.
+    - Wired people-page fandom request to pass `showId` to keep fallback relationship deduction scoped to the current show.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/lib/server/trr-api/trr-shows-repository.ts' 'src/lib/server/trr-api/fandom-ownership.ts' 'src/app/api/admin/trr-api/people/[personId]/fandom/route.ts' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'tests/fandom-person-ownership.test.ts' 'tests/person-fandom-route.test.ts'` (pass; existing unrelated warning in `trr-shows-repository.ts` about `enrichShowsWithImageUrls`)
+    - `pnpm -C apps/web exec vitest run tests/fandom-person-ownership.test.ts tests/person-fandom-route.test.ts` (pass; 2 files / 5 tests)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)
+
+- February 17, 2026: Enforced Figma-specific Likert typography defaults in preview/editor flow (instead of generic global fonts).
+  - Files:
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - Changes:
+    - For `agree-likert-scale` template previews:
+      - Default template fonts now map to Figma stack:
+        - heading: `Gloucester`
+        - statement: `Rude Slab Condensed`
+        - options: `Plymouth Serial`
+      - Added explicit heading font injection (`subTextHeadingFontFamily` / `promptFontFamily`) in preview config overrides so heading no longer falls back to global/default fonts.
+      - `agree-likert-scale` now starts with per-template defaults (global defaults toggle off by default for that variant) so editor dropdowns show template fonts immediately.
+    - Preserved `Preview Survey` selector behavior from prior update (default `RHOSLC S6 Survey`, RHOP hidden from selector options).
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx src/components/survey/MatrixLikertInput.tsx` (pass)
+    - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx tests/is-question-complete.test.ts` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit` blocked by existing unrelated syntax errors in `src/lib/server/trr-api/trr-shows-repository.ts` (not touched in this task).
+
+- February 17, 2026: Added preview survey selector in Questions tab defaults and defaulted examples to RHOSLC S6 (RHOP hidden from selection/filter).
+  - Files:
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - Changes:
+    - Added `Preview Survey` selector inside `Default Settings` (collapsible section), wired to filter per-component example choices.
+    - Default preview source is now `RHOSLC S6 Survey`.
+    - RHOP sources are excluded from selector options and from fallback example selection.
+    - Preview-card storage keys now include selected source so per-template edits are isolated per survey selection.
+    - Added auth preview entries for email/password/country-dropdown in the same iteration.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx tests/is-question-complete.test.ts` (pass)
+
+- February 17, 2026: Follow-up UI polish for Fonts > Questions previews (cast decision + Likert parity + default settings UX + auth field placement).
+  - Files:
+    - `apps/web/src/components/survey/CastDecisionCardInput.tsx`
+    - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - Changes:
+    - Cast decision card:
+      - Reduced selected `Demote` label size by `1px` when clicked/active to prevent text crowding in the circle on mobile.
+    - Survey default settings panel:
+      - Made `Default Settings` collapsible and closed by default.
+      - Added explicit `Edit Settings` / `Hide Settings` toggle.
+    - Catalog placement:
+      - Moved Email, Password, and Country Dropdown Select previews from Survey section into Auth / Signup Fields.
+      - Added corresponding auth preview keys (`auth-email`, `auth-password`, `auth-country-dropdown`).
+    - Likert Figma parity (`69:94`):
+      - Refined heading/statement/option typography (weights + line-heights) and preserved Figma bar dimensions/colors with responsive scaling.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx src/components/survey/CastDecisionCardInput.tsx src/components/survey/MatrixLikertInput.tsx tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx tests/is-question-complete.test.ts` (pass)
+
+- February 17, 2026: Split cast-decision UI out of matrix likert and aligned both templates to the Figma variants (`69:94` and `160:34`) with mobile-responsive sizing.
+  - Files:
+    - `apps/web/src/components/survey/CastDecisionCardInput.tsx`
+    - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+    - `apps/web/src/components/survey/QuestionRenderer.tsx`
+    - `apps/web/src/components/survey/ThreeChoiceSliderInput.tsx`
+    - `apps/web/src/components/survey/index.ts`
+    - `apps/web/src/components/survey/isQuestionComplete.ts`
+    - `apps/web/src/components/admin/surveys-section.tsx`
+    - `apps/web/src/lib/surveys/question-config-types.ts`
+    - `apps/web/tests/matrix-likert-input.test.tsx`
+    - `apps/web/tests/three-choice-slider-input.test.tsx`
+    - `apps/web/tests/is-question-complete.test.ts`
+  - Changes:
+    - Added `CastDecisionCardInput` for verdict-style prompts (`keep/fire/demote`, `bring back/keep gone`) and moved verdict rendering out of `MatrixLikertInput`.
+    - Made `MatrixLikertInput` agree/disagree-only with Figma color/typography structure and responsive mobile scaling for heading, statement, bars, and spacing.
+    - Added `cast-decision-card` UI variant support and kept `three-choice-slider` as a legacy compatibility alias routed to the new component.
+    - Updated completion logic so cast-decision questions require answers for all rows.
+    - Updated admin format naming and component exports for the new variant.
+  - Validation:
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec eslint src/components/survey/CastDecisionCardInput.tsx src/components/survey/MatrixLikertInput.tsx src/components/survey/QuestionRenderer.tsx src/components/survey/ThreeChoiceSliderInput.tsx src/components/survey/index.ts src/components/survey/isQuestionComplete.ts src/components/admin/surveys-section.tsx src/lib/surveys/question-config-types.ts tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx tests/is-question-complete.test.ts` (pass)
+    - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx tests/is-question-complete.test.ts tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+
 - February 17, 2026: Fixed cast-matrix sync error messaging and collapsed `Self*` role variants in show/season cast UIs.
   - Files:
     - `apps/web/src/lib/admin/cast-role-normalization.ts`
@@ -2141,3 +2285,176 @@ Question editor shape/button size controls wired to previews (this session, 2026
   - `pnpm -C apps/web exec eslint src/components/survey/MatrixLikertInput.tsx src/components/survey/WhoseSideInput.tsx src/components/survey/RankOrderInput.tsx src/components/flashback-ranker.tsx tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
   - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
   - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+
+Week social analytics post-stats modal UX + comment refresh action (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]/route.ts`
+- Changes:
+  - Converted post-stats UI from right-side drawer behavior to a centered modal with backdrop and escape-key close.
+  - Added `REFRESH` action in the modal header that triggers per-post comment re-sync through the admin proxy (`POST`), then reloads modal data.
+  - Added post thumbnail rendering in the modal directly under platform/author/date metadata.
+  - Extended post-detail typing to include `thumbnail_url`.
+  - Updated post-card thumbnail rendering so YouTube thumbnails use `object-contain` with a taller cap, avoiding cropped banner-style display.
+  - Added POST proxy support in the app API route for post comment refresh.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]/route.ts'` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Cast gallery crew split + image metadata copy/reassign UX (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `apps/web/src/components/admin/ImageLightbox.tsx`
+  - `apps/web/src/components/admin/ReassignImageModal.tsx`
+  - `apps/web/src/lib/photo-metadata.ts`
+  - `apps/web/tests/photo-metadata.test.ts`
+- Changes:
+  - Show-level cast gallery now renders Crew in its own container below Cast, with crew cards driven by `credit_category` classification (`crew`/`producer`/`production` matching).
+  - Season-level cast gallery now also splits Cast vs Crew into separate containers while preserving existing sort/filter behavior.
+  - Image metadata/details panel now exposes `S3 Mirror File` and adds a one-click `Copy` button for the mirror filename.
+  - Added S3 mirror filename inference in metadata mapping from explicit metadata keys and hosted URL path fallbacks for both person photos and season/show assets.
+  - Wired lightbox reassign flow on person gallery images:
+    - `Re-assign` action now opens modal from image details,
+    - modal searches people via existing admin people endpoint,
+    - reassignment calls `PUT /api/admin/images/cast/{imageId}/reassign`,
+    - gallery refreshes after reassignment.
+  - Hardened reassign modal to support auth headers and allowed destination-type restrictions (used as cast-only in person gallery).
+  - Added/updated metadata tests for S3 mirror filename derivation.
+- Validation:
+  - `pnpm -C apps/web run lint` (pass; existing repo warnings only)
+  - `pnpm -C apps/web run test -- tests/photo-metadata.test.ts` (pass; 51 files / 185 tests passed)
+
+Figma Likert font-family parity + editor selection sync (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `apps/web/src/lib/fonts/cdn-fonts.ts`
+  - `apps/web/tests/cdn-fonts.test.ts`
+- Changes:
+  - Added canonical font-family normalization for template-editor font fields so dropdown selections resolve to actual CDN-loaded families.
+  - Enforced Agree/Disagree (`agree-likert-scale`) template defaults to Figma families:
+    - heading/prompt: Gloucester
+    - statement: Rude Slab Condensed
+    - options: Plymouth Serial.
+  - Prevented stale persisted `useGlobal` state from forcing default/global fonts onto Figma-locked agree/disagree previews.
+  - Fixed reset behavior to restore per-template default mode (instead of always re-enabling global defaults).
+  - Expanded CloudFront font alias resolution for Figma/file-name tokens such as:
+    - `Gloucester_MT_Std:Bold`
+    - `GloucesterOldStyle-...`
+    - `Rude_Slab:Cond_XBd`
+    - `Plymouth_Serial:Medium`.
+  - Updated matrix-likert preview example content/source to RHOSLC S6 prompt/statement used in Figma node `69:95`.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx src/lib/fonts/cdn-fonts.ts` (pass)
+  - `pnpm -C apps/web exec vitest run tests/cdn-fonts.test.ts tests/matrix-likert-input.test.tsx` (pass)
+
+Likert duplicate heading removal for Figma 69:96 parity (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+- Changes:
+  - Suppressed outer template title/sub-text wrapper for `agree-likert-scale` previews so only the in-component all-caps prompt + statement render.
+  - Hidden title/sub-text editor controls for `agree-likert-scale` to avoid conflicting copy layers.
+  - Added persisted-state migration for `agree-likert-scale` so stale saved outer title/sub-text values are cleared.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx` (pass)
+
+Rank ranking unassigned bank (cast + season) with slot-click picker preserved (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/components/flashback-ranker.tsx`
+  - `apps/web/tests/flashback-ranker.test.tsx`
+  - `apps/web/tests/rank-order-input.test.tsx`
+- Changes:
+  - Added always-visible unassigned bank for `figma-rank-circles` (cast ranking) below the slot grid.
+  - Circle bank is droppable (`bench`) and uses smaller tokens than placed slot tokens; no visible title text.
+  - Kept slot-click picker behavior unchanged for both presets (`Select cast member/season for rank N`).
+  - Updated rectangle bank to remove visible `Unranked` title text and renamed accessibility label to `Unassigned seasons`.
+  - Added circle layout metrics for bank sizing/gap/spacing and kept scale multipliers (`shapeScalePercent`/`buttonScalePercent`) active.
+  - Expanded ranker tests to validate:
+    - presence of circle unassigned bank,
+    - no visible `Unranked` text,
+    - bank-item size remains smaller than slot size in both circle and rectangle presets,
+    - scale changes affect bank + slots without inversion,
+    - picker placement flow still emits ordered updates.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/flashback-ranker.test.tsx tests/rank-order-input.test.tsx` (pass)
+  - `pnpm -C apps/web exec eslint src/components/flashback-ranker.tsx src/components/survey/RankOrderInput.tsx tests/flashback-ranker.test.tsx tests/rank-order-input.test.tsx` (pass)
+
+Image metadata panel upgrade + face-box tagging + editable content type (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/components/admin/ImageLightbox.tsx`
+  - `apps/web/src/lib/photo-metadata.ts`
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `apps/web/src/lib/server/admin/cast-photo-tags-repository.ts`
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/src/app/api/admin/trr-api/cast-photos/[photoId]/tags/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/media-links/[linkId]/tags/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/assets/content-type/route.ts`
+  - `apps/web/tests/photo-metadata.test.ts`
+  - `apps/web/tests/image-lightbox-metadata.test.tsx`
+  - `apps/web/tests/tags-people-count-source-route.test.ts`
+  - `apps/web/tests/assets-content-type-route.test.ts`
+- Changes:
+  - Added `Original URL` and `Found on: SOURCE | PAGE TITLE` rows directly under `S3 Mirror File` in the image details panel.
+  - Added `PhotoMetadata.originalImageUrl` resolution that only uses true source candidates and avoids hosted/mirrored URLs.
+  - Added source branding normalization for `Found on` display (FANDOM/IMDB/TMDB with hostname fallback).
+  - Added optional `SeasonAsset.source_url` plumbing from repository queries (including cast-photo-derived season assets).
+  - Added editable `Content Type` control in image details panel with save action routed through new proxy:
+    - `POST /api/admin/trr-api/assets/content-type`.
+  - Wired content-type updates in person, show, and season gallery lightboxes with immediate local state updates.
+  - Added face-box tagging flow for multi-person images in person lightbox:
+    - auto-count response face boxes consumed,
+    - per-face cast assignment UI in `TagPeoplePanel`,
+    - tag routes now accept/persist `face_boxes`,
+    - lightbox overlays face boxes on the image when multi-person.
+- Validation:
+  - `pnpm -C apps/web run test -- tests/photo-metadata.test.ts tests/image-lightbox-metadata.test.tsx tests/tags-people-count-source-route.test.ts tests/assets-content-type-route.test.ts` (pass)
+  - `pnpm -C apps/web run lint` (pass; existing warnings only)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Likert prompt spacing tune + post-selection Continue CTA (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/src/components/survey/NormalizedSurveyPlay.tsx`
+  - `apps/web/tests/matrix-likert-input.test.tsx`
+- Changes:
+  - Reduced line spacing in the all-caps Likert prompt headline ("How much do you agree...") to tighten the two-line block.
+  - Increased vertical separation between prompt and statement block, and between statement heading and first answer option, to better match requested layout rhythm.
+  - Added conditional `Continue` button for agree/disagree template:
+    - hidden until at least one answer is selected,
+    - appears after selection,
+    - attempts to scroll/focus the next survey question card when available.
+  - Added `data-survey-question-card` markers in normalized survey renderer so continue navigation can target the next question container.
+  - Expanded matrix-likert tests to assert `Continue` visibility behavior after first selection.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx` (pass)
+  - `pnpm -C apps/web exec eslint src/components/survey/MatrixLikertInput.tsx src/components/survey/NormalizedSurveyPlay.tsx tests/matrix-likert-input.test.tsx` (pass)
+
+Person fandom data ownership guard for profile hydration (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/lib/server/trr-api/fandom-ownership.ts`
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `apps/web/tests/fandom-person-ownership.test.ts`
+- Changes:
+  - Added URL owner extraction for Wikipedia person pages and generalized owner extraction across Fandom/Wikipedia.
+  - Added `castFandomRowMatchesExpectedPerson(...)` to enforce row ownership during profile hydration.
+  - Updated `getFandomDataByPersonId(...)` to use strict ownership validation so relationship evidence URLs (e.g. Lisa page used as source for John relationship) cannot hydrate John’s personal profile fields.
+  - Restricted Fandom URL page-name extraction to actual Fandom/Wikia hosts.
+  - Added tests for:
+    - Wikipedia URL owner parsing,
+    - cross-source owner extraction,
+    - rejection when row source URL owner mismatches expected person.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/fandom-person-ownership.test.ts tests/person-fandom-route.test.ts` (pass)
+  - `pnpm -C apps/web exec eslint src/lib/server/trr-api/fandom-ownership.ts src/lib/server/trr-api/trr-shows-repository.ts tests/fandom-person-ownership.test.ts tests/person-fandom-route.test.ts` (pass; existing repo warning in `trr-shows-repository.ts` unrelated to this change)
+
+Show cast card fallback for latest season rendering (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - In cast display merge logic, `latest_season` now falls back to the base cast payload when cast-role-members payload is missing/null for that field, preventing unnecessary null regression in UI.
+- Validation:
+  - `pnpm -C apps/web exec eslint apps/web/src/app/admin/trr-shows/[showId]/page.tsx` (pass with existing repo warnings only; no new errors)

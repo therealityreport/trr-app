@@ -83,6 +83,8 @@ const formatName = (format: TemplateUiFormat): string => {
       return "Circle ranking";
     case "rectangle-ranking":
       return "List ranking";
+    case "cast-decision-card":
+      return "Cast decision card";
     case "three-choice-slider":
       return "3-choice matrix";
     case "agree-likert-scale":

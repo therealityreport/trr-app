@@ -180,7 +180,7 @@ type BravoImportImageKind =
   | "reunion"
   | "other";
 
-type TabId = "seasons" | "assets" | "news" | "cast" | "surveys" | "social" | "details";
+type TabId = "seasons" | "assets" | "news" | "cast" | "surveys" | "social" | "details" | "settings";
 type ShowCastSource = "episode_evidence" | "show_fallback";
 type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
 type ShowTab = { id: TabId; label: string };
@@ -232,6 +232,7 @@ const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
 
 const SHOW_PAGE_TABS: ShowTab[] = [
   { id: "details", label: "Overview" },
+  { id: "settings", label: "Settings" },
   { id: "seasons", label: "Seasons" },
   { id: "assets", label: "Assets" },
   { id: "news", label: "News" },
@@ -247,14 +248,6 @@ const ENTITY_LINK_GROUP_LABELS: Record<EntityLinkGroup, string> = {
   cast_announcements: "Cast Announcements",
   other: "Other",
 };
-
-const ENTITY_LINK_GROUP_ORDER: EntityLinkGroup[] = [
-  "official",
-  "social",
-  "knowledge",
-  "cast_announcements",
-  "other",
-];
 
 const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
   details: "Show Info",
@@ -650,6 +643,58 @@ const getAssetDetailUrl = (asset: SeasonAsset): string => {
   return cropDetail ?? detail ?? asset.hosted_url;
 };
 
+const normalizeContentTypeToken = (contentType: string): string =>
+  contentType.trim().toUpperCase().replace(/[_-]+/g, " ");
+
+const contentTypeToAssetKind = (contentType: string): string => {
+  const normalized = normalizeContentTypeToken(contentType);
+  switch (normalized) {
+    case "PROMO":
+      return "promo";
+    case "CONFESSIONAL":
+      return "confessional";
+    case "REUNION":
+      return "reunion";
+    case "INTRO":
+      return "intro";
+    case "EPISODE STILL":
+      return "episode_still";
+    case "CAST PHOTOS":
+      return "cast";
+    case "BACKDROP":
+      return "backdrop";
+    case "POSTER":
+      return "poster";
+    case "LOGO":
+      return "logo";
+    default:
+      return "other";
+  }
+};
+
+const contentTypeToContextType = (contentType: string): string => {
+  const normalized = normalizeContentTypeToken(contentType);
+  switch (normalized) {
+    case "EPISODE STILL":
+      return "episode still";
+    case "CAST PHOTOS":
+      return "cast photos";
+    default:
+      return normalized.toLowerCase();
+  }
+};
+
+const isCrewCreditCategory = (value: string | null | undefined): boolean => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized === "crew" ||
+    normalized.includes("crew") ||
+    normalized.includes("producer") ||
+    normalized.includes("production")
+  );
+};
+
 const NETWORK_LOGO_DOMAIN_BY_NAME: Record<string, string> = {
   bravo: "bravotv.com",
   nbc: "nbc.com",
@@ -885,8 +930,7 @@ export default function TrrShowDetailPage() {
   const [castSortBy, setCastSortBy] = useState<"episodes" | "season" | "name">("episodes");
   const [castSortOrder, setCastSortOrder] = useState<"desc" | "asc">("desc");
   const [castSeasonFilters, setCastSeasonFilters] = useState<number[]>([]);
-  const [castRoleFilters, setCastRoleFilters] = useState<string[]>([]);
-  const [castCreditFilters, setCastCreditFilters] = useState<string[]>([]);
+  const [castRoleAndCreditFilters, setCastRoleAndCreditFilters] = useState<string[]>([]);
   const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
 
   // Lightbox state (for cast photos)
@@ -999,7 +1043,16 @@ export default function TrrShowDetailPage() {
   const tabParam = searchParams.get("tab");
   const assetsParam = searchParams.get("assets");
   useEffect(() => {
-    const allowedTabs: TabId[] = ["seasons", "assets", "news", "cast", "surveys", "social", "details"];
+    const allowedTabs: TabId[] = [
+      "seasons",
+      "assets",
+      "news",
+      "cast",
+      "surveys",
+      "social",
+      "details",
+      "settings",
+    ];
     if (!tabParam) return;
 
     // Back-compat alias: ?tab=gallery -> ASSETS (Images)
@@ -2492,12 +2545,12 @@ export default function TrrShowDetailPage() {
   }, [hasAccess, showId, fetchShow, fetchSeasons, fetchCast, checkCoverage]);
 
   useEffect(() => {
-    if (!hasAccess || !showId || activeTab !== "details") return;
+    if (!hasAccess || !showId || activeTab !== "settings") return;
     void fetchShowLinks();
   }, [activeTab, fetchShowLinks, hasAccess, showId]);
 
   useEffect(() => {
-    if (!hasAccess || !showId || activeTab !== "cast") return;
+    if (!hasAccess || !showId || (activeTab !== "cast" && activeTab !== "settings")) return;
     void fetchShowRoles();
   }, [activeTab, fetchShowRoles, hasAccess, showId]);
 
@@ -2591,13 +2644,38 @@ export default function TrrShowDetailPage() {
 
   const availableCastSeasons = useMemo(() => {
     const values = new Set<number>();
+    for (const season of seasons) {
+      if (typeof season.season_number === "number" && Number.isFinite(season.season_number) && season.season_number > 0) {
+        values.add(season.season_number);
+      }
+    }
     for (const member of castRoleMembers) {
       if (typeof member.latest_season === "number" && Number.isFinite(member.latest_season)) {
         values.add(member.latest_season);
       }
     }
+    for (const member of cast) {
+      if (Array.isArray(member.seasons_appeared)) {
+        for (const seasonNumber of member.seasons_appeared) {
+          if (typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0) {
+            values.add(seasonNumber);
+          }
+        }
+      }
+    }
     return Array.from(values).sort((a, b) => b - a);
-  }, [castRoleMembers]);
+  }, [cast, castRoleMembers, seasons]);
+
+  const availableCastRoleAndCreditFilters = useMemo(() => {
+    const options: Array<{ key: string; label: string }> = [];
+    for (const role of availableCastRoles) {
+      options.push({ key: `role:${role}`, label: role });
+    }
+    for (const category of availableCastCreditCategories) {
+      options.push({ key: `credit:${category}`, label: category });
+    }
+    return options.sort((a, b) => a.label.localeCompare(b.label));
+  }, [availableCastCreditCategories, availableCastRoles]);
 
   const castMatrixSyncScopeLabel = useMemo(() => {
     if (castSeasonFilters.length > 0) {
@@ -2617,7 +2695,11 @@ export default function TrrShowDetailPage() {
             ? normalizeCastRoleList([member.role.trim()])
             : [];
       const mergedLatestSeason =
-        enriched && typeof enriched.latest_season === "number" ? enriched.latest_season : null;
+        enriched && typeof enriched.latest_season === "number"
+          ? enriched.latest_season
+          : typeof member.latest_season === "number"
+            ? member.latest_season
+            : null;
       const mergedTotalEpisodes =
         enriched && typeof enriched.total_episodes === "number"
           ? enriched.total_episodes
@@ -2648,21 +2730,19 @@ export default function TrrShowDetailPage() {
       ) {
         return false;
       }
-      if (
-        castRoleFilters.length > 0 &&
-        !member.roles.some((role) =>
-          castRoleFilters.some((selected) => castRoleMatchesFilter(role, selected))
-        )
-      ) {
-        return false;
-      }
-      if (
-        castCreditFilters.length > 0 &&
-        !castCreditFilters.some(
-          (value) => value.toLowerCase() === (member.credit_category ?? "").toLowerCase()
-        )
-      ) {
-        return false;
+      if (castRoleAndCreditFilters.length > 0) {
+        const matchesAnyFilter = castRoleAndCreditFilters.some((rawFilter) => {
+          const [kind, value] = rawFilter.split(":", 2);
+          if (!kind || !value) return false;
+          if (kind === "role") {
+            return member.roles.some((role) => castRoleMatchesFilter(role, value));
+          }
+          if (kind === "credit") {
+            return value.toLowerCase() === (member.credit_category ?? "").toLowerCase();
+          }
+          return false;
+        });
+        if (!matchesAnyFilter) return false;
       }
       if (castHasImageFilter === "yes" && !member.merged_photo_url) return false;
       if (castHasImageFilter === "no" && member.merged_photo_url) return false;
@@ -2688,9 +2768,8 @@ export default function TrrShowDetailPage() {
     return sorted;
   }, [
     cast,
-    castCreditFilters,
     castHasImageFilter,
-    castRoleFilters,
+    castRoleAndCreditFilters,
     castRoleMemberByPersonId,
     castRoleMembersLoadedOnce,
     castSeasonFilters,
@@ -2698,30 +2777,64 @@ export default function TrrShowDetailPage() {
     castSortOrder,
   ]);
 
-  const linksByGroup = useMemo(() => {
-    const grouped = new Map<EntityLinkGroup, EntityLink[]>();
-    for (const group of ENTITY_LINK_GROUP_ORDER) grouped.set(group, []);
-    for (const link of showLinks) {
-      const list = grouped.get(link.link_group as EntityLinkGroup);
-      if (!list) continue;
-      list.push(link);
-    }
-    for (const group of ENTITY_LINK_GROUP_ORDER) {
-      const list = grouped.get(group) ?? [];
-      list.sort((a, b) => {
-        if (group === "cast_announcements") {
-          if (a.season_number !== b.season_number) return b.season_number - a.season_number;
-        }
-        return (a.label || a.url).localeCompare(b.label || b.url);
-      });
-    }
-    return grouped;
-  }, [showLinks]);
+  const castGalleryMembers = useMemo(
+    () => castDisplayMembers.filter((member) => !isCrewCreditCategory(member.credit_category)),
+    [castDisplayMembers]
+  );
+  const crewGalleryMembers = useMemo(
+    () => castDisplayMembers.filter((member) => isCrewCreditCategory(member.credit_category)),
+    [castDisplayMembers]
+  );
 
   const pendingLinkCount = useMemo(
     () => showLinks.filter((link) => link.status === "pending").length,
     [showLinks]
   );
+
+  const settingsLinkSections = useMemo(() => {
+    const showPageLinks: EntityLink[] = [];
+    const seasonPageLinks: EntityLink[] = [];
+    const castMemberLinks: EntityLink[] = [];
+
+    for (const link of showLinks) {
+      if (link.entity_type === "person") {
+        castMemberLinks.push(link);
+        continue;
+      }
+      if (link.entity_type === "season" || link.link_group === "cast_announcements" || link.season_number > 0) {
+        seasonPageLinks.push(link);
+        continue;
+      }
+      showPageLinks.push(link);
+    }
+
+    const sortLinks = (links: EntityLink[]) =>
+      [...links].sort((a, b) => {
+        if (a.season_number !== b.season_number) return b.season_number - a.season_number;
+        return (a.label || a.url).localeCompare(b.label || b.url);
+      });
+
+    return [
+      {
+        key: "show-pages",
+        title: "Show Pages",
+        description: "Show wiki/fandom pages, IMDb/TMDb show links, BravoTV show pages, and other show-level URLs.",
+        links: sortLinks(showPageLinks),
+      },
+      {
+        key: "season-pages",
+        title: "Season Pages",
+        description: "Season wiki pages and official season/cast announcement links.",
+        links: sortLinks(seasonPageLinks),
+      },
+      {
+        key: "cast-member-pages",
+        title: "Cast Member Pages",
+        description: "Cast-member profile links (BravoTV, Fandom, Wikipedia, IMDb, TMDb, and related pages).",
+        links: sortLinks(castMemberLinks),
+      },
+    ] as const;
+  }, [showLinks]);
 
   const filteredGalleryAssets = useMemo(() => {
     return applyAdvancedFiltersToSeasonAssets(galleryAssets, advancedFilters, {
@@ -3848,6 +3961,67 @@ export default function TrrShowDetailPage() {
           else delete meta.starred_at;
           return { ...a, metadata: meta };
         })
+      );
+    },
+    [getAuthHeaders]
+  );
+
+  const updateGalleryAssetContentType = useCallback(
+    async (asset: SeasonAsset, contentType: string) => {
+      const origin = asset.origin_table ?? null;
+      if (!origin) throw new Error("Cannot update content type: missing origin_table");
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/content-type", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: asset.id, content_type: contentType }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail
+            ? `${data.error}: ${data.detail}`
+            : data?.detail || data?.error || "Content type update failed";
+        throw new Error(message);
+      }
+
+      const normalizedContentType =
+        typeof data.content_type === "string" && data.content_type.trim().length > 0
+          ? data.content_type.trim().toUpperCase()
+          : normalizeContentTypeToken(contentType);
+      const nextKind =
+        typeof data.kind === "string" && data.kind.trim().length > 0
+          ? data.kind.trim()
+          : contentTypeToAssetKind(normalizedContentType);
+      const nextContextType =
+        typeof data.context_type === "string" && data.context_type.trim().length > 0
+          ? data.context_type.trim()
+          : contentTypeToContextType(normalizedContentType);
+
+      const applyUpdate = (candidate: SeasonAsset): SeasonAsset => {
+        const metadata =
+          candidate.metadata && typeof candidate.metadata === "object"
+            ? { ...(candidate.metadata as Record<string, unknown>) }
+            : {};
+        metadata.fandom_section_tag = normalizedContentType;
+        metadata.content_type = normalizedContentType;
+        return {
+          ...candidate,
+          kind: nextKind,
+          context_type: nextContextType,
+          metadata,
+        };
+      };
+
+      setGalleryAssets((prev) =>
+        prev.map((candidate) =>
+          candidate.id === asset.id ? applyUpdate(candidate) : candidate
+        )
+      );
+      setAssetLightbox((prev) =>
+        prev && prev.asset.id === asset.id
+          ? { ...prev, asset: applyUpdate(prev.asset) }
+          : prev
       );
     },
     [getAuthHeaders]
@@ -5146,7 +5320,7 @@ export default function TrrShowDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {castDisplayMembers.length} shown · {cast.length} total
+                    {castGalleryMembers.length} cast · {crewGalleryMembers.length} crew · {cast.length} total
                   </span>
                   <button
                     type="button"
@@ -5201,7 +5375,7 @@ export default function TrrShowDetailPage() {
               />
 
               <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                <div className="grid gap-3 md:grid-cols-5">
+                <div className="grid gap-3 md:grid-cols-4">
                   <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                     Sort By
                     <select
@@ -5241,31 +5415,11 @@ export default function TrrShowDetailPage() {
                       <option value="no">Without Image</option>
                     </select>
                   </label>
-                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    New Role
-                    <div className="mt-1 flex gap-2">
-                      <input
-                        value={newRoleName}
-                        onChange={(event) => setNewRoleName(event.target.value)}
-                        placeholder="Housewife"
-                        className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm normal-case tracking-normal text-zinc-700"
-                      />
-                      <button
-                        type="button"
-                        onClick={createShowRole}
-                        disabled={rolesLoading}
-                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  </label>
                   <button
                     type="button"
                     onClick={() => {
                       setCastSeasonFilters([]);
-                      setCastRoleFilters([]);
-                      setCastCreditFilters([]);
+                      setCastRoleAndCreditFilters([]);
                       setCastHasImageFilter("all");
                       setCastSortBy("episodes");
                       setCastSortOrder("desc");
@@ -5313,24 +5467,20 @@ export default function TrrShowDetailPage() {
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Roles
+                      Roles & Credit
                     </span>
-                    {availableCastRoles.length === 0 ? (
-                      <span className="text-xs text-zinc-500">No roles configured.</span>
+                    {availableCastRoleAndCreditFilters.length === 0 ? (
+                      <span className="text-xs text-zinc-500">No role or credit filters available.</span>
                     ) : (
-                      availableCastRoles.map((role) => {
-                        const active = castRoleFilters.some((value) =>
-                          castRoleMatchesFilter(value, role)
-                        );
+                      availableCastRoleAndCreditFilters.map((option) => {
+                        const active = castRoleAndCreditFilters.includes(option.key);
                         return (
                           <button
-                            key={`role-filter-${role}`}
+                            key={`role-credit-filter-${option.key}`}
                             type="button"
                             onClick={() =>
-                              setCastRoleFilters((prev) =>
-                                active
-                                  ? prev.filter((value) => !castRoleMatchesFilter(value, role))
-                                  : [...prev, role]
+                              setCastRoleAndCreditFilters((prev) =>
+                                active ? prev.filter((value) => value !== option.key) : [...prev, option.key]
                               )
                             }
                             className={`rounded-full border px-2 py-1 text-xs font-semibold ${
@@ -5339,85 +5489,10 @@ export default function TrrShowDetailPage() {
                                 : "border-zinc-200 bg-white text-zinc-600"
                             }`}
                           >
-                            {role}
+                            {option.label}
                           </button>
                         );
                       })
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Credit
-                    </span>
-                    {availableCastCreditCategories.length === 0 ? (
-                      <span className="text-xs text-zinc-500">No categories.</span>
-                    ) : (
-                      availableCastCreditCategories.map((category) => {
-                        const active = castCreditFilters.some(
-                          (value) => value.toLowerCase() === category.toLowerCase()
-                        );
-                        return (
-                          <button
-                            key={`credit-filter-${category}`}
-                            type="button"
-                            onClick={() =>
-                              setCastCreditFilters((prev) =>
-                                active
-                                  ? prev.filter((value) => value.toLowerCase() !== category.toLowerCase())
-                                  : [...prev, category]
-                              )
-                            }
-                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
-                              active
-                                ? "border-zinc-900 bg-zinc-900 text-white"
-                                : "border-zinc-200 bg-white text-zinc-600"
-                            }`}
-                          >
-                            {category}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Role Catalog
-                    </span>
-                    {showRoles.length === 0 ? (
-                      <span className="text-xs text-zinc-500">No roles yet.</span>
-                    ) : (
-                      showRoles.map((role) => (
-                        <div
-                          key={`role-catalog-${role.id}`}
-                          className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1"
-                        >
-                          <span
-                            className={`text-xs font-semibold ${
-                              role.is_active ? "text-zinc-700" : "text-zinc-400 line-through"
-                            }`}
-                          >
-                            {role.name}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => void renameShowRole(role)}
-                            className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700"
-                          >
-                            Rename
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void toggleShowRoleActive(role)}
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                              role.is_active
-                                ? "border border-amber-200 bg-amber-50 text-amber-700"
-                                : "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                            }`}
-                          >
-                            {role.is_active ? "Deactivate" : "Activate"}
-                          </button>
-                        </div>
-                      ))
                     )}
                   </div>
                 </div>
@@ -5425,155 +5500,269 @@ export default function TrrShowDetailPage() {
               {castRoleMembersLoading && (
                 <p className="mb-4 text-sm text-zinc-500">Refreshing cast intelligence...</p>
               )}
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {castDisplayMembers.map((member) => {
-                  const thumbnailUrl = member.merged_photo_url;
-                  const episodeLabel =
-                    typeof member.total_episodes === "number"
-                      ? `${member.total_episodes} episodes`
-                      : null;
-
-                  return (
-                    <Link
-                      key={member.id}
-                      href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
-                      className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                    >
-                      <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                        {thumbnailUrl ? (
-                          <CastPhoto
-                            src={thumbnailUrl}
-                            alt={member.full_name || member.cast_member_name || "Cast member"}
-                            thumbnail_focus_x={member.thumbnail_focus_x}
-                            thumbnail_focus_y={member.thumbnail_focus_y}
-                            thumbnail_zoom={member.thumbnail_zoom}
-                            thumbnail_crop_mode={member.thumbnail_crop_mode}
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-zinc-400">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                              <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                              <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                      <p className="font-semibold text-zinc-900">
-                        {member.full_name || member.cast_member_name || "Unknown"}
-                      </p>
-                      {episodeLabel && (
-                        <p className="text-sm text-zinc-600">{episodeLabel}</p>
-                      )}
-                      {member.latest_season && (
-                        <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
-                      )}
-                      {member.roles.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {member.roles.map((role) => (
-                            <span
-                              key={`${member.person_id}-${role}`}
-                              className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                            >
-                              {role}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          handleRefreshCastMember(
-                            member.person_id,
-                            member.full_name || member.cast_member_name || "Cast member"
-                          );
-                        }}
-                        disabled={Boolean(refreshingPersonIds[member.person_id])}
-                        className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
-                      >
-                        {refreshingPersonIds[member.person_id]
-                          ? "Refreshing..."
-                          : "Refresh Person"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          void assignRolesToCastMember(
-                            member.person_id,
-                            member.full_name || member.cast_member_name || "Cast member"
-                          );
-                        }}
-                        className="mt-2 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                      >
-                        Edit Roles
-                      </button>
-                      <RefreshProgressBar
-                        show={Boolean(refreshingPersonIds[member.person_id])}
-                        stage={refreshingPersonProgress[member.person_id]?.stage}
-                        message={refreshingPersonProgress[member.person_id]?.message}
-                        current={refreshingPersonProgress[member.person_id]?.current}
-                        total={refreshingPersonProgress[member.person_id]?.total}
-                      />
-                    </Link>
-                  );
-                })}
-              </div>
-              {archiveFootageCast.length > 0 && (
-                <div className="mt-8">
+              <div className="space-y-8">
+                <section>
                   <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                    Archive Footage
+                    Cast
                   </p>
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {archiveFootageCast.map((member) => {
-                      const thumbnailUrl = member.cover_photo_url || member.photo_url;
-                      const archiveLabel =
-                        typeof member.archive_episode_count === "number"
-                          ? `${member.archive_episode_count} archive footage episodes`
-                          : "Archive footage appearance";
+                  {castGalleryMembers.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {castGalleryMembers.map((member) => {
+                        const thumbnailUrl = member.merged_photo_url;
+                        const episodeLabel =
+                          typeof member.total_episodes === "number"
+                            ? `${member.total_episodes} episodes`
+                            : null;
 
-                      return (
-                        <Link
-                          key={`archive-${member.id}`}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
-                          className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 transition hover:border-amber-300 hover:bg-amber-100/40"
-                        >
-                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                            {thumbnailUrl ? (
-                              <CastPhoto
-                                src={thumbnailUrl}
-                                alt={member.full_name || member.cast_member_name || "Cast member"}
-                                thumbnail_focus_x={member.thumbnail_focus_x}
-                                thumbnail_focus_y={member.thumbnail_focus_y}
-                                thumbnail_zoom={member.thumbnail_zoom}
-                                thumbnail_crop_mode={member.thumbnail_crop_mode}
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-zinc-400">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                </svg>
+                        return (
+                          <Link
+                            key={member.id}
+                            href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                            className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
+                          >
+                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                              {thumbnailUrl ? (
+                                <CastPhoto
+                                  src={thumbnailUrl}
+                                  alt={member.full_name || member.cast_member_name || "Cast member"}
+                                  thumbnail_focus_x={member.thumbnail_focus_x}
+                                  thumbnail_focus_y={member.thumbnail_focus_y}
+                                  thumbnail_zoom={member.thumbnail_zoom}
+                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
+                                />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-zinc-400">
+                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <p className="font-semibold text-zinc-900">
+                              {member.full_name || member.cast_member_name || "Unknown"}
+                            </p>
+                            {episodeLabel && <p className="text-sm text-zinc-600">{episodeLabel}</p>}
+                            {member.latest_season && (
+                              <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
+                            )}
+                            {member.roles.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {member.roles.map((role) => (
+                                  <span
+                                    key={`${member.person_id}-${role}`}
+                                    className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                  >
+                                    {role}
+                                  </span>
+                                ))}
                               </div>
                             )}
-                          </div>
-                          <p className="font-semibold text-zinc-900">
-                            {member.full_name || member.cast_member_name || "Unknown"}
-                          </p>
-                          <p className="text-sm text-amber-700">{archiveLabel}</p>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {cast.length === 0 && archiveFootageCast.length === 0 && (
-                <p className="text-sm text-zinc-500">
-                  No cast members found for this show.
-                </p>
-              )}
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleRefreshCastMember(
+                                  member.person_id,
+                                  member.full_name || member.cast_member_name || "Cast member"
+                                );
+                              }}
+                              disabled={Boolean(refreshingPersonIds[member.person_id])}
+                              className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                            >
+                              {refreshingPersonIds[member.person_id]
+                                ? "Refreshing..."
+                                : "Refresh Person"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void assignRolesToCastMember(
+                                  member.person_id,
+                                  member.full_name || member.cast_member_name || "Cast member"
+                                );
+                              }}
+                              className="mt-2 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                            >
+                              Edit Roles
+                            </button>
+                            <RefreshProgressBar
+                              show={Boolean(refreshingPersonIds[member.person_id])}
+                              stage={refreshingPersonProgress[member.person_id]?.stage}
+                              message={refreshingPersonProgress[member.person_id]?.message}
+                              current={refreshingPersonProgress[member.person_id]?.current}
+                              total={refreshingPersonProgress[member.person_id]?.total}
+                            />
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                {crewGalleryMembers.length > 0 && (
+                  <section>
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                      Crew
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {crewGalleryMembers.map((member) => {
+                        const thumbnailUrl = member.merged_photo_url;
+                        const episodeLabel =
+                          typeof member.total_episodes === "number"
+                            ? `${member.total_episodes} episodes`
+                            : null;
+                        return (
+                          <Link
+                            key={`crew-${member.id}`}
+                            href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                            className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
+                          >
+                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                              {thumbnailUrl ? (
+                                <CastPhoto
+                                  src={thumbnailUrl}
+                                  alt={member.full_name || member.cast_member_name || "Crew member"}
+                                  thumbnail_focus_x={member.thumbnail_focus_x}
+                                  thumbnail_focus_y={member.thumbnail_focus_y}
+                                  thumbnail_zoom={member.thumbnail_zoom}
+                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
+                                />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-zinc-400">
+                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <p className="font-semibold text-zinc-900">
+                              {member.full_name || member.cast_member_name || "Unknown"}
+                            </p>
+                            {member.credit_category && (
+                              <p className="text-sm text-blue-700">{member.credit_category}</p>
+                            )}
+                            {episodeLabel && <p className="text-xs text-zinc-600">{episodeLabel}</p>}
+                            {member.roles.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {member.roles.map((role) => (
+                                  <span
+                                    key={`crew-${member.person_id}-${role}`}
+                                    className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700"
+                                  >
+                                    {role}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleRefreshCastMember(
+                                  member.person_id,
+                                  member.full_name || member.cast_member_name || "Crew member"
+                                );
+                              }}
+                              disabled={Boolean(refreshingPersonIds[member.person_id])}
+                              className="mt-3 w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50"
+                            >
+                              {refreshingPersonIds[member.person_id] ? "Refreshing..." : "Refresh Person"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void assignRolesToCastMember(
+                                  member.person_id,
+                                  member.full_name || member.cast_member_name || "Crew member"
+                                );
+                              }}
+                              className="mt-2 w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                            >
+                              Edit Roles
+                            </button>
+                            <RefreshProgressBar
+                              show={Boolean(refreshingPersonIds[member.person_id])}
+                              stage={refreshingPersonProgress[member.person_id]?.stage}
+                              message={refreshingPersonProgress[member.person_id]?.message}
+                              current={refreshingPersonProgress[member.person_id]?.current}
+                              total={refreshingPersonProgress[member.person_id]?.total}
+                            />
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
+
+                {archiveFootageCast.length > 0 && (
+                  <section>
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                      Archive Footage
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {archiveFootageCast.map((member) => {
+                        const thumbnailUrl = member.cover_photo_url || member.photo_url;
+                        const archiveLabel =
+                          typeof member.archive_episode_count === "number"
+                            ? `${member.archive_episode_count} archive footage episodes`
+                            : "Archive footage appearance";
+
+                        return (
+                          <Link
+                            key={`archive-${member.id}`}
+                            href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                            className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 transition hover:border-amber-300 hover:bg-amber-100/40"
+                          >
+                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                              {thumbnailUrl ? (
+                                <CastPhoto
+                                  src={thumbnailUrl}
+                                  alt={member.full_name || member.cast_member_name || "Cast member"}
+                                  thumbnail_focus_x={member.thumbnail_focus_x}
+                                  thumbnail_focus_y={member.thumbnail_focus_y}
+                                  thumbnail_zoom={member.thumbnail_zoom}
+                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
+                                />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-zinc-400">
+                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <p className="font-semibold text-zinc-900">
+                              {member.full_name || member.cast_member_name || "Unknown"}
+                            </p>
+                            <p className="text-sm text-amber-700">{archiveLabel}</p>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
+
+                {castGalleryMembers.length === 0 && crewGalleryMembers.length === 0 && cast.length > 0 && (
+                  <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
+                )}
+
+                {cast.length === 0 && archiveFootageCast.length === 0 && (
+                  <p className="text-sm text-zinc-500">
+                    No cast members found for this show.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -5642,6 +5831,226 @@ export default function TrrShowDetailPage() {
             </div>
           )}
 
+          {/* Settings Tab */}
+          {activeTab === "settings" && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Show Settings
+                  </p>
+                  <h3 className="text-xl font-bold text-zinc-900">
+                    Links and Cast Role Catalog
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={refreshAllShowData}
+                  disabled={isShowRefreshBusy}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+
+              {(linksError || linksNotice || rolesError) && (
+                <p className={`mb-4 text-sm ${linksError || rolesError ? "text-red-600" : "text-zinc-500"}`}>
+                  {linksError || rolesError || linksNotice}
+                </p>
+              )}
+
+              <div className="space-y-6">
+                <section>
+                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Role Catalog</h4>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <input
+                        value={newRoleName}
+                        onChange={(event) => setNewRoleName(event.target.value)}
+                        placeholder="Housewife"
+                        className="min-w-[220px] flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={createShowRole}
+                        disabled={rolesLoading}
+                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                      >
+                        Add Role
+                      </button>
+                    </div>
+                    {showRoles.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No roles configured yet.</p>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {showRoles.map((role) => (
+                          <div
+                            key={`settings-role-catalog-${role.id}`}
+                            className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1"
+                          >
+                            <span
+                              className={`text-xs font-semibold ${
+                                role.is_active ? "text-zinc-700" : "text-zinc-400 line-through"
+                              }`}
+                            >
+                              {role.name}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void renameShowRole(role)}
+                              className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700"
+                            >
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void toggleShowRoleActive(role)}
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                                role.is_active
+                                  ? "border border-amber-200 bg-amber-50 text-amber-700"
+                                  : "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                              }`}
+                            >
+                              {role.is_active ? "Deactivate" : "Activate"}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-zinc-700">Links</h4>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">
+                        Pending {pendingLinkCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={discoverShowLinks}
+                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                      >
+                        Discover
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void fetchShowLinks()}
+                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    {linksLoading ? (
+                      <p className="text-sm text-zinc-500">Loading links...</p>
+                    ) : showLinks.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No links yet. Run discovery to populate this list.</p>
+                    ) : (
+                      <div className="space-y-5">
+                        {settingsLinkSections.map((section) => (
+                          <div key={section.key} className="space-y-2">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                                {section.title}
+                              </p>
+                              <p className="text-xs text-zinc-500">{section.description}</p>
+                            </div>
+                            {section.links.length === 0 ? (
+                              <p className="text-sm text-zinc-500">No links in this category yet.</p>
+                            ) : (
+                              <div className="space-y-1">
+                                {section.links.map((link) => {
+                                  const isPersonBravoProfile =
+                                    link.entity_type === "person" && link.link_kind === "bravo_profile";
+                                  return (
+                                    <div
+                                      key={`settings-link-${section.key}-${link.id}`}
+                                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5"
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <a
+                                          href={link.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="block truncate text-sm font-medium text-blue-700 hover:underline"
+                                        >
+                                          {link.label || link.url}
+                                        </a>
+                                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                            {link.link_kind}
+                                          </span>
+                                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                            {ENTITY_LINK_GROUP_LABELS[link.link_group]}
+                                          </span>
+                                          {link.season_number > 0 && (
+                                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                              Season {link.season_number}
+                                            </span>
+                                          )}
+                                          {link.entity_type !== "show" && (
+                                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                              {link.entity_type}
+                                            </span>
+                                          )}
+                                          {isPersonBravoProfile && (
+                                            <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                                              Bravo Person Profile
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                          {link.status}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => void setShowLinkStatus(link.id, "approved")}
+                                          className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                        >
+                                          Approve
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void setShowLinkStatus(link.id, "rejected")}
+                                          className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+                                        >
+                                          Reject
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void editShowLink(link)}
+                                          className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void deleteShowLink(link.id)}
+                                          className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
+            </div>
+          )}
+
           {/* Details Tab - External IDs */}
           {activeTab === "details" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -5651,7 +6060,7 @@ export default function TrrShowDetailPage() {
                     Show Overview
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
-                    Details, Links, and Metadata
+                    Details and Metadata
                   </h3>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -5928,210 +6337,17 @@ export default function TrrShowDetailPage() {
                   </div>
                 )}
 
-                <div>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-semibold text-zinc-700">Links</h4>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">
-                        Pending {pendingLinkCount}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={discoverShowLinks}
-                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                      >
-                        Discover
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void fetchShowLinks()}
-                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                      >
-                        Refresh
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    {(linksError || linksNotice) && (
-                      <p className={`mb-3 text-xs ${linksError ? "text-red-600" : "text-zinc-600"}`}>
-                        {linksError || linksNotice}
-                      </p>
-                    )}
-                    {linksLoading ? (
-                      <p className="text-sm text-zinc-500">Loading links...</p>
-                    ) : showLinks.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No links yet. Run discovery or add links manually.</p>
-                    ) : (
-                      <div className="space-y-4">
-                        {ENTITY_LINK_GROUP_ORDER.map((group) => {
-                          const groupLinks = linksByGroup.get(group) ?? [];
-                          if (groupLinks.length === 0) return null;
-                          const linksBySeason = new Map<number, EntityLink[]>();
-                          if (group === "cast_announcements") {
-                            for (const link of groupLinks) {
-                              const key = link.season_number > 0 ? link.season_number : 0;
-                              const list = linksBySeason.get(key) ?? [];
-                              list.push(link);
-                              linksBySeason.set(key, list);
-                            }
-                          }
-
-                          return (
-                            <section key={group}>
-                              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                                {ENTITY_LINK_GROUP_LABELS[group]}
-                              </p>
-
-                              {group === "cast_announcements" && linksBySeason.size > 0 ? (
-                                <div className="space-y-2">
-                                  {Array.from(linksBySeason.entries())
-                                    .sort((a, b) => b[0] - a[0])
-                                    .map(([seasonNumber, seasonLinks]) => (
-                                      <div
-                                        key={`season-${seasonNumber}`}
-                                        className="rounded-md border border-zinc-200 bg-white p-2"
-                                      >
-                                        <p className="mb-1 text-xs font-semibold text-zinc-600">
-                                          {seasonNumber > 0 ? `Season ${seasonNumber}` : "General"}
-                                        </p>
-                                        <div className="space-y-1">
-                                          {seasonLinks.map((link) => (
-                                            <div
-                                              key={link.id}
-                                              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-100 px-2 py-1.5"
-                                            >
-                                              <a
-                                                href={link.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="min-w-0 flex-1 truncate text-sm font-medium text-blue-700 hover:underline"
-                                              >
-                                                {link.label || link.url}
-                                              </a>
-                                              <div className="flex flex-wrap items-center gap-1">
-                                                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                                  {link.status}
-                                                </span>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => void setShowLinkStatus(link.id, "approved")}
-                                                  className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                                                >
-                                                  Approve
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => void setShowLinkStatus(link.id, "rejected")}
-                                                  className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
-                                                >
-                                                  Reject
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => void editShowLink(link)}
-                                                  className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                                >
-                                                  Edit
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => void deleteShowLink(link.id)}
-                                                  className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
-                                                >
-                                                  Delete
-                                                </button>
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ))}
-                                </div>
-                              ) : (
-                                <div className="space-y-1">
-                                  {groupLinks.map((link) => {
-                                    const isPersonBravoProfile =
-                                      link.entity_type === "person" && link.link_kind === "bravo_profile";
-                                    return (
-                                      <div
-                                        key={link.id}
-                                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5"
-                                      >
-                                        <div className="min-w-0 flex-1">
-                                          <a
-                                            href={link.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="block truncate text-sm font-medium text-blue-700 hover:underline"
-                                          >
-                                            {link.label || link.url}
-                                          </a>
-                                          <div className="mt-1 flex flex-wrap items-center gap-1">
-                                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                              {link.link_kind}
-                                            </span>
-                                            {link.season_number > 0 && (
-                                              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                                Season {link.season_number}
-                                              </span>
-                                            )}
-                                            {link.entity_type !== "show" && (
-                                              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                                {link.entity_type}
-                                              </span>
-                                            )}
-                                            {isPersonBravoProfile && (
-                                              <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                                                Bravo Person Profile
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div className="flex flex-wrap items-center gap-1">
-                                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                            {link.status}
-                                          </span>
-                                          <button
-                                            type="button"
-                                            onClick={() => void setShowLinkStatus(link.id, "approved")}
-                                            className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                                          >
-                                            Approve
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => void setShowLinkStatus(link.id, "rejected")}
-                                            className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
-                                          >
-                                            Reject
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => void editShowLink(link)}
-                                            className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                          >
-                                            Edit
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => void deleteShowLink(link.id)}
-                                            className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
-                                          >
-                                            Delete
-                                          </button>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </section>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                  <p className="text-sm text-zinc-700">
+                    Link management and role catalog tools are now on the <span className="font-semibold">Settings</span> tab.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setTab("settings")}
+                    className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                  >
+                    Open Settings
+                  </button>
                 </div>
 
                 {/* Internal ID */}
@@ -6203,6 +6419,9 @@ export default function TrrShowDetailPage() {
             isStarred={Boolean((assetLightbox.asset.metadata as Record<string, unknown> | null)?.starred)}
             onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
             onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
+            onUpdateContentType={(contentType) =>
+              updateGalleryAssetContentType(assetLightbox.asset, contentType)
+            }
             onDelete={async () => {
               const asset = assetLightbox.asset;
               const headers = await getAuthHeaders();

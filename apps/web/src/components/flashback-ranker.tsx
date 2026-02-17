@@ -40,6 +40,11 @@ type FigmaCircleLayoutMetrics = {
   gapY: number;
   slotSize: number;
   tokenSize: number;
+  benchTokenSize: number;
+  benchGap: number;
+  benchMarginTop: number;
+  benchPaddingY: number;
+  benchPaddingX: number;
   rankNumberSize: number;
   rankNumberMarginBottom: number;
   removeButtonSize: number;
@@ -491,6 +496,10 @@ export default function FlashbackRanker({
               fontOverrides={resolvedFontOverrides}
               layout={circleLayout}
             />
+            <FigmaCircleBench
+              items={benchItems}
+              layout={circleLayout}
+            />
             <SelectionPicker
               open={pickerSlotIndex !== null}
               onClose={closePicker}
@@ -635,21 +644,11 @@ function FigmaRectangleBench({
         style={{
           padding: `${layout.trayPaddingY}px ${layout.trayPaddingX}px`,
         }}
-        aria-label="Unranked seasons"
+        aria-label="Unassigned seasons"
         data-testid="figma-rectangle-unranked-tray"
       >
-        <p
-          className="uppercase text-white/90"
-          style={{
-            fontFamily: fontOverrides.trayLabelFontFamily,
-            fontSize: `${layout.trayLabelFontSize}px`,
-            letterSpacing: `${layout.trayLabelTracking}em`,
-          }}
-        >
-          Unranked
-        </p>
         <div
-          className={`mt-2.5 flex ${layout.trayWrap ? "flex-wrap overflow-visible" : "overflow-x-auto snap-x snap-mandatory pb-1"}`}
+          className={`flex ${layout.trayWrap ? "flex-wrap overflow-visible" : "overflow-x-auto snap-x snap-mandatory pb-1"}`}
           style={{ gap: `${layout.trayGap}px` }}
         >
           {items.map((item) => (
@@ -661,6 +660,46 @@ function FigmaRectangleBench({
                 seasonCardLabelFontFamily={fontOverrides.cardLabelFontFamily}
                 seasonCardLabelSize={layout.cardLabelFontSize}
               />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FigmaCircleBench({
+  items,
+  layout,
+}: {
+  items: SurveyRankingItem[];
+  layout: FigmaCircleLayoutMetrics;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: "bench" });
+
+  return (
+    <section
+      className="mx-auto w-full px-1"
+      style={{ maxWidth: `${layout.gridWidth}px`, marginTop: `${layout.benchMarginTop}px` }}
+    >
+      <div
+        ref={setNodeRef}
+        className={`rounded-[12px] border transition ${
+          isOver ? "border-black/20 bg-black/5" : "border-black/10 bg-black/[0.02]"
+        }`}
+        style={{
+          padding: `${layout.benchPaddingY}px ${layout.benchPaddingX}px`,
+        }}
+        aria-label="Unassigned cast members"
+        data-testid="figma-circle-unassigned-bank"
+      >
+        <div
+          className="flex overflow-x-auto pb-1 sm:flex-wrap sm:justify-center sm:overflow-visible"
+          style={{ gap: `${layout.benchGap}px` }}
+        >
+          {items.map((item) => (
+            <div key={item.id} className="shrink-0">
+              <Token item={item} size={layout.benchTokenSize} />
             </div>
           ))}
         </div>
@@ -1563,6 +1602,11 @@ function computeFigmaCircleLayoutMetrics(
   ));
   const tokenInset = clampNumber(slotSize * 0.07, 6, 14);
   const tokenSize = Math.round(clampNumber(slotSize - tokenInset * 2, 48, 170));
+  const benchTokenSize = Math.round(clampNumber(tokenSize * 0.74, 36, Math.max(36, tokenSize - 8)));
+  const benchGap = Math.round(clampNumber(interpolate(8, 14, horizontalScale) * shapeScaleFactor, 6, 22));
+  const benchMarginTop = Math.round(interpolate(14, 22, horizontalScale));
+  const benchPaddingY = Math.round(interpolate(6, 10, horizontalScale));
+  const benchPaddingX = Math.round(interpolate(4, 8, horizontalScale));
   const rankNumberSize = Math.round(clampNumber(slotSize * 0.16 * buttonScaleFactor, 12, 32));
   const rankNumberMarginBottom = Math.round(clampNumber(slotSize * 0.08, 5, 12));
   const removeButtonSize = Math.round(clampNumber(slotSize * 0.27 * buttonScaleFactor, 18, 52));
@@ -1578,6 +1622,11 @@ function computeFigmaCircleLayoutMetrics(
     gapY,
     slotSize,
     tokenSize,
+    benchTokenSize,
+    benchGap,
+    benchMarginTop,
+    benchPaddingY,
+    benchPaddingX,
     rankNumberSize,
     rankNumberMarginBottom,
     removeButtonSize,

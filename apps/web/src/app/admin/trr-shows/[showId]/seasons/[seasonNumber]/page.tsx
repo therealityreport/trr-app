@@ -345,6 +345,58 @@ const getAssetDetailUrl = (asset: SeasonAsset): string => {
   return cropDetail ?? detail ?? asset.hosted_url;
 };
 
+const normalizeContentTypeToken = (contentType: string): string =>
+  contentType.trim().toUpperCase().replace(/[_-]+/g, " ");
+
+const contentTypeToAssetKind = (contentType: string): string => {
+  const normalized = normalizeContentTypeToken(contentType);
+  switch (normalized) {
+    case "PROMO":
+      return "promo";
+    case "CONFESSIONAL":
+      return "confessional";
+    case "REUNION":
+      return "reunion";
+    case "INTRO":
+      return "intro";
+    case "EPISODE STILL":
+      return "episode_still";
+    case "CAST PHOTOS":
+      return "cast";
+    case "BACKDROP":
+      return "backdrop";
+    case "POSTER":
+      return "poster";
+    case "LOGO":
+      return "logo";
+    default:
+      return "other";
+  }
+};
+
+const contentTypeToContextType = (contentType: string): string => {
+  const normalized = normalizeContentTypeToken(contentType);
+  switch (normalized) {
+    case "EPISODE STILL":
+      return "episode still";
+    case "CAST PHOTOS":
+      return "cast photos";
+    default:
+      return normalized.toLowerCase();
+  }
+};
+
+const isCrewCreditCategory = (value: string | null | undefined): boolean => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized === "crew" ||
+    normalized.includes("crew") ||
+    normalized.includes("producer") ||
+    normalized.includes("production")
+  );
+};
+
 function RefreshProgressBar({
   show,
   stage,
@@ -1615,6 +1667,67 @@ export default function SeasonDetailPage() {
     [getAuthHeaders]
   );
 
+  const updateGalleryAssetContentType = useCallback(
+    async (asset: SeasonAsset, contentType: string) => {
+      const origin = asset.origin_table ?? null;
+      if (!origin) throw new Error("Cannot update content type: missing origin_table");
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/content-type", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: asset.id, content_type: contentType }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail
+            ? `${data.error}: ${data.detail}`
+            : data?.detail || data?.error || "Content type update failed";
+        throw new Error(message);
+      }
+
+      const normalizedContentType =
+        typeof data.content_type === "string" && data.content_type.trim().length > 0
+          ? data.content_type.trim().toUpperCase()
+          : normalizeContentTypeToken(contentType);
+      const nextKind =
+        typeof data.kind === "string" && data.kind.trim().length > 0
+          ? data.kind.trim()
+          : contentTypeToAssetKind(normalizedContentType);
+      const nextContextType =
+        typeof data.context_type === "string" && data.context_type.trim().length > 0
+          ? data.context_type.trim()
+          : contentTypeToContextType(normalizedContentType);
+
+      const applyUpdate = (candidate: SeasonAsset): SeasonAsset => {
+        const metadata =
+          candidate.metadata && typeof candidate.metadata === "object"
+            ? { ...(candidate.metadata as Record<string, unknown>) }
+            : {};
+        metadata.fandom_section_tag = normalizedContentType;
+        metadata.content_type = normalizedContentType;
+        return {
+          ...candidate,
+          kind: nextKind,
+          context_type: nextContextType,
+          metadata,
+        };
+      };
+
+      setAssets((prev) =>
+        prev.map((candidate) =>
+          candidate.id === asset.id ? applyUpdate(candidate) : candidate
+        )
+      );
+      setAssetLightbox((prev) =>
+        prev && prev.asset.id === asset.id
+          ? { ...prev, asset: applyUpdate(prev.asset) }
+          : prev
+      );
+    },
+    [getAuthHeaders]
+  );
+
   const totalEpisodes = episodes.length;
   const seasonHasPremiereDate = Boolean(
     (season?.premiere_date && season.premiere_date.trim()) ||
@@ -1794,6 +1907,15 @@ export default function SeasonDetailPage() {
     seasonCastSource === "show_fallback" &&
     Boolean(seasonCastEligibilityWarning) &&
     cast.every((member) => (member.episodes_in_season ?? 0) <= 0);
+
+  const castSeasonMembers = useMemo(
+    () => castDisplayMembers.filter((member) => !isCrewCreditCategory(member.credit_category)),
+    [castDisplayMembers]
+  );
+  const crewSeasonMembers = useMemo(
+    () => castDisplayMembers.filter((member) => isCrewCreditCategory(member.credit_category)),
+    [castDisplayMembers]
+  );
 
   const formatEpisodesLabel = (count: number) => {
     const normalized = Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
@@ -2766,7 +2888,7 @@ export default function SeasonDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {castDisplayMembers.length} shown · {cast.length} active
+                    {castSeasonMembers.length} cast · {crewSeasonMembers.length} crew · {cast.length} active
                     {archiveCast.length > 0 ? ` · ${archiveCast.length} archive-only` : ""}
                   </span>
                   <button
@@ -2934,62 +3056,127 @@ export default function SeasonDetailPage() {
               )}
 
               <div className="space-y-8">
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {castDisplayMembers.map((member) => (
-                    <Link
-                      key={member.person_id}
-                      href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
-                      className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                    >
-                      <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                        {member.merged_photo_url ? (
-                          <CastPhoto
-                            src={member.merged_photo_url}
-                            alt={member.person_name || "Cast"}
-                            thumbnail_focus_x={member.thumbnail_focus_x}
-                            thumbnail_focus_y={member.thumbnail_focus_y}
-                            thumbnail_zoom={member.thumbnail_zoom}
-                            thumbnail_crop_mode={member.thumbnail_crop_mode}
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-zinc-400">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                              <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                              <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                            </svg>
+                <section>
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                    Cast
+                  </p>
+                  {castSeasonMembers.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {castSeasonMembers.map((member) => (
+                        <Link
+                          key={member.person_id}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
+                          className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
+                        >
+                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                            {member.merged_photo_url ? (
+                              <CastPhoto
+                                src={member.merged_photo_url}
+                                alt={member.person_name || "Cast"}
+                                thumbnail_focus_x={member.thumbnail_focus_x}
+                                thumbnail_focus_y={member.thumbnail_focus_y}
+                                thumbnail_zoom={member.thumbnail_zoom}
+                                thumbnail_crop_mode={member.thumbnail_crop_mode}
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-zinc-400">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                </svg>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
-                      <p className="text-sm text-zinc-600">
-                        {formatEpisodesLabel(member.episodes_in_season)}
-                      </p>
-                      {typeof member.merged_total_episodes === "number" && (
-                        <p className="text-xs text-zinc-500">
-                          {member.merged_total_episodes} total episodes
-                        </p>
-                      )}
-                      {member.latest_season && (
-                        <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
-                      )}
-                      {member.credit_category && (
-                        <p className="text-xs text-zinc-500">Credit: {member.credit_category}</p>
-                      )}
-                      {member.roles.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {member.roles.map((role) => (
-                            <span
-                              key={`${member.person_id}-season-role-${role}`}
-                              className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                            >
-                              {role}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </Link>
-                  ))}
-                </div>
+                          <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
+                          <p className="text-sm text-zinc-600">
+                            {formatEpisodesLabel(member.episodes_in_season)}
+                          </p>
+                          {typeof member.merged_total_episodes === "number" && (
+                            <p className="text-xs text-zinc-500">
+                              {member.merged_total_episodes} total episodes
+                            </p>
+                          )}
+                          {member.latest_season && (
+                            <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
+                          )}
+                          {member.credit_category && (
+                            <p className="text-xs text-zinc-500">Credit: {member.credit_category}</p>
+                          )}
+                          {member.roles.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {member.roles.map((role) => (
+                                <span
+                                  key={`${member.person_id}-season-role-${role}`}
+                                  className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                >
+                                  {role}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {crewSeasonMembers.length > 0 && (
+                  <section>
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                      Crew
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {crewSeasonMembers.map((member) => (
+                        <Link
+                          key={`crew-${member.person_id}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
+                          className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
+                        >
+                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                            {member.merged_photo_url ? (
+                              <CastPhoto
+                                src={member.merged_photo_url}
+                                alt={member.person_name || "Crew"}
+                                thumbnail_focus_x={member.thumbnail_focus_x}
+                                thumbnail_focus_y={member.thumbnail_focus_y}
+                                thumbnail_zoom={member.thumbnail_zoom}
+                                thumbnail_crop_mode={member.thumbnail_crop_mode}
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-zinc-400">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                          <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
+                          {member.credit_category && (
+                            <p className="text-sm text-blue-700">{member.credit_category}</p>
+                          )}
+                          <p className="text-xs text-zinc-600">
+                            {formatEpisodesLabel(member.episodes_in_season)}
+                          </p>
+                          {member.roles.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {member.roles.map((role) => (
+                                <span
+                                  key={`${member.person_id}-season-crew-role-${role}`}
+                                  className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700"
+                                >
+                                  {role}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 {archiveCast.length > 0 && (
                   <section>
@@ -3042,7 +3229,7 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {castDisplayMembers.length === 0 && cast.length > 0 && (
+                {castSeasonMembers.length === 0 && crewSeasonMembers.length === 0 && cast.length > 0 && (
                   <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                 )}
 
@@ -3165,6 +3352,9 @@ export default function SeasonDetailPage() {
             isStarred={Boolean((assetLightbox.asset.metadata as Record<string, unknown> | null)?.starred)}
             onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
             onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
+            onUpdateContentType={(contentType) =>
+              updateGalleryAssetContentType(assetLightbox.asset, contentType)
+            }
             onDelete={
               assetLightbox.asset.source?.toLowerCase?.().startsWith("web_scrape:")
                 ? async () => {

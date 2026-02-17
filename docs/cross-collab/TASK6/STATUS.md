@@ -20,6 +20,24 @@ None.
 
 ## Recent Activity
 
+- February 17, 2026: Fixed person fandom ownership leakage and added deduced-family fallback for missing fandom pages.
+  - Files:
+    - `apps/web/src/lib/server/trr-api/fandom-ownership.ts`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - `apps/web/src/app/api/admin/trr-api/people/[personId]/fandom/route.ts`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/tests/fandom-person-ownership.test.ts`
+    - `apps/web/tests/person-fandom-route.test.ts`
+  - Changes:
+    - Enforced strict person-level fandom matching (no last-name-only pass-through).
+    - Filtered person-gallery fandom images when source page owner does not match the requested person.
+    - Added show-scoped inferred family fallback (`Mom/Dad/Brother/Sister/Sibling`) from cast-matrix role metadata when verified fandom profile data is unavailable.
+    - Passed `showId` from people page to fandom route for scoped inference.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/lib/server/trr-api/trr-shows-repository.ts' 'src/lib/server/trr-api/fandom-ownership.ts' 'src/app/api/admin/trr-api/people/[personId]/fandom/route.ts' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'tests/fandom-person-ownership.test.ts' 'tests/person-fandom-route.test.ts'` (pass; warning-only)
+    - `pnpm -C apps/web exec vitest run tests/fandom-person-ownership.test.ts tests/person-fandom-route.test.ts` (pass)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)
+
 - February 17, 2026: Added cast-matrix sync admin workflow and season-scoped role filtering semantics.
   - Added new proxy route:
     - `POST /api/admin/trr-api/shows/[showId]/cast-matrix/sync`

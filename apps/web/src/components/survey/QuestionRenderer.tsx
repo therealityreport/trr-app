@@ -10,7 +10,7 @@ import SliderInput from "./SliderInput";
 import RankOrderInput from "./RankOrderInput";
 import WhoseSideInput from "./WhoseSideInput";
 import MatrixLikertInput from "./MatrixLikertInput";
-import ThreeChoiceSliderInput from "./ThreeChoiceSliderInput";
+import CastDecisionCardInput from "./CastDecisionCardInput";
 import TwoAxisGridInput from "./TwoAxisGridInput";
 import MultiSelectInput from "./MultiSelectInput";
 import SingleSelectInput from "./SingleSelectInput";
@@ -101,8 +101,9 @@ export default function QuestionRenderer({
       );
 
     case "three-choice-slider":
+    case "cast-decision-card":
       return (
-        <ThreeChoiceSliderInput
+        <CastDecisionCardInput
           {...commonProps}
           value={value as Record<string, string> | null}
           onChange={onChange}

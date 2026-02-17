@@ -1,9 +1,24 @@
 import type { TrrPersonPhoto, SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
+export interface PhotoFaceBox {
+  index: number;
+  kind: "face";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence?: number | null;
+  person_id?: string;
+  person_name?: string;
+  label?: string;
+}
+
 export interface PhotoMetadata {
   source: string;
   sourceBadgeColor: string;
   s3Mirroring?: boolean;
+  s3MirrorFileName?: string | null;
+  originalImageUrl?: string | null;
   fileType?: string | null;
   createdAt?: Date | null;
   addedAt?: Date | null;
@@ -17,6 +32,8 @@ export interface PhotoMetadata {
   sourceVariant?: string | null;
   sourcePageTitle?: string | null;
   sourceUrl?: string | null;
+  faceBoxes?: PhotoFaceBox[];
+  peopleCount?: number | null;
   caption: string | null;
   dimensions: { width: number; height: number } | null;
   season: number | null;
@@ -132,6 +149,197 @@ const inferFileType = (
     }
   }
   return null;
+};
+
+const getMetadataString = (
+  metadata: Record<string, unknown> | null | undefined,
+  ...keys: string[]
+): string | null => {
+  if (!metadata) return null;
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+};
+
+const normalizeMirrorKey = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      const normalizedPath = decodeURIComponent(parsed.pathname || "").replace(/^\/+/, "");
+      return normalizedPath || null;
+    } catch {
+      return null;
+    }
+  }
+  return trimmed.replace(/^\/+/, "");
+};
+
+const inferS3MirrorFileName = (
+  metadata: Record<string, unknown> | null | undefined,
+  candidateUrls: Array<string | null | undefined>
+): string | null => {
+  const metadataFileName = getMetadataString(
+    metadata,
+    "s3_mirror_file_name",
+    "mirror_file_name",
+    "hosted_file_name",
+    "file_name",
+    "filename"
+  );
+  const metadataKey = getMetadataString(
+    metadata,
+    "hosted_key",
+    "s3_key",
+    "s3_object_key",
+    "storage_key",
+    "storage_path",
+    "mirror_key",
+    "cdn_key"
+  );
+  const keyCandidates = [metadataFileName, metadataKey, ...candidateUrls]
+    .map((value) => normalizeMirrorKey(value))
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+
+  for (const key of keyCandidates) {
+    const fileName = key.split("/").filter(Boolean).pop();
+    if (fileName && fileName.trim().length > 0) {
+      try {
+        return decodeURIComponent(fileName.trim());
+      } catch {
+        return fileName.trim();
+      }
+    }
+  }
+
+  return null;
+};
+
+const normalizeUrl = (value: string | null | undefined): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
+const isLikelyHostedMirrorUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host.includes("cloudfront.net") ||
+      host.includes("amazonaws.com") ||
+      host.includes("s3.") ||
+      host.includes("therealityreport")
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
+
+const resolveOriginalImageUrl = (
+  sourceCandidates: Array<string | null | undefined>,
+  hostedCandidates: Array<string | null | undefined>
+): string | null => {
+  const hostedSet = new Set(
+    hostedCandidates
+      .map((value) => normalizeUrl(value))
+      .filter((value): value is string => typeof value === "string")
+  );
+  for (const candidate of sourceCandidates) {
+    const normalized = normalizeUrl(candidate);
+    if (!normalized) continue;
+    if (hostedSet.has(normalized)) continue;
+    if (isLikelyHostedMirrorUrl(normalized)) continue;
+    return normalized;
+  }
+  return null;
+};
+
+const toPeopleCount = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+  }
+  return null;
+};
+
+const clampFaceCoord = (value: number): number => Math.min(1, Math.max(0, value));
+
+const parseFaceBoxes = (value: unknown): PhotoFaceBox[] => {
+  if (!Array.isArray(value)) return [];
+  const boxes: PhotoFaceBox[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? clampFaceCoord(candidate.x) : null;
+    const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? clampFaceCoord(candidate.y) : null;
+    const width =
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? clampFaceCoord(candidate.width)
+        : null;
+    const height =
+      typeof candidate.height === "number" && Number.isFinite(candidate.height)
+        ? clampFaceCoord(candidate.height)
+        : null;
+    if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+      continue;
+    }
+
+    const index =
+      typeof candidate.index === "number" && Number.isFinite(candidate.index)
+        ? Math.max(1, Math.floor(candidate.index))
+        : boxes.length + 1;
+    const confidence =
+      typeof candidate.confidence === "number" && Number.isFinite(candidate.confidence)
+        ? clampFaceCoord(candidate.confidence)
+        : null;
+    const personId =
+      typeof candidate.person_id === "string" && candidate.person_id.trim().length > 0
+        ? candidate.person_id.trim()
+        : undefined;
+    const personName =
+      typeof candidate.person_name === "string" && candidate.person_name.trim().length > 0
+        ? candidate.person_name.trim()
+        : undefined;
+    const label =
+      typeof candidate.label === "string" && candidate.label.trim().length > 0
+        ? candidate.label.trim()
+        : undefined;
+
+    boxes.push({
+      index,
+      kind: "face",
+      x,
+      y,
+      width,
+      height,
+      ...(confidence !== null ? { confidence } : {}),
+      ...(personId ? { person_id: personId } : {}),
+      ...(personName ? { person_name: personName } : {}),
+      ...(label ? { label } : {}),
+    });
+  }
+  return boxes;
 };
 
 const inferFandomSectionTag = (value: string | null | undefined): string | null => {
@@ -437,6 +645,32 @@ export function mapPhotoToMetadata(
         : typeof metadata.page_url === "string"
           ? metadata.page_url
         : null;
+  const originalImageUrl = resolveOriginalImageUrl(
+    [
+      typeof metadata.source_image_url === "string" ? metadata.source_image_url : null,
+      typeof metadata.original_image_url === "string" ? metadata.original_image_url : null,
+      typeof metadata.image_url === "string" ? metadata.image_url : null,
+      photo.url ?? null,
+      (photo as { original_url?: string | null }).original_url ?? null,
+    ],
+    [
+      photo.hosted_url ?? null,
+      (photo as { original_url?: string | null }).original_url ?? null,
+      (photo as { thumb_url?: string | null }).thumb_url ?? null,
+      (photo as { display_url?: string | null }).display_url ?? null,
+      (photo as { detail_url?: string | null }).detail_url ?? null,
+      (photo as { crop_display_url?: string | null }).crop_display_url ?? null,
+      (photo as { crop_detail_url?: string | null }).crop_detail_url ?? null,
+    ]
+  );
+  const faceBoxes = parseFaceBoxes(
+    (photo as { face_boxes?: unknown }).face_boxes ?? metadata.face_boxes
+  );
+  const peopleCount =
+    toPeopleCount((photo as { people_count?: unknown }).people_count) ??
+    toPeopleCount(metadata.people_count) ??
+    (faceBoxes.length > 0 ? faceBoxes.length : null);
+  const s3MirrorFileName = inferS3MirrorFileName(metadata, [photo.hosted_url, photo.url]);
   const rawCreatedAt =
     metadata.created_at ??
     metadata.createdAt ??
@@ -483,6 +717,8 @@ export function mapPhotoToMetadata(
     source: photo.source,
     sourceBadgeColor: SOURCE_COLORS[photo.source.toLowerCase()] ?? "#6b7280",
     s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
+    s3MirrorFileName,
+    originalImageUrl,
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
@@ -496,6 +732,8 @@ export function mapPhotoToMetadata(
     sourceVariant,
     sourcePageTitle,
     sourceUrl,
+    faceBoxes,
+    peopleCount,
     caption: photo.caption,
     dimensions:
       resolvedWidth && resolvedHeight
@@ -595,6 +833,34 @@ export function mapSeasonAssetToMetadata(
         : typeof metadata.page_url === "string"
           ? metadata.page_url
           : null;
+  const originalImageUrl = resolveOriginalImageUrl(
+    [
+      asset.source_url ?? null,
+      typeof metadata.source_image_url === "string" ? metadata.source_image_url : null,
+      typeof metadata.original_image_url === "string" ? metadata.original_image_url : null,
+      typeof metadata.image_url === "string" ? metadata.image_url : null,
+      typeof metadata.source_url === "string" ? metadata.source_url : null,
+      asset.original_url ?? null,
+    ],
+    [
+      asset.hosted_url ?? null,
+      asset.thumb_url ?? null,
+      asset.display_url ?? null,
+      asset.detail_url ?? null,
+      asset.crop_display_url ?? null,
+      asset.crop_detail_url ?? null,
+      asset.original_url ?? null,
+    ]
+  );
+  const faceBoxes = parseFaceBoxes(metadata.face_boxes);
+  const peopleCount =
+    toPeopleCount((metadata as Record<string, unknown>).people_count) ??
+    (faceBoxes.length > 0 ? faceBoxes.length : null);
+  const s3MirrorFileName = inferS3MirrorFileName(metadata, [
+    asset.hosted_url,
+    asset.original_url,
+    sourceUrl,
+  ]);
 
   // Dates
   const rawCreatedAt =
@@ -685,6 +951,8 @@ export function mapSeasonAssetToMetadata(
     source: asset.source,
     sourceBadgeColor: SOURCE_COLORS[asset.source.toLowerCase()] ?? "#6b7280",
     s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
+    s3MirrorFileName,
+    originalImageUrl,
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
@@ -698,6 +966,8 @@ export function mapSeasonAssetToMetadata(
     sourceVariant,
     sourcePageTitle,
     sourceUrl,
+    faceBoxes,
+    peopleCount,
     caption: asset.caption,
     dimensions:
       resolvedWidth && resolvedHeight
