@@ -27,6 +27,8 @@ Environment Variables (Preview + Production)
 - `TRR_AUTH_CUTOVER_MIN_SHADOW_CHECKS` (default `50`)
 - `TRR_AUTH_CUTOVER_MAX_SHADOW_FAILURES` (default `0`)
 - `TRR_AUTH_CUTOVER_MAX_SHADOW_MISMATCH_EVENTS` (default `0`)
+- `TRR_AUTH_DIAGNOSTICS_PERSIST` (default `true`; set `false` to disable store-backed snapshots)
+- `TRR_AUTH_DIAGNOSTICS_STORE_FILE` (optional file path; default `.cache/auth-diagnostics.json`)
 
 Firebase Console
 - Auth → enable Email/Password + Google (Apple optional)

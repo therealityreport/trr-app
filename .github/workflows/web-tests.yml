@@ -8,14 +8,28 @@ on:
       - '.github/workflows/web-tests.yml'
 
 jobs:
-  vitest:
-    name: Vitest (apps/web)
+  web-ci:
+    name: Web CI (Node ${{ matrix.node-version }} / ${{ matrix.lane }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node-version: 20
+            lane: full
+          - node-version: 22
+            lane: compat
     defaults:
       run:
         working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
+      - name: Check for unresolved merge markers
+        run: |
+          if git grep -n -E '^(<<<<<<< |>>>>>>> )' -- .; then
+            echo "Unresolved merge markers detected. Resolve conflicts before merge." >&2
+            exit 1
+          fi
       - name: Enforce pnpm lockfile
         run: |
           if [ -f apps/web/package-lock.json ]; then
@@ -28,13 +42,32 @@ jobs:
         working-directory: .
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
           cache-dependency-path: apps/web/pnpm-lock.yaml
+      - name: Validate env contract
+        run: |
+          python3 scripts/check_env_example.py \
+            --file apps/web/.env.example \
+            --required TRR_API_URL SCREENALYTICS_API_URL TRR_INTERNAL_ADMIN_SHARED_SECRET
+        working-directory: .
       - name: Install deps
         run: pnpm install --frozen-lockfile
-      - name: Run unit tests with coverage
+      - name: Run lint
+        run: pnpm run lint
+      - name: Run unit tests with coverage (Node 20 full lane)
+        if: matrix.lane == 'full'
         run: pnpm run test:ci -- --coverage
+      - name: Run smoke tests (Node 22 compatibility lane)
+        if: matrix.lane == 'compat'
+        run: pnpm exec vitest run -c vitest.config.ts tests/validation.test.ts tests/cdn-fonts.test.ts
+      - name: Run auth endpoint smoke tests (Node 22 compatibility lane)
+        if: matrix.lane == 'compat'
+        run: |
+          pnpm exec vitest run -c vitest.config.ts \
+            tests/admin-auth-status-route.test.ts \
+            tests/admin-auth-status-reset-route.test.ts \
+            tests/admin-auth-drill-report-route.test.ts
       - name: Build (no DATABASE_URL)
         run: pnpm run build
         env:
@@ -46,8 +79,8 @@ jobs:
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-build"
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.lane == 'full'
         with:
-          name: web-coverage
+          name: web-coverage-node-${{ matrix.node-version }}
           path: apps/web/coverage
           if-no-files-found: ignore

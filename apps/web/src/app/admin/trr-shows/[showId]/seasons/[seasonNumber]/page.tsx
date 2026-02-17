@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
@@ -39,11 +40,19 @@ import {
   isThumbnailCropMode,
   resolveThumbnailPresentation,
 } from "@/lib/thumbnail-crop";
+import {
+  buildShowAdminUrl,
+  buildSeasonAdminUrl,
+  cleanLegacyRoutingQuery,
+  parseSeasonRouteState,
+} from "@/lib/admin/show-admin-routes";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 interface TrrShow {
   id: string;
   name: string;
+  slug: string;
+  canonical_slug: string;
   imdb_id: string | null;
   tmdb_id: number | null;
 }
@@ -485,6 +494,7 @@ function mapEpisodeToMetadata(episode: TrrEpisode, showName?: string): PhotoMeta
 
 export default function SeasonDetailPage() {
   const params = useParams();
+  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const showRouteParam = params.showId as string;
@@ -581,14 +591,60 @@ export default function SeasonDetailPage() {
     [router, searchParams]
   );
 
+  const seasonRouteState = useMemo(
+    () => parseSeasonRouteState(pathname, new URLSearchParams(searchParams.toString())),
+    [pathname, searchParams]
+  );
+
+  useEffect(() => {
+    setActiveTab(seasonRouteState.tab);
+    if (seasonRouteState.tab === "assets") {
+      setAssetsView(seasonRouteState.assetsSubTab);
+    }
+  }, [seasonRouteState.assetsSubTab, seasonRouteState.tab]);
+
+  const showSlugForRouting = useMemo(() => {
+    const canonical = show?.canonical_slug?.trim();
+    if (canonical) return canonical;
+    const base = show?.slug?.trim();
+    if (base) return base;
+    return showRouteParam.trim();
+  }, [show?.canonical_slug, show?.slug, showRouteParam]);
+
   const setTab = useCallback(
     (tab: TabId) => {
       setActiveTab(tab);
-      const next = new URLSearchParams(searchParams.toString());
-      next.set("tab", tab);
-      router.replace(`?${next.toString()}`, { scroll: false });
+      const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      router.replace(
+        buildSeasonAdminUrl({
+          showSlug: showSlugForRouting,
+          seasonNumber,
+          tab,
+          assetsSubTab: tab === "assets" ? assetsView : undefined,
+          query: preservedQuery,
+        }) as Route,
+        { scroll: false }
+      );
     },
-    [router, searchParams]
+    [assetsView, router, searchParams, seasonNumber, showSlugForRouting]
+  );
+
+  const setAssetsSubTab = useCallback(
+    (view: "media" | "brand") => {
+      setAssetsView(view);
+      const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      router.replace(
+        buildSeasonAdminUrl({
+          showSlug: showSlugForRouting,
+          seasonNumber,
+          tab: "assets",
+          assetsSubTab: view,
+          query: preservedQuery,
+        }) as Route,
+        { scroll: false }
+      );
+    },
+    [router, searchParams, seasonNumber, showSlugForRouting]
   );
 
   const [addBackdropsOpen, setAddBackdropsOpen] = useState(false);
@@ -609,23 +665,6 @@ export default function SeasonDetailPage() {
   const [backdropsError, setBackdropsError] = useState<string | null>(null);
   const [selectedBackdropIds, setSelectedBackdropIds] = useState<Set<string>>(new Set());
   const [assigningBackdrops, setAssigningBackdrops] = useState(false);
-
-  const tabParam = searchParams.get("tab");
-  useEffect(() => {
-    const allowedTabs: TabId[] = ["episodes", "assets", "videos", "cast", "surveys", "social", "details"];
-    if (!tabParam) return;
-
-    // Back-compat alias: ?tab=media -> assets (media view)
-    if (tabParam === "media") {
-      setActiveTab("assets");
-      setAssetsView("media");
-      return;
-    }
-
-    if (allowedTabs.includes(tabParam as TabId)) {
-      setActiveTab(tabParam as TabId);
-    }
-  }, [tabParam]);
 
   const getAuthHeaders = useCallback(async () => {
     const token = await auth.currentUser?.getIdToken();
@@ -689,6 +728,33 @@ export default function SeasonDetailPage() {
       cancelled = true;
     };
   }, [checking, getAuthHeaders, hasAccess, showRouteParam]);
+
+  useEffect(() => {
+    const canonicalSlug = show?.canonical_slug?.trim() || show?.slug?.trim();
+    if (!canonicalSlug) return;
+
+    const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+    const canonicalUrl = buildSeasonAdminUrl({
+      showSlug: canonicalSlug,
+      seasonNumber,
+      tab: seasonRouteState.tab,
+      assetsSubTab: seasonRouteState.assetsSubTab,
+      query: preservedQuery,
+    });
+    const currentQuery = searchParams.toString();
+    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
+    if (currentUrl === canonicalUrl) return;
+    router.replace(canonicalUrl as Route, { scroll: false });
+  }, [
+    pathname,
+    router,
+    searchParams,
+    seasonNumber,
+    seasonRouteState.assetsSubTab,
+    seasonRouteState.tab,
+    show?.canonical_slug,
+    show?.slug,
+  ]);
 
   const fetchShowCastForBrand = useCallback(async () => {
     if (!showId) return;
@@ -2171,7 +2237,7 @@ export default function SeasonDetailPage() {
             {error || "Season not found"}
           </p>
           <Link
-            href={`/admin/trr-shows/${showId}`}
+            href={buildShowAdminUrl({ showSlug: showSlugForRouting }) as "/admin/trr-shows"}
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
             ← Back to Show
@@ -2188,7 +2254,7 @@ export default function SeasonDetailPage() {
           <div className="mx-auto max-w-6xl">
             <div className="mb-4">
               <Link
-                href={`/admin/trr-shows/${showId}`}
+                href={buildShowAdminUrl({ showSlug: showSlugForRouting }) as "/admin/trr-shows"}
                 className="text-sm text-zinc-500 hover:text-zinc-900"
               >
                 ← Back to Show
@@ -2447,7 +2513,7 @@ export default function SeasonDetailPage() {
                   <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
                     <button
                       type="button"
-                      onClick={() => setAssetsView("media")}
+                      onClick={() => setAssetsSubTab("media")}
                       className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
                         assetsView === "media"
                           ? "bg-white text-zinc-900 shadow-sm"
@@ -2458,7 +2524,7 @@ export default function SeasonDetailPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAssetsView("brand")}
+                      onClick={() => setAssetsSubTab("brand")}
                       className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
                         assetsView === "brand"
                           ? "bg-white text-zinc-900 shadow-sm"
@@ -3067,7 +3133,7 @@ export default function SeasonDetailPage() {
                       {castSeasonMembers.map((member) => (
                         <Link
                           key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
                           <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -3131,7 +3197,7 @@ export default function SeasonDetailPage() {
                       {crewSeasonMembers.map((member) => (
                         <Link
                           key={`crew-${member.person_id}`}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
                         >
                           <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -3190,7 +3256,7 @@ export default function SeasonDetailPage() {
                       {archiveCast.map((member) => (
                         <Link
                           key={`archive-${member.person_id}`}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
+                          href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}&seasonNumber=${seasonNumber}`}
                           className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 transition hover:border-amber-300 hover:bg-amber-100/50"
                         >
                           <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -3252,6 +3318,7 @@ export default function SeasonDetailPage() {
           {activeTab === "social" && (
             <SeasonSocialAnalyticsSection
               showId={showId}
+              showSlug={showSlugForRouting}
               seasonNumber={season.season_number}
               seasonId={season.id}
               showName={show.name}

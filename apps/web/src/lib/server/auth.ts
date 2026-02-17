@@ -1,5 +1,7 @@
 import "server-only";
 import { Buffer } from "node:buffer";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import type { NextRequest } from "next/server";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { adminAuth } from "@/lib/firebaseAdmin";
@@ -33,6 +35,12 @@ interface AuthDiagnosticsCounters {
   fallbackSuccesses: number;
 }
 
+interface PersistedAuthDiagnosticsState {
+  windowStartedAt: string;
+  lastObservedAt: string | null;
+  counters: AuthDiagnosticsCounters;
+}
+
 export interface AuthDiagnosticsSnapshot {
   provider: AuthProvider;
   shadowMode: boolean;
@@ -55,6 +63,13 @@ const AUTH_SHADOW_MODE = (process.env.TRR_AUTH_SHADOW_MODE ?? "false").toLowerCa
 const USE_EMULATORS = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
 const HAS_SERVICE_ACCOUNT = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT) || USE_EMULATORS;
 const FIREBASE_WEB_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "";
+const AUTH_DIAGNOSTICS_PERSIST_ENABLED =
+  (process.env.TRR_AUTH_DIAGNOSTICS_PERSIST ?? "true").toLowerCase() !== "false" &&
+  process.env.NODE_ENV !== "test";
+const AUTH_DIAGNOSTICS_STORE_FILE = resolve(
+  process.cwd(),
+  process.env.TRR_AUTH_DIAGNOSTICS_STORE_FILE ?? ".cache/auth-diagnostics.json",
+);
 let authDiagnosticsWindowStartedAt = new Date().toISOString();
 let authDiagnosticsLastObservedAt: string | null = null;
 const authDiagnosticsCounters: AuthDiagnosticsCounters = {
@@ -68,9 +83,73 @@ const authDiagnosticsCounters: AuthDiagnosticsCounters = {
   },
   fallbackSuccesses: 0,
 };
+let authDiagnosticsLoaded = false;
+
+function _buildAuthDiagnosticsState(): PersistedAuthDiagnosticsState {
+  return {
+    windowStartedAt: authDiagnosticsWindowStartedAt,
+    lastObservedAt: authDiagnosticsLastObservedAt,
+    counters: {
+      shadowChecks: authDiagnosticsCounters.shadowChecks,
+      shadowFailures: authDiagnosticsCounters.shadowFailures,
+      shadowMismatchEvents: authDiagnosticsCounters.shadowMismatchEvents,
+      shadowMismatchFieldCounts: {
+        uid: authDiagnosticsCounters.shadowMismatchFieldCounts.uid,
+        email: authDiagnosticsCounters.shadowMismatchFieldCounts.email,
+        name: authDiagnosticsCounters.shadowMismatchFieldCounts.name,
+      },
+      fallbackSuccesses: authDiagnosticsCounters.fallbackSuccesses,
+    },
+  };
+}
+
+function _persistAuthDiagnosticsState(): void {
+  if (!AUTH_DIAGNOSTICS_PERSIST_ENABLED) return;
+  try {
+    mkdirSync(dirname(AUTH_DIAGNOSTICS_STORE_FILE), { recursive: true });
+    writeFileSync(
+      AUTH_DIAGNOSTICS_STORE_FILE,
+      JSON.stringify(_buildAuthDiagnosticsState(), null, 2),
+      "utf8",
+    );
+  } catch (error) {
+    console.warn("[auth] Failed to persist diagnostics snapshot", error);
+  }
+}
+
+function _loadAuthDiagnosticsStateIfNeeded(): void {
+  if (authDiagnosticsLoaded || !AUTH_DIAGNOSTICS_PERSIST_ENABLED) return;
+  authDiagnosticsLoaded = true;
+  try {
+    if (!existsSync(AUTH_DIAGNOSTICS_STORE_FILE)) return;
+    const payload = JSON.parse(readFileSync(AUTH_DIAGNOSTICS_STORE_FILE, "utf8")) as Partial<PersistedAuthDiagnosticsState>;
+    if (typeof payload.windowStartedAt === "string" && payload.windowStartedAt.trim()) {
+      authDiagnosticsWindowStartedAt = payload.windowStartedAt;
+    }
+    authDiagnosticsLastObservedAt =
+      typeof payload.lastObservedAt === "string" && payload.lastObservedAt.trim()
+        ? payload.lastObservedAt
+        : null;
+    const counters = payload.counters;
+    if (counters && typeof counters === "object") {
+      authDiagnosticsCounters.shadowChecks = Number(counters.shadowChecks ?? 0) || 0;
+      authDiagnosticsCounters.shadowFailures = Number(counters.shadowFailures ?? 0) || 0;
+      authDiagnosticsCounters.shadowMismatchEvents = Number(counters.shadowMismatchEvents ?? 0) || 0;
+      authDiagnosticsCounters.fallbackSuccesses = Number(counters.fallbackSuccesses ?? 0) || 0;
+      const mismatch = counters.shadowMismatchFieldCounts ?? {};
+      authDiagnosticsCounters.shadowMismatchFieldCounts.uid = Number(mismatch.uid ?? 0) || 0;
+      authDiagnosticsCounters.shadowMismatchFieldCounts.email = Number(mismatch.email ?? 0) || 0;
+      authDiagnosticsCounters.shadowMismatchFieldCounts.name = Number(mismatch.name ?? 0) || 0;
+    }
+  } catch (error) {
+    console.warn("[auth] Failed to load diagnostics snapshot", error);
+  }
+}
 
 function markAuthDiagnosticsObservedNow(): void {
+  _loadAuthDiagnosticsStateIfNeeded();
   authDiagnosticsLastObservedAt = new Date().toISOString();
+  _persistAuthDiagnosticsState();
 }
 
 function parseTokenFromRequest(request: NextRequest): { token: string; kind: TokenKind } | null {
@@ -360,6 +439,7 @@ const allowedDisplayNameKeys = new Set<string>(
 );
 
 export function getAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
+  _loadAuthDiagnosticsStateIfNeeded();
   return {
     provider: AUTH_PROVIDER,
     shadowMode: AUTH_SHADOW_MODE,
@@ -385,6 +465,7 @@ export function getAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
 }
 
 export function resetAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
+  _loadAuthDiagnosticsStateIfNeeded();
   authDiagnosticsWindowStartedAt = new Date().toISOString();
   authDiagnosticsLastObservedAt = null;
   authDiagnosticsCounters.shadowChecks = 0;
@@ -394,6 +475,7 @@ export function resetAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
   authDiagnosticsCounters.shadowMismatchFieldCounts.email = 0;
   authDiagnosticsCounters.shadowMismatchFieldCounts.name = 0;
   authDiagnosticsCounters.fallbackSuccesses = 0;
+  _persistAuthDiagnosticsState();
 
   return getAuthDiagnosticsSnapshot();
 }

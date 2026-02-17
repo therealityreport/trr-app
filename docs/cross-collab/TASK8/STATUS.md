@@ -67,4 +67,13 @@ None.
 - February 17, 2026: Validation:
   - `pnpm -C apps/web exec vitest run tests/auth-cutover-readiness.test.ts tests/admin-auth-status-route.test.ts tests/admin-auth-status-reset-route.test.ts tests/server-auth-adapter.test.ts` (`12 passed`)
   - `pnpm -C apps/web run lint` (pass; warnings only)
-  - `pnpm -C apps/web exec next build --webpack` currently fails on unrelated typed-route mismatch in `src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx` (`buildSeasonAdminUrl` return type vs `router.replace` requirement).
+  - `pnpm -C apps/web exec next build --webpack` (pass; typed-route mismatch resolved).
+- February 17, 2026: Added Stage 3 drill report + CI smoke coverage:
+  - Added admin endpoint `GET /api/admin/auth/status/drill-report` with JSON and downloadable report modes.
+  - Added compatibility-lane CI smoke tests for:
+    - `tests/admin-auth-status-route.test.ts`
+    - `tests/admin-auth-status-reset-route.test.ts`
+    - `tests/admin-auth-drill-report-route.test.ts`
+  - Added persistent diagnostics storage knobs:
+    - `TRR_AUTH_DIAGNOSTICS_PERSIST`
+    - `TRR_AUTH_DIAGNOSTICS_STORE_FILE`

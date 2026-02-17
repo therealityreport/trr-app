@@ -235,6 +235,7 @@ export default function DevDashboardPage() {
   const [authStatus, setAuthStatus] = useState<AuthStatusPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [resettingAuthWindow, setResettingAuthWindow] = useState(false);
+  const [downloadingDrillReport, setDownloadingDrillReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<RepoName>("TRR-Backend");
 
@@ -295,6 +296,40 @@ export default function DevDashboardPage() {
       setError(err instanceof Error ? err.message : "Failed to reset auth diagnostics");
     } finally {
       setResettingAuthWindow(false);
+    }
+  }, [getAuthHeaders]);
+
+  const downloadAuthDrillReport = useCallback(async () => {
+    try {
+      setError(null);
+      setDownloadingDrillReport(true);
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/auth/status/drill-report?format=download", {
+        method: "GET",
+        headers,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const message = typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const match = disposition.match(/filename=\"([^\"]+)\"/);
+      const filename = match?.[1] || "auth-cutover-drill.json";
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to download drill report");
+    } finally {
+      setDownloadingDrillReport(false);
     }
   }, [getAuthHeaders]);
 
@@ -395,6 +430,14 @@ export default function DevDashboardPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void downloadAuthDrillReport()}
+                        disabled={downloadingDrillReport}
+                        className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {downloadingDrillReport ? "Downloading..." : "Download Drill Report"}
+                      </button>
                       <button
                         type="button"
                         onClick={() => void resetAuthDiagnosticsWindow()}

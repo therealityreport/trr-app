@@ -4,6 +4,45 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-17)
 
+- February 17, 2026: Implemented canonical slug URLs and path-based tab routing for admin show/season pages with legacy URL auto-canonicalization.
+  - Files:
+    - `apps/web/src/lib/admin/show-admin-routes.ts` (new)
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/page.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - `apps/web/src/components/admin/SurveyQuestionsEditor.tsx`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - `apps/web/next.config.ts`
+    - `apps/web/tests/show-admin-routes.test.ts` (new)
+    - `apps/web/tests/trr-shows-slug-route.test.ts` (new)
+  - Changes:
+    - Added centralized route parser/builder utilities for show and season admin URLs:
+      - canonical show root = overview.
+      - show/season tabs and assets sub-tabs encoded in path segments.
+      - legacy `tab/assets` query parsing + cleanup helpers.
+    - Added explicit `next.config.ts` `beforeFiles` rewrites for path-based show/season tab routes to existing render pages.
+    - Updated show and season admin pages to:
+      - parse tab state from pathname first and query fallback second.
+      - navigate via canonical path URLs (no query-tab routing).
+      - auto-canonicalize legacy UUID/query/alias URLs to slug + path equivalents while preserving non-routing query params.
+    - Updated show list and covered-show links to emit canonical slug URLs.
+    - Updated week drilldown and season social back links to path-based routes.
+    - Updated survey cast-role setup guidance link to path form (`/cast`).
+    - Added slug-aware person-page handling:
+      - preserves slug in `showId` query context.
+      - resolves slug to UUID for API calls.
+      - prefers current slug context for same-show credit links, UUID fallback for others.
+    - Extended TRR show payloads from repository with `slug` and `canonical_slug` for both search and single-show fetches.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/show-admin-routes.ts' 'src/app/admin/trr-shows/page.tsx' 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/components/admin/SurveyQuestionsEditor.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/lib/server/trr-api/trr-shows-repository.ts' 'next.config.ts'` (pass with existing warnings only, no errors)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts tests/trr-shows-slug-route.test.ts` (pass; 2 files / 8 tests)
+  - Notes:
+    - Existing legacy alias pages remain in place as fallback, but canonical navigation now routes through slug/path builders.
+
 - February 17, 2026: Implemented Task 10 social admin completion/polling correctness and incremental/full-refresh ingest UX.
   - Files:
     - `apps/web/src/components/admin/season-social-analytics-section.tsx`
@@ -2726,3 +2765,31 @@ Continuation (same session, 2026-02-17) — diagnostics reset window controls fo
   - `pnpm -C apps/web exec vitest run tests/auth-cutover-readiness.test.ts tests/admin-auth-status-route.test.ts tests/admin-auth-status-reset-route.test.ts tests/server-auth-adapter.test.ts` (`12 passed`)
   - `pnpm -C apps/web run lint` (pass; warnings only)
   - `pnpm -C apps/web exec next build --webpack` failed due to unrelated typed-route mismatch in `src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx` (`buildSeasonAdminUrl(...)` string not assignable to `RouteImpl<string>`).
+
+Continuation (same session, 2026-02-17) — drill report export + build blocker resolution:
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/src/lib/server/auth.ts`
+  - `apps/web/src/app/api/admin/auth/status/drill-report/route.ts`
+  - `.github/workflows/web-tests.yml`
+  - `apps/web/src/app/admin/dev-dashboard/page.tsx`
+  - `apps/web/tests/admin-auth-drill-report-route.test.ts`
+  - `apps/web/tests/admin-auth-status-route.test.ts`
+  - `apps/web/tests/admin-auth-status-reset-route.test.ts`
+  - `apps/web/tests/auth-cutover-readiness.test.ts`
+  - `apps/web/tests/server-auth-adapter.test.ts`
+  - `apps/web/DEPLOY.md`
+- Changes:
+  - Resolved typed-route build blocker by switching season admin route casts to `Route` for `router.replace(...)` targets.
+  - Added store-backed auth diagnostics persistence (file-backed) with configurable controls:
+    - `TRR_AUTH_DIAGNOSTICS_PERSIST`
+    - `TRR_AUTH_DIAGNOSTICS_STORE_FILE`
+  - Added Stage 3 drill report endpoint:
+    - `GET /api/admin/auth/status/drill-report`
+    - supports `?format=download` for JSON evidence export.
+  - Added dev dashboard action to download drill reports directly from admin UI.
+  - Added CI compatibility-lane smoke tests for auth status/reset/drill endpoints.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/admin-auth-status-route.test.ts tests/admin-auth-status-reset-route.test.ts tests/admin-auth-drill-report-route.test.ts tests/auth-cutover-readiness.test.ts tests/server-auth-adapter.test.ts` (`14 passed`)
+  - `pnpm -C apps/web run lint` (pass; warnings only)
+  - `pnpm -C apps/web exec next build --webpack` (pass)
