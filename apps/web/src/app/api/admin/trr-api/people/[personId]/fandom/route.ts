@@ -8,6 +8,11 @@ interface RouteParams {
   params: Promise<{ personId: string }>;
 }
 
+type GetFandomDataByPersonIdWithShow = (
+  personId: string,
+  options?: { showId?: string }
+) => ReturnType<typeof getFandomDataByPersonId>;
+
 /**
  * GET /api/admin/trr-api/people/[personId]/fandom
  *
@@ -31,7 +36,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const fandomData = await getFandomDataByPersonId(personId, { showId });
+    const getFandomData = getFandomDataByPersonId as unknown as GetFandomDataByPersonIdWithShow;
+    const fandomData = await getFandomData(personId, { showId });
 
     return NextResponse.json({
       fandomData,
