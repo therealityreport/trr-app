@@ -110,6 +110,53 @@ interface DevDashboardData {
   generatedAt: string;
 }
 
+interface AuthDiagnostics {
+  provider: "firebase" | "supabase";
+  shadowMode: boolean;
+  windowStartedAt: string;
+  lastObservedAt: string | null;
+  allowlistSizes: {
+    emails: number;
+    uids: number;
+    displayNames: number;
+  };
+  counters: {
+    shadowChecks: number;
+    shadowFailures: number;
+    shadowMismatchEvents: number;
+    shadowMismatchFieldCounts: {
+      uid: number;
+      email: number;
+      name: number;
+    };
+    fallbackSuccesses: number;
+  };
+}
+
+interface AuthCutoverReadiness {
+  ready: boolean;
+  reasons: string[];
+  thresholds: {
+    minShadowChecks: number;
+    maxShadowFailures: number;
+    maxShadowMismatchEvents: number;
+  };
+  observed: {
+    shadowChecks: number;
+    shadowFailures: number;
+    shadowMismatchEvents: number;
+  };
+}
+
+interface AuthStatusPayload {
+  diagnostics: AuthDiagnostics;
+  cutoverReadiness: AuthCutoverReadiness;
+  viewer: {
+    uid: string;
+    provider: "firebase" | "supabase";
+  };
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -170,6 +217,13 @@ function getChangeBadge(status: string) {
   return { label: status.toUpperCase(), className: "border border-zinc-200 bg-zinc-100 text-zinc-700" };
 }
 
+function getReadinessBadge(ready: boolean) {
+  if (ready) {
+    return { label: "Cutover Ready", className: "border border-green-200 bg-green-50 text-green-800" };
+  }
+  return { label: "Not Ready", className: "border border-amber-200 bg-amber-50 text-amber-800" };
+}
+
 // ============================================================================
 // Page
 // ============================================================================
@@ -178,7 +232,10 @@ export default function DevDashboardPage() {
   const { user, checking, hasAccess } = useAdminGuard();
 
   const [data, setData] = useState<DevDashboardData | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatusPayload | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resettingAuthWindow, setResettingAuthWindow] = useState(false);
+  const [downloadingDrillReport, setDownloadingDrillReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<RepoName>("TRR-Backend");
 
@@ -194,21 +251,85 @@ export default function DevDashboardPage() {
       setLoading(true);
 
       const headers = await getAuthHeaders();
-      const res = await fetch("/api/admin/dev-dashboard", { headers });
-      const payload = await res.json().catch(() => null);
+      const [dashboardRes, authStatusRes] = await Promise.all([
+        fetch("/api/admin/dev-dashboard", { headers }),
+        fetch("/api/admin/auth/status", { headers }),
+      ]);
+      const dashboardPayload = await dashboardRes.json().catch(() => null);
+      const authStatusPayload = await authStatusRes.json().catch(() => null);
 
-      if (!res.ok) {
+      if (!dashboardRes.ok) {
         const message =
-          typeof payload?.error === "string" ? payload.error : `Request failed (${res.status})`;
+          typeof dashboardPayload?.error === "string"
+            ? dashboardPayload.error
+            : `Request failed (${dashboardRes.status})`;
         throw new Error(message);
       }
 
-      setData(payload as DevDashboardData);
+      setData(dashboardPayload as DevDashboardData);
+      setAuthStatus(authStatusRes.ok ? (authStatusPayload as AuthStatusPayload) : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard");
       setData(null);
+      setAuthStatus(null);
     } finally {
       setLoading(false);
+    }
+  }, [getAuthHeaders]);
+
+  const resetAuthDiagnosticsWindow = useCallback(async () => {
+    try {
+      setError(null);
+      setResettingAuthWindow(true);
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/auth/status/reset", {
+        method: "POST",
+        headers,
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+      setAuthStatus(payload as AuthStatusPayload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset auth diagnostics");
+    } finally {
+      setResettingAuthWindow(false);
+    }
+  }, [getAuthHeaders]);
+
+  const downloadAuthDrillReport = useCallback(async () => {
+    try {
+      setError(null);
+      setDownloadingDrillReport(true);
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/auth/status/drill-report?format=download", {
+        method: "GET",
+        headers,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const message = typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const match = disposition.match(/filename=\"([^\"]+)\"/);
+      const filename = match?.[1] || "auth-cutover-drill.json";
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to download drill report");
+    } finally {
+      setDownloadingDrillReport(false);
     }
   }, [getAuthHeaders]);
 
@@ -286,6 +407,88 @@ export default function DevDashboardPage() {
 
           {data ? (
             <>
+              {authStatus ? (
+                <div className="mb-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-zinc-900">Auth Migration Status</h2>
+                      <p className="text-xs text-zinc-500">
+                        Provider: <span className="font-mono">{authStatus.diagnostics.provider}</span> · Shadow mode:{" "}
+                        <span className="font-mono">{authStatus.diagnostics.shadowMode ? "enabled" : "disabled"}</span>
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        Window:{" "}
+                        <span className="font-mono">
+                          {new Date(authStatus.diagnostics.windowStartedAt).toLocaleString()}
+                        </span>
+                        {" · "}Last observed:{" "}
+                        <span className="font-mono">
+                          {authStatus.diagnostics.lastObservedAt
+                            ? new Date(authStatus.diagnostics.lastObservedAt).toLocaleString()
+                            : "none"}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void downloadAuthDrillReport()}
+                        disabled={downloadingDrillReport}
+                        className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {downloadingDrillReport ? "Downloading..." : "Download Drill Report"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void resetAuthDiagnosticsWindow()}
+                        disabled={resettingAuthWindow}
+                        className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {resettingAuthWindow ? "Resetting..." : "Reset Window"}
+                      </button>
+                      {(() => {
+                        const badge = getReadinessBadge(authStatus.cutoverReadiness.ready);
+                        return (
+                          <span className={`rounded-md px-2 py-1 text-xs font-semibold ${badge.className}`}>
+                            {badge.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  <div className="grid gap-4 text-sm text-zinc-700 md:grid-cols-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-zinc-500">Observed</p>
+                      <p>Shadow checks: {authStatus.cutoverReadiness.observed.shadowChecks}</p>
+                      <p>Shadow failures: {authStatus.cutoverReadiness.observed.shadowFailures}</p>
+                      <p>Mismatch events: {authStatus.cutoverReadiness.observed.shadowMismatchEvents}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-zinc-500">Thresholds</p>
+                      <p>Min checks: {authStatus.cutoverReadiness.thresholds.minShadowChecks}</p>
+                      <p>Max failures: {authStatus.cutoverReadiness.thresholds.maxShadowFailures}</p>
+                      <p>
+                        Max mismatches: {authStatus.cutoverReadiness.thresholds.maxShadowMismatchEvents}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-zinc-500">Mismatch Fields</p>
+                      <p>Email: {authStatus.diagnostics.counters.shadowMismatchFieldCounts.email}</p>
+                      <p>Name: {authStatus.diagnostics.counters.shadowMismatchFieldCounts.name}</p>
+                      <p>UID: {authStatus.diagnostics.counters.shadowMismatchFieldCounts.uid}</p>
+                    </div>
+                  </div>
+                  {authStatus.cutoverReadiness.reasons.length > 0 ? (
+                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Blocking Reasons</p>
+                      <p className="mt-1 text-sm text-amber-900">
+                        {authStatus.cutoverReadiness.reasons.join(" | ")}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="mb-6 flex flex-wrap gap-2">
                 {REPO_TABS.map((tab) => {
                   const isActive = tab === activeRepo;

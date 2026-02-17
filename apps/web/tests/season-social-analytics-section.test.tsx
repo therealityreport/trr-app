@@ -303,6 +303,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -566,13 +567,227 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       target: { value: "run-1-abcdef" },
     });
 
-    await screen.findByText("1 job");
     fireEvent.click(screen.getByRole("button", { name: /Ingest Job Status.*Show/i }));
+    await screen.findByText("123 items");
 
     failJobsRefresh = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh Jobs" }));
 
     expect(await screen.findByText(/temporary jobs outage/i)).toBeInTheDocument();
-    expect(screen.getByText("1 job")).toBeInTheDocument();
+    expect(screen.getByText("123 items")).toBeInTheDocument();
+  });
+
+  it("uses incremental sync strategy by default for ingest payload", async () => {
+    const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
+    const capturedPayloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: runId,
+              status: "running",
+              summary: { total_jobs: 2, completed_jobs: 0, failed_jobs: 0, active_jobs: 2, items_found_total: 0 },
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+        if (typeof init?.body === "string") {
+          capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 2 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Ingest + Export");
+    fireEvent.click(screen.getByRole("button", { name: /Run Season Ingest \(All\)/i }));
+
+    await waitFor(() => {
+      expect(capturedPayloads.length).toBeGreaterThan(0);
+    });
+    expect(capturedPayloads[0]?.sync_strategy).toBe("incremental");
+  });
+
+  it("sends full_refresh strategy when full refresh mode is selected", async () => {
+    const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
+    const capturedPayloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+        if (typeof init?.body === "string") {
+          capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 2 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Sync Mode");
+    fireEvent.change(screen.getByRole("combobox", { name: /Sync Mode/i }), {
+      target: { value: "full_refresh" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Run Season Ingest \(All\)/i }));
+
+    await waitFor(() => {
+      expect(capturedPayloads.length).toBeGreaterThan(0);
+    });
+    expect(capturedPayloads[0]?.sync_strategy).toBe("full_refresh");
+  });
+
+  it("renders rich run labels in the run selector", async () => {
+    const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) {
+        return jsonResponse(analyticsBase);
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({ targets: [] });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({ jobs: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: runId,
+              status: "running",
+              created_at: "2026-02-17T19:57:13Z",
+              config: {
+                date_start: "2026-01-07T00:00:00Z",
+                date_end: "2026-01-13T23:59:59Z",
+                platforms: "all",
+              },
+              summary: {
+                total_jobs: 8,
+                completed_jobs: 1,
+                failed_jobs: 0,
+                active_jobs: 7,
+                items_found_total: 0,
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const runSelect = await screen.findByRole("combobox", { name: /Run/i });
+    const matchingOption = await within(runSelect).findByRole("option", { name: /80423aa2/i });
+    expect(matchingOption.textContent).toContain("Week 1");
+    expect(matchingOption.textContent).toContain("All Platforms");
+    expect(matchingOption.textContent).toContain("Running 1/8");
+    expect(matchingOption.textContent).toContain("0 items");
+  });
+
+  it("does not emit false completion while run status remains active with transient empty jobs", async () => {
+    const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
+    let runJobsCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: runId,
+              status: "running",
+              summary: {
+                total_jobs: 8,
+                completed_jobs: 1,
+                failed_jobs: 0,
+                active_jobs: 7,
+                items_found_total: 0,
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/jobs?") && url.includes(`run_id=${runId}`)) {
+        runJobsCalls += 1;
+        if (runJobsCalls === 1) {
+          return jsonResponse({
+            jobs: [
+              {
+                id: "job-1",
+                run_id: runId,
+                platform: "instagram",
+                status: "running",
+                job_type: "posts",
+              },
+            ],
+          });
+        }
+        return jsonResponse({ jobs: [] });
+      }
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 8 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Ingest + Export");
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: /Run Season Ingest \(All\)/i }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(runJobsCalls).toBeGreaterThan(0);
+
+    await vi.advanceTimersByTimeAsync(7000);
+    expect(screen.queryByText(/Ingest complete/i)).not.toBeInTheDocument();
   });
 });
