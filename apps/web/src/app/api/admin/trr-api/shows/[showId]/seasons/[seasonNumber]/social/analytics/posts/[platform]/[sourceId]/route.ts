@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
-import { getSeasonByShowAndNumber } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  fetchSeasonBackendJson,
+  socialProxyErrorResponse,
+} from "@/lib/server/trr-api/social-admin-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -14,75 +16,54 @@ interface RouteParams {
   }>;
 }
 
-const getServiceRoleKey = (): string => {
-  const value = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
-  if (!value) {
-    throw new Error("Backend auth not configured");
-  }
-  return value;
-};
-
-const resolveSeasonId = async (showId: string, seasonNumberRaw: string): Promise<string> => {
-  const seasonNumber = Number.parseInt(seasonNumberRaw, 10);
-  if (!Number.isFinite(seasonNumber)) {
-    throw new Error("seasonNumber is invalid");
-  }
-  const season = await getSeasonByShowAndNumber(showId, seasonNumber);
-  if (!season?.id) {
-    throw new Error("season not found");
-  }
-  return season.id;
-};
-
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     await requireAdmin(request);
     const { showId, seasonNumber, platform, sourceId } = await params;
     if (!showId) {
-      return NextResponse.json({ error: "showId is required" }, { status: 400 });
+      return NextResponse.json({ error: "showId is required", code: "BAD_REQUEST", retryable: false }, { status: 400 });
     }
 
-    const seasonId = await resolveSeasonId(showId, seasonNumber);
-    const backendBase = getBackendApiUrl(
-      `/admin/socials/seasons/${seasonId}/analytics/posts/${platform}/${sourceId}`,
-    );
-    if (!backendBase) {
-      return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
-    }
-
-    const query = request.nextUrl.searchParams.toString();
-    const backendUrl = query ? `${backendBase}?${query}` : backendBase;
-
-    const response = await fetch(backendUrl, {
-      headers: {
-        Authorization: `Bearer ${getServiceRoleKey()}`,
+    const data = await fetchSeasonBackendJson(
+      showId,
+      seasonNumber,
+      `/analytics/posts/${platform}/${sourceId}`,
+      {
+        queryString: request.nextUrl.searchParams.toString(),
+        fallbackError: "Failed to fetch post comments",
+        retries: 2,
+        timeoutMs: 20_000,
       },
-      cache: "no-store",
-    });
-
-    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!response.ok) {
-      const error =
-        typeof data.error === "string"
-          ? data.error
-          : typeof data.detail === "string"
-            ? data.detail
-            : "Failed to fetch post comments";
-      return NextResponse.json({ error }, { status: response.status });
-    }
-
+    );
     return NextResponse.json(data);
   } catch (error) {
-    console.error("[api] Failed to fetch post comments", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized"
-        ? 401
-        : message === "forbidden"
-          ? 403
-          : message === "season not found"
-            ? 404
-            : 500;
-    return NextResponse.json({ error: message }, { status });
+    return socialProxyErrorResponse(error, "[api] Failed to fetch post comments");
+  }
+}
+
+export async function POST(request: NextRequest, { params }: RouteParams) {
+  try {
+    await requireAdmin(request);
+    const { showId, seasonNumber, platform, sourceId } = await params;
+    if (!showId) {
+      return NextResponse.json({ error: "showId is required", code: "BAD_REQUEST", retryable: false }, { status: 400 });
+    }
+
+    const data = await fetchSeasonBackendJson(
+      showId,
+      seasonNumber,
+      `/analytics/posts/${platform}/${sourceId}/refresh`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: await request.text(),
+        fallbackError: "Failed to refresh post comments",
+        retries: 0,
+        timeoutMs: 30_000,
+      },
+    );
+    return NextResponse.json(data);
+  } catch (error) {
+    return socialProxyErrorResponse(error, "[api] Failed to refresh post comments");
   }
 }

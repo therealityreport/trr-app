@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
 import { auth } from "@/lib/firebase";
@@ -286,6 +286,9 @@ function mockSeasonSocialFetch(analytics: AnalyticsPayload) {
     if (url.includes("/social/jobs?")) {
       return jsonResponse({ jobs: [] });
     }
+    if (url.includes("/social/runs?")) {
+      return jsonResponse({ runs: [] });
+    }
     throw new Error(`Unexpected fetch URL: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
@@ -387,5 +390,189 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await screen.findByTestId("weekly-trend-row-1");
     expect(screen.queryByTestId("weekly-engagement-bar-1-instagram")).not.toBeInTheDocument();
     expect(screen.getByTestId("weekly-engagement-bar-1-youtube")).toBeInTheDocument();
+  });
+
+  it("keeps analytics visible when targets fetch fails", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) {
+        return jsonResponse(analyticsBase);
+      }
+      if (url.includes("/social/targets?")) {
+        return ({
+          ok: false,
+          status: 502,
+          json: async () => ({ error: "targets unavailable" }),
+        }) as Response;
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({ runs: [] });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({ jobs: [] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Content Volume");
+    expect(screen.getByText("10")).toBeInTheDocument();
+    expect(await screen.findByText(/targets unavailable/i)).toBeInTheDocument();
+  });
+
+  it("shows strict run-scoped jobs empty state when no run is selected", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Ingest Job Status");
+    fireEvent.click(screen.getByRole("button", { name: /Ingest Job Status.*Show/i }));
+    expect(
+      await screen.findByText("No run selected. Pick a run above or start a new ingest."),
+    ).toBeInTheDocument();
+  });
+
+  it("loads jobs for the selected run id", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) {
+        return jsonResponse(analyticsBase);
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({ targets: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: "run-1-abcdef",
+              status: "completed",
+              created_at: "2026-02-17T10:00:00Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({
+          jobs: [
+            {
+              id: "job-1",
+              run_id: "run-1-abcdef",
+              platform: "instagram",
+              status: "completed",
+              job_type: "posts",
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Run");
+    fireEvent.change(screen.getByRole("combobox", { name: /Run/i }), {
+      target: { value: "run-1-abcdef" },
+    });
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).includes("run_id=run-1-abcdef")),
+      ).toBe(true);
+    });
+  });
+
+  it("keeps existing jobs visible when a jobs refresh fails transiently", async () => {
+    let failJobsRefresh = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) {
+        return jsonResponse(analyticsBase);
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({ targets: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: "run-1-abcdef",
+              status: "completed",
+              created_at: "2026-02-17T10:00:00Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        if (failJobsRefresh) {
+          return ({
+            ok: false,
+            status: 503,
+            json: async () => ({ error: "temporary jobs outage" }),
+          }) as Response;
+        }
+        return jsonResponse({
+          jobs: [
+            {
+              id: "job-1",
+              run_id: "run-1-abcdef",
+              platform: "instagram",
+              status: "completed",
+              job_type: "posts",
+              items_found: 123,
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Run");
+    fireEvent.change(screen.getByRole("combobox", { name: /Run/i }), {
+      target: { value: "run-1-abcdef" },
+    });
+
+    await screen.findByText("1 job");
+    fireEvent.click(screen.getByRole("button", { name: /Ingest Job Status.*Show/i }));
+
+    failJobsRefresh = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Jobs" }));
+
+    expect(await screen.findByText(/temporary jobs outage/i)).toBeInTheDocument();
+    expect(screen.getByText("1 job")).toBeInTheDocument();
   });
 });

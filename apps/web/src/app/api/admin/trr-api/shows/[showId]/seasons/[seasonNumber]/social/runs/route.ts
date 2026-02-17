@@ -11,7 +11,7 @@ interface RouteParams {
   params: Promise<{ showId: string; seasonNumber: string }>;
 }
 
-export async function POST(request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     await requireAdmin(request);
     const { showId, seasonNumber } = await params;
@@ -19,16 +19,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "showId is required", code: "BAD_REQUEST", retryable: false }, { status: 400 });
     }
 
-    const data = await fetchSeasonBackendJson(showId, seasonNumber, "/ingest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: await request.text(),
-      fallbackError: "Failed to run social ingest",
-      retries: 0,
-      timeoutMs: 60_000,
+    const data = await fetchSeasonBackendJson(showId, seasonNumber, "/ingest/runs", {
+      queryString: request.nextUrl.searchParams.toString(),
+      fallbackError: "Failed to fetch social runs",
+      retries: 2,
+      timeoutMs: 20_000,
     });
     return NextResponse.json(data);
   } catch (error) {
-    return socialProxyErrorResponse(error, "[api] Failed to run social ingest");
+    return socialProxyErrorResponse(error, "[api] Failed to fetch social runs");
   }
 }

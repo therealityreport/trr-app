@@ -23,6 +23,35 @@ None.
 
 ## Recent Activity
 
+- February 17, 2026: Implemented social admin reliability + run-history UX hardening on season social analytics.
+  - Files:
+    - `apps/web/src/lib/server/trr-api/social-admin-proxy.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/runs/[runId]/cancel/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/export/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+    - `apps/web/tests/social-admin-proxy.test.ts`
+    - `apps/web/vitest.config.ts`
+    - `apps/web/tests/mocks/server-only.ts`
+  - Changes:
+    - Added shared social admin proxy helper with timeout/retry controls and standardized upstream error envelope (`error`, `code`, `retryable`, `upstream_status`).
+    - Refactored social admin route handlers to use helper-based retry policies (GET retries, cancel retry, ingest no replay).
+    - Added new runs proxy route and wired season social component to explicit run-history selection.
+    - Decoupled analytics/targets/runs/jobs load errors, replaced startup `Promise.all` with `Promise.allSettled`, and removed global page-failure behavior for isolated fetch failures.
+    - Enforced strict run-scoped jobs view with explicit no-run-selected empty state.
+    - Added non-blocking polling retry/recovery banners while preserving last-good data.
+    - Fixed manual jobs refresh to map transient failures to section-level errors without unhandled promise rejection.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/lib/server/trr-api/social-admin-proxy.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/runs/[runId]/cancel/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/export/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts' 'src/components/admin/season-social-analytics-section.tsx' 'tests/season-social-analytics-section.test.tsx' 'tests/social-admin-proxy.test.ts' 'vitest.config.ts' 'tests/mocks/server-only.ts'` (pass)
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/social-admin-proxy.test.ts` (`2 files passed`, `9 tests passed`)
+
 - February 17, 2026: Added social intelligence dashboard structure and scoped week-detail routing for Bravo content.
   - Files:
     - `apps/web/src/app/admin/social-media/page.tsx`
