@@ -714,7 +714,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     const runSelect = await screen.findByRole("combobox", { name: /Run/i });
-    const matchingOption = within(runSelect).getByRole("option", { name: /80423aa2/i });
+    const matchingOption = await within(runSelect).findByRole("option", { name: /80423aa2/i });
     expect(matchingOption.textContent).toContain("Week 1");
     expect(matchingOption.textContent).toContain("All Platforms");
     expect(matchingOption.textContent).toContain("Running 1/8");
