@@ -227,7 +227,7 @@ export default function NormalizedSurveyPlay({
     <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       {/* Header */}
       <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3">
           {backUrl && (
             <button
               type="button"
@@ -237,8 +237,8 @@ export default function NormalizedSurveyPlay({
               ← Back
             </button>
           )}
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500">{completionPct}% complete</span>
+          <div className="flex items-center gap-3 sm:gap-4">
+            <span className="text-xs text-gray-500 sm:text-sm">{completionPct}% complete</span>
             <div className="h-2 w-24 overflow-hidden rounded-full bg-gray-200">
               <div
                 className="h-full bg-indigo-500 transition-[width] duration-300"
@@ -250,33 +250,33 @@ export default function NormalizedSurveyPlay({
       </header>
 
       {/* Survey content */}
-      <div className="mx-auto max-w-3xl px-4 py-8">
+      <div className="mx-auto max-w-3xl px-3 py-6 sm:px-4 sm:py-8">
         {/* Title */}
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-gray-900">{survey.title}</h1>
+        <div className="mb-6 text-center sm:mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">{survey.title}</h1>
           {survey.description && (
-            <p className="mt-2 text-gray-600">{survey.description}</p>
+            <p className="mt-2 text-sm text-gray-600 sm:text-base">{survey.description}</p>
           )}
         </div>
 
         {/* Questions */}
-        <div className="space-y-12">
+        <div className="space-y-6 sm:space-y-8 lg:space-y-12">
           {questionsForRender.map(({ question, index, section, showSectionHeader }) => (
             <div
               key={question.id}
-              className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
+              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6"
             >
-              <div className="mb-4">
+              <div className="mb-3 sm:mb-4">
                 {showSectionHeader && (
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.3em] text-gray-500">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500 sm:text-xs sm:tracking-[0.3em]">
                     {section}
                   </p>
                 )}
-                <span className="text-sm font-medium text-indigo-600">
+                <span className="text-xs font-medium text-indigo-600 sm:text-sm">
                   Question {index + 1} of {totalQuestions}
                   {question.is_required && <span className="ml-1 text-red-500">*</span>}
                 </span>
-                <h2 className="mt-1 text-lg font-semibold text-gray-900">
+                <h2 className="mt-1 text-base font-semibold leading-snug text-gray-900 sm:text-lg">
                   {question.question_text}
                 </h2>
               </div>
@@ -291,19 +291,19 @@ export default function NormalizedSurveyPlay({
         </div>
 
         {/* Submit section */}
-        <div className="mt-12 border-t border-gray-200 pt-8">
+        <div className="mt-8 border-t border-gray-200 pt-6 sm:mt-12 sm:pt-8">
           {submitError && (
             <div className="mb-4 rounded-lg bg-red-50 p-4 text-center text-sm text-red-600">
               {submitError}
             </div>
           )}
 
-          <div className="flex flex-col items-center gap-4">
+          <div className="flex flex-col items-center gap-3 sm:gap-4">
             <button
               type="button"
               onClick={handleSubmit}
               disabled={!requiredComplete || submitting}
-              className="inline-flex items-center rounded-full bg-indigo-600 px-8 py-3 text-lg font-semibold text-white shadow-lg transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="inline-flex items-center rounded-full bg-indigo-600 px-6 py-2.5 text-base font-semibold text-white shadow-lg transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 sm:px-8 sm:py-3 sm:text-lg"
             >
               {submitting ? (
                 <>

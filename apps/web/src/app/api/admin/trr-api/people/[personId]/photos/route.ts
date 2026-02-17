@@ -15,8 +15,9 @@ interface RouteParams {
  * Only returns photos with hosted_url (mirrored to CloudFront).
  *
  * Query params:
- * - limit: max results (default 100, max 100)
+ * - limit: max results (default 100, max 500)
  * - offset: pagination offset (default 0)
+ * - sources: comma-separated sources to include (optional)
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
@@ -32,10 +33,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get("limit") ?? "100", 10);
-    const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const parsedLimit = parseInt(searchParams.get("limit") ?? "100", 10);
+    const parsedOffset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const limit = Number.isFinite(parsedLimit) ? parsedLimit : 100;
+    const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
+    const sources = (searchParams.get("sources") ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
 
-    const photos = await getPhotosByPersonId(personId, { limit, offset });
+    const photos = await getPhotosByPersonId(personId, { limit, offset, sources });
 
     return NextResponse.json({
       photos,

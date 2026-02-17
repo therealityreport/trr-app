@@ -1,7 +1,7 @@
 # Status — Task 6 (Bravo Import + Cast Eligibility + Videos/News)
 
 Repo: TRR-APP
-Last updated: February 12, 2026
+Last updated: February 17, 2026
 
 ## Phase Status
 
@@ -19,6 +19,50 @@ Last updated: February 12, 2026
 None.
 
 ## Recent Activity
+
+- February 17, 2026: Added cast-matrix sync admin workflow and season-scoped role filtering semantics.
+  - Added new proxy route:
+    - `POST /api/admin/trr-api/shows/[showId]/cast-matrix/sync`
+    - file: `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast-matrix/sync/route.ts`
+  - Updated show admin cast tab:
+    - `Sync Cast Roles (Wiki/Fandom)` button
+    - sync result panel with counts + unmatched names + missing season evidence
+    - file: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - component: `apps/web/src/components/admin/CastMatrixSyncPanel.tsx`
+  - Updated season filter role behavior to rely on scoped role response + global season-0 roles:
+    - `apps/web/src/lib/admin/cast-role-filtering.ts`
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Updated links display to highlight person `bravo_profile` links with explicit badge while preserving review actions:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/show-cast-matrix-sync-proxy-route.test.ts tests/cast-matrix-sync-panel.test.tsx tests/cast-role-season-filtering.test.ts` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+    - `pnpm -C apps/web exec eslint src/app/admin/trr-shows/[showId]/page.tsx src/components/admin/CastMatrixSyncPanel.tsx src/lib/admin/cast-role-filtering.ts src/app/api/admin/trr-api/shows/[showId]/cast-matrix/sync/route.ts` (warnings only; no errors)
+
+- February 13, 2026: Implemented thumbnail-first gallery delivery + `Profile Pictures` category wiring across show/season/person.
+  - Added `profile_picture` content type in advanced filters:
+    - `apps/web/src/lib/admin/advanced-filters.ts`
+    - `apps/web/src/components/admin/AdvancedFilterDrawer.tsx`
+    - `apps/web/src/lib/gallery-filter-utils.ts` (includes legacy fallback for `context_type=profile` / `context_section=bravo_profile`)
+  - Added `Profile Pictures` gallery sections:
+    - Show assets page: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - Season assets page: `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - Person gallery: `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - Added thumbnail-first URL preference and render batching:
+    - card URL precedence now includes `thumb_url` before larger URLs
+    - Load More batching on show/season/person gallery grids
+  - Added server-side source/pagination support in gallery proxy routes:
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/assets/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/assets/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/people/[personId]/photos/route.ts`
+  - Updated repository cast-photo precedence + fallback robustness:
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - Cast thumbnail/source precedence now prefers `profile_picture` (season-scoped first), then legacy Bravo profile fallback.
+    - Removed reliance on missing `v_cast_photos.thumbnail_focus_*` columns in fallback query.
+    - Added source-filter pagination options for show/season/person gallery fetches.
+  - Validation:
+    - `pnpm -C apps/web exec eslint ...` on touched files (pass; warnings only)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
 
 - February 12, 2026: Added person canonical-profile source-order controls (`tmdb -> fandom -> manual`) on the person admin page.
   - Added reorder UI (`Up`/`Down`) with `Save Order` / `Reset`.

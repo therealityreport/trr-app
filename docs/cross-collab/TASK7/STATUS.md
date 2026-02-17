@@ -1,0 +1,69 @@
+# Status — Task 7 (Season Social Analytics V3 + Reddit Stabilization)
+
+Repo: TRR-APP
+Last updated: February 17, 2026
+
+## Phase Status
+
+| Phase | Description | Status | Notes |
+|------:|-------------|--------|-------|
+| 1 | Weekly payload consumption | Implemented | Added `weekly_platform_engagement` response typing + lookup helpers. |
+| 2 | Weekly trend visualization rewrite | Implemented | Replaced single minimum-width bar with grouped platform bars and no-data text rows. |
+| 3 | Sentiment drivers UI hint | Implemented | Added note: cast names/handles excluded from driver terms. |
+| 4 | Frontend tests | Implemented | New targeted test file validates no-data rows, grouped bars, and zero-width regression. |
+| 5 | Validation | Implemented | Targeted eslint + vitest passing. |
+| 6 | Reddit flair persistence + refresh route | Implemented | Added migration `024` and `/flares/refresh` endpoint. |
+| 7 | Reddit manager create/discover stabilization | Implemented | Create-first optimistic UI, async flair refresh, no-flair fallback, request timeout + action lockouts. |
+| 8 | Reddit host validation hardening | Implemented | Client URL parser + thread create/update routes now enforce Reddit hosts for URL/permalink. |
+| 9 | Reddit regression tests | Implemented | Added/updated tests for manager flow, flair service, refresh route, communities payload, and thread route validation. |
+
+## Blockers
+
+None.
+
+## Recent Activity
+
+- February 17, 2026: Added social intelligence dashboard structure and scoped week-detail routing for Bravo content.
+  - Files:
+    - `apps/web/src/app/admin/social-media/page.tsx`
+    - `apps/web/src/app/admin/social-media/bravo-content/page.tsx`
+    - `apps/web/src/app/admin/social-media/creator-content/page.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - `apps/web/tests/week-social-thumbnails.test.tsx`
+  - Changes:
+    - Added category-first admin social hub with separate Bravo and Creator dashboards.
+    - Kept Creator dashboard scaffolded/read-only for now.
+    - Week analytics links now pass `source_scope`; week detail view reads `source_scope`/`scope` and fetches scoped analytics (default `bravo`).
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/social-media/page.tsx' 'src/app/admin/social-media/bravo-content/page.tsx' 'src/app/admin/social-media/creator-content/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'tests/week-social-thumbnails.test.tsx'` (pass)
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/week-social-thumbnails.test.tsx` (`2 files passed`, `4 tests passed`)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)
+
+- February 17, 2026: Implemented season social analytics V3 frontend updates.
+  - Files:
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'tests/season-social-analytics-section.test.tsx'` (pass)
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx` (3 passed)
+
+- February 17, 2026: Implemented Reddit page stabilization + flair-enriched community creation updates.
+  - Files:
+    - `apps/web/db/migrations/024_add_post_flares_to_admin_reddit_communities.sql`
+    - `apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+    - `apps/web/src/lib/server/admin/reddit-flairs-service.ts`
+    - `apps/web/src/app/api/admin/reddit/communities/[communityId]/flares/refresh/route.ts`
+    - `apps/web/src/app/api/admin/reddit/threads/route.ts`
+    - `apps/web/src/app/api/admin/reddit/threads/[threadId]/route.ts`
+    - `apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `apps/web/tests/reddit-sources-manager.test.tsx`
+    - `apps/web/tests/reddit-communities-route.test.ts`
+    - `apps/web/tests/reddit-community-flares-refresh-route.test.ts`
+    - `apps/web/tests/reddit-flairs-service.test.ts`
+    - `apps/web/tests/reddit-threads-route.test.ts`
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/components/admin/reddit-sources-manager.tsx' 'src/app/api/admin/reddit/communities/route.ts' 'src/app/api/admin/reddit/communities/[communityId]/flares/refresh/route.ts' 'src/app/api/admin/reddit/threads/route.ts' 'src/app/api/admin/reddit/threads/[threadId]/route.ts' 'src/lib/server/admin/reddit-flairs-service.ts' 'src/lib/server/admin/reddit-sources-repository.ts' 'tests/reddit-sources-manager.test.tsx' 'tests/reddit-flairs-service.test.ts' 'tests/reddit-community-flares-refresh-route.test.ts' 'tests/reddit-threads-route.test.ts' 'tests/reddit-communities-route.test.ts'` (pass)
+    - `pnpm -C apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-communities-route.test.ts tests/reddit-community-flares-refresh-route.test.ts tests/reddit-flairs-service.test.ts tests/reddit-threads-route.test.ts` (5 files passed, 18 tests passed)
+    - `pnpm -C apps/web run db:migrate` (pass; applied `024_add_post_flares_to_admin_reddit_communities.sql`)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)

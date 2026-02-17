@@ -3,9 +3,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import {
+  DESIGN_SYSTEM_BASE_COLORS,
+  DESIGN_SYSTEM_COLORS_STORAGE_KEY,
+} from "@/lib/admin/design-system-tokens";
 
 const QuestionsTab = dynamic(() => import("./_components/QuestionsTab"), {
   loading: () => (
@@ -15,7 +19,110 @@ const QuestionsTab = dynamic(() => import("./_components/QuestionsTab"), {
   ),
 });
 
-type TabId = "fonts" | "questions";
+type TabId = "fonts" | "questions" | "colors";
+type TabDefinition = {
+  id: TabId;
+  label: string;
+  queryValue: string;
+};
+
+const TAB_DEFINITIONS: TabDefinition[] = [
+  { id: "fonts", label: "Fonts", queryValue: "fonts" },
+  { id: "colors", label: "Colors", queryValue: "colors" },
+  { id: "questions", label: "Questions & Forms", queryValue: "questions-forms" },
+];
+
+const TAB_QUERY_TO_ID: Record<string, TabId> = {
+  fonts: "fonts",
+  colors: "colors",
+  questions: "questions",
+  "questions-forms": "questions",
+};
+
+function getTabFromQuery(tabQueryValue: string | null): TabId {
+  if (!tabQueryValue) return "fonts";
+  return TAB_QUERY_TO_ID[tabQueryValue] ?? "fonts";
+}
+
+function isValidTabQuery(tabQueryValue: string | null): boolean {
+  if (!tabQueryValue) return true;
+  return Boolean(TAB_QUERY_TO_ID[tabQueryValue]);
+}
+
+type TabHref = "/admin/fonts" | "/admin/fonts?tab=colors" | "/admin/fonts?tab=questions-forms";
+
+function buildTabHref(tabId: TabId): TabHref {
+  if (tabId === "colors") return "/admin/fonts?tab=colors";
+  if (tabId === "questions") return "/admin/fonts?tab=questions-forms";
+  return "/admin/fonts";
+}
+
+const TINT_SHADE_SWATCHES_PER_SIDE = 3;
+
+type RGB = { red: number; green: number; blue: number };
+
+function normalizeHexColor(colorValue: string): string | null {
+  const raw = colorValue.trim();
+  if (!raw) return null;
+  const match = raw.match(/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (!match) return null;
+  const hex = match[1];
+  if (!hex) return null;
+  const normalized = hex.length === 3
+    ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+    : hex;
+  return `#${normalized.toUpperCase()}`;
+}
+
+function hexToRgb(colorValue: string): RGB | null {
+  const normalized = normalizeHexColor(colorValue);
+  if (!normalized) return null;
+  const hex = normalized.slice(1);
+  return {
+    red: parseInt(hex.slice(0, 2), 16),
+    green: parseInt(hex.slice(2, 4), 16),
+    blue: parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function mixChannel(from: number, to: number, ratio: number): number {
+  return from + (to - from) * ratio;
+}
+
+function channelToHex(channel: number): string {
+  return Math.min(Math.max(Math.round(channel), 0), 255).toString(16).padStart(2, "0").toUpperCase();
+}
+
+function rgbToHex(rgb: RGB): string {
+  return `#${channelToHex(rgb.red)}${channelToHex(rgb.green)}${channelToHex(rgb.blue)}`;
+}
+
+function calculateShades(colorValue: string, steps = TINT_SHADE_SWATCHES_PER_SIDE): string[] {
+  const rgb = hexToRgb(colorValue);
+  if (!rgb) return [];
+  const shades = Array.from({ length: steps }, (_, index) => {
+    const ratio = (index + 1) / (steps + 1);
+    return rgbToHex({
+      red: mixChannel(rgb.red, 0, ratio),
+      green: mixChannel(rgb.green, 0, ratio),
+      blue: mixChannel(rgb.blue, 0, ratio),
+    });
+  });
+  return shades.reverse();
+}
+
+function calculateTints(colorValue: string, steps = TINT_SHADE_SWATCHES_PER_SIDE): string[] {
+  const rgb = hexToRgb(colorValue);
+  if (!rgb) return [];
+  return Array.from({ length: steps }, (_, index) => {
+    const ratio = (index + 1) / (steps + 1);
+    return rgbToHex({
+      red: mixChannel(rgb.red, 255, ratio),
+      green: mixChannel(rgb.green, 255, ratio),
+      blue: mixChannel(rgb.blue, 255, ratio),
+    });
+  });
+}
 
 const CDN_BASE = "https://d1fmdyqfafwim3.cloudfront.net/fonts";
 
@@ -1000,12 +1107,84 @@ function RealiteaseFontCard({
 
 export default function AdminFontsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, checking, hasAccess } = useAdminGuard();
-  const [activeTab, setActiveTab] = useState<TabId>("fonts");
   const [previewText, setPreviewText] = useState(
     "The quick brown fox jumps over the lazy dog"
   );
   const [showUsedOnly, setShowUsedOnly] = useState(false);
+  const [designSystemColors, setDesignSystemColors] = useState<string[]>(() => [...DESIGN_SYSTEM_BASE_COLORS]);
+  const [newBaseColor, setNewBaseColor] = useState("#5C0F4F");
+  const [newBaseColorError, setNewBaseColorError] = useState<string | null>(null);
+  const tabQueryValue = searchParams.get("tab");
+  const activeTab = getTabFromQuery(tabQueryValue);
+
+  useEffect(() => {
+    if (!isValidTabQuery(tabQueryValue)) {
+      router.replace("/admin/fonts");
+    }
+  }, [router, tabQueryValue]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(DESIGN_SYSTEM_COLORS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+      const normalized = parsed
+        .map((entry) => (typeof entry === "string" ? normalizeHexColor(entry) : null))
+        .filter((entry): entry is string => Boolean(entry));
+      if (!normalized.length) return;
+      setDesignSystemColors(Array.from(new Set(normalized)));
+    } catch {
+      // Ignore malformed persisted colors and keep defaults.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        DESIGN_SYSTEM_COLORS_STORAGE_KEY,
+        JSON.stringify(designSystemColors),
+      );
+    } catch {
+      // Ignore persistence failures.
+    }
+  }, [designSystemColors]);
+
+  const handleAddBaseColor = useCallback(() => {
+    const normalized = normalizeHexColor(newBaseColor);
+    if (!normalized) {
+      setNewBaseColorError("Enter a valid hex color (for example #5C0F4F).");
+      return;
+    }
+
+    let added = false;
+    setDesignSystemColors((prev) => {
+      if (prev.includes(normalized)) {
+        return prev;
+      }
+      added = true;
+      return [...prev, normalized];
+    });
+
+    if (added) {
+      setNewBaseColor(normalized);
+      setNewBaseColorError(null);
+    } else {
+      setNewBaseColorError("That base color is already in the list.");
+    }
+  }, [newBaseColor]);
+
+  const handleTabClick = useCallback(
+    (tabId: TabId) => {
+      if (activeTab === tabId) return;
+      router.push(buildTabHref(tabId));
+    },
+    [activeTab, router],
+  );
+
+  const normalizedNewBaseColor = normalizeHexColor(newBaseColor) ?? "#000000";
 
   if (checking) {
     return (
@@ -1048,7 +1227,7 @@ export default function AdminFontsPage() {
               <div>
                 <h1 className="text-2xl font-bold text-zinc-900">UI Design System</h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Fonts, question components, and form patterns used across the app.
+                  Fonts, colors, question components, and form patterns used across the app.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1075,13 +1254,11 @@ export default function AdminFontsPage() {
         <div className="border-b border-zinc-200 bg-white">
           <div className="mx-auto max-w-5xl px-6">
             <nav className="flex gap-6">
-              {([
-                { id: "fonts" as const, label: "Fonts" },
-                { id: "questions" as const, label: "Questions & Forms" },
-              ]).map((tab) => (
+              {TAB_DEFINITIONS.map((tab) => (
                 <button
+                  type="button"
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => handleTabClick(tab.id)}
                   className={`border-b-2 py-4 text-sm font-semibold transition ${
                     activeTab === tab.id
                       ? "border-zinc-900 text-zinc-900"
@@ -1098,7 +1275,112 @@ export default function AdminFontsPage() {
         <main className="mx-auto max-w-5xl px-6 py-6">
 
         {/* Questions & Forms Tab */}
-        {activeTab === "questions" && <QuestionsTab />}
+        {activeTab === "questions" && <QuestionsTab baseColors={designSystemColors} />}
+
+        {/* Colors Tab */}
+        {activeTab === "colors" && (
+          <>
+            <form
+              className="mb-4 rounded-xl border border-zinc-200 bg-white p-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleAddBaseColor();
+              }}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={normalizedNewBaseColor}
+                    onChange={(event) => {
+                      setNewBaseColor(event.target.value.toUpperCase());
+                      setNewBaseColorError(null);
+                    }}
+                    className="h-10 w-10 rounded border border-zinc-200 bg-white p-0.5"
+                    aria-label="Pick base color"
+                  />
+                  <input
+                    id="new-base-color"
+                    type="text"
+                    value={newBaseColor}
+                    onChange={(event) => {
+                      setNewBaseColor(event.target.value);
+                      setNewBaseColorError(null);
+                    }}
+                    placeholder="#5C0F4F"
+                    className="w-36 rounded-md border border-zinc-300 px-3 py-2 text-sm uppercase tracking-wide text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                >
+                  Add Base Color
+                </button>
+              </div>
+              {newBaseColorError && (
+                <p className="mt-2 text-xs font-medium text-red-600">{newBaseColorError}</p>
+              )}
+            </form>
+            <p className="mb-4 text-sm text-zinc-500">
+              {designSystemColors.length} style-guide colors. Each row shows generated shades (left), base (center),
+              and generated tints (right).
+            </p>
+            <section className="space-y-2">
+              {designSystemColors.map((hex, index) => {
+                const shades = calculateShades(hex);
+                const tints = calculateTints(hex);
+                return (
+                  <div
+                    key={`${hex}-${index}`}
+                    className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="grid w-full max-w-[24rem] grid-cols-7 gap-2">
+                      {shades.map((shadeHex, slot) => (
+                        <div
+                          key={`left-${slot}-${shadeHex}`}
+                          className="aspect-square rounded-md border border-zinc-300"
+                          style={{ backgroundColor: shadeHex }}
+                          aria-label={`Shade ${slot + 1} for ${hex}: ${shadeHex}`}
+                          role="img"
+                          title={`Shade ${slot + 1}: ${shadeHex}`}
+                        />
+                      ))}
+                      <div
+                        className="aspect-square rounded-md border border-zinc-300"
+                        style={{ backgroundColor: hex }}
+                        aria-label={`Base color ${hex}`}
+                        role="img"
+                        title={`Base: ${hex}`}
+                      />
+                      {tints.map((tintHex, slot) => (
+                        <div
+                          key={`right-${slot}-${tintHex}`}
+                          className="aspect-square rounded-md border border-zinc-300"
+                          style={{ backgroundColor: tintHex }}
+                          aria-label={`Tint ${slot + 1} for ${hex}: ${tintHex}`}
+                          role="img"
+                          title={`Tint ${slot + 1}: ${tintHex}`}
+                        />
+                      ))}
+                    </div>
+                    <div className="min-w-[14rem] text-sm text-zinc-700">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-semibold text-zinc-900">Row {String(index + 1).padStart(2, "0")}</span>
+                        <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs uppercase tracking-wide text-zinc-600">
+                          {hex}
+                        </code>
+                      </div>
+                      <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+                        {shades.join(" • ")} • {hex} • {tints.join(" • ")}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          </>
+        )}
 
         {/* Fonts Tab */}
         {activeTab === "fonts" && (<>

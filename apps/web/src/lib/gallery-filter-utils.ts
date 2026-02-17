@@ -49,6 +49,19 @@ function matchesWwhl(text: string): boolean {
   return text.toLowerCase().includes("wwhl");
 }
 
+function isProfilePictureContext(
+  contextType: string | null | undefined,
+  contextSection: string | null | undefined
+): boolean {
+  const normalizedType = (contextType ?? "").toLowerCase().trim();
+  const normalizedSection = (contextSection ?? "").toLowerCase().trim();
+  return (
+    normalizedType === "profile_picture" ||
+    normalizedType === "profile" ||
+    normalizedSection === "bravo_profile"
+  );
+}
+
 export function matchesContentTypesForPersonPhoto(
   photo: TrrPersonPhoto,
   contentTypes: ContentTypeFilter[]
@@ -68,6 +81,8 @@ export function matchesContentTypesForPersonPhoto(
         return sectionTag.includes("reunion");
       case "promo":
         return sectionTag.includes("promo");
+      case "profile_picture":
+        return isProfilePictureContext(photo.context_type, photo.context_section);
       case "episode_still":
         return sectionTag.includes("episode still") || sectionTag.includes("episode");
       case "intro":
@@ -108,6 +123,8 @@ export function matchesContentTypesForSeasonAsset(
         return sectionTag.includes("reunion");
       case "promo":
         return sectionTag.includes("promo");
+      case "profile_picture":
+        return isProfilePictureContext(asset.context_type, asset.context_section);
       case "episode_still":
         return sectionTag.includes("episode still") || sectionTag.includes("episode");
       case "intro":

@@ -74,6 +74,10 @@ export interface BaseQuestionConfig {
   description?: string;
   /** Optional grouping label (used by admin editor + play UI to render sections). */
   section?: string;
+  /** Optional size multiplier (percent) for shape-like UI elements in previews/components. */
+  shapeScale?: number;
+  /** Optional size multiplier (percent) for buttons/interactive controls in previews/components. */
+  buttonScale?: number;
 }
 
 /**

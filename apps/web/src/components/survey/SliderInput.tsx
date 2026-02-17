@@ -48,12 +48,12 @@ export default function SliderInput({
   const percentage = ((localValue - min) / (max - min)) * 100;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Subject header with image */}
       {subject && (
-        <div className="flex items-center justify-center gap-3 mb-4">
+        <div className="mb-3 flex items-center justify-center gap-2.5 sm:mb-4 sm:gap-3">
           {subject.img && (
-            <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-gray-200">
+            <div className="h-14 w-14 overflow-hidden rounded-full border-2 border-gray-200 sm:h-16 sm:w-16">
               <Image
                 src={subject.img}
                 alt={subject.name}
@@ -64,13 +64,13 @@ export default function SliderInput({
               />
             </div>
           )}
-          <span className="text-lg font-semibold text-gray-700">{subject.name}</span>
+          <span className="text-base font-semibold text-gray-700 sm:text-lg">{subject.name}</span>
         </div>
       )}
 
-      <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-col items-center gap-3 sm:gap-4">
         {/* Current value display */}
-        <div className="text-4xl font-bold text-gray-800 tabular-nums">
+        <div className="text-3xl font-bold tabular-nums text-gray-800 sm:text-4xl">
           {localValue}
         </div>
 
@@ -132,7 +132,7 @@ export default function SliderInput({
           </div>
 
           {/* Labels */}
-          <div className="flex justify-between mt-2 text-sm font-medium text-gray-500">
+          <div className="mt-2 flex justify-between text-xs font-medium text-gray-500 sm:text-sm">
             <span>{minLabel}</span>
             <span>{maxLabel}</span>
           </div>

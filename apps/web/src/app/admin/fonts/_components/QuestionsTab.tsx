@@ -1,9 +1,15 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import QuestionRenderer from "@/components/survey/QuestionRenderer";
 import IconRatingInput from "@/components/survey/IconRatingInput";
-import FlashbackRanker from "@/components/flashback-ranker";
+import FlashbackRanker, { type FlashbackRankerFontOverrides } from "@/components/flashback-ranker";
+import {
+  DESIGN_SYSTEM_BASE_COLORS,
+  DESIGN_SYSTEM_CDN_FONT_OPTIONS,
+  DESIGN_SYSTEM_COLORS_STORAGE_KEY,
+} from "@/lib/admin/design-system-tokens";
+import { resolveCloudfrontCdnFont } from "@/lib/fonts/cdn-fonts";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { SurveyRankingItem } from "@/lib/surveys/types";
 
@@ -34,6 +40,74 @@ interface CatalogEntry {
 }
 
 type PreviewViewport = "phone" | "tablet" | "desktop";
+type DefaultViewport = "mobile" | "desktop";
+
+interface TemplatePreviewEditorState {
+  titleText: string;
+  subText: string;
+  titleColor: string;
+  subTextColor: string;
+  titleFontFamily: string;
+  subTextFontFamily: string;
+  titleFontSize: number;
+  subTextFontSize: number;
+  shapeScale: number;
+  buttonScale: number;
+  canvasBackground: string;
+  frameBackground: string;
+  frameBorderColor: string;
+}
+
+type TemplateStyleKey =
+  | "titleColor"
+  | "subTextColor"
+  | "titleFontFamily"
+  | "subTextFontFamily"
+  | "titleFontSize"
+  | "subTextFontSize"
+  | "shapeScale"
+  | "buttonScale"
+  | "canvasBackground"
+  | "frameBackground"
+  | "frameBorderColor";
+
+type TemplateStyleDefaults = Pick<TemplatePreviewEditorState, TemplateStyleKey>;
+const TEMPLATE_STYLE_FIELDS: TemplateStyleKey[] = [
+  "titleColor",
+  "subTextColor",
+  "titleFontFamily",
+  "subTextFontFamily",
+  "titleFontSize",
+  "subTextFontSize",
+  "shapeScale",
+  "buttonScale",
+  "canvasBackground",
+  "frameBackground",
+  "frameBorderColor",
+];
+
+interface SurveyQuestionDefaultsState {
+  mobile: TemplateStyleDefaults;
+  desktop: TemplateStyleDefaults;
+}
+
+interface QuestionsTabProps {
+  baseColors?: string[];
+}
+
+const TEMPLATE_EDITOR_STORAGE_PREFIX = "trr.questions-tab.template-editor.v2";
+const SURVEY_QUESTION_DEFAULTS_STORAGE_KEY = "trr.questions-tab.survey-defaults.v1";
+type TemplateEditorStringKey =
+  | "titleText"
+  | "subText"
+  | "titleColor"
+  | "subTextColor"
+  | "titleFontFamily"
+  | "subTextFontFamily"
+  | "canvasBackground"
+  | "frameBackground"
+  | "frameBorderColor";
+type TemplateEditorNumberKey = "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale";
 
 /* ------------------------------------------------------------------ */
 /*  Auth / Signup field data                                            */
@@ -132,14 +206,14 @@ const SURVEY_CATALOG: CatalogEntry[] = [
     { label: "Season Rating", source: "RHOSLC S6 Survey", mockQuestion: mkQ("star_season", "Rate RHOSLC Season 6 overall", "numeric", { uiVariant: "numeric-ranking", min: 0, max: 10, step: 0.1 }), mockValue: null },
   ]},
   { key: "numeric-slider", displayName: "Numeric Slider", description: "Horizontal range slider with min/max labels for cast or subject ratings.", componentPath: "components/survey/SliderInput.tsx", category: "survey", examples: [
-    { label: "Entertainment Factor", source: "Cast Rating Survey", mockQuestion: mkQ("slider_ent", "How entertaining was Lisa Barlow this episode?", "numeric", { uiVariant: "numeric-scale-slider", min: 0, max: 100, step: 1, minLabel: "Boring", maxLabel: "Entertaining" }), mockValue: 65 },
+    { label: "Entertainment Factor", source: "Cast Rating Survey", mockQuestion: mkQ("slider_ent", "How entertaining was Lisa Barlow this episode?", "numeric", { uiVariant: "numeric-scale-slider", min: 0, max: 100, step: 1, minLabel: "Boring", maxLabel: "Entertaining", subject: { name: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" } }), mockValue: 65 },
   ]},
   { key: "single-select", displayName: "Single Select (Radio)", description: "Vertical radio button list for single-choice questions.", componentPath: "components/survey/SingleSelectInput.tsx", category: "survey", examples: [
     { label: "Favorite Housewife", source: "RHOSLC Survey", mockQuestion: mkQ("fav_hw", "Who is your favorite RHOSLC housewife this season?", "single_choice", { uiVariant: "text-multiple-choice" }, [{ key: "lisa", text: "Lisa Barlow" }, { key: "heather", text: "Heather Gay" }, { key: "meredith", text: "Meredith Marks" }, { key: "whitney", text: "Whitney Rose" }, { key: "angie", text: "Angie Katsanevas" }]), mockValue: null },
     { label: "Yes / No Question", source: "General Survey", mockQuestion: mkQ("yes_no", "Do you watch the show live or on streaming?", "single_choice", { uiVariant: "text-multiple-choice" }, [{ key: "live", text: "Live on Bravo" }, { key: "streaming", text: "Streaming (Peacock)" }, { key: "both", text: "Both" }]), mockValue: null },
   ]},
   { key: "image-select", displayName: "Image Select (Grid)", description: "Grid of circular image buttons for cast/image-based selection.", componentPath: "components/survey/SingleSelectInput.tsx (grid)", category: "survey", examples: [
-    { label: "Cast Member Select", source: "RHOP S10 Survey", mockQuestion: mkQ("cast_img", "Which cast member had the best confessional look?", "single_choice", { uiVariant: "image-multiple-choice" }, [{ key: "gizelle", text: "Gizelle Bryant" }, { key: "karen", text: "Karen Huger" }, { key: "ashley", text: "Ashley Darby" }, { key: "robyn", text: "Robyn Dixon" }]), mockValue: null },
+    { label: "Cast Member Select", source: "RHOSLC S6 Survey", mockQuestion: mkQ("cast_img", "Which RHOSLC cast member had the best confessional look?", "single_choice", { uiVariant: "image-multiple-choice" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }, { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } }]), mockValue: null },
   ]},
   { key: "multi-select", displayName: "Multi-Select (Checkbox)", description: "Checkbox group with optional min/max selection constraints.", componentPath: "components/survey/MultiSelectInput.tsx", category: "survey", examples: [
     { label: "Select Shows", source: "Signup / Onboarding", mockQuestion: mkQ("select_shows", "Which Real Housewives shows do you watch?", "multi_choice", { uiVariant: "multi-select-choice", minSelections: 1, maxSelections: 5 }, [{ key: "rhoslc", text: "RHOSLC" }, { key: "rhobh", text: "RHOBH" }, { key: "rhoa", text: "RHOA" }, { key: "rhop", text: "RHOP" }, { key: "rhonj", text: "RHONJ" }, { key: "rhony", text: "RHONY" }, { key: "rhod", text: "RHOD" }]), mockValue: ["rhoslc", "rhop"] },
@@ -158,19 +232,19 @@ const SURVEY_CATALOG: CatalogEntry[] = [
     { label: "Password", source: "Signup / Login", mockQuestion: mkQ("password", "Password", "free_text", { uiVariant: "text-entry", placeholder: "Enter your password", inputType: "password" }), mockValue: "" },
   ]},
   { key: "whose-side", displayName: "Whose Side (Head-to-Head)", description: "Two-choice comparison with VS divider and optional neutral option.", componentPath: "components/survey/WhoseSideInput.tsx", category: "survey", examples: [
-    { label: "Feud: Lisa vs Meredith", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_lm", "Whose side are you on in the Lisa vs. Meredith feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neutral" }, [{ key: "lisa", text: "Lisa Barlow" }, { key: "meredith", text: "Meredith Marks" }]), mockValue: null },
-    { label: "Feud: Karen vs Gizelle", source: "RHOP S10 Survey", mockQuestion: mkQ("feud_kg", "Whose side are you on in the Karen vs. Gizelle rivalry?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neither" }, [{ key: "karen", text: "Karen Huger" }, { key: "gizelle", text: "Gizelle Bryant" }]), mockValue: null },
+    { label: "Feud: Lisa vs Meredith", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_lm", "Whose side are you on in the Lisa vs. Meredith feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neutral" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }]), mockValue: null },
+    { label: "Feud: Whitney vs Heather", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_wh", "Whose side are you on in the Whitney vs. Heather feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neither" }, [{ key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } }]), mockValue: null },
   ]},
   { key: "matrix-likert", displayName: "Matrix / Likert Scale", description: "Table-grid with rows (cast members or statements) and columns (verdict options).", componentPath: "components/survey/MatrixLikertInput.tsx", category: "survey", examples: [
-    { label: "Cast Verdict (Fire/Demote/Keep)", source: "RHOP S10 Survey", mockQuestion: mkQ("verdict", "What should happen to each cast member next season?", "likert", { uiVariant: "three-choice-slider", choices: [{ value: "fire", label: "Fire" }, { value: "demote", label: "Demote" }, { value: "keep", label: "Keep" }], rows: [{ id: "gizelle", label: "Gizelle Bryant" }, { id: "karen", label: "Karen Huger" }, { id: "ashley", label: "Ashley Darby" }, { id: "robyn", label: "Robyn Dixon" }] }, [{ key: "fire", text: "Fire" }, { key: "demote", text: "Demote" }, { key: "keep", text: "Keep" }]), mockValue: {} },
-    { label: "Agree / Disagree", source: "General Survey", mockQuestion: mkQ("agree", "How do you feel about each statement?", "likert", { uiVariant: "agree-likert-scale", rows: [{ id: "s1", label: "The season had too much drama" }, { id: "s2", label: "The cast needs fresh faces" }, { id: "s3", label: "The reunion was satisfying" }] }, [{ key: "strongly_disagree", text: "Strongly Disagree" }, { key: "disagree", text: "Disagree" }, { key: "neutral", text: "Neutral" }, { key: "agree", text: "Agree" }, { key: "strongly_agree", text: "Strongly Agree" }]), mockValue: {} },
+    { label: "Cast Verdict (Fire/Demote/Keep)", source: "RHOSLC S6 Survey", mockQuestion: mkQ("verdict", "For each cast member, should Bravo keep, demote, or fire them?", "likert", { uiVariant: "three-choice-slider", choices: [{ value: "fire", label: "Fire" }, { value: "demote", label: "Demote" }, { value: "keep", label: "Keep" }], rows: [{ id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" }, { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" }] }, [{ key: "fire", text: "Fire" }, { key: "demote", text: "Demote" }, { key: "keep", text: "Keep" }]), mockValue: {} },
+    { label: "Agree / Disagree", source: "General Survey", mockQuestion: mkQ("agree", "How do you feel about each statement?", "likert", { uiVariant: "agree-likert-scale", rows: [{ id: "s1", label: "The season had too much drama" }, { id: "s2", label: "The cast needs fresh faces" }, { id: "s3", label: "The reunion was satisfying" }] }, [{ key: "strongly_disagree", text: "Strongly Disagree" }, { key: "somewhat_disagree", text: "Somewhat Disagree" }, { key: "neutral", text: "Neither" }, { key: "somewhat_agree", text: "Somewhat Agree" }, { key: "strongly_agree", text: "Strongly Agree" }]), mockValue: {} },
   ]},
-  { key: "rank-order", displayName: "Rank Order (Drag & Drop)", description: "Drag-and-drop ranking grid with numbered slots and responsive mobile tray.", componentPath: "components/survey/RankOrderInput.tsx + flashback-ranker.tsx", category: "survey", examples: [
-    { label: "RHOP Cast Ranking", source: "RHOP S10 Survey", mockQuestion: mkQ("rank_rhop", "Rank the cast of RHOP Season 10", "ranking", { uiVariant: "rectangle-ranking", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "gizelle", text: "Gizelle Bryant" }, { key: "karen", text: "Karen Huger" }, { key: "ashley", text: "Ashley Darby" }, { key: "robyn", text: "Robyn Dixon" }]), mockValue: [] },
-    { label: "RHOSLC Cast Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_rhoslc", "Rank the RHOSLC Icons", "ranking", { uiVariant: "circle-ranking", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "lisa", text: "Lisa Barlow" }, { key: "heather", text: "Heather Gay" }, { key: "meredith", text: "Meredith Marks" }, { key: "whitney", text: "Whitney Rose" }]), mockValue: [] },
+  { key: "rank-order", displayName: "Rank Order (Drag & Drop)", description: "Drag-and-drop ranked slots with an unranked tray. Supports circle cast and rectangle seasons templates.", componentPath: "components/survey/RankOrderInput.tsx + flashback-ranker.tsx", category: "survey", examples: [
+    { label: "RHOSLC Season Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_seasons", "Rank the Seasons of RHOSLC.", "ranking", { uiVariant: "rectangle-ranking", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "s1", text: "SEASON 1" }, { key: "s2", text: "SEASON 2" }, { key: "s3", text: "SEASON 3" }, { key: "s4", text: "SEASON 4" }, { key: "s5", text: "SEASON 5" }, { key: "s6", text: "SEASON 6" }]), mockValue: [] },
+    { label: "RHOSLC Cast Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_rhoslc", "Rank the Cast of RHOSLC S6.", "ranking", { uiVariant: "circle-ranking", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }, { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } }]), mockValue: [] },
   ]},
   { key: "two-axis-grid", displayName: "Two-Axis Grid (2D Map)", description: "Draggable tokens on a 2D grid with labeled axes. Snap-to-grid.", componentPath: "components/survey/TwoAxisGridInput.tsx", category: "survey", examples: [
-    { label: "Cast Perception Map", source: "RHOSLC S6 Survey", mockQuestion: mkQ("perception", "Place each housewife on the grid", "likert", { uiVariant: "two-axis-grid", extent: 3, xLabelLeft: "VILLAIN", xLabelRight: "HERO", yLabelTop: "ENTERTAINING", yLabelBottom: "BORING", rows: [{ id: "lisa", label: "Lisa B." }, { id: "heather", label: "Heather G." }, { id: "meredith", label: "Meredith M." }] }), mockValue: {} },
+    { label: "Cast Perception Map", source: "RHOSLC S6 Survey", mockQuestion: mkQ("perception", "Place each housewife on the grid", "likert", { uiVariant: "two-axis-grid", extent: 3, xLabelLeft: "VILLAIN", xLabelRight: "HERO", yLabelTop: "ENTERTAINING", yLabelBottom: "BORING", rows: [{ id: "lisa", label: "Lisa B.", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather G.", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith M.", img: "/images/cast/rhoslc-s6/meredith.png" }] }), mockValue: {} },
   ]},
 ];
 
@@ -192,11 +266,11 @@ const AUTH_CATALOG: CatalogEntry[] = [
 /* ------------------------------------------------------------------ */
 
 const RHOSLC_CAST: SurveyRankingItem[] = [
-  { id: "lisa", label: "Lisa Barlow", img: "" },
-  { id: "whitney", label: "Whitney Rose", img: "" },
-  { id: "meredith", label: "Meredith Marks", img: "" },
-  { id: "heather", label: "Heather Gay", img: "" },
-  { id: "angie", label: "Angie Katsanevas", img: "" },
+  { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" },
+  { id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" },
+  { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" },
+  { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" },
+  { id: "angie", label: "Angie Katsanevas", img: "/images/cast/rhoslc-s6/angie.png" },
 ];
 
 const STANDALONE_CATALOG: CatalogEntry[] = [
@@ -217,10 +291,331 @@ const PREVIEW_VIEWPORT_WIDTH_CLASS: Record<PreviewViewport, string> = {
 };
 
 const PREVIEW_VIEWPORT_HEIGHT_CLASS: Record<PreviewViewport, string> = {
-  phone: "h-[700px]",
+  phone: "h-[640px]",
   tablet: "h-[740px]",
   desktop: "max-h-[760px]",
 };
+
+const TEMPLATE_FONT_OPTIONS: Array<{ label: string; value: string }> = DESIGN_SYSTEM_CDN_FONT_OPTIONS.map((font) => ({
+  label: font.name,
+  value: font.fontFamily,
+}));
+
+const DEFAULT_TITLE_FONT = "\"Sofia Pro\", var(--font-sans), sans-serif";
+const DEFAULT_SUBTEXT_FONT = "\"Sofia Pro\", var(--font-sans), sans-serif";
+const FIGMA_TITLE_FONT = "\"Rude Slab Condensed\", var(--font-sans), sans-serif";
+const FIGMA_SUBTEXT_FONT = "\"Plymouth Serial\", var(--font-sans), sans-serif";
+
+const DEFAULT_SURVEY_STYLE_MOBILE: TemplateStyleDefaults = {
+  titleColor: "#111111",
+  subTextColor: "#111111",
+  titleFontFamily: DEFAULT_TITLE_FONT,
+  subTextFontFamily: DEFAULT_SUBTEXT_FONT,
+  titleFontSize: 20,
+  subTextFontSize: 14,
+  shapeScale: 100,
+  buttonScale: 100,
+  canvasBackground: "#FFFFFF",
+  frameBackground: "#FFFFFF",
+  frameBorderColor: "#E4E4E7",
+};
+
+const DEFAULT_SURVEY_STYLE_DESKTOP: TemplateStyleDefaults = {
+  titleColor: "#111111",
+  subTextColor: "#111111",
+  titleFontFamily: DEFAULT_TITLE_FONT,
+  subTextFontFamily: DEFAULT_SUBTEXT_FONT,
+  titleFontSize: 24,
+  subTextFontSize: 16,
+  shapeScale: 100,
+  buttonScale: 100,
+  canvasBackground: "#FFFFFF",
+  frameBackground: "#FFFFFF",
+  frameBorderColor: "#E4E4E7",
+};
+
+function normalizeHexColor(colorValue: string): string | null {
+  const raw = colorValue.trim();
+  if (!raw) return null;
+  const match = raw.match(/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (!match) return null;
+  const hex = match[1];
+  if (!hex) return null;
+  const normalized = hex.length === 3
+    ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+    : hex;
+  return `#${normalized.toUpperCase()}`;
+}
+
+function resolveColorPalette(rawColors: string[]): string[] {
+  const normalized = rawColors
+    .map((entry) => normalizeHexColor(entry))
+    .filter((entry): entry is string => Boolean(entry));
+  const deduped = Array.from(new Set(normalized));
+  return deduped.length ? deduped : [...DESIGN_SYSTEM_BASE_COLORS];
+}
+
+function buildTemplateEditorDefaults(
+  titleText: string,
+  subText: string,
+  isFigmaRankPreview: boolean,
+): TemplatePreviewEditorState {
+  return {
+    titleText,
+    subText,
+    titleColor: "#111111",
+    subTextColor: "#111111",
+    titleFontFamily: isFigmaRankPreview
+      ? FIGMA_TITLE_FONT
+      : DEFAULT_TITLE_FONT,
+    subTextFontFamily: isFigmaRankPreview
+      ? FIGMA_SUBTEXT_FONT
+      : DEFAULT_SUBTEXT_FONT,
+    titleFontSize: isFigmaRankPreview ? 70 : 24,
+    subTextFontSize: isFigmaRankPreview ? 35 : 16,
+    shapeScale: 100,
+    buttonScale: 100,
+    canvasBackground: "#FFFFFF",
+    frameBackground: isFigmaRankPreview ? "#D9D9D9" : "#FFFFFF",
+    frameBorderColor: isFigmaRankPreview ? "#D9D9D9" : "#E4E4E7",
+  };
+}
+
+function responsiveFontSize(sizePx: number, enabled: boolean, minPx: number): string {
+  if (!enabled) return `${sizePx}px`;
+  return `clamp(${minPx}px, 6vw, ${sizePx}px)`;
+}
+
+function sanitizeTemplateEditorState(
+  value: unknown,
+): Partial<TemplatePreviewEditorState> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const candidate = value as Record<string, unknown>;
+
+  const stringFields: TemplateEditorStringKey[] = [
+    "titleText",
+    "subText",
+    "titleColor",
+    "subTextColor",
+    "titleFontFamily",
+    "subTextFontFamily",
+    "canvasBackground",
+    "frameBackground",
+    "frameBorderColor",
+  ];
+  const numericFields: TemplateEditorNumberKey[] = [
+    "titleFontSize",
+    "subTextFontSize",
+    "shapeScale",
+    "buttonScale",
+  ];
+
+  const sanitized: Partial<TemplatePreviewEditorState> = {};
+  for (const field of stringFields) {
+    const raw = candidate[field];
+    if (typeof raw === "string") {
+      sanitized[field] = raw;
+    }
+  }
+  for (const field of numericFields) {
+    const raw = candidate[field];
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      sanitized[field] = raw;
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizeTemplateStyleDefaults(value: unknown): Partial<TemplateStyleDefaults> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const candidate = value as Record<string, unknown>;
+  const sanitized: Partial<TemplateStyleDefaults> = {};
+
+  const stringFields: Array<Exclude<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale">> = [
+    "titleColor",
+    "subTextColor",
+    "titleFontFamily",
+    "subTextFontFamily",
+    "canvasBackground",
+    "frameBackground",
+    "frameBorderColor",
+  ];
+  const numberFields: Array<Extract<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale">> = [
+    "titleFontSize",
+    "subTextFontSize",
+    "shapeScale",
+    "buttonScale",
+  ];
+
+  for (const field of stringFields) {
+    const raw = candidate[field];
+    if (typeof raw === "string") {
+      sanitized[field] = raw;
+    }
+  }
+
+  for (const field of numberFields) {
+    const raw = candidate[field];
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      sanitized[field] = raw;
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizeSurveyQuestionDefaultsState(value: unknown): SurveyQuestionDefaultsState {
+  const mobile = {
+    ...DEFAULT_SURVEY_STYLE_MOBILE,
+    ...sanitizeTemplateStyleDefaults(
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>).mobile
+        : null,
+    ),
+  };
+  const desktop = {
+    ...DEFAULT_SURVEY_STYLE_DESKTOP,
+    ...sanitizeTemplateStyleDefaults(
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>).desktop
+        : null,
+    ),
+  };
+
+  return { mobile, desktop };
+}
+
+function asConfigRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function withEditorFontOverridesForQuestion(
+  question: SurveyQuestion & { options: QuestionOption[] },
+  editorState: TemplatePreviewEditorState,
+): SurveyQuestion & { options: QuestionOption[] } {
+  const baseConfig = asConfigRecord(question.config);
+  const uiVariant = typeof baseConfig.uiVariant === "string" ? baseConfig.uiVariant : "";
+
+  if (uiVariant === "three-choice-slider") {
+    const existingFonts = asConfigRecord(baseConfig.fonts);
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        subTextHeadingFontFamily: editorState.subTextFontFamily,
+        questionTextFontFamily: editorState.titleFontFamily,
+        optionTextFontFamily: editorState.subTextFontFamily,
+        promptFontFamily: editorState.subTextFontFamily,
+        castNameFontFamily: editorState.titleFontFamily,
+        choiceFontFamily: editorState.subTextFontFamily,
+        nextButtonFontFamily: editorState.subTextFontFamily,
+        fonts: {
+          ...existingFonts,
+          subTextHeading: editorState.subTextFontFamily,
+          questionText: editorState.titleFontFamily,
+          optionText: editorState.subTextFontFamily,
+          prompt: editorState.subTextFontFamily,
+          castName: editorState.titleFontFamily,
+          choice: editorState.subTextFontFamily,
+          nextButton: editorState.subTextFontFamily,
+        },
+      },
+    };
+  }
+
+  if (uiVariant === "two-choice-slider") {
+    const existingFonts = asConfigRecord(baseConfig.fonts);
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        questionTextFontFamily: editorState.titleFontFamily,
+        headingFontFamily: editorState.titleFontFamily,
+        titleFontFamily: editorState.titleFontFamily,
+        neutralOptionFontFamily: editorState.subTextFontFamily,
+        optionTextFontFamily: editorState.subTextFontFamily,
+        fonts: {
+          ...existingFonts,
+          questionText: editorState.titleFontFamily,
+          heading: editorState.titleFontFamily,
+          title: editorState.titleFontFamily,
+          neutralOption: editorState.subTextFontFamily,
+          optionText: editorState.subTextFontFamily,
+        },
+      },
+    };
+  }
+
+  if (uiVariant === "circle-ranking" || uiVariant === "rectangle-ranking") {
+    const existingFonts = asConfigRecord(baseConfig.fonts);
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        rankNumberFontFamily: editorState.titleFontFamily,
+        trayLabelFontFamily: editorState.subTextFontFamily,
+        cardLabelFontFamily: editorState.titleFontFamily,
+        pickerTitleFontFamily: editorState.subTextFontFamily,
+        pickerItemFontFamily: editorState.subTextFontFamily,
+        fonts: {
+          ...existingFonts,
+          rankNumber: editorState.titleFontFamily,
+          trayLabel: editorState.subTextFontFamily,
+          cardLabel: editorState.titleFontFamily,
+          pickerTitle: editorState.subTextFontFamily,
+          pickerItem: editorState.subTextFontFamily,
+        },
+      },
+    };
+  }
+
+  if (uiVariant === "agree-likert-scale") {
+    const existingFonts = asConfigRecord(baseConfig.fonts);
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        questionTextFontFamily: editorState.titleFontFamily,
+        optionTextFontFamily: editorState.subTextFontFamily,
+        rowLabelFontFamily: editorState.titleFontFamily,
+        columnLabelFontFamily: editorState.subTextFontFamily,
+        fonts: {
+          ...existingFonts,
+          questionText: editorState.titleFontFamily,
+          optionText: editorState.subTextFontFamily,
+          rowLabel: editorState.titleFontFamily,
+          statement: editorState.titleFontFamily,
+          castName: editorState.titleFontFamily,
+          columnLabel: editorState.subTextFontFamily,
+          choice: editorState.subTextFontFamily,
+          option: editorState.subTextFontFamily,
+        },
+      },
+    };
+  }
+
+  return question;
+}
+
+function buildStandaloneFontOverrides(editorState: TemplatePreviewEditorState): FlashbackRankerFontOverrides {
+  return {
+    rankNumberFontFamily: editorState.titleFontFamily,
+    trayLabelFontFamily: editorState.subTextFontFamily,
+    cardLabelFontFamily: editorState.titleFontFamily,
+    pickerTitleFontFamily: editorState.subTextFontFamily,
+    pickerItemFontFamily: editorState.subTextFontFamily,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /*  Shared card header                                                  */
@@ -286,15 +681,285 @@ function PreviewViewportToggle({
   );
 }
 
+function TemplateFontSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const selectValue = useMemo(() => {
+    if (TEMPLATE_FONT_OPTIONS.some((option) => option.value === value)) {
+      return value;
+    }
+    const resolved = resolveCloudfrontCdnFont(value);
+    if (resolved) {
+      const matched = TEMPLATE_FONT_OPTIONS.find(
+        (option) => option.value === resolved.fontFamily || option.label === resolved.name,
+      );
+      if (matched) return matched.value;
+    }
+    const fallbackByLabel = TEMPLATE_FONT_OPTIONS.find(
+      (option) => option.label.toLowerCase() === value.trim().toLowerCase(),
+    );
+    return fallbackByLabel?.value ?? value;
+  }, [value]);
+
+  return (
+    <div>
+      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+        {label}
+      </label>
+      <select
+        value={selectValue}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
+      >
+        {TEMPLATE_FONT_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function TemplateFontSizeInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+        {label}
+      </label>
+      <input
+        type="number"
+        value={value}
+        onChange={(event) => {
+          const parsed = Number(event.target.value);
+          if (Number.isFinite(parsed)) {
+            onChange(parsed);
+          }
+        }}
+        className="w-full rounded-md border border-zinc-300 bg-white px-2 py-2 text-sm text-zinc-800"
+      />
+    </div>
+  );
+}
+
+function TemplateColorSelect({
+  label,
+  value,
+  baseColors,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  baseColors: string[];
+  onChange: (next: string) => void;
+}) {
+  const options = useMemo(
+    () => Array.from(new Set([value, ...baseColors])),
+    [baseColors, value],
+  );
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-zinc-200 bg-white px-2 py-2">
+      <label className="block text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+        {label}
+      </label>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs font-medium text-zinc-700"
+      >
+        {options.map((hex) => (
+          <option key={hex} value={hex}>
+            {hex}
+          </option>
+        ))}
+      </select>
+      <div className="grid grid-cols-7 gap-1">
+        {baseColors.map((hex) => (
+          <button
+            key={hex}
+            type="button"
+            onClick={() => onChange(hex)}
+            className={`h-5 w-full rounded border ${value === hex ? "border-zinc-900" : "border-zinc-300"}`}
+            style={{ backgroundColor: hex }}
+            title={hex}
+            aria-label={`Set ${label} to ${hex}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SurveyDefaultSettingsPanel({
+  defaults,
+  onChange,
+  baseColors,
+}: {
+  defaults: SurveyQuestionDefaultsState;
+  onChange: (next: SurveyQuestionDefaultsState) => void;
+  baseColors: string[];
+}) {
+  const [activeViewport, setActiveViewport] = useState<DefaultViewport>("mobile");
+  const activeDefaults = defaults[activeViewport];
+
+  const updateActiveDefaults = useCallback(
+    (partial: Partial<TemplateStyleDefaults>) => {
+      onChange({
+        ...defaults,
+        [activeViewport]: {
+          ...defaults[activeViewport],
+          ...partial,
+        },
+      });
+    },
+    [activeViewport, defaults, onChange],
+  );
+
+  return (
+    <div className="mb-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-zinc-900">Default Settings</h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Set baseline styles for all survey question previews. Per-template edits override these defaults.
+          </p>
+        </div>
+        <div className="inline-flex rounded-full border border-zinc-300 bg-white p-1">
+          <button
+            type="button"
+            onClick={() => setActiveViewport("mobile")}
+            className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+              activeViewport === "mobile" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100"
+            }`}
+            aria-pressed={activeViewport === "mobile"}
+          >
+            Mobile
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveViewport("desktop")}
+            className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+              activeViewport === "desktop" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100"
+            }`}
+            aria-pressed={activeViewport === "desktop"}
+          >
+            Desktop
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <TemplateFontSelect
+          label="Title Font"
+          value={activeDefaults.titleFontFamily}
+          onChange={(titleFontFamily) => updateActiveDefaults({ titleFontFamily })}
+        />
+        <TemplateFontSelect
+          label="Sub-Text Font"
+          value={activeDefaults.subTextFontFamily}
+          onChange={(subTextFontFamily) => updateActiveDefaults({ subTextFontFamily })}
+        />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-sm">
+        <TemplateFontSizeInput
+          label="Title Size"
+          value={activeDefaults.titleFontSize}
+          onChange={(titleFontSize) => updateActiveDefaults({ titleFontSize })}
+        />
+        <TemplateFontSizeInput
+          label="Sub-Text Size"
+          value={activeDefaults.subTextFontSize}
+          onChange={(subTextFontSize) => updateActiveDefaults({ subTextFontSize })}
+        />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-sm">
+        <TemplateFontSizeInput
+          label="Shape Size (%)"
+          value={activeDefaults.shapeScale}
+          onChange={(shapeScale) => updateActiveDefaults({ shapeScale })}
+        />
+        <TemplateFontSizeInput
+          label="Button Size (%)"
+          value={activeDefaults.buttonScale}
+          onChange={(buttonScale) => updateActiveDefaults({ buttonScale })}
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+        <TemplateColorSelect
+          label="Title"
+          value={activeDefaults.titleColor}
+          baseColors={baseColors}
+          onChange={(titleColor) => updateActiveDefaults({ titleColor })}
+        />
+        <TemplateColorSelect
+          label="Sub-Text"
+          value={activeDefaults.subTextColor}
+          baseColors={baseColors}
+          onChange={(subTextColor) => updateActiveDefaults({ subTextColor })}
+        />
+        <TemplateColorSelect
+          label="Canvas"
+          value={activeDefaults.canvasBackground}
+          baseColors={baseColors}
+          onChange={(canvasBackground) => updateActiveDefaults({ canvasBackground })}
+        />
+        <TemplateColorSelect
+          label="Frame"
+          value={activeDefaults.frameBackground}
+          baseColors={baseColors}
+          onChange={(frameBackground) => updateActiveDefaults({ frameBackground })}
+        />
+        <TemplateColorSelect
+          label="Frame Border"
+          value={activeDefaults.frameBorderColor}
+          baseColors={baseColors}
+          onChange={(frameBorderColor) => updateActiveDefaults({ frameBorderColor })}
+        />
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Survey Preview Card — matches NormalizedSurveyPlay styling          */
 /* ------------------------------------------------------------------ */
 
-function SurveyPreviewCard({ entry }: { entry: CatalogEntry }) {
+function SurveyPreviewCard({
+  entry,
+  baseColors,
+  surveyDefaults,
+}: {
+  entry: CatalogEntry;
+  baseColors: string[];
+  surveyDefaults: SurveyQuestionDefaultsState;
+}) {
   const examples = entry.examples!;
+  const storageKey = `${TEMPLATE_EDITOR_STORAGE_PREFIX}.survey.${entry.key}`;
   const [exampleIdx, setExampleIdx] = useState(0);
   const [viewport, setViewport] = useState<PreviewViewport>("phone");
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   const example = examples[exampleIdx];
+  const activeVariant = (example.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
+  const isRankOrderPreview =
+    entry.key === "rank-order" &&
+    (activeVariant === "circle-ranking" || activeVariant === "rectangle-ranking");
   const [values, setValues] = useState<Record<number, unknown>>(() => {
     const init: Record<number, unknown> = {};
     examples.forEach((ex, i) => {
@@ -302,10 +967,217 @@ function SurveyPreviewCard({ entry }: { entry: CatalogEntry }) {
     });
     return init;
   });
+  const buildDefaults = useCallback(
+    (exampleValue: QuestionExample) => {
+      const variant = (exampleValue.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
+      const isRankPreview = entry.key === "rank-order" && (variant === "circle-ranking" || variant === "rectangle-ranking");
+      const isSeasonPreview = entry.key === "rank-order" && variant === "rectangle-ranking";
+      const isThreeChoice = variant === "three-choice-slider";
+      const isWhoseSide = variant === "two-choice-slider";
+      return buildTemplateEditorDefaults(
+        isThreeChoice || isWhoseSide
+          ? ""
+          : isSeasonPreview
+            ? "Rank the Seasons of RHOSLC."
+            : isRankPreview
+              ? "Rank the Cast of RHOSLC S6."
+              : exampleValue.mockQuestion.question_text,
+        isThreeChoice || isWhoseSide
+          ? ""
+          : isSeasonPreview
+            ? "Drag-and-Drop the Seasons to their Rank."
+            : isRankPreview
+              ? "Drag-and-Drop the Cast Members to their Rank."
+              : "",
+        isRankPreview,
+      );
+    },
+    [entry.key],
+  );
+  const [editorStateByExample, setEditorStateByExample] = useState<Record<number, TemplatePreviewEditorState>>(() => {
+    const initial: Record<number, TemplatePreviewEditorState> = {};
+    examples.forEach((ex, idx) => {
+      initial[idx] = buildDefaults(ex);
+    });
+    return initial;
+  });
+  const [useGlobalDefaultsByExample, setUseGlobalDefaultsByExample] = useState<Record<number, boolean>>(() => {
+    const initial: Record<number, boolean> = {};
+    examples.forEach((_, idx) => {
+      initial[idx] = true;
+    });
+    return initial;
+  });
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+      const record = parsed as Record<string, unknown>;
+      setEditorStateByExample((prev) => {
+        const next: Record<number, TemplatePreviewEditorState> = { ...prev };
+        const savedStates = record.states && typeof record.states === "object" && !Array.isArray(record.states)
+          ? (record.states as Record<string, unknown>)
+          : record;
+        examples.forEach((exampleValue, index) => {
+          const saved = sanitizeTemplateEditorState(savedStates[String(index)]);
+          next[index] = {
+            ...buildDefaults(exampleValue),
+            ...saved,
+          };
+        });
+        return next;
+      });
+      setUseGlobalDefaultsByExample((prev) => {
+        const next: Record<number, boolean> = { ...prev };
+        const savedFlags = record.useGlobal && typeof record.useGlobal === "object" && !Array.isArray(record.useGlobal)
+          ? (record.useGlobal as Record<string, unknown>)
+          : {};
+        examples.forEach((_, index) => {
+          const saved = savedFlags[String(index)];
+          next[index] = typeof saved === "boolean" ? saved : true;
+        });
+        return next;
+      });
+    } catch {
+      // Ignore malformed persisted editor settings.
+    }
+  }, [buildDefaults, examples, storageKey]);
+
+  useEffect(() => {
+    try {
+      const payload: Record<string, TemplatePreviewEditorState> = {};
+      Object.entries(editorStateByExample).forEach(([index, state]) => {
+        payload[index] = state;
+      });
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          states: payload,
+          useGlobal: useGlobalDefaultsByExample,
+        }),
+      );
+    } catch {
+      // Ignore persistence failures.
+    }
+  }, [editorStateByExample, storageKey, useGlobalDefaultsByExample]);
 
   const handleChange = useCallback((v: unknown) => {
     setValues((prev) => ({ ...prev, [exampleIdx]: v }));
   }, [exampleIdx]);
+  const editorState =
+    editorStateByExample[exampleIdx] ?? buildDefaults(example);
+  const activeSurveyDefaults = useMemo(
+    () => (viewport === "phone" ? surveyDefaults.mobile : surveyDefaults.desktop),
+    [surveyDefaults.desktop, surveyDefaults.mobile, viewport],
+  );
+  const isUsingGlobalDefaults = useGlobalDefaultsByExample[exampleIdx] ?? true;
+  const effectiveEditorState = useMemo(
+    () => (isUsingGlobalDefaults
+      ? {
+        ...editorState,
+        ...activeSurveyDefaults,
+      }
+      : editorState),
+    [activeSurveyDefaults, editorState, isUsingGlobalDefaults],
+  );
+  const previewQuestion = useMemo(
+    () => withEditorFontOverridesForQuestion(example.mockQuestion, effectiveEditorState),
+    [effectiveEditorState, example.mockQuestion],
+  );
+  const updateEditorState = useCallback(
+    (partial: Partial<TemplatePreviewEditorState>) => {
+      const touchesStyleDefaults = Object.keys(partial).some((field) =>
+        TEMPLATE_STYLE_FIELDS.includes(field as TemplateStyleKey),
+      );
+      setEditorStateByExample((prev) => {
+        const base = isUsingGlobalDefaults && touchesStyleDefaults
+          ? effectiveEditorState
+          : prev[exampleIdx] ?? buildDefaults(example);
+        return {
+          ...prev,
+          [exampleIdx]: { ...base, ...partial },
+        };
+      });
+      if (touchesStyleDefaults) {
+        setUseGlobalDefaultsByExample((prev) => ({
+          ...prev,
+          [exampleIdx]: false,
+        }));
+      }
+    },
+    [buildDefaults, effectiveEditorState, example, exampleIdx, isUsingGlobalDefaults],
+  );
+  const resetEditorState = useCallback(() => {
+    setEditorStateByExample((prev) => ({
+      ...prev,
+      [exampleIdx]: buildDefaults(example),
+    }));
+    setUseGlobalDefaultsByExample((prev) => ({
+      ...prev,
+      [exampleIdx]: true,
+    }));
+  }, [buildDefaults, example, exampleIdx]);
+
+  const renderPreview = (heightClass: string) => (
+    <div
+      className="rounded-2xl border p-2 sm:p-3"
+      style={{
+        backgroundColor: effectiveEditorState.canvasBackground,
+        borderColor: effectiveEditorState.frameBorderColor,
+      }}
+    >
+      <div className={`mx-auto w-full ${PREVIEW_VIEWPORT_WIDTH_CLASS[viewport]}`}>
+        <div
+          className={`overflow-auto rounded-[24px] border shadow-sm ${heightClass}`}
+          style={{
+            backgroundColor: effectiveEditorState.frameBackground,
+            borderColor: effectiveEditorState.frameBorderColor,
+          }}
+        >
+          <div className="p-3 sm:p-6">
+            {(effectiveEditorState.titleText.trim().length > 0 || effectiveEditorState.subText.trim().length > 0) && (
+              <div className="mb-3 sm:mb-4">
+                {effectiveEditorState.titleText.trim().length > 0 && (
+                  <p
+                    className="leading-[1.05] tracking-[0.01em]"
+                    style={{
+                      color: effectiveEditorState.titleColor,
+                      fontFamily: effectiveEditorState.titleFontFamily,
+                      fontSize: responsiveFontSize(effectiveEditorState.titleFontSize, isRankOrderPreview, 22),
+                      fontWeight: isRankOrderPreview ? 800 : 600,
+                    }}
+                  >
+                    {effectiveEditorState.titleText}
+                  </p>
+                )}
+                {effectiveEditorState.subText.trim().length > 0 && (
+                  <p
+                    className="mt-2 leading-none"
+                    style={{
+                      color: effectiveEditorState.subTextColor,
+                      fontFamily: effectiveEditorState.subTextFontFamily,
+                      fontSize: responsiveFontSize(effectiveEditorState.subTextFontSize, isRankOrderPreview, 14),
+                      fontWeight: isRankOrderPreview ? 400 : 500,
+                    }}
+                  >
+                    {effectiveEditorState.subText}
+                  </p>
+                )}
+              </div>
+            )}
+            <QuestionRenderer
+              question={previewQuestion}
+              value={values[exampleIdx]}
+              onChange={handleChange}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden flex flex-col">
@@ -326,28 +1198,197 @@ function SurveyPreviewCard({ entry }: { entry: CatalogEntry }) {
           </div>
         )}
         <PreviewViewportToggle value={viewport} onChange={setViewport} />
+        <button
+          type="button"
+          onClick={() => setIsEditorOpen(true)}
+          className="mt-2 inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900"
+        >
+          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+            <path d="M14.7 2.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4l-9.5 9.5-3.7.6.6-3.7 9.6-9.4Zm1.1 2.3-1.6-1.6-1.2 1.2 1.6 1.6 1.2-1.2ZM12.9 6 6.2 12.7l-.3 1.8 1.8-.3L14.4 7 12.9 6Z" />
+          </svg>
+          Edit Template
+        </button>
+        {!isUsingGlobalDefaults && (
+          <button
+            type="button"
+            onClick={resetEditorState}
+            className="mt-2 ml-2 inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900"
+          >
+            Use Defaults
+          </button>
+        )}
       </CardHeader>
 
       <div className="flex-1 p-3 sm:p-4">
-        <div className="rounded-2xl border border-zinc-200 bg-zinc-100/70 p-2 sm:p-3">
-          <div className={`mx-auto w-full ${PREVIEW_VIEWPORT_WIDTH_CLASS[viewport]}`}>
-            <div className={`overflow-auto rounded-[24px] border border-zinc-200 bg-white shadow-sm ${PREVIEW_VIEWPORT_HEIGHT_CLASS[viewport]}`}>
-              <div className="p-4 sm:p-6">
-                <div className="mb-4">
-                  <p className="text-lg font-semibold text-gray-900" style={{ fontFamily: "var(--font-sans)" }}>
-                    {example.mockQuestion.question_text}
-                  </p>
+        {renderPreview(PREVIEW_VIEWPORT_HEIGHT_CLASS[viewport])}
+      </div>
+
+      {isEditorOpen && (
+        <div className="fixed inset-0 z-[90]">
+          <div
+            className="absolute inset-0 bg-black/55"
+            onClick={() => setIsEditorOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${entry.displayName} template editor`}
+            className="absolute left-1/2 top-1/2 h-[calc(100vh-3rem)] w-[min(1400px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-zinc-900">
+                  {entry.displayName} Template Editor
+                </h3>
+                <p className="text-xs text-zinc-500">
+                  Preview and tune colors, fonts, text, and sizing.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={resetEditorState}
+                  className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-700 hover:bg-zinc-100"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditorOpen(false)}
+                  className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-zinc-800"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="grid h-[calc(100%-64px)] grid-cols-1 lg:grid-cols-[340px,minmax(0,1fr)]">
+              <aside className="overflow-y-auto border-r border-zinc-200 bg-zinc-50 p-4">
+                <div className="space-y-4">
+                  {examples.length > 1 && (
+                    <div>
+                      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Example
+                      </label>
+                      <select
+                        value={exampleIdx}
+                        onChange={(e) => setExampleIdx(Number(e.target.value))}
+                        className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
+                      >
+                        {examples.map((ex, i) => (
+                          <option key={i} value={i}>
+                            {ex.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Title Text
+                    </label>
+                    <textarea
+                      value={effectiveEditorState.titleText}
+                      onChange={(e) => updateEditorState({ titleText: e.target.value })}
+                      className="min-h-20 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Sub-Text
+                    </label>
+                    <textarea
+                      value={effectiveEditorState.subText}
+                      onChange={(e) => updateEditorState({ subText: e.target.value })}
+                      className="min-h-16 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
+                    />
+                  </div>
+
+                  <TemplateFontSelect
+                    label="Title Font"
+                    value={effectiveEditorState.titleFontFamily}
+                    onChange={(titleFontFamily) => updateEditorState({ titleFontFamily })}
+                  />
+
+                  <TemplateFontSelect
+                    label="Sub-Text Font"
+                    value={effectiveEditorState.subTextFontFamily}
+                    onChange={(subTextFontFamily) => updateEditorState({ subTextFontFamily })}
+                  />
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <TemplateFontSizeInput
+                      label="Title Size"
+                      value={effectiveEditorState.titleFontSize}
+                      onChange={(titleFontSize) => updateEditorState({ titleFontSize })}
+                    />
+                    <TemplateFontSizeInput
+                      label="Sub-Text Size"
+                      value={effectiveEditorState.subTextFontSize}
+                      onChange={(subTextFontSize) => updateEditorState({ subTextFontSize })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <TemplateFontSizeInput
+                      label="Shape Size (%)"
+                      value={effectiveEditorState.shapeScale}
+                      onChange={(shapeScale) => updateEditorState({ shapeScale })}
+                    />
+                    <TemplateFontSizeInput
+                      label="Button Size (%)"
+                      value={effectiveEditorState.buttonScale}
+                      onChange={(buttonScale) => updateEditorState({ buttonScale })}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <TemplateColorSelect
+                      label="Title"
+                      value={effectiveEditorState.titleColor}
+                      baseColors={baseColors}
+                      onChange={(titleColor) => updateEditorState({ titleColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Sub-Text"
+                      value={effectiveEditorState.subTextColor}
+                      baseColors={baseColors}
+                      onChange={(subTextColor) => updateEditorState({ subTextColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Canvas"
+                      value={effectiveEditorState.canvasBackground}
+                      baseColors={baseColors}
+                      onChange={(canvasBackground) => updateEditorState({ canvasBackground })}
+                    />
+                    <TemplateColorSelect
+                      label="Frame"
+                      value={effectiveEditorState.frameBackground}
+                      baseColors={baseColors}
+                      onChange={(frameBackground) => updateEditorState({ frameBackground })}
+                    />
+                    <TemplateColorSelect
+                      label="Frame Border"
+                      value={effectiveEditorState.frameBorderColor}
+                      baseColors={baseColors}
+                      onChange={(frameBorderColor) => updateEditorState({ frameBorderColor })}
+                    />
+                  </div>
                 </div>
-                <QuestionRenderer
-                  question={example.mockQuestion}
-                  value={values[exampleIdx]}
-                  onChange={handleChange}
-                />
+              </aside>
+
+              <div className="overflow-y-auto p-4 sm:p-5">
+                <PreviewViewportToggle value={viewport} onChange={setViewport} />
+                <div className="mt-3">
+                  {renderPreview("h-[min(72vh,860px)]")}
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -518,40 +1559,286 @@ function AuthFieldPreview({ fieldKey }: { fieldKey: string }) {
 /*  Standalone Preview Card — renders components directly               */
 /* ------------------------------------------------------------------ */
 
-function StandalonePreviewCard({ entry }: { entry: CatalogEntry }) {
+function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; baseColors: string[] }) {
+  const storageKey = `${TEMPLATE_EDITOR_STORAGE_PREFIX}.standalone.${entry.key}`;
   const [viewport, setViewport] = useState<PreviewViewport>("phone");
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const isFigmaRankPreview = entry.key === "flashback-ranker";
+  const buildStandaloneDefaults = useCallback(
+    () =>
+      buildTemplateEditorDefaults(
+        entry.key === "flashback-ranker" ? "Rank the Seasons of RHOSLC." : "Rate the season",
+        entry.key === "flashback-ranker"
+          ? "Drag-and-Drop the Seasons to their Rank."
+          : "Pick 1 to 5 snowflakes. Halves are allowed.",
+        isFigmaRankPreview,
+      ),
+    [entry.key, isFigmaRankPreview],
+  );
+  const [editorState, setEditorState] = useState<TemplatePreviewEditorState>(() => buildStandaloneDefaults());
+  const updateEditorState = useCallback(
+    (partial: Partial<TemplatePreviewEditorState>) => {
+      setEditorState((prev) => ({ ...prev, ...partial }));
+    },
+    [],
+  );
+  const resetEditorState = useCallback(() => {
+    setEditorState(buildStandaloneDefaults());
+  }, [buildStandaloneDefaults]);
+  const standaloneFontOverrides = useMemo(
+    () => buildStandaloneFontOverrides(editorState),
+    [editorState],
+  );
 
-  return (
-    <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden flex flex-col">
-      <CardHeader entry={entry} badge="Custom Survey">
-        <PreviewViewportToggle value={viewport} onChange={setViewport} />
-      </CardHeader>
-      <div className="flex-1 p-3 sm:p-4">
-        <div className="rounded-2xl border border-zinc-200 bg-zinc-100/70 p-2 sm:p-3">
-          <div className={`mx-auto w-full ${PREVIEW_VIEWPORT_WIDTH_CLASS[viewport]}`}>
-            <div className={`overflow-auto rounded-[24px] border border-zinc-200 bg-white shadow-sm ${PREVIEW_VIEWPORT_HEIGHT_CLASS[viewport]}`}>
-              <div className="p-4 sm:p-6">
-                <StandaloneFieldPreview fieldKey={entry.key} />
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      const saved = sanitizeTemplateEditorState(parsed);
+      if (!Object.keys(saved).length) return;
+      setEditorState({
+        ...buildStandaloneDefaults(),
+        ...saved,
+      });
+    } catch {
+      // Ignore malformed persisted editor settings.
+    }
+  }, [buildStandaloneDefaults, storageKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(editorState));
+    } catch {
+      // Ignore persistence failures.
+    }
+  }, [editorState, storageKey]);
+
+  const renderPreview = (heightClass: string) => (
+    <div
+      className="rounded-2xl border p-2 sm:p-3"
+      style={{
+        backgroundColor: editorState.canvasBackground,
+        borderColor: editorState.frameBorderColor,
+      }}
+    >
+      <div className={`mx-auto w-full ${PREVIEW_VIEWPORT_WIDTH_CLASS[viewport]}`}>
+        <div
+          className={`overflow-auto rounded-[24px] border shadow-sm ${heightClass}`}
+          style={{
+            backgroundColor: editorState.frameBackground,
+            borderColor: editorState.frameBorderColor,
+          }}
+        >
+          <div className="p-3 sm:p-6">
+            {(editorState.titleText.trim().length > 0 || editorState.subText.trim().length > 0) && (
+              <div className="mb-3 sm:mb-4">
+                {editorState.titleText.trim().length > 0 && (
+                  <p
+                    className="leading-[1.05] tracking-[0.01em]"
+                    style={{
+                      color: editorState.titleColor,
+                      fontFamily: editorState.titleFontFamily,
+                      fontSize: responsiveFontSize(editorState.titleFontSize, isFigmaRankPreview, 22),
+                      fontWeight: isFigmaRankPreview ? 800 : 600,
+                    }}
+                  >
+                    {editorState.titleText}
+                  </p>
+                )}
+                {editorState.subText.trim().length > 0 && (
+                  <p
+                    className="mt-2 leading-none"
+                    style={{
+                      color: editorState.subTextColor,
+                      fontFamily: editorState.subTextFontFamily,
+                      fontSize: responsiveFontSize(editorState.subTextFontSize, isFigmaRankPreview, 14),
+                      fontWeight: isFigmaRankPreview ? 400 : 500,
+                    }}
+                  >
+                    {editorState.subText}
+                  </p>
+                )}
               </div>
-            </div>
+            )}
+            <StandaloneFieldPreview fieldKey={entry.key} fontOverrides={standaloneFontOverrides} />
           </div>
         </div>
       </div>
     </div>
   );
+
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden flex flex-col">
+      <CardHeader entry={entry} badge="Custom Survey">
+        <PreviewViewportToggle value={viewport} onChange={setViewport} />
+        <button
+          type="button"
+          onClick={() => setIsEditorOpen(true)}
+          className="mt-2 inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900"
+        >
+          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+            <path d="M14.7 2.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4l-9.5 9.5-3.7.6.6-3.7 9.6-9.4Zm1.1 2.3-1.6-1.6-1.2 1.2 1.6 1.6 1.2-1.2ZM12.9 6 6.2 12.7l-.3 1.8 1.8-.3L14.4 7 12.9 6Z" />
+          </svg>
+          Edit Template
+        </button>
+      </CardHeader>
+      <div className="flex-1 p-3 sm:p-4">
+        {renderPreview(PREVIEW_VIEWPORT_HEIGHT_CLASS[viewport])}
+      </div>
+
+      {isEditorOpen && (
+        <div className="fixed inset-0 z-[90]">
+          <div
+            className="absolute inset-0 bg-black/55"
+            onClick={() => setIsEditorOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${entry.displayName} template editor`}
+            className="absolute left-1/2 top-1/2 h-[calc(100vh-3rem)] w-[min(1400px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-zinc-900">
+                  {entry.displayName} Template Editor
+                </h3>
+                <p className="text-xs text-zinc-500">
+                  Preview and tune colors, fonts, text, and sizing.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={resetEditorState}
+                  className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-700 hover:bg-zinc-100"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditorOpen(false)}
+                  className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-zinc-800"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="grid h-[calc(100%-64px)] grid-cols-1 lg:grid-cols-[340px,minmax(0,1fr)]">
+              <aside className="overflow-y-auto border-r border-zinc-200 bg-zinc-50 p-4">
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Title Text
+                    </label>
+                    <textarea
+                      value={editorState.titleText}
+                      onChange={(e) => updateEditorState({ titleText: e.target.value })}
+                      className="min-h-20 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Sub-Text
+                    </label>
+                    <textarea
+                      value={editorState.subText}
+                      onChange={(e) => updateEditorState({ subText: e.target.value })}
+                      className="min-h-16 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
+                    />
+                  </div>
+
+                  <TemplateFontSelect
+                    label="Title Font"
+                    value={editorState.titleFontFamily}
+                    onChange={(titleFontFamily) => updateEditorState({ titleFontFamily })}
+                  />
+
+                  <TemplateFontSelect
+                    label="Sub-Text Font"
+                    value={editorState.subTextFontFamily}
+                    onChange={(subTextFontFamily) => updateEditorState({ subTextFontFamily })}
+                  />
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <TemplateFontSizeInput
+                      label="Title Size"
+                      value={editorState.titleFontSize}
+                      onChange={(titleFontSize) => updateEditorState({ titleFontSize })}
+                    />
+                    <TemplateFontSizeInput
+                      label="Sub-Text Size"
+                      value={editorState.subTextFontSize}
+                      onChange={(subTextFontSize) => updateEditorState({ subTextFontSize })}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <TemplateColorSelect
+                      label="Title"
+                      value={editorState.titleColor}
+                      baseColors={baseColors}
+                      onChange={(titleColor) => updateEditorState({ titleColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Sub-Text"
+                      value={editorState.subTextColor}
+                      baseColors={baseColors}
+                      onChange={(subTextColor) => updateEditorState({ subTextColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Canvas"
+                      value={editorState.canvasBackground}
+                      baseColors={baseColors}
+                      onChange={(canvasBackground) => updateEditorState({ canvasBackground })}
+                    />
+                    <TemplateColorSelect
+                      label="Frame"
+                      value={editorState.frameBackground}
+                      baseColors={baseColors}
+                      onChange={(frameBackground) => updateEditorState({ frameBackground })}
+                    />
+                    <TemplateColorSelect
+                      label="Frame Border"
+                      value={editorState.frameBorderColor}
+                      baseColors={baseColors}
+                      onChange={(frameBorderColor) => updateEditorState({ frameBorderColor })}
+                    />
+                  </div>
+                </div>
+              </aside>
+
+              <div className="overflow-y-auto p-4 sm:p-5">
+                <PreviewViewportToggle value={viewport} onChange={setViewport} />
+                <div className="mt-3">
+                  {renderPreview("h-[min(72vh,860px)]")}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
-function StandaloneFieldPreview({ fieldKey }: { fieldKey: string }) {
+function StandaloneFieldPreview({
+  fieldKey,
+  fontOverrides,
+}: {
+  fieldKey: string;
+  fontOverrides?: FlashbackRankerFontOverrides;
+}) {
   const [rating, setRating] = useState<number | null>(null);
 
   switch (fieldKey) {
     case "icon-rating":
       return (
         <div className="flex flex-col items-center gap-4 text-center">
-          <h2 className="font-rude-slab font-bold text-2xl uppercase tracking-wide text-rose-900">
-            Rate the season
-          </h2>
-          <p className="text-sm text-rose-700">Pick 1 to 5 snowflakes. Halves are allowed.</p>
           <IconRatingInput
             value={rating}
             onChange={setRating}
@@ -570,19 +1857,14 @@ function StandaloneFieldPreview({ fieldKey }: { fieldKey: string }) {
 
     case "flashback-ranker":
       return (
-        <div>
-          <h2 className="font-bold text-lg text-zinc-900 mb-2 text-center">
-            Rank the RHOSLC Cast
-          </h2>
-          <p className="text-sm text-zinc-500 mb-4 text-center">
-            Drag cast members from the bench onto the ranked line.
-          </p>
-          <FlashbackRanker
-            items={RHOSLC_CAST}
-            lineLabelTop="ICONIC"
-            lineLabelBottom="SNOOZE"
-          />
-        </div>
+        <FlashbackRanker
+          items={RHOSLC_CAST}
+          lineLabelTop="ICONIC"
+          lineLabelBottom="SNOOZE"
+          variant="grid"
+          layoutPreset="figma-rank-circles"
+          fontOverrides={fontOverrides}
+        />
       );
 
     default:
@@ -594,7 +1876,55 @@ function StandaloneFieldPreview({ fieldKey }: { fieldKey: string }) {
 /*  Questions Tab                                                      */
 /* ------------------------------------------------------------------ */
 
-export default function QuestionsTab() {
+export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
+  const [storedBaseColors, setStoredBaseColors] = useState<string[]>([]);
+  const [surveyDefaults, setSurveyDefaults] = useState<SurveyQuestionDefaultsState>(() => ({
+    mobile: { ...DEFAULT_SURVEY_STYLE_MOBILE },
+    desktop: { ...DEFAULT_SURVEY_STYLE_DESKTOP },
+  }));
+
+  useEffect(() => {
+    if (baseColors?.length) return;
+    try {
+      const raw = window.localStorage.getItem(DESIGN_SYSTEM_COLORS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+      const loaded = parsed.filter((entry): entry is string => typeof entry === "string");
+      setStoredBaseColors(resolveColorPalette(loaded));
+    } catch {
+      setStoredBaseColors([]);
+    }
+  }, [baseColors]);
+
+  const editorBaseColors = useMemo(() => {
+    if (baseColors?.length) return resolveColorPalette(baseColors);
+    if (storedBaseColors.length) return storedBaseColors;
+    return [...DESIGN_SYSTEM_BASE_COLORS];
+  }, [baseColors, storedBaseColors]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SURVEY_QUESTION_DEFAULTS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      setSurveyDefaults(sanitizeSurveyQuestionDefaultsState(parsed));
+    } catch {
+      setSurveyDefaults({
+        mobile: { ...DEFAULT_SURVEY_STYLE_MOBILE },
+        desktop: { ...DEFAULT_SURVEY_STYLE_DESKTOP },
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SURVEY_QUESTION_DEFAULTS_STORAGE_KEY, JSON.stringify(surveyDefaults));
+    } catch {
+      // Ignore persistence failures.
+    }
+  }, [surveyDefaults]);
+
   const totalCount = SURVEY_CATALOG.length + AUTH_CATALOG.length + STANDALONE_CATALOG.length;
 
   return (
@@ -610,9 +1940,19 @@ export default function QuestionsTab() {
             Interactive previews — click and interact with each component
           </span>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <SurveyDefaultSettingsPanel
+          defaults={surveyDefaults}
+          onChange={setSurveyDefaults}
+          baseColors={editorBaseColors}
+        />
+        <div className="grid grid-cols-1 gap-6">
           {SURVEY_CATALOG.map((entry) => (
-            <SurveyPreviewCard key={entry.key} entry={entry} />
+            <SurveyPreviewCard
+              key={entry.key}
+              entry={entry}
+              baseColors={editorBaseColors}
+              surveyDefaults={surveyDefaults}
+            />
           ))}
         </div>
       </section>
@@ -628,9 +1968,9 @@ export default function QuestionsTab() {
             Standalone components used in bespoke survey pages (e.g. RHOSLC S6)
           </span>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-6">
           {STANDALONE_CATALOG.map((entry) => (
-            <StandalonePreviewCard key={entry.key} entry={entry} />
+            <StandalonePreviewCard key={entry.key} entry={entry} baseColors={editorBaseColors} />
           ))}
         </div>
       </section>
@@ -646,7 +1986,7 @@ export default function QuestionsTab() {
             Form fields from the registration and profile completion flow
           </span>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-6">
           {AUTH_CATALOG.map((entry) => (
             <AuthPreviewCard key={entry.key} entry={entry} />
           ))}

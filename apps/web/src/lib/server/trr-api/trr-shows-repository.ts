@@ -178,6 +178,10 @@ export interface PaginationOptions {
   offset?: number;
 }
 
+export interface SourcePaginationOptions extends PaginationOptions {
+  sources?: string[];
+}
+
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 500;
 
@@ -604,6 +608,30 @@ const toCastThumbnailFields = (value: unknown): CastThumbnailFields => {
   };
 };
 
+const pickVariantUrlFromMetadata = (
+  metadata: Record<string, unknown> | null | undefined,
+  signature: string,
+  variantKey: string
+): string | null => {
+  if (!metadata || typeof metadata !== "object") return null;
+  const variants = metadata.variants;
+  if (!variants || typeof variants !== "object") return null;
+  const signatureBucket = (variants as Record<string, unknown>)[signature];
+  if (!signatureBucket || typeof signatureBucket !== "object") return null;
+  const variantBucket = (signatureBucket as Record<string, unknown>)[variantKey];
+  if (!variantBucket || typeof variantBucket !== "object") return null;
+  const formatBucket = variantBucket as Record<string, unknown>;
+  const webp = formatBucket.webp;
+  if (webp && typeof webp === "object" && typeof (webp as Record<string, unknown>).url === "string") {
+    return (webp as Record<string, unknown>).url as string;
+  }
+  const jpg = formatBucket.jpg;
+  if (jpg && typeof jpg === "object" && typeof (jpg as Record<string, unknown>).url === "string") {
+    return (jpg as Record<string, unknown>).url as string;
+  }
+  return null;
+};
+
 async function getPreferredCastPhotoMap(
   personIds: string[],
   options?: { seasonNumber?: number | null }
@@ -621,6 +649,7 @@ async function getPreferredCastPhotoMap(
       person_id: string;
       hosted_url: string | null;
       hosted_content_type: string | null;
+      metadata: Record<string, unknown> | null;
       context: Record<string, unknown> | null;
       position: number | null;
       created_at: string | null;
@@ -629,6 +658,7 @@ async function getPreferredCastPhotoMap(
          ml.entity_id::text AS person_id,
          ma.hosted_url,
          ma.hosted_content_type,
+         ma.metadata,
          ml.context,
          ml.position,
          ml.created_at
@@ -646,17 +676,27 @@ async function getPreferredCastPhotoMap(
              AND COALESCE(ml.context->>'season_number', '') ~ '^[0-9]+$'
              AND (ml.context->>'season_number')::int = $2::int
            THEN 0
-           WHEN LOWER(COALESCE(ml.context->>'context_section', '')) = 'bravo_profile'
-           THEN 1
            WHEN LOWER(COALESCE(ml.context->>'context_section', '')) IN (
              'official season announcement',
              'official_season_announcement'
            )
+             AND $2::int IS NOT NULL
+             AND COALESCE(ml.context->>'season_number', '') ~ '^[0-9]+$'
+             AND (ml.context->>'season_number')::int = $2::int
+           THEN 1
+           WHEN LOWER(COALESCE(ml.context->>'context_section', '')) = 'bravo_profile'
            THEN 2
+           WHEN LOWER(COALESCE(ml.context->>'context_section', '')) IN (
+             'official season announcement',
+             'official_season_announcement'
+           )
+           THEN 3
            WHEN COALESCE(ml.context->>'people_count', '') ~ '^[0-9]+$'
              AND (ml.context->>'people_count')::int = 1
-           THEN 3
-           ELSE 4
+           THEN 4
+           WHEN LOWER(COALESCE(ml.context->>'context_type', '')) IN ('profile_picture', 'profile')
+           THEN 5
+           ELSE 6
          END,
          COALESCE(ml.position, 2147483647) ASC,
          ml.created_at DESC`,
@@ -665,14 +705,26 @@ async function getPreferredCastPhotoMap(
 
     for (const row of personLinksResult.rows) {
       if (map.has(row.person_id)) continue;
-      if (!row.hosted_url || !isLikelyImage(row.hosted_content_type, row.hosted_url)) continue;
+      const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : null;
+      const thumbUrlFromMetadata =
+        pickVariantUrlFromMetadata(metadata, "base", "thumb") ??
+        (typeof metadata?.thumb_url === "string" && metadata.thumb_url.trim().length > 0
+          ? metadata.thumb_url.trim()
+          : null);
+      const displayUrlFromMetadata =
+        pickVariantUrlFromMetadata(metadata, "base", "card") ??
+        (typeof metadata?.display_url === "string" && metadata.display_url.trim().length > 0
+          ? metadata.display_url.trim()
+          : null);
+      const candidateUrl = thumbUrlFromMetadata ?? displayUrlFromMetadata ?? row.hosted_url ?? null;
+      if (!candidateUrl || !isLikelyImage(row.hosted_content_type, candidateUrl)) continue;
       const context = row.context ?? null;
       const thumbnailCrop =
         context && typeof context === "object"
           ? (context as { thumbnail_crop?: unknown }).thumbnail_crop
           : null;
       map.set(row.person_id, {
-        url: row.hosted_url,
+        url: candidateUrl,
         ...toCastThumbnailFields(thumbnailCrop),
       });
     }
@@ -686,26 +738,20 @@ async function getPreferredCastPhotoMap(
   try {
     const castPhotosResult = await pgQuery<{
       person_id: string;
+      thumb_url: string | null;
       display_url: string | null;
       hosted_url: string | null;
       url: string | null;
-      thumbnail_focus_x: number | null;
-      thumbnail_focus_y: number | null;
-      thumbnail_zoom: number | null;
-      thumbnail_crop_mode: "manual" | "auto" | null;
       context_section: string | null;
       season: number | null;
       gallery_index: number | null;
     }>(
       `SELECT
          person_id,
+         thumb_url,
          display_url,
          hosted_url,
          url,
-         thumbnail_focus_x,
-         thumbnail_focus_y,
-         thumbnail_zoom,
-         thumbnail_crop_mode,
          context_section,
          season,
          gallery_index
@@ -718,9 +764,21 @@ async function getPreferredCastPhotoMap(
              AND $2::int IS NOT NULL
              AND season = $2::int
            THEN 0
-           WHEN LOWER(COALESCE(context_section, '')) = 'bravo_profile'
+           WHEN LOWER(COALESCE(context_section, '')) IN (
+             'official season announcement',
+             'official_season_announcement'
+           )
+             AND $2::int IS NOT NULL
+             AND season = $2::int
            THEN 1
-           ELSE 2
+           WHEN LOWER(COALESCE(context_section, '')) = 'bravo_profile'
+           THEN 2
+           WHEN LOWER(COALESCE(context_section, '')) IN (
+             'official season announcement',
+             'official_season_announcement'
+           )
+           THEN 3
+           ELSE 4
          END,
          gallery_index ASC NULLS LAST`,
       [remainingPersonIds, requestedSeason]
@@ -728,17 +786,11 @@ async function getPreferredCastPhotoMap(
 
     for (const row of castPhotosResult.rows) {
       if (map.has(row.person_id)) continue;
-      const candidateUrl = row.display_url ?? row.hosted_url ?? row.url;
+      const candidateUrl = row.thumb_url ?? row.display_url ?? row.hosted_url ?? row.url;
       if (!candidateUrl || !isLikelyImage(null, candidateUrl)) continue;
       map.set(row.person_id, {
         url: candidateUrl,
-        thumbnail_focus_x: row.thumbnail_focus_x,
-        thumbnail_focus_y: row.thumbnail_focus_y,
-        thumbnail_zoom: row.thumbnail_zoom,
-        thumbnail_crop_mode:
-          row.thumbnail_crop_mode === "manual" || row.thumbnail_crop_mode === "auto"
-            ? row.thumbnail_crop_mode
-            : null,
+        ...EMPTY_CAST_THUMBNAIL_FIELDS,
       });
     }
   } catch (error) {
@@ -1201,6 +1253,7 @@ export interface TrrPersonPhoto {
   url: string | null;
   hosted_url: string | null;
   original_url?: string | null;
+  thumb_url?: string | null;
   display_url?: string | null;
   detail_url?: string | null;
   crop_display_url?: string | null;
@@ -1357,7 +1410,12 @@ const toThumbnailCropFields = (value: unknown): ThumbnailCropFields => {
 
 type PersonPhotoVariantUrls = Pick<
   TrrPersonPhoto,
-  "original_url" | "display_url" | "detail_url" | "crop_display_url" | "crop_detail_url"
+  | "original_url"
+  | "thumb_url"
+  | "display_url"
+  | "detail_url"
+  | "crop_display_url"
+  | "crop_detail_url"
 >;
 
 const pickPersonPhotoVariantUrl = (
@@ -1393,6 +1451,7 @@ const resolvePersonPhotoVariantUrls = (
   if (!md) {
     return {
       original_url: fallbackUrl,
+      thumb_url: fallbackUrl,
       display_url: fallbackUrl,
       detail_url: fallbackUrl,
       crop_display_url: null,
@@ -1400,6 +1459,8 @@ const resolvePersonPhotoVariantUrls = (
     };
   }
 
+  const directThumb =
+    typeof md.thumb_url === "string" && md.thumb_url.trim().length > 0 ? md.thumb_url.trim() : null;
   const directDisplay =
     typeof md.display_url === "string" && md.display_url.trim().length > 0 ? md.display_url.trim() : null;
   const directDetail =
@@ -1418,6 +1479,7 @@ const resolvePersonPhotoVariantUrls = (
       ? md.active_crop_signature.trim()
       : null;
 
+  const variantThumb = pickPersonPhotoVariantUrl(md, "base", "thumb") ?? directThumb;
   const variantDisplay = pickPersonPhotoVariantUrl(md, "base", "card") ?? directDisplay;
   const variantDetail = pickPersonPhotoVariantUrl(md, "base", "detail") ?? directDetail;
   const variantCropDisplay =
@@ -1429,6 +1491,7 @@ const resolvePersonPhotoVariantUrls = (
 
   return {
     original_url: fallbackUrl,
+    thumb_url: variantThumb ?? variantDisplay ?? fallbackUrl,
     display_url: variantDisplay ?? fallbackUrl,
     detail_url: variantDetail ?? fallbackUrl,
     crop_display_url: variantCropDisplay,
@@ -1443,7 +1506,7 @@ const resolvePersonPhotoVariantUrls = (
  */
 export async function getPhotosByPersonId(
   personId: string,
-  options?: PaginationOptions
+  options?: SourcePaginationOptions
 ): Promise<TrrPersonPhoto[]> {
   const { limit, offset } = normalizePagination(options);
 
@@ -1863,8 +1926,20 @@ export async function getPhotosByPersonId(
   // preferring media_links rows when collisions occur.
   const dedupedPhotos = dedupePhotosByCanonicalKeysPreferMediaLinks(allPhotos);
 
+  const normalizedSources = new Set(
+    (options?.sources ?? [])
+      .map((source) => source.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const sourceFilteredPhotos =
+    normalizedSources.size > 0
+      ? dedupedPhotos.filter((photo) =>
+          normalizedSources.has((photo.source ?? "").trim().toLowerCase())
+        )
+      : dedupedPhotos;
+
   // Apply pagination
-  return dedupedPhotos.slice(offset, offset + limit);
+  return sourceFilteredPhotos.slice(offset, offset + limit);
 }
 
 /**
@@ -2327,6 +2402,7 @@ export interface SeasonAsset {
   kind: string;
   hosted_url: string;
   original_url?: string;
+  thumb_url?: string | null;
   display_url?: string | null;
   detail_url?: string | null;
   crop_display_url?: string | null;
@@ -2350,7 +2426,12 @@ export interface SeasonAsset {
 
 type SeasonAssetVariantUrls = Pick<
   SeasonAsset,
-  "original_url" | "display_url" | "detail_url" | "crop_display_url" | "crop_detail_url"
+  | "original_url"
+  | "thumb_url"
+  | "display_url"
+  | "detail_url"
+  | "crop_display_url"
+  | "crop_detail_url"
 >;
 
 const pickVariantUrlFromSignature = (
@@ -2382,6 +2463,10 @@ const resolveSeasonAssetVariantUrls = (
   hostedUrl: string
 ): SeasonAssetVariantUrls => {
   const md = metadata && typeof metadata === "object" ? metadata : null;
+  const directThumb =
+    typeof md?.thumb_url === "string" && md.thumb_url.trim().length > 0
+      ? md.thumb_url.trim()
+      : null;
   const directDisplay =
     typeof md?.display_url === "string" && md.display_url.trim().length > 0
       ? md.display_url.trim()
@@ -2404,6 +2489,8 @@ const resolveSeasonAssetVariantUrls = (
       ? md.active_crop_signature.trim()
       : null;
 
+  const variantThumb =
+    (md && pickVariantUrlFromSignature(md, "base", "thumb")) ?? directThumb;
   const variantDisplay =
     (md && pickVariantUrlFromSignature(md, "base", "card")) ?? directDisplay;
   const variantDetail =
@@ -2419,6 +2506,7 @@ const resolveSeasonAssetVariantUrls = (
 
   return {
     original_url: hostedUrl,
+    thumb_url: variantThumb ?? variantDisplay ?? hostedUrl,
     display_url: variantDisplay ?? hostedUrl,
     detail_url: variantDetail ?? hostedUrl,
     crop_display_url: variantCropDisplay,
@@ -2433,10 +2521,10 @@ const resolveSeasonAssetVariantUrls = (
 export async function getAssetsByShowSeason(
   showId: string,
   seasonNumber: number,
-  options?: PaginationOptions
+  options?: SourcePaginationOptions
 ): Promise<SeasonAsset[]> {
   // Admin gallery should return "everything" by default (up to MAX_LIMIT).
-  const { limit } = normalizePagination({
+  const { limit, offset } = normalizePagination({
     ...options,
     limit: options?.limit ?? MAX_LIMIT,
   });
@@ -2867,7 +2955,19 @@ export async function getAssetsByShowSeason(
     return 0;
   });
 
-  return assets.slice(0, limit);
+  const normalizedSources = new Set(
+    (options?.sources ?? [])
+      .map((source) => source.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const sourceFilteredAssets =
+    normalizedSources.size > 0
+      ? assets.filter((asset) =>
+          normalizedSources.has((asset.source ?? "").trim().toLowerCase())
+        )
+      : assets;
+
+  return sourceFilteredAssets.slice(offset, offset + limit);
 }
 
 /**
@@ -2877,9 +2977,9 @@ export async function getAssetsByShowSeason(
  */
 export async function getAssetsByShowId(
   showId: string,
-  options?: PaginationOptions
+  options?: SourcePaginationOptions
 ): Promise<SeasonAsset[]> {
-  const { limit } = normalizePagination({
+  const { limit, offset } = normalizePagination({
     ...options,
     limit: options?.limit ?? MAX_LIMIT,
   });
@@ -3038,7 +3138,19 @@ export async function getAssetsByShowId(
     console.warn("[trr-shows-repository] getAssetsByShowId show_images lookup failed", error);
   }
 
-  return assets.slice(0, limit);
+  const normalizedSources = new Set(
+    (options?.sources ?? [])
+      .map((source) => source.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const sourceFilteredAssets =
+    normalizedSources.size > 0
+      ? assets.filter((asset) =>
+          normalizedSources.has((asset.source ?? "").trim().toLowerCase())
+        )
+      : assets;
+
+  return sourceFilteredAssets.slice(offset, offset + limit);
 }
 
 // ============================================================================

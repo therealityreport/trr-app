@@ -26,6 +26,9 @@ export type { WhoseSideInputProps } from "./WhoseSideInput";
 export { default as MatrixLikertInput } from "./MatrixLikertInput";
 export type { MatrixLikertInputProps } from "./MatrixLikertInput";
 
+export { default as ThreeChoiceSliderInput } from "./ThreeChoiceSliderInput";
+export type { ThreeChoiceSliderInputProps } from "./ThreeChoiceSliderInput";
+
 export { default as MultiSelectInput } from "./MultiSelectInput";
 export type { MultiSelectInputProps } from "./MultiSelectInput";
 

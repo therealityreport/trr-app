@@ -22,8 +22,25 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "showId is required" }, { status: 400 });
     }
 
-    const assets = await getAssetsByShowId(showId);
-    return NextResponse.json({ assets });
+    const { searchParams } = new URL(_request.url);
+    const parsedLimit = parseInt(searchParams.get("limit") ?? "200", 10);
+    const parsedOffset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const limit = Number.isFinite(parsedLimit) ? parsedLimit : 200;
+    const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
+    const sources = (searchParams.get("sources") ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    const assets = await getAssetsByShowId(showId, { limit, offset, sources });
+    return NextResponse.json({
+      assets,
+      pagination: {
+        limit,
+        offset,
+        count: assets.length,
+      },
+    });
   } catch (error) {
     console.error("[api] Failed to fetch show assets", error);
     const message = error instanceof Error ? error.message : "failed";
@@ -32,4 +49,3 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: message }, { status });
   }
 }
-

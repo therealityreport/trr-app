@@ -14,6 +14,11 @@ import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/Ex
 import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
+import {
+  canonicalizeCastRoleName,
+  castRoleMatchesFilter,
+  normalizeCastRoleList,
+} from "@/lib/admin/cast-role-normalization";
 import { mapSeasonAssetToMetadata, type PhotoMetadata } from "@/lib/photo-metadata";
 import {
   readAdvancedFilters,
@@ -94,6 +99,15 @@ interface TrrShowCastMember {
   credit_category: string;
   photo_url: string | null;
   cover_photo_url: string | null;
+}
+
+interface CastRoleMember {
+  person_id: string;
+  person_name: string | null;
+  total_episodes: number | null;
+  latest_season: number | null;
+  roles: string[];
+  photo_url: string | null;
 }
 
 interface BravoVideoItem {
@@ -308,11 +322,15 @@ const getAssetDisplayUrl = (asset: SeasonAsset): string => {
     typeof asset.crop_display_url === "string" && asset.crop_display_url.trim().length > 0
       ? asset.crop_display_url.trim()
       : null;
+  const thumb =
+    typeof asset.thumb_url === "string" && asset.thumb_url.trim().length > 0
+      ? asset.thumb_url.trim()
+      : null;
   const display =
     typeof asset.display_url === "string" && asset.display_url.trim().length > 0
       ? asset.display_url.trim()
       : null;
-  return cropDisplay ?? display ?? asset.hosted_url;
+  return cropDisplay ?? thumb ?? display ?? asset.hosted_url;
 };
 
 const getAssetDetailUrl = (asset: SeasonAsset): string => {
@@ -433,6 +451,7 @@ export default function SeasonDetailPage() {
   const [showSeasons, setShowSeasons] = useState<TrrSeason[]>([]);
   const [episodes, setEpisodes] = useState<TrrEpisode[]>([]);
   const [assets, setAssets] = useState<SeasonAsset[]>([]);
+  const [assetsVisibleCount, setAssetsVisibleCount] = useState(120);
   const [cast, setCast] = useState<SeasonCastMember[]>([]);
   const [seasonCastSource, setSeasonCastSource] = useState<SeasonCastSource>("season_evidence");
   const [seasonCastEligibilityWarning, setSeasonCastEligibilityWarning] = useState<string | null>(null);
@@ -463,6 +482,14 @@ export default function SeasonDetailPage() {
   const [trrShowCast, setTrrShowCast] = useState<TrrShowCastMember[]>([]);
   const [trrShowCastLoading, setTrrShowCastLoading] = useState(false);
   const [trrShowCastError, setTrrShowCastError] = useState<string | null>(null);
+  const [castRoleMembers, setCastRoleMembers] = useState<CastRoleMember[]>([]);
+  const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
+  const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
+  const [castSortBy, setCastSortBy] = useState<"episodes" | "season" | "name">("episodes");
+  const [castSortOrder, setCastSortOrder] = useState<"desc" | "asc">("desc");
+  const [castRoleFilters, setCastRoleFilters] = useState<string[]>([]);
+  const [castCreditFilters, setCastCreditFilters] = useState<string[]>([]);
+  const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
   const showCastFetchAttemptedRef = useRef(false);
 
   const [episodeLightbox, setEpisodeLightbox] = useState<{
@@ -637,6 +664,58 @@ export default function SeasonDetailPage() {
     }
   }, [getAuthHeaders, showId]);
 
+  const fetchCastRoleMembers = useCallback(async () => {
+    if (!showId) return;
+    if (!Number.isFinite(seasonNumber)) return;
+    setCastRoleMembersLoading(true);
+    setCastRoleMembersError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      params.set("seasons", String(seasonNumber));
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
+        { headers, cache: "no-store" }
+      );
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Failed to load cast role members");
+      setCastRoleMembers(
+        (Array.isArray(data) ? data : []).map((row) => {
+          const roles = Array.isArray((row as { roles?: unknown }).roles)
+            ? ((row as { roles: unknown[] }).roles.filter(
+                (value): value is string => typeof value === "string" && value.trim().length > 0
+              ) as string[])
+            : [];
+          return {
+            person_id: String((row as { person_id?: unknown }).person_id ?? ""),
+            person_name:
+              typeof (row as { person_name?: unknown }).person_name === "string"
+                ? (row as { person_name: string }).person_name
+                : null,
+            total_episodes:
+              typeof (row as { total_episodes?: unknown }).total_episodes === "number"
+                ? (row as { total_episodes: number }).total_episodes
+                : null,
+            latest_season:
+              typeof (row as { latest_season?: unknown }).latest_season === "number"
+                ? (row as { latest_season: number }).latest_season
+                : null,
+            roles,
+            photo_url:
+              typeof (row as { photo_url?: unknown }).photo_url === "string"
+                ? (row as { photo_url: string }).photo_url
+                : null,
+          };
+        })
+      );
+    } catch (err) {
+      setCastRoleMembers([]);
+      setCastRoleMembersError(err instanceof Error ? err.message : "Failed to load cast role members");
+    } finally {
+      setCastRoleMembersLoading(false);
+    }
+  }, [getAuthHeaders, seasonNumber, showId]);
+
   const fetchSeasonBravoVideos = useCallback(async () => {
     if (!showId) return;
     if (!Number.isFinite(seasonNumber)) return;
@@ -713,10 +792,12 @@ export default function SeasonDetailPage() {
       }
 
       setSeason(foundSeason);
-
       const [episodesResponse, assetsResponse, castResponse, castWithArchiveResponse] = await Promise.all([
         fetch(`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`, { headers }),
-        fetch(`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`, { headers }),
+        fetch(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0`,
+          { headers }
+        ),
         fetch(`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500`, { headers }),
         fetch(
           `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
@@ -775,6 +856,13 @@ export default function SeasonDetailPage() {
   useEffect(() => {
     setAllowPlaceholderMediaOverride(false);
     setGalleryDiagnosticFilter("all");
+    setCastSortBy("episodes");
+    setCastSortOrder("desc");
+    setCastRoleFilters([]);
+    setCastCreditFilters([]);
+    setCastHasImageFilter("all");
+    setCastRoleMembers([]);
+    setCastRoleMembersError(null);
   }, [season?.id]);
 
   useEffect(() => {
@@ -784,17 +872,37 @@ export default function SeasonDetailPage() {
     fetchShowCastForBrand();
   }, [hasAccess, activeTab, assetsView, fetchShowCastForBrand]);
 
+  useEffect(() => {
+    if (!hasAccess || !showId) return;
+    if (activeTab !== "cast") return;
+    void fetchCastRoleMembers();
+    if (!showCastFetchAttemptedRef.current) {
+      void fetchShowCastForBrand();
+    }
+  }, [activeTab, fetchCastRoleMembers, fetchShowCastForBrand, hasAccess, showId]);
+
   const fetchAssets = useCallback(async () => {
     if (!showId) return;
     const headers = await getAuthHeaders();
+    const sourcesParam = advancedFilters.sources.length
+      ? `&sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
+      : "";
     const response = await fetch(
-      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`,
+      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0${sourcesParam}`,
       { headers }
     );
     if (!response.ok) throw new Error("Failed to fetch season media");
     const data = await response.json();
     setAssets(data.assets ?? []);
-  }, [showId, seasonNumber, getAuthHeaders]);
+  }, [showId, seasonNumber, getAuthHeaders, advancedFilters.sources]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId) return;
+    if (activeTab !== "assets" || assetsView !== "media") return;
+    void fetchAssets().catch((err) => {
+      console.error("Failed to refresh filtered season media:", err);
+    });
+  }, [hasAccess, showId, activeTab, assetsView, fetchAssets]);
 
   const handleRefreshImages = useCallback(async () => {
     if (!showId) return;
@@ -1276,6 +1384,8 @@ export default function SeasonDetailPage() {
         }
       }
 
+      await Promise.all([fetchCastRoleMembers(), fetchShowCastForBrand()]);
+
       setCastRefreshNotice(
         castProfilesTotal > 0
           ? `Refreshed season cast, then synced cast profiles/media from TMDb/IMDb/Fandom (${castProfilesTotal - castProfilesFailed}/${castProfilesTotal}${castProfilesFailed > 0 ? `, ${castProfilesFailed} failed` : ""}).`
@@ -1287,7 +1397,15 @@ export default function SeasonDetailPage() {
       setRefreshingCast(false);
       setCastRefreshProgress(null);
     }
-  }, [refreshingCast, getAuthHeaders, showId, seasonNumber, show?.name]);
+  }, [
+    refreshingCast,
+    getAuthHeaders,
+    showId,
+    seasonNumber,
+    show?.name,
+    fetchCastRoleMembers,
+    fetchShowCastForBrand,
+  ]);
 
   const openAddBackdrops = useCallback(async () => {
     if (!season?.id) return;
@@ -1538,34 +1656,149 @@ export default function SeasonDetailPage() {
     };
   }, [episodeCoverageRows]);
 
-  const groupedCast = useMemo(() => {
-    const main: SeasonCastMember[] = [];
-    const recurring: SeasonCastMember[] = [];
-    const guest: SeasonCastMember[] = [];
-
-    for (const member of cast) {
-      if (totalEpisodes > 0 && member.episodes_in_season > totalEpisodes / 2) {
-        main.push(member);
-      } else if (
-        member.episodes_in_season >= 3 &&
-        (totalEpisodes === 0 || member.episodes_in_season < totalEpisodes / 2)
-      ) {
-        recurring.push(member);
-      } else {
-        guest.push(member);
-      }
-    }
-
-    return { main, recurring, guest };
-  }, [cast, totalEpisodes]);
-
-  const hasEpisodeCounts = useMemo(
-    () => cast.some((member) => member.episodes_in_season > 0),
-    [cast]
+  const castRoleMemberByPersonId = useMemo(
+    () => new Map(castRoleMembers.map((member) => [member.person_id, member] as const)),
+    [castRoleMembers]
   );
 
-  const formatEpisodesLabel = (count: number) =>
-    count > 0 ? `${count} episodes this season` : "Appeared this season";
+  const showCastByPersonId = useMemo(() => {
+    const byPersonId = new Map<string, TrrShowCastMember>();
+    for (const member of trrShowCast) {
+      if (typeof member.person_id === "string" && member.person_id.trim().length > 0) {
+        byPersonId.set(member.person_id, member);
+      }
+    }
+    return byPersonId;
+  }, [trrShowCast]);
+
+  const availableCastRoles = useMemo(() => {
+    const values = new Set<string>();
+    for (const member of cast) {
+      const scoped = castRoleMemberByPersonId.get(member.person_id);
+      if (scoped?.roles.length) {
+        for (const role of scoped.roles) {
+          const canonical = canonicalizeCastRoleName(role);
+          if (canonical) values.add(canonical);
+        }
+        continue;
+      }
+      const showRole = showCastByPersonId.get(member.person_id)?.role;
+      const canonical = canonicalizeCastRoleName(showRole);
+      if (canonical) {
+        values.add(canonical);
+      }
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [cast, castRoleMemberByPersonId, showCastByPersonId]);
+
+  const availableCastCreditCategories = useMemo(() => {
+    const values = new Set<string>();
+    for (const member of cast) {
+      const category = showCastByPersonId.get(member.person_id)?.credit_category;
+      if (typeof category === "string" && category.trim().length > 0) {
+        values.add(category.trim());
+      }
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [cast, showCastByPersonId]);
+
+  const castDisplayMembers = useMemo(() => {
+    const merged = cast.map((member) => {
+      const scoped = castRoleMemberByPersonId.get(member.person_id);
+      const showCastMember = showCastByPersonId.get(member.person_id);
+      const fallbackRole =
+        typeof showCastMember?.role === "string" && showCastMember.role.trim().length > 0
+          ? showCastMember.role.trim()
+          : null;
+      const roles = scoped?.roles.length
+        ? normalizeCastRoleList(scoped.roles)
+        : fallbackRole
+          ? normalizeCastRoleList([fallbackRole])
+          : [];
+      const creditCategory =
+        typeof showCastMember?.credit_category === "string" &&
+        showCastMember.credit_category.trim().length > 0
+          ? showCastMember.credit_category.trim()
+          : null;
+      return {
+        ...member,
+        roles,
+        latest_season: typeof scoped?.latest_season === "number" ? scoped.latest_season : null,
+        merged_photo_url:
+          member.photo_url ||
+          scoped?.photo_url ||
+          showCastMember?.photo_url ||
+          showCastMember?.cover_photo_url ||
+          null,
+        merged_total_episodes:
+          typeof member.total_episodes === "number"
+            ? member.total_episodes
+            : typeof scoped?.total_episodes === "number"
+              ? scoped.total_episodes
+              : null,
+        credit_category: creditCategory,
+      };
+    });
+
+    const filtered = merged.filter((member) => {
+      if (
+        castRoleFilters.length > 0 &&
+        !member.roles.some((role) =>
+          castRoleFilters.some((selected) => castRoleMatchesFilter(role, selected))
+        )
+      ) {
+        return false;
+      }
+      if (
+        castCreditFilters.length > 0 &&
+        !castCreditFilters.some(
+          (selected) => selected.toLowerCase() === (member.credit_category ?? "").toLowerCase()
+        )
+      ) {
+        return false;
+      }
+      if (castHasImageFilter === "yes" && !member.merged_photo_url) return false;
+      if (castHasImageFilter === "no" && member.merged_photo_url) return false;
+      return true;
+    });
+
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (castSortBy === "name") {
+        const aName = (a.person_name || "").toLowerCase();
+        const bName = (b.person_name || "").toLowerCase();
+        return castSortOrder === "asc" ? aName.localeCompare(bName) : bName.localeCompare(aName);
+      }
+      if (castSortBy === "season") {
+        const aSeason = a.latest_season ?? -1;
+        const bSeason = b.latest_season ?? -1;
+        return castSortOrder === "asc" ? aSeason - bSeason : bSeason - aSeason;
+      }
+      const aEpisodes = a.episodes_in_season ?? 0;
+      const bEpisodes = b.episodes_in_season ?? 0;
+      return castSortOrder === "asc" ? aEpisodes - bEpisodes : bEpisodes - aEpisodes;
+    });
+    return sorted;
+  }, [
+    cast,
+    castCreditFilters,
+    castHasImageFilter,
+    castRoleFilters,
+    castRoleMemberByPersonId,
+    castSortBy,
+    castSortOrder,
+    showCastByPersonId,
+  ]);
+
+  const showFallbackCastWarning =
+    seasonCastSource === "show_fallback" &&
+    Boolean(seasonCastEligibilityWarning) &&
+    cast.every((member) => (member.episodes_in_season ?? 0) <= 0);
+
+  const formatEpisodesLabel = (count: number) => {
+    const normalized = Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
+    return `${normalized} ${normalized === 1 ? "episode" : "episodes"} this season`;
+  };
 
   const formatBravoPublishedDate = (value: string | null | undefined): string | null => {
     if (!value || typeof value !== "string") return null;
@@ -1645,14 +1878,34 @@ export default function SeasonDetailPage() {
     });
   }, [advancedFilteredMediaAssets, galleryDiagnosticFilter]);
 
+  useEffect(() => {
+    setAssetsVisibleCount(120);
+  }, [advancedFilters, galleryDiagnosticFilter]);
+
   const mediaSections = useMemo(() => {
     const backdrops: SeasonAsset[] = [];
-    const seasonPosters: SeasonAsset[] = [];
+    const posters: SeasonAsset[] = [];
     const episodeStills: SeasonAsset[] = [];
+    const profilePictures: SeasonAsset[] = [];
     const castPhotos: SeasonAsset[] = [];
 
-    for (const asset of filteredMediaAssets) {
-      if (asset.type === "cast") {
+    for (const asset of filteredMediaAssets.slice(0, assetsVisibleCount)) {
+      const normalizedKind = (asset.kind ?? "").toLowerCase().trim();
+      const normalizedContextSection = (asset.context_section ?? "").toLowerCase().trim();
+      const normalizedContextType = (asset.context_type ?? "").toLowerCase().trim();
+      const isProfilePicture =
+        normalizedContextType === "profile_picture" ||
+        normalizedContextType === "profile" ||
+        normalizedContextSection === "bravo_profile";
+      const isCastLike =
+        asset.type === "cast" || normalizedKind === "cast" || normalizedKind === "promo";
+
+      if (isProfilePicture) {
+        profilePictures.push(asset);
+        continue;
+      }
+
+      if (isCastLike) {
         castPhotos.push(asset);
         continue;
       }
@@ -1664,7 +1917,7 @@ export default function SeasonDetailPage() {
 
       if (asset.type !== "season") continue;
 
-      if (isSeasonBackdrop(asset) && (asset.source ?? "").toLowerCase() === "tmdb") {
+      if (isSeasonBackdrop(asset)) {
         backdrops.push(asset);
         continue;
       }
@@ -1680,13 +1933,13 @@ export default function SeasonDetailPage() {
         continue;
       }
 
-      if (!isSeasonBackdrop(asset)) {
-        seasonPosters.push(asset);
+      if (normalizedKind === "poster") {
+        posters.push(asset);
       }
     }
 
-    return { backdrops, seasonPosters, episodeStills, castPhotos };
-  }, [filteredMediaAssets, isSeasonBackdrop, seasonNumber, show?.name]);
+    return { backdrops, posters, episodeStills, profilePictures, castPhotos };
+  }, [filteredMediaAssets, assetsVisibleCount, isSeasonBackdrop, seasonNumber, show?.name]);
 
   const isTextFilterActive = useMemo(() => {
     const wantsText = advancedFilters.text.includes("text");
@@ -2298,11 +2551,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {mediaSections.seasonPosters.length > 0 && (
+                {mediaSections.posters.length > 0 && (
                   <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Season Posters</h4>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Posters</h4>
                     <div className="grid grid-cols-4 gap-4">
-                      {mediaSections.seasonPosters.map((asset, i, arr) => (
+                      {mediaSections.posters.map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
@@ -2310,7 +2563,7 @@ export default function SeasonDetailPage() {
                           >
                             <GalleryImage
                               src={getAssetDisplayUrl(asset)}
-                              alt={asset.caption || "Season poster"}
+                              alt={asset.caption || "Poster"}
                               sizes="180px"
                             />
                           </button>
@@ -2334,6 +2587,32 @@ export default function SeasonDetailPage() {
                               alt={asset.caption || "Episode still"}
                               sizes="150px"
                             />
+                          </button>
+                        ))}
+                    </div>
+                  </section>
+                )}
+
+                {mediaSections.profilePictures.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Profile Pictures</h4>
+                    <div className="grid grid-cols-5 gap-4">
+                      {mediaSections.profilePictures.map((asset, i, arr) => (
+                          <button
+                            key={`${asset.id}-${i}`}
+                            onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                            className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <GalleryImage
+                              src={getAssetDisplayUrl(asset)}
+                              alt={asset.caption || "Profile picture"}
+                              sizes="180px"
+                            />
+                            {asset.person_name && (
+                              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                                <p className="truncate text-xs text-white">{asset.person_name}</p>
+                              </div>
+                            )}
                           </button>
                         ))}
                     </div>
@@ -2364,6 +2643,18 @@ export default function SeasonDetailPage() {
                         ))}
                     </div>
                   </section>
+                )}
+
+                {filteredMediaAssets.length > assetsVisibleCount && (
+                  <div className="flex justify-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setAssetsVisibleCount((prev) => prev + 120)}
+                      className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                    >
+                      Load More Images
+                    </button>
+                  </div>
                 )}
 
                 {filteredMediaAssets.length === 0 && (
@@ -2475,7 +2766,8 @@ export default function SeasonDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {cast.length} active{archiveCast.length > 0 ? ` · ${archiveCast.length} archive-only` : ""}
+                    {castDisplayMembers.length} shown · {cast.length} active
+                    {archiveCast.length > 0 ? ` · ${archiveCast.length} archive-only` : ""}
                   </span>
                   <button
                     type="button"
@@ -2492,9 +2784,10 @@ export default function SeasonDetailPage() {
                   {castRefreshError || castRefreshNotice}
                 </p>
               )}
-              {seasonCastSource === "show_fallback" && seasonCastEligibilityWarning && (
+              {showFallbackCastWarning && (
                 <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  {seasonCastEligibilityWarning}
+                  Season cast evidence is still syncing. Showing show-level cast fallback until
+                  episode-level cast sync completes.
                 </div>
               )}
               <RefreshProgressBar
@@ -2505,190 +2798,198 @@ export default function SeasonDetailPage() {
                 total={castRefreshProgress?.total}
               />
 
+              {(castRoleMembersError || trrShowCastError) && (
+                <p className="mb-4 text-sm text-red-600">{castRoleMembersError || trrShowCastError}</p>
+              )}
+
+              <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Sort By
+                    <select
+                      value={castSortBy}
+                      onChange={(event) =>
+                        setCastSortBy(event.target.value as "episodes" | "season" | "name")
+                      }
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    >
+                      <option value="episodes">Episodes</option>
+                      <option value="season">Season Recency</option>
+                      <option value="name">Name</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Order
+                    <select
+                      value={castSortOrder}
+                      onChange={(event) => setCastSortOrder(event.target.value as "desc" | "asc")}
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    >
+                      <option value="desc">Desc</option>
+                      <option value="asc">Asc</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Has Image
+                    <select
+                      value={castHasImageFilter}
+                      onChange={(event) =>
+                        setCastHasImageFilter(event.target.value as "all" | "yes" | "no")
+                      }
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    >
+                      <option value="all">All</option>
+                      <option value="yes">With Image</option>
+                      <option value="no">Without Image</option>
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCastSortBy("episodes");
+                      setCastSortOrder("desc");
+                      setCastRoleFilters([]);
+                      setCastCreditFilters([]);
+                      setCastHasImageFilter("all");
+                    }}
+                    className="self-end rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Roles
+                    </span>
+                    {availableCastRoles.length === 0 ? (
+                      <span className="text-xs text-zinc-500">No roles configured.</span>
+                    ) : (
+                      availableCastRoles.map((role) => {
+                        const active = castRoleFilters.some((value) =>
+                          castRoleMatchesFilter(value, role)
+                        );
+                        return (
+                          <button
+                            key={`season-role-filter-${role}`}
+                            type="button"
+                            onClick={() =>
+                              setCastRoleFilters((prev) =>
+                                active
+                                  ? prev.filter((value) => !castRoleMatchesFilter(value, role))
+                                  : [...prev, role]
+                              )
+                            }
+                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                              active
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-white text-zinc-600"
+                            }`}
+                          >
+                            {role}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Credit
+                    </span>
+                    {availableCastCreditCategories.length === 0 ? (
+                      <span className="text-xs text-zinc-500">No categories.</span>
+                    ) : (
+                      availableCastCreditCategories.map((category) => {
+                        const active = castCreditFilters.some(
+                          (value) => value.toLowerCase() === category.toLowerCase()
+                        );
+                        return (
+                          <button
+                            key={`season-credit-filter-${category}`}
+                            type="button"
+                            onClick={() =>
+                              setCastCreditFilters((prev) =>
+                                active
+                                  ? prev.filter((value) => value.toLowerCase() !== category.toLowerCase())
+                                  : [...prev, category]
+                              )
+                            }
+                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                              active
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-white text-zinc-600"
+                            }`}
+                          >
+                            {category}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {(castRoleMembersLoading || trrShowCastLoading) && (
+                <p className="mb-4 text-sm text-zinc-500">Refreshing cast intelligence...</p>
+              )}
+
               <div className="space-y-8">
-                {!hasEpisodeCounts && cast.length > 0 && (
-                  <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Cast</h4>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {cast.map((member) => (
-                        <Link
-                          key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
-                          className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                        >
-                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                            {member.photo_url ? (
-                              <CastPhoto
-                                src={member.photo_url}
-                                alt={member.person_name || "Cast"}
-                                thumbnail_focus_x={member.thumbnail_focus_x}
-                                thumbnail_focus_y={member.thumbnail_focus_y}
-                                thumbnail_zoom={member.thumbnail_zoom}
-                                thumbnail_crop_mode={member.thumbnail_crop_mode}
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-zinc-400">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                </svg>
-                              </div>
-                            )}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {castDisplayMembers.map((member) => (
+                    <Link
+                      key={member.person_id}
+                      href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
+                    >
+                      <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                        {member.merged_photo_url ? (
+                          <CastPhoto
+                            src={member.merged_photo_url}
+                            alt={member.person_name || "Cast"}
+                            thumbnail_focus_x={member.thumbnail_focus_x}
+                            thumbnail_focus_y={member.thumbnail_focus_y}
+                            thumbnail_zoom={member.thumbnail_zoom}
+                            thumbnail_crop_mode={member.thumbnail_crop_mode}
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-zinc-400">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                              <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                              <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                            </svg>
                           </div>
-                          <p className="font-semibold text-zinc-900">
-                            {member.person_name || "Unknown"}
-                          </p>
-                          <p className="text-sm text-zinc-600">
-                            {formatEpisodesLabel(member.episodes_in_season)}
-                          </p>
-                          {typeof member.total_episodes === "number" && (
-                            <p className="text-xs text-zinc-500">
-                              {member.total_episodes} total episodes
-                            </p>
-                          )}
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                {hasEpisodeCounts && groupedCast.main.length > 0 && (
-                  <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Main Cast</h4>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {groupedCast.main.map((member) => (
-                        <Link
-                          key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
-                          className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                        >
-                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                            {member.photo_url ? (
-                              <CastPhoto
-                                src={member.photo_url}
-                                alt={member.person_name || "Cast"}
-                                thumbnail_focus_x={member.thumbnail_focus_x}
-                                thumbnail_focus_y={member.thumbnail_focus_y}
-                                thumbnail_zoom={member.thumbnail_zoom}
-                                thumbnail_crop_mode={member.thumbnail_crop_mode}
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-zinc-400">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                </svg>
-                              </div>
-                            )}
-                          </div>
-                          <p className="font-semibold text-zinc-900">
-                            {member.person_name || "Unknown"}
-                          </p>
-                          <p className="text-sm text-zinc-600">
-                            {formatEpisodesLabel(member.episodes_in_season)}
-                          </p>
-                          {typeof member.total_episodes === "number" && (
-                            <p className="text-xs text-zinc-500">
-                              {member.total_episodes} total episodes
-                            </p>
-                          )}
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                {hasEpisodeCounts && groupedCast.recurring.length > 0 && (
-                  <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Recurring Cast</h4>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {groupedCast.recurring.map((member) => (
-                        <Link
-                          key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
-                          className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                        >
-                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                            {member.photo_url ? (
-                              <CastPhoto
-                                src={member.photo_url}
-                                alt={member.person_name || "Cast"}
-                                thumbnail_focus_x={member.thumbnail_focus_x}
-                                thumbnail_focus_y={member.thumbnail_focus_y}
-                                thumbnail_zoom={member.thumbnail_zoom}
-                                thumbnail_crop_mode={member.thumbnail_crop_mode}
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-zinc-400">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                </svg>
-                              </div>
-                            )}
-                          </div>
-                          <p className="font-semibold text-zinc-900">
-                            {member.person_name || "Unknown"}
-                          </p>
-                          <p className="text-sm text-zinc-600">
-                            {formatEpisodesLabel(member.episodes_in_season)}
-                          </p>
-                          {typeof member.total_episodes === "number" && (
-                            <p className="text-xs text-zinc-500">
-                              {member.total_episodes} total episodes
-                            </p>
-                          )}
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                {hasEpisodeCounts && groupedCast.guest.length > 0 && (
-                  <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Guest Appearances</h4>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {groupedCast.guest.map((member) => (
-                        <Link
-                          key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}&seasonNumber=${seasonNumber}`}
-                          className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                        >
-                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                            {member.photo_url ? (
-                              <CastPhoto
-                                src={member.photo_url}
-                                alt={member.person_name || "Cast"}
-                                thumbnail_focus_x={member.thumbnail_focus_x}
-                                thumbnail_focus_y={member.thumbnail_focus_y}
-                                thumbnail_zoom={member.thumbnail_zoom}
-                                thumbnail_crop_mode={member.thumbnail_crop_mode}
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-zinc-400">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                </svg>
-                              </div>
-                            )}
-                          </div>
-                          <p className="font-semibold text-zinc-900">
-                            {member.person_name || "Unknown"}
-                          </p>
-                          <p className="text-sm text-zinc-600">
-                            {formatEpisodesLabel(member.episodes_in_season)}
-                          </p>
-                          {typeof member.total_episodes === "number" && (
-                            <p className="text-xs text-zinc-500">
-                              {member.total_episodes} total episodes
-                            </p>
-                          )}
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
-                )}
+                        )}
+                      </div>
+                      <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
+                      <p className="text-sm text-zinc-600">
+                        {formatEpisodesLabel(member.episodes_in_season)}
+                      </p>
+                      {typeof member.merged_total_episodes === "number" && (
+                        <p className="text-xs text-zinc-500">
+                          {member.merged_total_episodes} total episodes
+                        </p>
+                      )}
+                      {member.latest_season && (
+                        <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
+                      )}
+                      {member.credit_category && (
+                        <p className="text-xs text-zinc-500">Credit: {member.credit_category}</p>
+                      )}
+                      {member.roles.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {member.roles.map((role) => (
+                            <span
+                              key={`${member.person_id}-season-role-${role}`}
+                              className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                            >
+                              {role}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </Link>
+                  ))}
+                </div>
 
                 {archiveCast.length > 0 && (
                   <section>
@@ -2739,6 +3040,10 @@ export default function SeasonDetailPage() {
                       ))}
                     </div>
                   </section>
+                )}
+
+                {castDisplayMembers.length === 0 && cast.length > 0 && (
+                  <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                 )}
 
                 {cast.length === 0 && archiveCast.length === 0 && (

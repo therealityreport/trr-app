@@ -17,6 +17,8 @@ vi.mock('next/image', () => ({
   },
 }));
 
+vi.mock('server-only', () => ({}));
+
 vi.mock('@/lib/firebase', () => ({
   auth: {
     onAuthStateChanged: vi.fn(() => () => {}),

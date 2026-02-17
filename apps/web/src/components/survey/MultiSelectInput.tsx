@@ -57,10 +57,10 @@ export default function MultiSelectInput({
   const hasImages = sortedOptions.some((opt) => getImagePath(opt));
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Selection constraints info */}
       {(minSelections > 0 || maxSelections < Infinity) && (
-        <p className="text-sm text-gray-500">
+        <p className="text-xs text-gray-500 sm:text-sm">
           {minSelections > 0 && maxSelections < Infinity
             ? `Select ${minSelections} to ${maxSelections} options`
             : minSelections > 0
@@ -71,7 +71,7 @@ export default function MultiSelectInput({
       )}
 
       {/* Options grid */}
-      <div className={`grid gap-3 ${hasImages ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4" : "grid-cols-1"}`}>
+      <div className={`grid gap-2.5 sm:gap-3 ${hasImages ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4" : "grid-cols-1"}`}>
         {sortedOptions.map((option) => {
           const isSelected = selectedValues.includes(option.option_key);
           const isDisabledByMax = !isSelected && selectedValues.length >= maxSelections;
@@ -84,7 +84,7 @@ export default function MultiSelectInput({
               onClick={() => handleToggle(option.option_key)}
               disabled={disabled || isDisabledByMax}
               className={`
-                flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left
+                flex items-center gap-2.5 rounded-xl border-2 p-2.5 text-left transition-all sm:gap-3 sm:p-3
                 ${isSelected
                   ? "border-indigo-500 bg-indigo-50"
                   : "border-gray-200 bg-white hover:border-gray-300"
@@ -95,7 +95,7 @@ export default function MultiSelectInput({
               aria-pressed={isSelected}
             >
               {imagePath && (
-                <div className="w-16 h-16 rounded-full overflow-hidden flex-shrink-0">
+                <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-full sm:h-16 sm:w-16">
                   <Image
                     src={imagePath}
                     alt={option.option_text}
@@ -110,12 +110,13 @@ export default function MultiSelectInput({
                 {/* Checkbox indicator */}
                 <div
                   className={`
-                    w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0
+                    h-4 w-4 flex-shrink-0 rounded border-2 sm:h-5 sm:w-5
+                    flex items-center justify-center
                     ${isSelected ? "border-indigo-500 bg-indigo-500" : "border-gray-300 bg-white"}
                   `}
                 >
                   {isSelected && (
-                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <svg className="h-2.5 w-2.5 text-white sm:h-3 sm:w-3" fill="currentColor" viewBox="0 0 20 20">
                       <path
                         fillRule="evenodd"
                         d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
@@ -124,7 +125,7 @@ export default function MultiSelectInput({
                     </svg>
                   )}
                 </div>
-                <span className="text-sm font-medium text-gray-800">{option.option_text}</span>
+                <span className="text-xs font-medium text-gray-800 sm:text-sm">{option.option_text}</span>
               </div>
             </button>
           );

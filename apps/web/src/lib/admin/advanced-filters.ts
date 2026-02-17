@@ -8,6 +8,7 @@ export type ContentTypeFilter =
   | "confessional"
   | "reunion"
   | "promo"
+  | "profile_picture"
   | "episode_still"
   | "intro"
   | "wwhl"
@@ -114,4 +115,3 @@ export function countActiveAdvancedFilters(
   if (filters.sort && filters.sort !== base.sort) count += 1;
   return count;
 }
-

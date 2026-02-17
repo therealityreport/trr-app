@@ -1,0 +1,125 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+const {
+  requireAdminMock,
+  listRedditCommunitiesWithThreadsMock,
+  createRedditCommunityMock,
+  normalizeSubredditMock,
+  isValidSubredditMock,
+} = vi.hoisted(() => ({
+  requireAdminMock: vi.fn(),
+  listRedditCommunitiesWithThreadsMock: vi.fn(),
+  createRedditCommunityMock: vi.fn(),
+  normalizeSubredditMock: vi.fn((value: string) => value.replace(/^r\//i, "")),
+  isValidSubredditMock: vi.fn(() => true),
+}));
+
+vi.mock("@/lib/server/auth", () => ({
+  requireAdmin: requireAdminMock,
+}));
+
+vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
+  listRedditCommunitiesWithThreads: listRedditCommunitiesWithThreadsMock,
+  createRedditCommunity: createRedditCommunityMock,
+  normalizeSubreddit: normalizeSubredditMock,
+  isValidSubreddit: isValidSubredditMock,
+}));
+
+import { GET, POST } from "@/app/api/admin/reddit/communities/route";
+
+describe("/api/admin/reddit/communities route", () => {
+  beforeEach(() => {
+    requireAdminMock.mockReset();
+    listRedditCommunitiesWithThreadsMock.mockReset();
+    createRedditCommunityMock.mockReset();
+    normalizeSubredditMock.mockClear();
+    isValidSubredditMock.mockReset();
+
+    requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
+    isValidSubredditMock.mockReturnValue(true);
+  });
+
+  it("returns communities list with season-aware filters", async () => {
+    listRedditCommunitiesWithThreadsMock.mockResolvedValue([
+      {
+        id: "community-1",
+        subreddit: "BravoRealHousewives",
+        post_flares: ["Episode Discussion", "Live Thread"],
+        post_flares_updated_at: "2026-02-17T00:00:00.000Z",
+      },
+    ]);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/reddit/communities?trr_show_id=show-1&trr_season_id=season-1",
+      { method: "GET" },
+    );
+
+    const response = await GET(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.communities).toHaveLength(1);
+    expect(payload.communities[0]).toMatchObject({
+      post_flares: ["Episode Discussion", "Live Thread"],
+      post_flares_updated_at: "2026-02-17T00:00:00.000Z",
+    });
+    expect(listRedditCommunitiesWithThreadsMock).toHaveBeenCalledWith({
+      trrShowId: "show-1",
+      trrSeasonId: "season-1",
+      includeInactive: false,
+      includeGlobalThreadsForSeason: true,
+    });
+  });
+
+  it("validates required POST fields", async () => {
+    const request = new NextRequest("http://localhost/api/admin/reddit/communities", {
+      method: "POST",
+      body: JSON.stringify({ subreddit: "BravoRealHousewives" }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("trr_show_id");
+    expect(createRedditCommunityMock).not.toHaveBeenCalled();
+  });
+
+  it("creates a community when payload is valid", async () => {
+    createRedditCommunityMock.mockResolvedValue({
+      id: "community-1",
+      trr_show_id: "show-1",
+      trr_show_name: "The Real Housewives of Salt Lake City",
+      subreddit: "BravoRealHousewives",
+      post_flares: [],
+      post_flares_updated_at: null,
+    });
+
+    const request = new NextRequest("http://localhost/api/admin/reddit/communities", {
+      method: "POST",
+      body: JSON.stringify({
+        trr_show_id: "show-1",
+        trr_show_name: "The Real Housewives of Salt Lake City",
+        subreddit: "r/BravoRealHousewives",
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(payload.community?.id).toBe("community-1");
+    expect(normalizeSubredditMock).toHaveBeenCalledWith("r/BravoRealHousewives");
+    expect(createRedditCommunityMock).toHaveBeenCalledWith(
+      { firebaseUid: "admin-uid", isAdmin: true },
+      expect.objectContaining({
+        trrShowId: "show-1",
+        trrShowName: "The Real Housewives of Salt Lake City",
+        subreddit: "BravoRealHousewives",
+      }),
+    );
+  });
+});

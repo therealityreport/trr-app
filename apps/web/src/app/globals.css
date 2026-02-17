@@ -8,6 +8,16 @@
   --font-plymouth-serial: "Plymouth Serial";
   --font-rude-slab: "Rude Slab Condensed";
   --font-goodall: "Goodall";
+  /*
+   * Runtime aliases used by inline style stacks in preview components.
+   * Tailwind @theme tokens are not exposed as regular CSS custom properties,
+   * so define explicit fallbacks here for var(--font-sans|serif|display|body|games).
+   */
+  --font-sans: "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Gloucester", "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-display: "Gloucester", "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-body: "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-games: "Plymouth Serial", "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Tailwind v4 theme tokens */

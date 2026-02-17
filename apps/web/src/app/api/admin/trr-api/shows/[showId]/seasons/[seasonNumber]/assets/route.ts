@@ -34,9 +34,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const assets = await getAssetsByShowSeason(showId, seasonNum);
+    const { searchParams } = new URL(request.url);
+    const parsedLimit = parseInt(searchParams.get("limit") ?? "200", 10);
+    const parsedOffset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const limit = Number.isFinite(parsedLimit) ? parsedLimit : 200;
+    const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
+    const sources = (searchParams.get("sources") ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
 
-    return NextResponse.json({ assets });
+    const assets = await getAssetsByShowSeason(showId, seasonNum, {
+      limit,
+      offset,
+      sources,
+    });
+
+    return NextResponse.json({
+      assets,
+      pagination: {
+        limit,
+        offset,
+        count: assets.length,
+      },
+    });
   } catch (error) {
     console.error("[api] Failed to fetch season assets", error);
     const message = error instanceof Error ? error.message : "failed";

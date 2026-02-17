@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 
 const renderRankerMock = vi.fn(() => <div data-testid="flashback-ranker" />);
 
@@ -78,7 +78,7 @@ describe("RankOrderInput", () => {
     expect(props.layoutPreset).toBe("figma-rank-circles");
   });
 
-  it("keeps legacy preset for rectangle-ranking", () => {
+  it("uses figma-rank-rectangles preset for rectangle-ranking", () => {
     render(
       <RankOrderInput
         question={makeQuestion("rectangle-ranking") as never}
@@ -91,8 +91,8 @@ describe("RankOrderInput", () => {
       variant: string;
       layoutPreset: string;
     };
-    expect(props.variant).toBe("classic");
-    expect(props.layoutPreset).toBe("legacy");
+    expect(props.variant).toBe("grid");
+    expect(props.layoutPreset).toBe("figma-rank-rectangles");
   });
 
   it("does not pass onChange handler to ranker in disabled mode", () => {
@@ -107,6 +107,56 @@ describe("RankOrderInput", () => {
 
     const props = renderRankerMock.mock.calls[0][0] as { onChange?: unknown };
     expect(props.onChange).toBeUndefined();
-    expect(container.firstElementChild?.className).toContain("pointer-events-none");
+    const disabledWrap = container.querySelector(".pointer-events-none");
+    expect(disabledWrap).toBeTruthy();
+  });
+
+  it("passes CDN-resolved font overrides to flashback ranker", () => {
+    const question = makeQuestion("circle-ranking");
+    question.config = {
+      ...question.config,
+      rankNumberFontFamily: "Sofia Pro",
+      trayLabelFontFamily: "Plymouth Serial",
+      shapeScale: 88,
+      buttonScale: 122,
+    };
+
+    render(
+      <RankOrderInput
+        question={question as never}
+        value={[]}
+        onChange={() => {}}
+      />,
+    );
+
+    const props = renderRankerMock.mock.calls[0][0] as {
+      fontOverrides?: Record<string, string>;
+      shapeScalePercent?: number;
+      buttonScalePercent?: number;
+    };
+    expect(props.fontOverrides?.rankNumberFontFamily).toContain("Sofia Pro");
+    expect(props.fontOverrides?.trayLabelFontFamily).toContain("Plymouth Serial");
+    expect(props.shapeScalePercent).toBe(88);
+    expect(props.buttonScalePercent).toBe(122);
+  });
+
+  it("shows a warning when required fonts are not in CloudFront CDN", () => {
+    const question = makeQuestion("rectangle-ranking");
+    question.config = {
+      ...question.config,
+      rankNumberFontFamily: "Totally Missing Font",
+    };
+
+    render(
+      <RankOrderInput
+        question={question as never}
+        value={[]}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("rank-order-missing-fonts")).toHaveTextContent(
+      "Missing CloudFront CDN fonts: Totally Missing Font",
+    );
   });
 });
