@@ -567,14 +567,14 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       target: { value: "run-1-abcdef" },
     });
 
-    await screen.findByText("1 job");
     fireEvent.click(screen.getByRole("button", { name: /Ingest Job Status.*Show/i }));
+    await screen.findByText("123 items");
 
     failJobsRefresh = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh Jobs" }));
 
     expect(await screen.findByText(/temporary jobs outage/i)).toBeInTheDocument();
-    expect(screen.getByText("1 job")).toBeInTheDocument();
+    expect(screen.getByText("123 items")).toBeInTheDocument();
   });
 
   it("uses incremental sync strategy by default for ingest payload", async () => {
