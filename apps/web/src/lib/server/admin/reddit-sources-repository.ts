@@ -93,6 +93,8 @@ export interface CreateRedditThreadInput {
 
 export interface UpdateRedditThreadInput {
   communityId?: string;
+  trrShowId?: string;
+  trrShowName?: string;
   trrSeasonId?: string | null;
   title?: string;
   url?: string;
@@ -432,6 +434,14 @@ export async function updateRedditThread(
     if (input.communityId !== undefined) {
       sets.push(`community_id = $${idx++}`);
       values.push(input.communityId);
+    }
+    if (input.trrShowId !== undefined) {
+      sets.push(`trr_show_id = $${idx++}`);
+      values.push(input.trrShowId);
+    }
+    if (input.trrShowName !== undefined) {
+      sets.push(`trr_show_name = $${idx++}`);
+      values.push(input.trrShowName);
     }
     if (input.trrSeasonId !== undefined) {
       sets.push(`trr_season_id = $${idx++}`);
