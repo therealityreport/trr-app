@@ -13,6 +13,19 @@ interface RouteParams {
   params: Promise<{ linkId: string }>;
 }
 
+interface FaceBoxInput {
+  index?: unknown;
+  kind?: unknown;
+  x?: unknown;
+  y?: unknown;
+  width?: unknown;
+  height?: unknown;
+  confidence?: unknown;
+  person_id?: unknown;
+  person_name?: unknown;
+  label?: unknown;
+}
+
 const normalizePeople = (raw: unknown): TagPerson[] => {
   if (!Array.isArray(raw)) return [];
   const byKey = new Map<string, TagPerson>();
@@ -50,6 +63,84 @@ const parseCount = (value: unknown): number | null =>
 const parseCountSource = (value: unknown): "auto" | "manual" | null =>
   value === "auto" || value === "manual" ? value : null;
 
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+const normalizeFaceBoxes = (
+  raw: unknown
+):
+  | Array<{
+      index: number;
+      kind: "face";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      confidence: number | null;
+      person_id?: string;
+      person_name?: string;
+      label?: string;
+    }>
+  | null => {
+  if (raw === null) return null;
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{
+    index: number;
+    kind: "face";
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    confidence: number | null;
+    person_id?: string;
+    person_name?: string;
+    label?: string;
+  }> = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as FaceBoxInput;
+    const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? clamp01(candidate.x) : null;
+    const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? clamp01(candidate.y) : null;
+    const width =
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? clamp01(candidate.width)
+        : null;
+    const height =
+      typeof candidate.height === "number" && Number.isFinite(candidate.height)
+        ? clamp01(candidate.height)
+        : null;
+    if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+      continue;
+    }
+    const index =
+      typeof candidate.index === "number" && Number.isFinite(candidate.index)
+        ? Math.max(1, Math.floor(candidate.index))
+        : out.length + 1;
+    const confidence =
+      typeof candidate.confidence === "number" && Number.isFinite(candidate.confidence)
+        ? clamp01(candidate.confidence)
+        : null;
+    const personId = typeof candidate.person_id === "string" && candidate.person_id.trim() ? candidate.person_id.trim() : undefined;
+    const personName =
+      typeof candidate.person_name === "string" && candidate.person_name.trim()
+        ? candidate.person_name.trim()
+        : undefined;
+    const label = typeof candidate.label === "string" && candidate.label.trim() ? candidate.label.trim() : undefined;
+    out.push({
+      index,
+      kind: "face",
+      x,
+      y,
+      width,
+      height,
+      confidence,
+      ...(personId ? { person_id: personId } : {}),
+      ...(personName ? { person_name: personName } : {}),
+      ...(label ? { label } : {}),
+    });
+  }
+  return out;
+};
+
 /**
  * PUT /api/admin/trr-api/media-links/[linkId]/tags
  *
@@ -68,6 +159,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const body = await request.json().catch(() => ({}));
     const people = normalizePeople((body as { people?: unknown }).people);
+    const hasFaceBoxes = Object.prototype.hasOwnProperty.call(
+      body as Record<string, unknown>,
+      "face_boxes"
+    );
+    const faceBoxes = hasFaceBoxes
+      ? normalizeFaceBoxes((body as { face_boxes?: unknown }).face_boxes)
+      : undefined;
 
     const link = await getMediaLinkById(linkId);
     if (!link) {
@@ -100,6 +198,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       people_names: peopleNames,
       people_count: peopleCount,
       people_count_source: peopleCountSource,
+      ...(hasFaceBoxes ? { face_boxes: faceBoxes ?? null } : {}),
     };
 
     await ensureMediaLinksForPeople(link.media_asset_id, people, mergedContext);
@@ -110,6 +209,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       people_ids: peopleIds,
       people_count: peopleCount,
       people_count_source: peopleCountSource,
+      face_boxes: hasFaceBoxes ? faceBoxes ?? null : null,
     });
   } catch (error) {
     console.error("[api] Failed to update media link tags", error);

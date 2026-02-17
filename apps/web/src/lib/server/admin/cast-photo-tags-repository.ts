@@ -157,3 +157,26 @@ export async function upsertCastPhotoTags(
     return null;
   }
 }
+
+export async function setCastPhotoFaceBoxes(
+  castPhotoId: string,
+  faceBoxes: unknown[] | null
+): Promise<boolean> {
+  try {
+    await query(
+      `UPDATE core.cast_photos
+       SET metadata = CASE
+         WHEN $2::jsonb IS NULL
+           THEN (COALESCE(metadata, '{}'::jsonb) - 'face_boxes')
+         ELSE jsonb_set(COALESCE(metadata, '{}'::jsonb), '{face_boxes}', $2::jsonb, true)
+       END,
+       updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [castPhotoId, faceBoxes ? JSON.stringify(faceBoxes) : null]
+    );
+    return true;
+  } catch (error) {
+    console.warn("[cast-photo-tags] Failed to update face boxes", error);
+    return false;
+  }
+}
