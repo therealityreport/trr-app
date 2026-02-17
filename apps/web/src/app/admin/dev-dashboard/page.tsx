@@ -113,6 +113,8 @@ interface DevDashboardData {
 interface AuthDiagnostics {
   provider: "firebase" | "supabase";
   shadowMode: boolean;
+  windowStartedAt: string;
+  lastObservedAt: string | null;
   allowlistSizes: {
     emails: number;
     uids: number;
@@ -232,6 +234,7 @@ export default function DevDashboardPage() {
   const [data, setData] = useState<DevDashboardData | null>(null);
   const [authStatus, setAuthStatus] = useState<AuthStatusPayload | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resettingAuthWindow, setResettingAuthWindow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<RepoName>("TRR-Backend");
 
@@ -270,6 +273,28 @@ export default function DevDashboardPage() {
       setAuthStatus(null);
     } finally {
       setLoading(false);
+    }
+  }, [getAuthHeaders]);
+
+  const resetAuthDiagnosticsWindow = useCallback(async () => {
+    try {
+      setError(null);
+      setResettingAuthWindow(true);
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/auth/status/reset", {
+        method: "POST",
+        headers,
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+      setAuthStatus(payload as AuthStatusPayload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset auth diagnostics");
+    } finally {
+      setResettingAuthWindow(false);
     }
   }, [getAuthHeaders]);
 
@@ -356,15 +381,37 @@ export default function DevDashboardPage() {
                         Provider: <span className="font-mono">{authStatus.diagnostics.provider}</span> · Shadow mode:{" "}
                         <span className="font-mono">{authStatus.diagnostics.shadowMode ? "enabled" : "disabled"}</span>
                       </p>
-                    </div>
-                    {(() => {
-                      const badge = getReadinessBadge(authStatus.cutoverReadiness.ready);
-                      return (
-                        <span className={`rounded-md px-2 py-1 text-xs font-semibold ${badge.className}`}>
-                          {badge.label}
+                      <p className="text-xs text-zinc-500">
+                        Window:{" "}
+                        <span className="font-mono">
+                          {new Date(authStatus.diagnostics.windowStartedAt).toLocaleString()}
                         </span>
-                      );
-                    })()}
+                        {" · "}Last observed:{" "}
+                        <span className="font-mono">
+                          {authStatus.diagnostics.lastObservedAt
+                            ? new Date(authStatus.diagnostics.lastObservedAt).toLocaleString()
+                            : "none"}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void resetAuthDiagnosticsWindow()}
+                        disabled={resettingAuthWindow}
+                        className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {resettingAuthWindow ? "Resetting..." : "Reset Window"}
+                      </button>
+                      {(() => {
+                        const badge = getReadinessBadge(authStatus.cutoverReadiness.ready);
+                        return (
+                          <span className={`rounded-md px-2 py-1 text-xs font-semibold ${badge.className}`}>
+                            {badge.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
                   <div className="grid gap-4 text-sm text-zinc-700 md:grid-cols-3">
                     <div>

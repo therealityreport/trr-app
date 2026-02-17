@@ -214,5 +214,16 @@ describe("server auth adapter", () => {
     expect(snapshot.counters.shadowMismatchFieldCounts.uid).toBe(1);
     expect(snapshot.counters.shadowMismatchFieldCounts.email).toBe(1);
     expect(snapshot.counters.shadowMismatchFieldCounts.name).toBe(1);
+
+    const resetSnapshot = auth.resetAuthDiagnosticsSnapshot();
+    expect(resetSnapshot.counters.shadowChecks).toBe(0);
+    expect(resetSnapshot.counters.shadowFailures).toBe(0);
+    expect(resetSnapshot.counters.shadowMismatchEvents).toBe(0);
+    expect(resetSnapshot.counters.shadowMismatchFieldCounts.uid).toBe(0);
+    expect(resetSnapshot.counters.shadowMismatchFieldCounts.email).toBe(0);
+    expect(resetSnapshot.counters.shadowMismatchFieldCounts.name).toBe(0);
+    expect(resetSnapshot.counters.fallbackSuccesses).toBe(0);
+    expect(resetSnapshot.windowStartedAt).toBeTruthy();
+    expect(resetSnapshot.lastObservedAt).toBeNull();
   });
 });

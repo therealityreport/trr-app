@@ -2706,3 +2706,23 @@ Continuation (same session, 2026-02-17) — Stage 3 cutover readiness gating + d
   - `pnpm -C apps/web exec vitest run tests/auth-cutover-readiness.test.ts tests/admin-auth-status-route.test.ts tests/server-auth-adapter.test.ts` (`10 passed`)
   - `pnpm -C apps/web run lint` (pass; warnings only)
   - `pnpm -C apps/web exec next build --webpack` (pass)
+
+Continuation (same session, 2026-02-17) — diagnostics reset window controls for cutover drills:
+- Files:
+  - `apps/web/src/lib/server/auth.ts`
+  - `apps/web/src/app/api/admin/auth/status/reset/route.ts`
+  - `apps/web/src/app/admin/dev-dashboard/page.tsx`
+  - `apps/web/tests/admin-auth-status-reset-route.test.ts`
+  - `apps/web/tests/server-auth-adapter.test.ts`
+  - `apps/web/tests/admin-auth-status-route.test.ts`
+  - `apps/web/tests/auth-cutover-readiness.test.ts`
+- Changes:
+  - Added diagnostics window metadata (`windowStartedAt`, `lastObservedAt`) to auth diagnostics snapshots.
+  - Added `resetAuthDiagnosticsSnapshot()` to zero counters and start a new observation window.
+  - Added admin endpoint `POST /api/admin/auth/status/reset` to reset diagnostics and return refreshed readiness payload.
+  - Added dev dashboard `Reset Window` action and timestamp display for the auth migration panel.
+  - Extended test coverage for reset route and reset semantics.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/auth-cutover-readiness.test.ts tests/admin-auth-status-route.test.ts tests/admin-auth-status-reset-route.test.ts tests/server-auth-adapter.test.ts` (`12 passed`)
+  - `pnpm -C apps/web run lint` (pass; warnings only)
+  - `pnpm -C apps/web exec next build --webpack` failed due to unrelated typed-route mismatch in `src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx` (`buildSeasonAdminUrl(...)` string not assignable to `RouteImpl<string>`).

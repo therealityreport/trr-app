@@ -57,3 +57,14 @@ None.
 - February 17, 2026: Added readiness-focused tests:
   - `tests/auth-cutover-readiness.test.ts`
   - `tests/admin-auth-status-route.test.ts` (cutover payload assertions)
+- February 17, 2026: Added auth diagnostics reset workflow for controlled migration windows:
+  - Added `resetAuthDiagnosticsSnapshot()` and diagnostics window metadata (`windowStartedAt`, `lastObservedAt`) in `src/lib/server/auth.ts`.
+  - Added admin endpoint `POST /api/admin/auth/status/reset` (`src/app/api/admin/auth/status/reset/route.ts`).
+  - Updated dev dashboard auth card to show diagnostics window timestamps and a `Reset Window` control.
+- February 17, 2026: Added reset/window tests:
+  - `tests/admin-auth-status-reset-route.test.ts`
+  - `tests/server-auth-adapter.test.ts` reset assertions
+- February 17, 2026: Validation:
+  - `pnpm -C apps/web exec vitest run tests/auth-cutover-readiness.test.ts tests/admin-auth-status-route.test.ts tests/admin-auth-status-reset-route.test.ts tests/server-auth-adapter.test.ts` (`12 passed`)
+  - `pnpm -C apps/web run lint` (pass; warnings only)
+  - `pnpm -C apps/web exec next build --webpack` currently fails on unrelated typed-route mismatch in `src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx` (`buildSeasonAdminUrl` return type vs `router.replace` requirement).

@@ -34,6 +34,8 @@ describe("/api/admin/auth/status route", () => {
     getAuthDiagnosticsSnapshotMock.mockReturnValue({
       provider: "firebase",
       shadowMode: true,
+      windowStartedAt: "2026-02-17T00:00:00.000Z",
+      lastObservedAt: "2026-02-17T00:10:00.000Z",
       allowlistSizes: { emails: 2, uids: 3, displayNames: 1 },
       counters: {
         shadowChecks: 5,
@@ -67,6 +69,8 @@ describe("/api/admin/auth/status route", () => {
       diagnostics: {
         provider: "firebase",
         shadowMode: true,
+        windowStartedAt: "2026-02-17T00:00:00.000Z",
+        lastObservedAt: "2026-02-17T00:10:00.000Z",
         allowlistSizes: { emails: 2, uids: 3, displayNames: 1 },
         counters: {
           shadowChecks: 5,

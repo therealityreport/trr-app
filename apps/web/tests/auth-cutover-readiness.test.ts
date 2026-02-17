@@ -7,6 +7,8 @@ function snapshot(overrides?: Partial<AuthDiagnosticsSnapshot>): AuthDiagnostics
   return {
     provider: "firebase",
     shadowMode: true,
+    windowStartedAt: "2026-02-17T00:00:00.000Z",
+    lastObservedAt: null,
     allowlistSizes: {
       emails: 1,
       uids: 1,

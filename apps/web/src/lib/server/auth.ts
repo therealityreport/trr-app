@@ -36,6 +36,8 @@ interface AuthDiagnosticsCounters {
 export interface AuthDiagnosticsSnapshot {
   provider: AuthProvider;
   shadowMode: boolean;
+  windowStartedAt: string;
+  lastObservedAt: string | null;
   allowlistSizes: {
     emails: number;
     uids: number;
@@ -53,6 +55,8 @@ const AUTH_SHADOW_MODE = (process.env.TRR_AUTH_SHADOW_MODE ?? "false").toLowerCa
 const USE_EMULATORS = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
 const HAS_SERVICE_ACCOUNT = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT) || USE_EMULATORS;
 const FIREBASE_WEB_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "";
+let authDiagnosticsWindowStartedAt = new Date().toISOString();
+let authDiagnosticsLastObservedAt: string | null = null;
 const authDiagnosticsCounters: AuthDiagnosticsCounters = {
   shadowChecks: 0,
   shadowFailures: 0,
@@ -64,6 +68,10 @@ const authDiagnosticsCounters: AuthDiagnosticsCounters = {
   },
   fallbackSuccesses: 0,
 };
+
+function markAuthDiagnosticsObservedNow(): void {
+  authDiagnosticsLastObservedAt = new Date().toISOString();
+}
 
 function parseTokenFromRequest(request: NextRequest): { token: string; kind: TokenKind } | null {
   const authHeader = request.headers.get("authorization") ?? request.headers.get("Authorization");
@@ -246,9 +254,11 @@ async function verifyToken(
   if (primaryClaims?.uid) {
     if (AUTH_SHADOW_MODE) {
       authDiagnosticsCounters.shadowChecks += 1;
+      markAuthDiagnosticsObservedNow();
       const shadowClaims = await verifyWithProvider(secondary, token, kind);
       if (!shadowClaims?.uid) {
         authDiagnosticsCounters.shadowFailures += 1;
+        markAuthDiagnosticsObservedNow();
         console.warn("[auth] Shadow verification failed", { primary, secondary, kind });
       } else {
         const mismatches = _shadowParityMismatches(primaryClaims, shadowClaims);
@@ -257,6 +267,7 @@ async function verifyToken(
           for (const mismatch of mismatches) {
             authDiagnosticsCounters.shadowMismatchFieldCounts[mismatch] += 1;
           }
+          markAuthDiagnosticsObservedNow();
           console.warn("[auth] Shadow verification mismatch", {
             primary,
             secondary,
@@ -274,6 +285,7 @@ async function verifyToken(
   const fallbackClaims = await verifyWithProvider(secondary, token, kind);
   if (fallbackClaims?.uid) {
     authDiagnosticsCounters.fallbackSuccesses += 1;
+    markAuthDiagnosticsObservedNow();
     console.warn("[auth] Auth provider fallback succeeded", { primary, secondary, kind });
     return { provider: secondary, claims: fallbackClaims };
   }
@@ -351,6 +363,8 @@ export function getAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
   return {
     provider: AUTH_PROVIDER,
     shadowMode: AUTH_SHADOW_MODE,
+    windowStartedAt: authDiagnosticsWindowStartedAt,
+    lastObservedAt: authDiagnosticsLastObservedAt,
     allowlistSizes: {
       emails: allowedEmails.size,
       uids: allowedUids.size,
@@ -368,6 +382,20 @@ export function getAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
       fallbackSuccesses: authDiagnosticsCounters.fallbackSuccesses,
     },
   };
+}
+
+export function resetAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
+  authDiagnosticsWindowStartedAt = new Date().toISOString();
+  authDiagnosticsLastObservedAt = null;
+  authDiagnosticsCounters.shadowChecks = 0;
+  authDiagnosticsCounters.shadowFailures = 0;
+  authDiagnosticsCounters.shadowMismatchEvents = 0;
+  authDiagnosticsCounters.shadowMismatchFieldCounts.uid = 0;
+  authDiagnosticsCounters.shadowMismatchFieldCounts.email = 0;
+  authDiagnosticsCounters.shadowMismatchFieldCounts.name = 0;
+  authDiagnosticsCounters.fallbackSuccesses = 0;
+
+  return getAuthDiagnosticsSnapshot();
 }
 
 export async function requireAdmin(request: NextRequest): Promise<AuthenticatedUser> {
