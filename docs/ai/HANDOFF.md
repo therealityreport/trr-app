@@ -2793,3 +2793,49 @@ Continuation (same session, 2026-02-17) — drill report export + build blocker 
   - `pnpm -C apps/web exec vitest run tests/admin-auth-status-route.test.ts tests/admin-auth-status-reset-route.test.ts tests/admin-auth-drill-report-route.test.ts tests/auth-cutover-readiness.test.ts tests/server-auth-adapter.test.ts` (`14 passed`)
   - `pnpm -C apps/web run lint` (pass; warnings only)
   - `pnpm -C apps/web exec next build --webpack` (pass)
+
+Continuation (same session, 2026-02-17) — admin show/season URL canonicalization immediate routing:
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+- Changes:
+  - Added immediate (pre-data) canonicalization effects on show and season pages so legacy query routing (`?tab=...`, `?assets=...`) is rewritten to path-based tab URLs without waiting for show payload fetch.
+  - Preserved non-routing query params during rewrite via existing query cleanup helper.
+  - Kept post-load slug canonicalization in place for final normalization to canonical show slug when data resolves.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'apps/web/src/app/admin/trr-shows/[showId]/page.tsx' 'apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx'` (pass; warnings only)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+  - Playwright manual checks confirmed URL canonicalization within ~300ms for:
+    - show tab query -> `/cast`
+    - show overview query -> show root
+    - season tab query -> `/seasons/:n/social`
+    - season assets query -> `/seasons/:n/assets/brand`
+
+Continuation (same session, 2026-02-17) — Phase 9 CI stabilization and review-blocker closure:
+- Branch/PR:
+  - `codex/auth-cutover-phase9`
+  - `https://github.com/therealityreport/trr-app/pull/41`
+- Fixes applied in this continuation:
+  - Added tracked env contract validator script: `scripts/check_env_example.py`.
+  - Tracked `apps/web/.env.example` by opting it back in from ignore (`apps/web/.gitignore` -> `!.env.example`) to satisfy workflow env-contract checks.
+  - Fixed auth diagnostics load order race in `apps/web/src/lib/server/auth.ts` by loading persisted diagnostics state before token verification counters mutate.
+  - Added missing admin route helper modules/tests required by season/show admin pages:
+    - `apps/web/src/lib/admin/show-admin-routes.ts`
+    - `apps/web/src/lib/admin/cast-episode-scope.ts`
+    - `apps/web/tests/show-admin-routes.test.ts`
+    - `apps/web/tests/cast-episode-scope.test.ts`
+    - `apps/web/tests/trr-shows-slug-route.test.ts`
+  - Fixed build-time prop contract mismatch by aligning season social analytics section props and tests:
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+- Validation:
+  - Local:
+    - `python3 scripts/check_env_example.py --file apps/web/.env.example --required TRR_API_URL SCREENALYTICS_API_URL TRR_INTERNAL_ADMIN_SHARED_SECRET` (pass)
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/show-admin-routes.test.ts tests/cast-episode-scope.test.ts tests/trr-shows-slug-route.test.ts` (pass)
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (pass)
+    - `DATABASE_URL='' NEXT_PUBLIC_FIREBASE_API_KEY='placeholder-api-key-for-build' NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN='placeholder.firebaseapp.com' NEXT_PUBLIC_FIREBASE_PROJECT_ID='demo-build' pnpm -C apps/web run build` (pass)
+  - GitHub checks on head `9b7330518b2b99f6651536b350c5d344d02ff5b4`:
+    - `Web Tests / Web CI (Node 20 / full)` (success)
+    - `Web Tests / Web CI (Node 22 / compat)` (success)
+    - `Repository Map / generate-repo-map` (success)
+    - `Vercel` (success)
