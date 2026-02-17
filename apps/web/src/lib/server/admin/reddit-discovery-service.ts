@@ -1,0 +1,382 @@
+export type RedditListingSort = "new" | "hot" | "top";
+
+export interface RedditDiscoveryThread {
+  reddit_post_id: string;
+  title: string;
+  text: string | null;
+  url: string;
+  permalink: string | null;
+  author: string | null;
+  score: number;
+  num_comments: number;
+  posted_at: string | null;
+  source_sorts: RedditListingSort[];
+  matched_terms: string[];
+  cross_show_terms: string[];
+  is_show_match: boolean;
+  match_score: number;
+  suggested_include_terms: string[];
+  suggested_exclude_terms: string[];
+}
+
+export interface RedditDiscoveryHints {
+  suggested_include_terms: string[];
+  suggested_exclude_terms: string[];
+}
+
+export interface DiscoverSubredditThreadsInput {
+  subreddit: string;
+  showName: string;
+  showAliases?: string[] | null;
+  sortModes?: RedditListingSort[];
+  limitPerMode?: number;
+}
+
+export interface DiscoverSubredditThreadsResult {
+  subreddit: string;
+  fetched_at: string;
+  sources_fetched: RedditListingSort[];
+  terms: string[];
+  hints: RedditDiscoveryHints;
+  threads: RedditDiscoveryThread[];
+}
+
+export class RedditDiscoveryError extends Error {
+  status: number;
+
+  constructor(message: string, status = 500) {
+    super(message);
+    this.name = "RedditDiscoveryError";
+    this.status = status;
+  }
+}
+
+interface RedditListingChild {
+  data?: {
+    id?: string;
+    title?: string;
+    selftext?: string;
+    url?: string;
+    permalink?: string;
+    author?: string;
+    score?: number;
+    num_comments?: number;
+    created_utc?: number;
+  };
+}
+
+interface RedditListingPayload {
+  data?: {
+    children?: RedditListingChild[];
+  };
+}
+
+const DEFAULT_SORTS: RedditListingSort[] = ["new", "hot", "top"];
+const DEFAULT_LIMIT_PER_MODE = 35;
+const MAX_LIMIT_PER_MODE = 80;
+const DEFAULT_REDDIT_TIMEOUT_MS = 12_000;
+const DEFAULT_REDDIT_USER_AGENT = "TRRAdminRedditDiscovery/1.0 (+https://thereality.report)";
+
+const FRANCHISE_EXCLUDE_TERMS = [
+  "rhoa",
+  "rhobh",
+  "rhop",
+  "rhonj",
+  "rhony",
+  "rhoc",
+  "rhom",
+  "rhodubai",
+  "wife swap",
+  "real housewives edition",
+] as const;
+
+const normalizeText = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getFetchTimeoutMs = (): number => {
+  const raw = process.env.REDDIT_FETCH_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return DEFAULT_REDDIT_TIMEOUT_MS;
+};
+
+const getRedditUserAgent = (): string =>
+  (process.env.REDDIT_USER_AGENT ?? "").trim() || DEFAULT_REDDIT_USER_AGENT;
+
+const dedupeTerms = (terms: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const term of terms.map(normalizeText)) {
+    if (!term || seen.has(term)) continue;
+    seen.add(term);
+    result.push(term);
+  }
+  return result;
+};
+
+const maybeBuildHousewivesAcronym = (name: string): string | null => {
+  const normalized = name.trim().replace(/^the\s+/i, "");
+  const match = normalized.match(/real housewives of (.+)$/i);
+  if (!match) return null;
+
+  const remainder = match[1]
+    .replace(/[()]/g, " ")
+    .replace(/[^A-Za-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!remainder) return null;
+
+  const stopWords = new Set(["of", "the", "and"]);
+  const initials = remainder
+    .split(" ")
+    .filter((word) => word.length > 0 && !stopWords.has(word.toLowerCase()))
+    .map((word) => word[0]?.toUpperCase())
+    .filter((value): value is string => Boolean(value));
+
+  if (initials.length === 0) return null;
+  return `RHO${initials.join("")}`;
+};
+
+const buildShowTerms = (showName: string, aliases: string[] = []): string[] => {
+  const baseNames = [showName, ...aliases]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const extraTerms: string[] = [];
+  for (const name of baseNames) {
+    const normalized = normalizeText(name);
+    if (normalized) {
+      extraTerms.push(normalized);
+    }
+
+    const acronym = maybeBuildHousewivesAcronym(name);
+    if (acronym) {
+      extraTerms.push(acronym.toLowerCase());
+    }
+
+    if (/^rh[a-z0-9]{2,}$/i.test(name)) {
+      extraTerms.push(name.toLowerCase());
+    }
+
+    const housewivesMatch = normalized.match(/^real housewives of (.+)$/);
+    if (housewivesMatch?.[1]) {
+      extraTerms.push(housewivesMatch[1]);
+    }
+  }
+
+  return dedupeTerms(extraTerms).slice(0, 18);
+};
+
+const containsTerm = (haystack: string, term: string): boolean => {
+  const escaped = escapeRegex(term);
+  const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i");
+  return regex.test(haystack);
+};
+
+const findMatchedTerms = (text: string, terms: string[]): string[] =>
+  terms.filter((term) => containsTerm(text, term));
+
+const toIsoOrNull = (createdUtc: number | undefined): string | null => {
+  if (!Number.isFinite(createdUtc)) return null;
+  return new Date((createdUtc as number) * 1000).toISOString();
+};
+
+const toAbsoluteRedditUrl = (value: string): string => {
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith("/")) return `https://www.reddit.com${value}`;
+  return `https://www.reddit.com/${value}`;
+};
+
+const makeSortUrl = (subreddit: string, sort: RedditListingSort, limit: number): string => {
+  const params = new URLSearchParams({ limit: String(limit), raw_json: "1" });
+  if (sort === "top") {
+    params.set("t", "month");
+  }
+  return `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/${sort}.json?${params.toString()}`;
+};
+
+const fetchSort = async (
+  subreddit: string,
+  sort: RedditListingSort,
+  limit: number,
+): Promise<RedditDiscoveryThread[]> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), getFetchTimeoutMs());
+  try {
+    const response = await fetch(makeSortUrl(subreddit, sort, limit), {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": getRedditUserAgent(),
+      },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+
+    if (response.status === 404) {
+      throw new RedditDiscoveryError("Subreddit not found", 404);
+    }
+    if (response.status === 429) {
+      throw new RedditDiscoveryError("Reddit rate limit hit, try again shortly", 429);
+    }
+    if (!response.ok) {
+      throw new RedditDiscoveryError(`Reddit request failed (${response.status})`, 502);
+    }
+
+    const payload = (await response.json()) as RedditListingPayload;
+    const children = payload.data?.children ?? [];
+
+    return children
+      .map((child): RedditDiscoveryThread | null => {
+        const data = child.data;
+        if (!data?.id || !data.title || !data.url) return null;
+        return {
+          reddit_post_id: data.id,
+          title: data.title,
+          text: typeof data.selftext === "string" && data.selftext.trim().length > 0 ? data.selftext : null,
+          url: toAbsoluteRedditUrl(data.url),
+          permalink: data.permalink ? toAbsoluteRedditUrl(data.permalink) : null,
+          author: data.author ?? null,
+          score: Number.isFinite(data.score) ? (data.score as number) : 0,
+          num_comments: Number.isFinite(data.num_comments) ? (data.num_comments as number) : 0,
+          posted_at: toIsoOrNull(data.created_utc),
+          source_sorts: [sort],
+          matched_terms: [],
+          cross_show_terms: [],
+          is_show_match: false,
+          match_score: 0,
+          suggested_include_terms: [],
+          suggested_exclude_terms: [],
+        };
+      })
+      .filter((thread): thread is RedditDiscoveryThread => Boolean(thread));
+  } catch (error) {
+    if (error instanceof RedditDiscoveryError) {
+      throw error;
+    }
+    if ((error as { name?: string } | null)?.name === "AbortError") {
+      throw new RedditDiscoveryError("Reddit request timed out", 504);
+    }
+    throw new RedditDiscoveryError("Failed to fetch subreddit threads", 502);
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const mergeByPostId = (rows: RedditDiscoveryThread[]): RedditDiscoveryThread[] => {
+  const byId = new Map<string, RedditDiscoveryThread>();
+  for (const row of rows) {
+    const existing = byId.get(row.reddit_post_id);
+    if (!existing) {
+      byId.set(row.reddit_post_id, row);
+      continue;
+    }
+    const mergedSorts = new Set<RedditListingSort>([...existing.source_sorts, ...row.source_sorts]);
+    const preferred = row.score > existing.score ? row : existing;
+    byId.set(row.reddit_post_id, {
+      ...preferred,
+      source_sorts: [...mergedSorts],
+    });
+  }
+  return [...byId.values()];
+};
+
+const applyMatchMetadata = (
+  threads: RedditDiscoveryThread[],
+  terms: string[],
+): { threads: RedditDiscoveryThread[]; hints: RedditDiscoveryHints } => {
+  const includeCounts = new Map<string, number>();
+  const excludeCounts = new Map<string, number>();
+  const threadsWithMeta = threads.map((thread) => {
+    const text = normalizeText(`${thread.title} ${thread.text ?? ""}`);
+    const matchedTerms = findMatchedTerms(text, terms);
+    const crossShowTerms = FRANCHISE_EXCLUDE_TERMS.filter((term) => {
+      if (terms.includes(term)) return false;
+      return containsTerm(text, term);
+    });
+    const titleMatchBonus = matchedTerms.some((term) => containsTerm(normalizeText(thread.title), term))
+      ? 1
+      : 0;
+    const matchScore = matchedTerms.length + titleMatchBonus;
+
+    for (const term of matchedTerms) {
+      includeCounts.set(term, (includeCounts.get(term) ?? 0) + 1);
+    }
+    for (const term of crossShowTerms) {
+      excludeCounts.set(term, (excludeCounts.get(term) ?? 0) + 1);
+    }
+
+    return {
+      ...thread,
+      matched_terms: matchedTerms,
+      cross_show_terms: crossShowTerms,
+      is_show_match: matchedTerms.length > 0,
+      match_score: matchScore,
+      suggested_include_terms: matchedTerms.slice(0, 4),
+      suggested_exclude_terms: crossShowTerms.slice(0, 4),
+    };
+  });
+
+  const suggestedIncludeTerms = [...includeCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([term]) => term)
+    .slice(0, 8);
+
+  const suggestedExcludeTerms = [...excludeCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([term]) => term)
+    .slice(0, 8);
+
+  return {
+    threads: threadsWithMeta,
+    hints: {
+      suggested_include_terms: suggestedIncludeTerms,
+      suggested_exclude_terms: suggestedExcludeTerms,
+    },
+  };
+};
+
+export async function discoverSubredditThreads(
+  input: DiscoverSubredditThreadsInput,
+): Promise<DiscoverSubredditThreadsResult> {
+  const subreddit = input.subreddit.trim();
+  const sortModes = input.sortModes?.length ? input.sortModes : DEFAULT_SORTS;
+  const limitPerMode = Math.min(
+    Math.max(input.limitPerMode ?? DEFAULT_LIMIT_PER_MODE, 1),
+    MAX_LIMIT_PER_MODE,
+  );
+  const terms = buildShowTerms(input.showName, input.showAliases ?? []);
+
+  if (terms.length === 0) {
+    throw new RedditDiscoveryError("Show terms are required for discovery", 400);
+  }
+
+  const fetchedBySort = await Promise.all(
+    sortModes.map(async (sort) => fetchSort(subreddit, sort, limitPerMode)),
+  );
+  const mergedThreads = mergeByPostId(fetchedBySort.flat());
+  const { threads, hints } = applyMatchMetadata(mergedThreads, terms);
+
+  threads.sort((a, b) => {
+    if (b.match_score !== a.match_score) return b.match_score - a.match_score;
+    if (b.num_comments !== a.num_comments) return b.num_comments - a.num_comments;
+    return b.score - a.score;
+  });
+
+  return {
+    subreddit,
+    fetched_at: new Date().toISOString(),
+    sources_fetched: sortModes,
+    terms,
+    hints,
+    threads,
+  };
+}

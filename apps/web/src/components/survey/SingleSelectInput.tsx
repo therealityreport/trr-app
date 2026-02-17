@@ -50,7 +50,7 @@ export default function SingleSelectInput({
               onClick={() => handleSelect(option.option_key)}
               disabled={disabled}
               className={`
-                px-4 py-2 rounded-full border-2 transition-all text-sm font-medium
+                rounded-full border-2 px-3 py-1.5 text-xs font-medium transition-all sm:px-4 sm:py-2 sm:text-sm
                 ${isSelected
                   ? "border-indigo-500 bg-indigo-500 text-white"
                   : "border-gray-200 bg-white text-gray-700 hover:border-indigo-300"
@@ -71,7 +71,7 @@ export default function SingleSelectInput({
   if (layout === "grid" || hasImages) {
     // Grid layout with images
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 md:grid-cols-4">
         {sortedOptions.map((option) => {
           const isSelected = value === option.option_key;
           const imagePath = getImagePath(option);
@@ -83,7 +83,7 @@ export default function SingleSelectInput({
               onClick={() => handleSelect(option.option_key)}
               disabled={disabled}
               className={`
-                flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all
+                flex flex-col items-center gap-1.5 rounded-xl border-2 p-2.5 transition-all sm:gap-2 sm:p-3
                 ${isSelected
                   ? "border-indigo-500 bg-indigo-50"
                   : "border-gray-200 bg-white hover:border-gray-300"
@@ -93,7 +93,7 @@ export default function SingleSelectInput({
               aria-pressed={isSelected}
             >
               {imagePath && (
-                <div className="w-16 h-16 rounded-full overflow-hidden">
+                <div className="h-14 w-14 overflow-hidden rounded-full sm:h-16 sm:w-16">
                   <Image
                     src={imagePath}
                     alt={option.option_text}
@@ -104,7 +104,7 @@ export default function SingleSelectInput({
                   />
                 </div>
               )}
-              <span className="text-sm font-medium text-gray-800 text-center">
+              <span className="text-xs font-medium text-center text-gray-800 sm:text-sm">
                 {option.option_text}
               </span>
             </button>
@@ -116,7 +116,7 @@ export default function SingleSelectInput({
 
   // Standard vertical radio list
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5 sm:space-y-2">
       {sortedOptions.map((option) => {
         const isSelected = value === option.option_key;
         return (
@@ -126,7 +126,8 @@ export default function SingleSelectInput({
             onClick={() => handleSelect(option.option_key)}
             disabled={disabled}
             className={`
-              w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-all text-left
+              w-full rounded-lg border-2 p-2.5 text-left transition-all sm:p-3
+              flex items-center gap-2.5 sm:gap-3
               ${isSelected
                 ? "border-indigo-500 bg-indigo-50"
                 : "border-gray-200 bg-white hover:border-gray-300"
@@ -138,13 +139,14 @@ export default function SingleSelectInput({
             {/* Radio indicator */}
             <div
               className={`
-                w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0
+                h-4 w-4 flex-shrink-0 rounded-full border-2 sm:h-5 sm:w-5
+                flex items-center justify-center
                 ${isSelected ? "border-indigo-500" : "border-gray-300"}
               `}
             >
-              {isSelected && <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />}
+              {isSelected && <div className="h-2 w-2 rounded-full bg-indigo-500 sm:h-2.5 sm:w-2.5" />}
             </div>
-            <span className="text-sm font-medium text-gray-800">{option.option_text}</span>
+            <span className="text-xs font-medium text-gray-800 sm:text-sm">{option.option_text}</span>
           </button>
         );
       })}

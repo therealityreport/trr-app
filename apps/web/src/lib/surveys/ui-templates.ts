@@ -160,9 +160,9 @@ export const UI_TEMPLATES: UiTemplate[] = [
     },
     seedOptions: [
       { option_key: "strongly_disagree", option_text: "Strongly disagree" },
-      { option_key: "disagree", option_text: "Disagree" },
-      { option_key: "neutral", option_text: "Neutral" },
-      { option_key: "agree", option_text: "Agree" },
+      { option_key: "somewhat_disagree", option_text: "Somewhat disagree" },
+      { option_key: "neutral", option_text: "Neither" },
+      { option_key: "somewhat_agree", option_text: "Somewhat agree" },
       { option_key: "strongly_agree", option_text: "Strongly agree" },
     ],
     usesRows: true,
@@ -211,4 +211,3 @@ export function uiVariantLabel(uiVariant: UiVariant): string {
   // Fallback for any variants not in the picker yet.
   return uiVariant;
 }
-

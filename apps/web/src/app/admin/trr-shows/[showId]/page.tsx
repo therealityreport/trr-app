@@ -11,10 +11,20 @@ import SocialPostsSection from "@/components/admin/social-posts-section";
 import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
+import {
+  CastMatrixSyncPanel,
+  type CastMatrixSyncResult,
+} from "@/components/admin/CastMatrixSyncPanel";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { ImageScrapeDrawer, type EntityContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
+import { shouldIncludeCastMemberForSeasonFilter } from "@/lib/admin/cast-role-filtering";
+import {
+  canonicalizeCastRoleName,
+  castRoleMatchesFilter,
+  normalizeCastRoleList,
+} from "@/lib/admin/cast-role-normalization";
 import { mapSeasonAssetToMetadata } from "@/lib/photo-metadata";
 import {
   clearAdvancedFilters,
@@ -118,6 +128,17 @@ interface ShowRole {
   sort_order: number;
   is_active: boolean;
 }
+
+interface CastRoleMember {
+  person_id: string;
+  person_name: string | null;
+  total_episodes: number | null;
+  seasons_appeared: number | null;
+  latest_season: number | null;
+  roles: string[];
+  photo_url: string | null;
+}
+
 interface BravoPersonTag {
   person_id?: string | null;
   person_name?: string | null;
@@ -606,11 +627,15 @@ const getAssetDisplayUrl = (asset: SeasonAsset): string => {
     typeof asset.crop_display_url === "string" && asset.crop_display_url.trim().length > 0
       ? asset.crop_display_url.trim()
       : null;
+  const thumb =
+    typeof asset.thumb_url === "string" && asset.thumb_url.trim().length > 0
+      ? asset.thumb_url.trim()
+      : null;
   const display =
     typeof asset.display_url === "string" && asset.display_url.trim().length > 0
       ? asset.display_url.trim()
       : null;
-  return cropDisplay ?? display ?? asset.hosted_url;
+  return cropDisplay ?? thumb ?? display ?? asset.hosted_url;
 };
 
 const getAssetDetailUrl = (asset: SeasonAsset): string => {
@@ -784,19 +809,15 @@ export default function TrrShowDetailPage() {
   const [cast, setCast] = useState<TrrCastMember[]>([]);
   const [castSource, setCastSource] = useState<ShowCastSource>("episode_evidence");
   const [castEligibilityWarning, setCastEligibilityWarning] = useState<string | null>(null);
-  const [castRoleMembers, setCastRoleMembers] = useState<
-    Array<{
-      person_id: string;
-      person_name: string | null;
-      total_episodes: number | null;
-      seasons_appeared: number | null;
-      latest_season: number | null;
-      roles: string[];
-      photo_url: string | null;
-    }>
-  >([]);
+  const [castRoleMembers, setCastRoleMembers] = useState<CastRoleMember[]>([]);
+  const [castRoleMembersLoadedOnce, setCastRoleMembersLoadedOnce] = useState(false);
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
+  const [castMatrixSyncLoading, setCastMatrixSyncLoading] = useState(false);
+  const [castMatrixSyncError, setCastMatrixSyncError] = useState<string | null>(null);
+  const [castMatrixSyncResult, setCastMatrixSyncResult] = useState<CastMatrixSyncResult | null>(
+    null
+  );
   const [archiveFootageCast, setArchiveFootageCast] = useState<TrrCastMember[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("details");
   const [selectedSocialSeasonId, setSelectedSocialSeasonId] = useState<string | null>(null);
@@ -874,6 +895,8 @@ export default function TrrShowDetailPage() {
 
   // Gallery state
   const [galleryAssets, setGalleryAssets] = useState<SeasonAsset[]>([]);
+  const [galleryVisibleCount, setGalleryVisibleCount] = useState(120);
+  const [showOtherAssets, setShowOtherAssets] = useState(false);
   const [selectedGallerySeason, setSelectedGallerySeason] = useState<
     number | "all"
   >("all");
@@ -1825,20 +1848,14 @@ export default function TrrShowDetailPage() {
   const fetchCastRoleMembers = useCallback(async () => {
     if (!showId) return;
     setCastRoleMembersLoading(true);
+    setCastRoleMembersLoadedOnce(false);
     setCastRoleMembersError(null);
     try {
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
-      params.set("sort_by", castSortBy);
-      params.set("order", castSortOrder);
       if (castSeasonFilters.length > 0) {
         params.set("seasons", castSeasonFilters.join(","));
       }
-      if (castRoleFilters.length > 0) {
-        params.set("roles", castRoleFilters.join(","));
-      }
-      if (castHasImageFilter === "yes") params.set("has_image", "true");
-      if (castHasImageFilter === "no") params.set("has_image", "false");
 
       const response = await fetch(
         `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
@@ -1879,19 +1896,61 @@ export default function TrrShowDetailPage() {
           };
         })
       );
+      setCastRoleMembersLoadedOnce(true);
     } catch (err) {
       setCastRoleMembers([]);
+      setCastRoleMembersLoadedOnce(false);
       setCastRoleMembersError(err instanceof Error ? err.message : "Failed to load cast role members");
     } finally {
       setCastRoleMembersLoading(false);
     }
+  }, [castSeasonFilters, getAuthHeaders, showId]);
+
+  const syncCastMatrixRoles = useCallback(async () => {
+    if (!showId) return;
+    setCastMatrixSyncLoading(true);
+    setCastMatrixSyncError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const seasonNumbers = (
+        castSeasonFilters.length > 0
+          ? castSeasonFilters
+          : seasons
+              .map((season) => season.season_number)
+              .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+      ).sort((a, b) => a - b);
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/cast-matrix/sync`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          season_numbers: seasonNumbers,
+          include_relationship_roles: true,
+          include_bravo_links: true,
+          include_bravo_images: true,
+          dry_run: false,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as CastMatrixSyncResult & {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to sync cast matrix roles");
+      }
+      setCastMatrixSyncResult(data);
+      await Promise.all([fetchCastRoleMembers(), fetchShowRoles(), fetchShowLinks(), fetchCast()]);
+    } catch (err) {
+      setCastMatrixSyncError(err instanceof Error ? err.message : "Failed to sync cast matrix roles");
+    } finally {
+      setCastMatrixSyncLoading(false);
+    }
   }, [
-    castHasImageFilter,
-    castRoleFilters,
     castSeasonFilters,
-    castSortBy,
-    castSortOrder,
+    fetchCast,
+    fetchCastRoleMembers,
+    fetchShowLinks,
+    fetchShowRoles,
     getAuthHeaders,
+    seasons,
     showId,
   ]);
 
@@ -2456,7 +2515,10 @@ export default function TrrShowDetailPage() {
     setShowLinks([]);
     setShowRoles([]);
     setCastRoleMembers([]);
+    setCastRoleMembersLoadedOnce(false);
     setCastRoleMembersError(null);
+    setCastMatrixSyncError(null);
+    setCastMatrixSyncResult(null);
     setLinksError(null);
     setLinksNotice(null);
     setDetailsEditing(false);
@@ -2499,13 +2561,20 @@ export default function TrrShowDetailPage() {
   const availableCastRoles = useMemo(() => {
     const values = new Set<string>();
     for (const role of showRoles) {
-      if (role.is_active) values.add(role.name);
+      if (role.is_active) {
+        const canonical = canonicalizeCastRoleName(role.name);
+        if (canonical) values.add(canonical);
+      }
     }
     for (const member of castRoleMembers) {
-      for (const role of member.roles) values.add(role);
+      for (const role of member.roles) {
+        const canonical = canonicalizeCastRoleName(role);
+        if (canonical) values.add(canonical);
+      }
     }
     for (const member of cast) {
-      if (typeof member.role === "string" && member.role.trim()) values.add(member.role.trim());
+      const canonical = canonicalizeCastRoleName(member.role);
+      if (canonical) values.add(canonical);
     }
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [cast, castRoleMembers, showRoles]);
@@ -2530,14 +2599,22 @@ export default function TrrShowDetailPage() {
     return Array.from(values).sort((a, b) => b - a);
   }, [castRoleMembers]);
 
+  const castMatrixSyncScopeLabel = useMemo(() => {
+    if (castSeasonFilters.length > 0) {
+      const seasonsLabel = [...castSeasonFilters].sort((a, b) => a - b).join(", ");
+      return `Season scope: ${seasonsLabel} (plus global season 0 roles).`;
+    }
+    return "Season scope: all show seasons (plus global season 0 roles).";
+  }, [castSeasonFilters]);
+
   const castDisplayMembers = useMemo(() => {
     const merged = cast.map((member) => {
       const enriched = castRoleMemberByPersonId.get(member.person_id);
       const mergedRoles =
         enriched && enriched.roles.length > 0
-          ? enriched.roles
+          ? normalizeCastRoleList(enriched.roles)
           : typeof member.role === "string" && member.role.trim().length > 0
-            ? [member.role.trim()]
+            ? normalizeCastRoleList([member.role.trim()])
             : [];
       const mergedLatestSeason =
         enriched && typeof enriched.latest_season === "number" ? enriched.latest_season : null;
@@ -2547,8 +2624,9 @@ export default function TrrShowDetailPage() {
           : typeof member.total_episodes === "number"
             ? member.total_episodes
             : null;
+      // Keep the primary cast endpoint photo stable; cast-role-members is supplemental.
       const mergedPhotoUrl =
-        enriched?.photo_url || member.photo_url || member.cover_photo_url || null;
+        member.photo_url || enriched?.photo_url || member.cover_photo_url || null;
       return {
         ...member,
         roles: mergedRoles,
@@ -2559,16 +2637,21 @@ export default function TrrShowDetailPage() {
     });
 
     const filtered = merged.filter((member) => {
+      const hasScopedRoleOrSeasonMatch = castRoleMemberByPersonId.has(member.person_id);
       if (
-        castSeasonFilters.length > 0 &&
-        (!member.latest_season || !castSeasonFilters.includes(member.latest_season))
+        !shouldIncludeCastMemberForSeasonFilter({
+          castSeasonFilters,
+          hasScopedRoleOrSeasonMatch,
+          latestSeason: member.latest_season,
+          scopedFilteringReady: castRoleMembersLoadedOnce,
+        })
       ) {
         return false;
       }
       if (
         castRoleFilters.length > 0 &&
         !member.roles.some((role) =>
-          castRoleFilters.some((selected) => selected.toLowerCase() === role.toLowerCase())
+          castRoleFilters.some((selected) => castRoleMatchesFilter(role, selected))
         )
       ) {
         return false;
@@ -2609,6 +2692,7 @@ export default function TrrShowDetailPage() {
     castHasImageFilter,
     castRoleFilters,
     castRoleMemberByPersonId,
+    castRoleMembersLoadedOnce,
     castSeasonFilters,
     castSortBy,
     castSortOrder,
@@ -2653,60 +2737,103 @@ export default function TrrShowDetailPage() {
 
   const gallerySectionAssets = useMemo(() => {
     const showBackdrops: SeasonAsset[] = [];
-    const showPosters: SeasonAsset[] = [];
-    const seasonPosters: SeasonAsset[] = [];
+    const posters: SeasonAsset[] = [];
     const episodeStills: SeasonAsset[] = [];
+    const profilePictures: SeasonAsset[] = [];
     const castAndPromos: SeasonAsset[] = [];
     const other: SeasonAsset[] = [];
 
-    for (const asset of filteredGalleryAssets) {
+    const classifyAsset = (
+      asset: SeasonAsset
+    ):
+      | "showBackdrops"
+      | "posters"
+      | "episodeStills"
+      | "profilePictures"
+      | "castAndPromos"
+      | "other"
+      | null => {
       const normalizedKind = (asset.kind ?? "").toLowerCase().trim();
-      const normalizedSource = (asset.source ?? "").toLowerCase().trim();
-      const isBackdropKind = normalizedKind === "backdrop";
-      const isTmdbBackdrop =
-        asset.type === "show" &&
-        isBackdropKind &&
-        normalizedSource === "tmdb";
-      const isShowPoster =
-        asset.type === "show" &&
-        !isBackdropKind &&
-        normalizedKind === "poster";
+      const normalizedContextSection = (asset.context_section ?? "").toLowerCase().trim();
+      const normalizedContextType = (asset.context_type ?? "").toLowerCase().trim();
+      const isBackdrop = normalizedKind === "backdrop";
+      const isPoster =
+        normalizedKind === "poster" && (asset.type === "show" || asset.type === "season");
       const isLogo = normalizedKind === "logo";
       const isCastOrPromo = normalizedKind === "cast" || normalizedKind === "promo";
+      const isProfilePicture =
+        normalizedContextType === "profile_picture" ||
+        normalizedContextType === "profile" ||
+        normalizedContextSection === "bravo_profile";
 
-      if (isTmdbBackdrop) {
+      if (isProfilePicture) {
+        return "profilePictures";
+      }
+      if (isBackdrop) {
+        return "showBackdrops";
+      }
+      if (isPoster) {
+        return "posters";
+      }
+      if (asset.type === "episode") {
+        return "episodeStills";
+      }
+      if (isCastOrPromo) {
+        return "castAndPromos";
+      }
+      if (isLogo) return null;
+      return "other";
+    };
+
+    const classifiedAssets = filteredGalleryAssets.map((asset) => ({
+      asset,
+      bucket: classifyAsset(asset),
+    }));
+
+    const displayAssets = classifiedAssets.filter((row) => {
+      if (row.bucket === null) return false;
+      if (!showOtherAssets && row.bucket === "other") return false;
+      return true;
+    });
+
+    for (const row of displayAssets.slice(0, galleryVisibleCount)) {
+      const { asset, bucket } = row;
+      if (bucket === "showBackdrops") {
         showBackdrops.push(asset);
         continue;
       }
-      if (isShowPoster) {
-        showPosters.push(asset);
+      if (bucket === "posters") {
+        posters.push(asset);
         continue;
       }
-      if (asset.type === "season") {
-        seasonPosters.push(asset);
-        continue;
-      }
-      if (asset.type === "episode") {
+      if (bucket === "episodeStills") {
         episodeStills.push(asset);
         continue;
       }
-      if (isCastOrPromo) {
+      if (bucket === "profilePictures") {
+        profilePictures.push(asset);
+        continue;
+      }
+      if (bucket === "castAndPromos") {
         castAndPromos.push(asset);
         continue;
       }
-      if (isLogo) continue;
-      other.push(asset);
+      if (bucket === "other") {
+        other.push(asset);
+      }
     }
 
     return {
       showBackdrops,
-      showPosters,
-      seasonPosters,
+      posters,
       episodeStills,
+      profilePictures,
       castAndPromos,
       other,
+      hasMoreVisible: displayAssets.length > galleryVisibleCount,
+      hasHiddenOther: !showOtherAssets && classifiedAssets.some((row) => row.bucket === "other"),
     };
-  }, [filteredGalleryAssets]);
+  }, [filteredGalleryAssets, galleryVisibleCount, showOtherAssets]);
 
   const brandLogoAssets = useMemo(
     () =>
@@ -2928,6 +3055,11 @@ export default function TrrShowDetailPage() {
     }
   }, [selectedGallerySeason, visibleSeasons]);
 
+  useEffect(() => {
+    setGalleryVisibleCount(120);
+    setShowOtherAssets(false);
+  }, [selectedGallerySeason, advancedFilters]);
+
   // Load gallery assets for a season (or all seasons)
   const loadGalleryAssets = useCallback(
     async (seasonNumber: number | "all") => {
@@ -2935,6 +3067,9 @@ export default function TrrShowDetailPage() {
       setGalleryLoading(true);
       try {
         const headers = await getAuthHeaders();
+        const sourcesParam = advancedFilters.sources.length
+          ? `&sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
+          : "";
         const dedupe = (rows: SeasonAsset[]) => {
           const seen = new Set<string>();
           const out: SeasonAsset[] = [];
@@ -2949,7 +3084,10 @@ export default function TrrShowDetailPage() {
         };
 
         const fetchShowAssets = async (): Promise<SeasonAsset[]> => {
-          const res = await fetch(`/api/admin/trr-api/shows/${showId}/assets`, { headers });
+          const res = await fetch(
+            `/api/admin/trr-api/shows/${showId}/assets?limit=250&offset=0${sourcesParam}`,
+            { headers }
+          );
           if (!res.ok) return [];
           const data = await res.json().catch(() => ({}));
           const assets = (data as { assets?: unknown }).assets;
@@ -2962,7 +3100,7 @@ export default function TrrShowDetailPage() {
             fetchShowAssets(),
             ...visibleSeasons.map(async (season) => {
               const res = await fetch(
-                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets`,
+                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets?limit=250&offset=0${sourcesParam}`,
                 { headers }
               );
               if (!res.ok) return [];
@@ -2977,7 +3115,7 @@ export default function TrrShowDetailPage() {
             fetchShowAssets(),
             (async () => {
               const res = await fetch(
-                `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`,
+                `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0${sourcesParam}`,
                 { headers }
               );
               if (!res.ok) return [];
@@ -2992,7 +3130,7 @@ export default function TrrShowDetailPage() {
         setGalleryLoading(false);
       }
     },
-    [showId, visibleSeasons, getAuthHeaders]
+    [showId, visibleSeasons, getAuthHeaders, advancedFilters.sources]
   );
 
   const refreshShow = useCallback(
@@ -4636,7 +4774,7 @@ export default function TrrShowDetailPage() {
                     </p>
                   ) : (
                     <div className="space-y-8">
-                      {/* Show Backdrops (TMDb backdrops) */}
+                      {/* Backdrops */}
                       {gallerySectionAssets.showBackdrops.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
@@ -4653,7 +4791,7 @@ export default function TrrShowDetailPage() {
                                 >
                                   <GalleryImage
                                     src={getAssetDisplayUrl(asset)}
-                                    alt={asset.caption || "Season backdrop"}
+                                    alt={asset.caption || "Backdrop"}
                                     sizes="300px"
                                     className="object-cover"
                                   />
@@ -4663,14 +4801,14 @@ export default function TrrShowDetailPage() {
                         </section>
                       )}
 
-                      {/* Show Posters */}
-                      {gallerySectionAssets.showPosters.length > 0 && (
+                      {/* Posters */}
+                      {gallerySectionAssets.posters.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Show Posters
+                            Posters
                           </h4>
                           <div className="grid grid-cols-4 gap-4">
-                            {gallerySectionAssets.showPosters.map((asset, i, arr) => (
+                            {gallerySectionAssets.posters.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -4680,33 +4818,7 @@ export default function TrrShowDetailPage() {
                                 >
                                   <GalleryImage
                                     src={getAssetDisplayUrl(asset)}
-                                    alt={asset.caption || "Show poster"}
-                                    sizes="200px"
-                                  />
-                                </button>
-                              ))}
-                          </div>
-                        </section>
-                      )}
-
-                      {/* Season Posters */}
-                      {gallerySectionAssets.seasonPosters.length > 0 && (
-                        <section>
-                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Season Posters
-                          </h4>
-                          <div className="grid grid-cols-4 gap-4">
-                            {gallerySectionAssets.seasonPosters.map((asset, i, arr) => (
-                                <button
-                                  key={`${asset.id}-${i}`}
-                                  onClick={(e) =>
-                                    openAssetLightbox(asset, i, arr, e.currentTarget)
-                                  }
-                                  className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                  <GalleryImage
-                                    src={getAssetDisplayUrl(asset)}
-                                    alt={asset.caption || "Season poster"}
+                                    alt={asset.caption || "Poster"}
                                     sizes="200px"
                                   />
                                 </button>
@@ -4735,6 +4847,39 @@ export default function TrrShowDetailPage() {
                                     alt={asset.caption || "Episode still"}
                                     sizes="150px"
                                   />
+                                </button>
+                              ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {/* Profile Pictures */}
+                      {gallerySectionAssets.profilePictures.length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Profile Pictures
+                          </h4>
+                          <div className="grid grid-cols-5 gap-4">
+                            {gallerySectionAssets.profilePictures.map((asset, i, arr) => (
+                                <button
+                                  key={`${asset.id}-${i}`}
+                                  onClick={(e) =>
+                                    openAssetLightbox(asset, i, arr, e.currentTarget)
+                                  }
+                                  className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                  <GalleryImage
+                                    src={getAssetDisplayUrl(asset)}
+                                    alt={asset.caption || "Profile picture"}
+                                    sizes="180px"
+                                  />
+                                  {asset.person_name && (
+                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                                      <p className="truncate text-xs text-white">
+                                        {asset.person_name}
+                                      </p>
+                                    </div>
+                                  )}
                                 </button>
                               ))}
                           </div>
@@ -4775,7 +4920,7 @@ export default function TrrShowDetailPage() {
                       )}
 
                       {/* Other */}
-                      {gallerySectionAssets.other.length > 0 && (
+                      {showOtherAssets && gallerySectionAssets.other.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Other
@@ -4805,6 +4950,25 @@ export default function TrrShowDetailPage() {
                             ))}
                           </div>
                         </section>
+                      )}
+
+                      {(gallerySectionAssets.hasMoreVisible || gallerySectionAssets.hasHiddenOther) && (
+                        <div className="flex justify-center pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setGalleryVisibleCount((prev) => prev + 120);
+                              if (!showOtherAssets && gallerySectionAssets.hasHiddenOther) {
+                                setShowOtherAssets(true);
+                              }
+                            }}
+                            className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                          >
+                            {gallerySectionAssets.hasHiddenOther && !showOtherAssets
+                              ? "Load More Images (Including Other)"
+                              : "Load More Images"}
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -5027,6 +5191,15 @@ export default function TrrShowDetailPage() {
                   {castEligibilityWarning}
                 </div>
               )}
+
+              <CastMatrixSyncPanel
+                loading={castMatrixSyncLoading}
+                error={castMatrixSyncError}
+                result={castMatrixSyncResult}
+                scopeLabel={castMatrixSyncScopeLabel}
+                onSync={() => void syncCastMatrixRoles()}
+              />
+
               <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                 <div className="grid gap-3 md:grid-cols-5">
                   <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
@@ -5135,6 +5308,9 @@ export default function TrrShowDetailPage() {
                       })
                     )}
                   </div>
+                  <p className="text-[11px] text-zinc-500">
+                    Season filters use season-scoped role assignments plus global season-0 roles.
+                  </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                       Roles
@@ -5143,8 +5319,8 @@ export default function TrrShowDetailPage() {
                       <span className="text-xs text-zinc-500">No roles configured.</span>
                     ) : (
                       availableCastRoles.map((role) => {
-                        const active = castRoleFilters.some(
-                          (value) => value.toLowerCase() === role.toLowerCase()
+                        const active = castRoleFilters.some((value) =>
+                          castRoleMatchesFilter(value, role)
                         );
                         return (
                           <button
@@ -5153,7 +5329,7 @@ export default function TrrShowDetailPage() {
                             onClick={() =>
                               setCastRoleFilters((prev) =>
                                 active
-                                  ? prev.filter((value) => value.toLowerCase() !== role.toLowerCase())
+                                  ? prev.filter((value) => !castRoleMatchesFilter(value, role))
                                   : [...prev, role]
                               )
                             }
@@ -5874,61 +6050,80 @@ export default function TrrShowDetailPage() {
                                 </div>
                               ) : (
                                 <div className="space-y-1">
-                                  {groupLinks.map((link) => (
-                                    <div
-                                      key={link.id}
-                                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5"
-                                    >
-                                      <div className="min-w-0 flex-1">
-                                        <a
-                                          href={link.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="block truncate text-sm font-medium text-blue-700 hover:underline"
-                                        >
-                                          {link.label || link.url}
-                                        </a>
-                                        <p className="text-[11px] text-zinc-500">
-                                          {link.link_kind}
-                                          {link.season_number > 0 ? ` · Season ${link.season_number}` : ""}
-                                          {link.entity_type !== "show" ? ` · ${link.entity_type}` : ""}
-                                        </p>
+                                  {groupLinks.map((link) => {
+                                    const isPersonBravoProfile =
+                                      link.entity_type === "person" && link.link_kind === "bravo_profile";
+                                    return (
+                                      <div
+                                        key={link.id}
+                                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5"
+                                      >
+                                        <div className="min-w-0 flex-1">
+                                          <a
+                                            href={link.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="block truncate text-sm font-medium text-blue-700 hover:underline"
+                                          >
+                                            {link.label || link.url}
+                                          </a>
+                                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                              {link.link_kind}
+                                            </span>
+                                            {link.season_number > 0 && (
+                                              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                                Season {link.season_number}
+                                              </span>
+                                            )}
+                                            {link.entity_type !== "show" && (
+                                              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                                {link.entity_type}
+                                              </span>
+                                            )}
+                                            {isPersonBravoProfile && (
+                                              <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                                                Bravo Person Profile
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-1">
+                                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                            {link.status}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => void setShowLinkStatus(link.id, "approved")}
+                                            className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                          >
+                                            Approve
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => void setShowLinkStatus(link.id, "rejected")}
+                                            className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+                                          >
+                                            Reject
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => void editShowLink(link)}
+                                            className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                          >
+                                            Edit
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => void deleteShowLink(link.id)}
+                                            className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
                                       </div>
-                                      <div className="flex flex-wrap items-center gap-1">
-                                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                          {link.status}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => void setShowLinkStatus(link.id, "approved")}
-                                          className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                                        >
-                                          Approve
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => void setShowLinkStatus(link.id, "rejected")}
-                                          className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
-                                        >
-                                          Reject
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => void editShowLink(link)}
-                                          className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                        >
-                                          Edit
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => void deleteShowLink(link.id)}
-                                          className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
-                                        >
-                                          Delete
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               )}
                             </section>

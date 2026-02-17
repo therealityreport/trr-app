@@ -10,6 +10,7 @@ import SliderInput from "./SliderInput";
 import RankOrderInput from "./RankOrderInput";
 import WhoseSideInput from "./WhoseSideInput";
 import MatrixLikertInput from "./MatrixLikertInput";
+import ThreeChoiceSliderInput from "./ThreeChoiceSliderInput";
 import TwoAxisGridInput from "./TwoAxisGridInput";
 import MultiSelectInput from "./MultiSelectInput";
 import SingleSelectInput from "./SingleSelectInput";
@@ -100,6 +101,14 @@ export default function QuestionRenderer({
       );
 
     case "three-choice-slider":
+      return (
+        <ThreeChoiceSliderInput
+          {...commonProps}
+          value={value as Record<string, string> | null}
+          onChange={onChange}
+        />
+      );
+
     case "agree-likert-scale":
       return (
         <MatrixLikertInput

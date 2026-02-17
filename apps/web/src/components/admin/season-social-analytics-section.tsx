@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import SocialPostsSection from "@/components/admin/social-posts-section";
+import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import { auth } from "@/lib/firebase";
 
 type Platform = "instagram" | "tiktok" | "twitter" | "youtube";
+type PlatformTab = "overview" | Platform | "reddit";
 type Scope = "bravo" | "creator" | "community";
 
 type SocialJob = {
@@ -83,7 +86,28 @@ type AnalyticsResponse = {
       tiktok: number;
       twitter: number;
     };
+    comments?: {
+      instagram: number;
+      youtube: number;
+      tiktok: number;
+      twitter: number;
+    };
     total_posts: number;
+    total_comments?: number;
+  }>;
+  weekly_platform_engagement?: Array<{
+    week_index: number;
+    label: string;
+    start: string;
+    end: string;
+    engagement: {
+      instagram: number;
+      youtube: number;
+      tiktok: number;
+      twitter: number;
+    };
+    total_engagement: number;
+    has_data: boolean;
   }>;
   platform_breakdown: Array<{
     platform: string;
@@ -134,6 +158,25 @@ const PLATFORM_LABELS: Record<string, string> = {
   tiktok: "TikTok",
   twitter: "Twitter/X",
   youtube: "YouTube",
+  reddit: "Reddit",
+};
+
+const PLATFORM_TABS: { key: PlatformTab; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "instagram", label: "Instagram" },
+  { key: "tiktok", label: "TikTok" },
+  { key: "twitter", label: "Twitter/X" },
+  { key: "youtube", label: "YouTube" },
+  { key: "reddit", label: "Reddit" },
+];
+
+const WEEKLY_ENGAGEMENT_PLATFORMS: Platform[] = ["instagram", "youtube", "tiktok", "twitter"];
+
+const WEEKLY_ENGAGEMENT_BAR_CLASS: Record<Platform, string> = {
+  instagram: "bg-pink-500",
+  youtube: "bg-red-500",
+  tiktok: "bg-teal-400",
+  twitter: "bg-sky-500",
 };
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
@@ -145,6 +188,41 @@ const formatDateTime = (value: string | null | undefined): string => {
   return date.toLocaleString();
 };
 
+const formatWeekScopeLabel = (week: number | "all" | null): string => {
+  if (week === "all" || week === null) return "All Weeks";
+  return week === 0 ? "Pre-Season" : `Week ${week}`;
+};
+
+const formatPlatformScopeLabel = (platform: "all" | Platform | null): string => {
+  if (!platform || platform === "all") return "All Platforms";
+  return PLATFORM_LABELS[platform] ?? platform;
+};
+
+const normalizeIsoInstant = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return null;
+  return new Date(timestamp).toISOString();
+};
+
+const formatDateRangeLabel = (start: string, end: string): string => {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return `${start} to ${end}`;
+  }
+  return `${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`;
+};
+
+const statusToLogVerb = (status: SocialJob["status"]): string => {
+  if (status === "queued" || status === "pending") return "queued";
+  if (status === "retrying") return "retrying";
+  if (status === "running") return "running";
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  return "cancelled";
+};
+
 export default function SeasonSocialAnalyticsSection({
   showId,
   seasonNumber,
@@ -152,6 +230,7 @@ export default function SeasonSocialAnalyticsSection({
   showName,
 }: SeasonSocialAnalyticsSectionProps) {
   const [scope, setScope] = useState<Scope>("bravo");
+  const [platformTab, setPlatformTab] = useState<PlatformTab>("overview");
   const [platformFilter, setPlatformFilter] = useState<"all" | Platform>("all");
   const [weekFilter, setWeekFilter] = useState<number | "all">("all");
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
@@ -164,10 +243,15 @@ export default function SeasonSocialAnalyticsSection({
   const [cancellingRun, setCancellingRun] = useState(false);
   const [ingestingWeek, setIngestingWeek] = useState<number | null>(null);
   const [ingestingPlatform, setIngestingPlatform] = useState<string | null>(null);
+  const [activeRunRequest, setActiveRunRequest] = useState<{ week: number | null; platform: "all" | Platform } | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [hasObservedRunJobs, setHasObservedRunJobs] = useState(false);
+  const [noRunningJobsCount, setNoRunningJobsCount] = useState(0);
+  const [ingestStartedAt, setIngestStartedAt] = useState<Date | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
+  const [jobsOpen, setJobsOpen] = useState(false);
+  const [elapsedTick, setElapsedTick] = useState(0);
 
   const getAuthHeaders = useCallback(async () => {
     const token = await auth.currentUser?.getIdToken();
@@ -247,9 +331,113 @@ export default function SeasonSocialAnalyticsSection({
   }, [refreshAll]);
 
   const runScopedJobs = useMemo(() => {
-    if (!activeRunId) return [];
+    if (!activeRunId) return jobs;
     return jobs.filter((job) => job.run_id === activeRunId);
   }, [activeRunId, jobs]);
+
+  const weeklyWindowLookup = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const week of analytics?.weekly ?? []) {
+      const start = normalizeIsoInstant(week.start);
+      const end = normalizeIsoInstant(week.end);
+      if (!start || !end) continue;
+      map.set(`${start}|${end}`, week.label ?? formatWeekScopeLabel(week.week_index));
+    }
+    for (const week of analytics?.weekly_platform_posts ?? []) {
+      const start = normalizeIsoInstant(week.start);
+      const end = normalizeIsoInstant(week.end);
+      if (!start || !end) continue;
+      if (!map.has(`${start}|${end}`)) {
+        map.set(`${start}|${end}`, week.label ?? formatWeekScopeLabel(week.week_index));
+      }
+    }
+    return map;
+  }, [analytics]);
+
+  const activeRunScope = useMemo(() => {
+    const fallbackWeek = activeRunRequest?.week ?? (weekFilter === "all" ? null : weekFilter);
+    const fallbackPlatform = activeRunRequest?.platform ?? platformFilter;
+    const fallbackWeekLabel = formatWeekScopeLabel(fallbackWeek);
+    const fallbackPlatformLabel = formatPlatformScopeLabel(fallbackPlatform);
+
+    if (!activeRunId || runScopedJobs.length === 0) {
+      return {
+        weekLabel: fallbackWeekLabel,
+        platformLabel: fallbackPlatformLabel,
+      };
+    }
+
+    const platformSet = new Set<string>();
+    const weekLabelSet = new Set<string>();
+    let hasUnboundedWeeks = false;
+    for (const job of runScopedJobs) {
+      if (job.platform) platformSet.add(job.platform);
+      const dateStartRaw = typeof job.config?.date_start === "string" ? job.config.date_start : null;
+      const dateEndRaw = typeof job.config?.date_end === "string" ? job.config.date_end : null;
+      if (!dateStartRaw || !dateEndRaw) {
+        hasUnboundedWeeks = true;
+        continue;
+      }
+      const dateStartIso = normalizeIsoInstant(dateStartRaw);
+      const dateEndIso = normalizeIsoInstant(dateEndRaw);
+      if (!dateStartIso || !dateEndIso) {
+        weekLabelSet.add(formatDateRangeLabel(dateStartRaw, dateEndRaw));
+        continue;
+      }
+      const matchedWeekLabel = weeklyWindowLookup.get(`${dateStartIso}|${dateEndIso}`);
+      weekLabelSet.add(matchedWeekLabel ?? formatDateRangeLabel(dateStartRaw, dateEndRaw));
+    }
+
+    const sortedPlatforms = Array.from(platformSet).sort((a, b) =>
+      (PLATFORM_LABELS[a] ?? a).localeCompare(PLATFORM_LABELS[b] ?? b)
+    );
+    const platformLabel =
+      sortedPlatforms.length === 0
+        ? fallbackPlatformLabel
+        : sortedPlatforms.length >= Object.keys(PLATFORM_LABELS).length
+          ? "All Platforms"
+          : sortedPlatforms.map((platform) => PLATFORM_LABELS[platform] ?? platform).join(", ");
+
+    const sortedWeekLabels = Array.from(weekLabelSet).sort((a, b) => a.localeCompare(b));
+    const weekLabel =
+      hasUnboundedWeeks || sortedWeekLabels.length === 0 ? "All Weeks" : sortedWeekLabels.join(", ");
+
+    return {
+      weekLabel,
+      platformLabel,
+    };
+  }, [activeRunId, activeRunRequest, platformFilter, runScopedJobs, weekFilter, weeklyWindowLookup]);
+
+  const liveRunLogs = useMemo(() => {
+    if (!activeRunId) return [];
+    return [...runScopedJobs]
+      .map((job) => {
+        const stage =
+          (typeof job.config?.stage === "string" ? job.config.stage : undefined) ??
+          (typeof job.metadata?.stage === "string" ? job.metadata.stage : undefined) ??
+          job.job_type ??
+          "posts";
+        const timestamp = job.completed_at ?? job.started_at ?? job.created_at ?? null;
+        const ts = timestamp ? Date.parse(timestamp) : Number.NaN;
+        const counters = (job.metadata as Record<string, unknown>)?.stage_counters as
+          | Record<string, number>
+          | undefined;
+        const counterSummary =
+          counters && (typeof counters.posts === "number" || typeof counters.comments === "number")
+            ? ` · ${counters.posts ?? 0}p/${counters.comments ?? 0}c`
+            : "";
+        const account = typeof job.config?.account === "string" && job.config.account ? ` @${job.config.account}` : "";
+        const itemCount = typeof job.items_found === "number" ? ` · ${job.items_found.toLocaleString()} items` : "";
+        return {
+          id: job.id,
+          timestampMs: Number.isNaN(ts) ? 0 : ts,
+          timestampLabel: timestamp ? new Date(timestamp).toLocaleTimeString() : "--:--:--",
+          message: `${PLATFORM_LABELS[job.platform] ?? job.platform} ${stage}${account} ${statusToLogVerb(job.status)}${itemCount}${counterSummary}`,
+        };
+      })
+      .sort((a, b) => b.timestampMs - a.timestampMs)
+      .slice(0, 8);
+  }, [activeRunId, runScopedJobs]);
 
   const hasRunningJobs = useMemo(() => {
     const runningStatuses = new Set(["queued", "pending", "retrying", "running"]);
@@ -267,32 +455,50 @@ export default function SeasonSocialAnalyticsSection({
     }
   }, [activeRunId, runScopedJobs.length]);
 
-  // When polling detects no more running jobs, clear the ingest UI state
+  // Track consecutive polls with no running jobs (grace period for inter-job transitions)
+  useEffect(() => {
+    if (!runningIngest || !activeRunId || !hasObservedRunJobs) return;
+    if (hasRunningJobs) {
+      setNoRunningJobsCount(0);
+      return;
+    }
+    setNoRunningJobsCount((prev) => prev + 1);
+  }, [activeRunId, hasObservedRunJobs, hasRunningJobs, runningIngest]);
+
+  // When polling detects no more running jobs for 2+ consecutive polls, clear the ingest UI state
   useEffect(() => {
     if (!runningIngest) return;
     if (!activeRunId) return;
     if (!hasObservedRunJobs) return;
-    if (hasRunningJobs) return;
+    // Require 2 consecutive polls with no running jobs to avoid false positives
+    // during inter-job transitions in execute_run
+    if (noRunningJobsCount < 2) return;
     // Jobs finished — summarize from the latest jobs list
-    const recentJobs = runScopedJobs.filter(
+    const finishedJobs = runScopedJobs.filter(
       (j) => j.status === "completed" || j.status === "failed"
-    ).slice(0, 10);
-    const completed = recentJobs.filter((j) => j.status === "completed");
-    const failed = recentJobs.filter((j) => j.status === "failed");
+    );
+    const completed = finishedJobs.filter((j) => j.status === "completed");
+    const failed = finishedJobs.filter((j) => j.status === "failed");
     const totalItems = completed.reduce((s, j) => s + (j.items_found ?? 0), 0);
 
-    let msg = `Ingest complete: ${completed.length} job(s) finished, ${totalItems} items`;
+    const elapsed = ingestStartedAt
+      ? ` in ${Math.round((Date.now() - ingestStartedAt.getTime()) / 1000)}s`
+      : "";
+    let msg = `Ingest complete${elapsed}: ${completed.length} job(s) finished, ${totalItems} items`;
     if (failed.length > 0) {
-      msg += ` (${failed.length} failed)`;
+      msg += ` · ${failed.length} failed`;
     }
     setIngestMessage(msg);
     setRunningIngest(false);
     setIngestingWeek(null);
     setIngestingPlatform(null);
+    setActiveRunRequest(null);
     setActiveRunId(null);
+    setNoRunningJobsCount(0);
+    setIngestStartedAt(null);
     // Refresh analytics to reflect new data
     fetchAnalytics().catch(() => {});
-  }, [activeRunId, hasObservedRunJobs, hasRunningJobs, runningIngest, runScopedJobs, fetchAnalytics]);
+  }, [activeRunId, hasObservedRunJobs, noRunningJobsCount, runningIngest, runScopedJobs, fetchAnalytics, ingestStartedAt]);
 
   // Poll for job updates when there are running jobs or an active ingest
   useEffect(() => {
@@ -311,6 +517,19 @@ export default function SeasonSocialAnalyticsSection({
     }, interval);
     return () => window.clearInterval(timer);
   }, [activeRunId, fetchAnalytics, fetchJobs, hasRunningJobs, runningIngest]);
+
+  // Tick elapsed timer every second for smooth display
+  useEffect(() => {
+    if (!runningIngest || !ingestStartedAt) {
+      setElapsedTick(0);
+      return;
+    }
+    setElapsedTick(Date.now() - ingestStartedAt.getTime());
+    const timer = window.setInterval(() => {
+      setElapsedTick(Date.now() - ingestStartedAt.getTime());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [runningIngest, ingestStartedAt]);
 
   const cancelActiveRun = useCallback(async () => {
     if (!activeRunId) return;
@@ -334,7 +553,10 @@ export default function SeasonSocialAnalyticsSection({
       setRunningIngest(false);
       setIngestingWeek(null);
       setIngestingPlatform(null);
+      setActiveRunRequest(null);
       setActiveRunId(null);
+      setNoRunningJobsCount(0);
+      setIngestStartedAt(null);
       await fetchJobs(activeRunId);
       await fetchAnalytics();
     } catch (err) {
@@ -351,11 +573,14 @@ export default function SeasonSocialAnalyticsSection({
     setJobs([]);
     setActiveRunId(null);
     setHasObservedRunJobs(false);
+    setNoRunningJobsCount(0);
+    setIngestStartedAt(new Date());
 
     const effectivePlatform = override?.platform ?? platformFilter;
     const effectiveWeek = override?.week ?? (weekFilter === "all" ? null : weekFilter);
     setIngestingWeek(effectiveWeek);
     setIngestingPlatform(effectivePlatform);
+    setActiveRunRequest({ week: effectiveWeek, platform: effectivePlatform });
 
     try {
       const headers = await getAuthHeaders();
@@ -448,7 +673,10 @@ export default function SeasonSocialAnalyticsSection({
       setCancellingRun(false);
       setIngestingWeek(null);
       setIngestingPlatform(null);
+      setActiveRunRequest(null);
       setActiveRunId(null);
+      setNoRunningJobsCount(0);
+      setIngestStartedAt(null);
     }
   }, [analytics, fetchJobs, getAuthHeaders, platformFilter, scope, seasonNumber, showId, weekFilter]);
 
@@ -486,15 +714,24 @@ export default function SeasonSocialAnalyticsSection({
     [getAuthHeaders, queryString, seasonNumber, showId]
   );
 
-  const weeklyMax = useMemo(() => {
-    if (!analytics?.weekly?.length) return 1;
-    return Math.max(
-      1,
-      ...analytics.weekly.map((week) => Math.max(week.post_volume + week.comment_volume, week.engagement))
-    );
-  }, [analytics]);
-
   const weeklyPlatformRows = useMemo(() => analytics?.weekly_platform_posts ?? [], [analytics]);
+  const weeklyPlatformEngagementRows = useMemo(
+    () => analytics?.weekly_platform_engagement ?? [],
+    [analytics]
+  );
+  const weeklyPlatformEngagementLookup = useMemo(() => {
+    const lookup = new Map<number, NonNullable<AnalyticsResponse["weekly_platform_engagement"]>[number]>();
+    for (const row of weeklyPlatformEngagementRows) {
+      lookup.set(row.week_index, row);
+    }
+    return lookup;
+  }, [weeklyPlatformEngagementRows]);
+  const weeklyPlatformEngagementMax = useMemo(() => {
+    const values = weeklyPlatformEngagementRows.flatMap((row) =>
+      WEEKLY_ENGAGEMENT_PLATFORMS.map((platform) => row.engagement?.[platform] ?? 0)
+    );
+    return Math.max(1, ...values);
+  }, [weeklyPlatformEngagementRows]);
 
   return (
     <div className="space-y-6">
@@ -509,7 +746,7 @@ export default function SeasonSocialAnalyticsSection({
               Bravo-owned social analytics with viewer sentiment and weekly rollups.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
               Scope
               <select
@@ -518,20 +755,6 @@ export default function SeasonSocialAnalyticsSection({
                 className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700"
               >
                 <option value="bravo">Bravo</option>
-              </select>
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-              Platform
-              <select
-                value={platformFilter}
-                onChange={(event) => setPlatformFilter(event.target.value as "all" | Platform)}
-                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700"
-              >
-                <option value="all">All Platforms</option>
-                <option value="instagram">Instagram</option>
-                <option value="tiktok">TikTok</option>
-                <option value="twitter">Twitter/X</option>
-                <option value="youtube">YouTube</option>
               </select>
             </label>
             <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
@@ -566,51 +789,268 @@ export default function SeasonSocialAnalyticsSection({
         </div>
       </section>
 
+      {/* Platform tabs */}
+      <nav className="flex gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-1 shadow-sm">
+        {PLATFORM_TABS.map((tab) => {
+          const isActive = platformTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                setPlatformTab(tab.key);
+                setPlatformFilter(tab.key === "overview" || tab.key === "reddit" ? "all" : tab.key);
+              }}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                isActive
+                  ? "bg-white text-zinc-900 shadow-sm"
+                  : "text-zinc-500 hover:bg-white/50 hover:text-zinc-700"
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
+
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
-      {ingestMessage && !error && (
-        <div className={`rounded-xl border px-4 py-3 text-sm ${
-          runningIngest
-            ? "animate-pulse border-blue-200 bg-blue-50 text-blue-700"
-            : "border-green-200 bg-green-50 text-green-700"
-        }`}>
-              <p>{ingestMessage}</p>
-              {runningIngest && hasObservedRunJobs && (
-                <div className="mt-2 space-y-1 text-xs">
-                  {runScopedJobs.filter((j) => ["queued", "pending", "retrying", "running"].includes(j.status)).map((j) => {
-                    const stage =
-                      (typeof j.config?.stage === "string" ? j.config.stage : undefined) ??
-                      (typeof j.metadata?.stage === "string" ? j.metadata.stage : "stage");
-                    return (
-                    <div key={j.id} className="flex items-center gap-2">
-                      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-                      <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
-                      <span className="text-blue-500">{stage} {j.status} — {j.items_found ?? 0} items so far</span>
-                    </div>
-                    );
-                  })}
-                  {runScopedJobs.filter((j) => j.status === "completed").slice(0, 5).map((j) => {
-                    const stage =
-                      (typeof j.config?.stage === "string" ? j.config.stage : undefined) ??
-                      (typeof j.metadata?.stage === "string" ? j.metadata.stage : "stage");
-                    return (
-                    <div key={j.id} className="flex items-center gap-2 text-green-700">
-                      <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-                      <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
-                      <span>{stage} done — {j.items_found ?? 0} items</span>
-                    </div>
-                    );
-                  })}
-                </div>
+      {ingestMessage && !error && (() => {
+        const activeJobs = runScopedJobs.filter((j) =>
+          activeRunId ? j.run_id === activeRunId : ["queued", "pending", "retrying", "running"].includes(j.status)
+        );
+        const totalJobs = activeJobs.length;
+        const completedJobs = activeJobs.filter((j) => j.status === "completed");
+        const failedJobs = activeJobs.filter((j) => j.status === "failed");
+        const finishedCount = completedJobs.length + failedJobs.length;
+        const progressPct = totalJobs > 0 ? Math.round((finishedCount / totalJobs) * 100) : 0;
+        const totalItemsFound = activeJobs.reduce((s, j) => s + (j.items_found ?? 0), 0);
+        const elapsedSec = Math.floor(elapsedTick / 1000);
+        const elapsedMin = Math.floor(elapsedSec / 60);
+        const elapsedStr = elapsedMin > 0 ? `${elapsedMin}m ${String(elapsedSec % 60).padStart(2, "0")}s` : `${elapsedSec}s`;
+
+        const getStage = (j: SocialJob) =>
+          (typeof j.config?.stage === "string" ? j.config.stage : undefined) ??
+          (typeof j.metadata?.stage === "string" ? j.metadata.stage : "unknown");
+
+        const getAccount = (j: SocialJob) =>
+          typeof j.config?.account === "string" && j.config.account ? j.config.account : null;
+
+        const postsStageJobs = activeJobs.filter((j) => getStage(j) === "posts");
+        const commentsStageJobs = activeJobs.filter((j) => getStage(j) === "comments");
+
+        const stageProgress = (stageJobs: SocialJob[], label: string) => {
+          if (stageJobs.length === 0) return null;
+          const done = stageJobs.filter((j) => j.status === "completed" || j.status === "failed").length;
+          const pct = Math.round((done / stageJobs.length) * 100);
+          const items = stageJobs.reduce((s, j) => s + (j.items_found ?? 0), 0);
+          return { label, total: stageJobs.length, done, pct, items, jobs: stageJobs };
+        };
+
+        const stages = [stageProgress(postsStageJobs, "Posts"), stageProgress(commentsStageJobs, "Comments")].filter(Boolean) as
+          NonNullable<ReturnType<typeof stageProgress>>[];
+
+        // Per-platform completion stats for summary
+        const platformStats = new Map<string, { posts: number; comments: number }>();
+        for (const j of completedJobs) {
+          const counters = (j.metadata as Record<string, unknown>)?.stage_counters as Record<string, number> | undefined;
+          const existing = platformStats.get(j.platform) ?? { posts: 0, comments: 0 };
+          existing.posts += counters?.posts ?? 0;
+          existing.comments += counters?.comments ?? 0;
+          platformStats.set(j.platform, existing);
+        }
+
+        const statusDotClass: Record<string, string> = {
+          running: "bg-blue-500 animate-pulse",
+          completed: "bg-green-500",
+          failed: "bg-red-500",
+          queued: "bg-zinc-300",
+          pending: "bg-zinc-300",
+          retrying: "bg-amber-400 animate-pulse",
+          cancelled: "bg-zinc-300",
+        };
+        const statusTextClass: Record<string, string> = {
+          running: "text-blue-700",
+          completed: "text-green-700",
+          failed: "text-red-600",
+          queued: "text-zinc-500",
+          pending: "text-zinc-500",
+          retrying: "text-amber-600",
+          cancelled: "text-zinc-400",
+        };
+        const statusVerb: Record<string, string> = {
+          running: "scraping",
+          completed: "done",
+          failed: "failed",
+          queued: "queued",
+          pending: "queued",
+          retrying: "retrying",
+          cancelled: "cancelled",
+        };
+
+        return (
+          <div className={`rounded-xl border px-5 py-4 text-sm ${
+            runningIngest
+              ? "border-blue-200 bg-blue-50 text-blue-800"
+              : failedJobs.length > 0
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-green-200 bg-green-50 text-green-700"
+          }`}>
+            {/* Header row: message + elapsed */}
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-semibold">{ingestMessage}</p>
+              {runningIngest && ingestStartedAt && (
+                <span className="shrink-0 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-mono font-semibold text-blue-700 tabular-nums">
+                  {elapsedStr}
+                </span>
               )}
             </div>
-          )}
 
-      {loading && !analytics ? (
+            {/* Overall progress bar */}
+            {runningIngest && totalJobs > 0 && (
+              <div className="mt-3">
+                <div className="mb-1.5 flex items-center justify-between text-xs">
+                  <span className="font-medium">
+                    {finishedCount}/{totalJobs} jobs · {totalItemsFound.toLocaleString()} items
+                  </span>
+                  <span className="font-semibold tabular-nums">{progressPct}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-blue-200">
+                  <div
+                    className="h-2 rounded-full bg-blue-600 transition-all duration-500"
+                    style={{ width: `${Math.max(2, progressPct)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Per-stage progress */}
+            {runningIngest && stages.length > 0 && (
+              <div className="mt-4 space-y-4">
+                {stages.map((s) => {
+                  const allDone = s.done === s.total;
+                  const hasActive = s.jobs.some((j) => j.status === "running" || j.status === "retrying");
+                  return (
+                    <div key={s.label}>
+                      <div className="mb-1.5 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold uppercase tracking-wide">{s.label}</span>
+                          {hasActive && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
+                              Active
+                            </span>
+                          )}
+                          {allDone && (
+                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+                              Complete
+                            </span>
+                          )}
+                        </div>
+                        <span className="tabular-nums">{s.done}/{s.total} · {s.items.toLocaleString()} items</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-blue-200">
+                        <div
+                          className={`h-1.5 rounded-full transition-all duration-500 ${allDone ? "bg-green-500" : "bg-blue-500"}`}
+                          style={{ width: `${Math.max(2, s.pct)}%` }}
+                        />
+                      </div>
+                      {/* Per-platform rows within stage */}
+                      <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                        {s.jobs.map((j) => {
+                          const counters = (j.metadata as Record<string, unknown>)?.stage_counters as
+                            | Record<string, number>
+                            | undefined;
+                          const postsFound = counters?.posts ?? 0;
+                          const commentsFound = counters?.comments ?? 0;
+                          const account = getAccount(j);
+                          const jobDuration = j.started_at
+                            ? `${Math.round(((j.completed_at ? new Date(j.completed_at).getTime() : Date.now()) - new Date(j.started_at).getTime()) / 1000)}s`
+                            : null;
+                          return (
+                            <div key={j.id} className="flex items-center gap-1.5 rounded bg-white/50 px-2 py-1 text-xs">
+                              <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusDotClass[j.status] ?? "bg-zinc-300"}`} />
+                              <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
+                              {account && <span className="text-blue-600">@{account}</span>}
+                              <span className={`ml-auto ${statusTextClass[j.status] ?? "text-zinc-500"}`}>
+                                {statusVerb[j.status] ?? j.status}
+                              </span>
+                              {(postsFound > 0 || commentsFound > 0) && (
+                                <span className="tabular-nums text-zinc-600">{postsFound}p/{commentsFound}c</span>
+                              )}
+                              {j.items_found && j.items_found > 0 && !(postsFound > 0 || commentsFound > 0) ? (
+                                <span className="tabular-nums text-zinc-600">{j.items_found}</span>
+                              ) : null}
+                              {jobDuration && j.status !== "queued" && j.status !== "pending" && (
+                                <span className="tabular-nums text-zinc-400">{jobDuration}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Live activity log (latest events) */}
+            {runningIngest && liveRunLogs.length > 0 && (
+              <div className="mt-4 border-t border-blue-200 pt-3">
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-blue-600">Activity Log</p>
+                <div className="space-y-0.5">
+                  {liveRunLogs.slice(0, 6).map((entry) => (
+                    <p key={entry.id} className="flex items-center gap-2 text-xs">
+                      <span className="shrink-0 font-mono text-[10px] tabular-nums text-blue-500">{entry.timestampLabel}</span>
+                      <span className="text-blue-900">{entry.message}</span>
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Completed summary with per-platform breakdown */}
+            {!runningIngest && completedJobs.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  {Array.from(platformStats.entries())
+                    .sort(([a], [b]) => (PLATFORM_LABELS[a] ?? a).localeCompare(PLATFORM_LABELS[b] ?? b))
+                    .map(([platform, stats]) => (
+                      <span key={platform} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                        failedJobs.some((j) => j.platform === platform)
+                          ? "bg-red-100 text-red-700"
+                          : "bg-green-100 text-green-700"
+                      }`}>
+                        {PLATFORM_LABELS[platform] ?? platform}
+                        <span className="font-semibold tabular-nums">{stats.posts}p / {stats.comments}c</span>
+                      </span>
+                    ))}
+                </div>
+                {failedJobs.length > 0 && (
+                  <div className="text-xs text-red-600">
+                    {failedJobs.length} job{failedJobs.length !== 1 ? "s" : ""} failed:{" "}
+                    {failedJobs.map((j) => `${PLATFORM_LABELS[j.platform] ?? j.platform} ${getStage(j)}`).join(", ")}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {platformTab === "reddit" ? (
+        <RedditSourcesManager
+          mode="season"
+          showId={showId}
+          showName={showName}
+          seasonId={seasonId}
+          seasonNumber={seasonNumber}
+        />
+      ) : loading && !analytics ? (
         <div className="rounded-2xl border border-zinc-200 bg-white p-10 text-center text-sm text-zinc-500 shadow-sm">
           Loading social analytics...
         </div>
@@ -658,19 +1098,63 @@ export default function SeasonSocialAnalyticsSection({
               </div>
               <div className="space-y-3">
                 {(analytics?.weekly ?? []).map((week) => {
-                  const activity = week.post_volume + week.comment_volume;
-                  const width = `${Math.max(5, (activity / weeklyMax) * 100)}%`;
+                  const engagementRow = weeklyPlatformEngagementLookup.get(week.week_index);
+                  const hasData = Boolean(engagementRow?.has_data);
+                  const engagement = engagementRow?.engagement ?? {
+                    instagram: 0,
+                    youtube: 0,
+                    tiktok: 0,
+                    twitter: 0,
+                  };
                   return (
-                    <div key={week.week_index} className="space-y-1">
+                    <div
+                      key={week.week_index}
+                      className="space-y-1"
+                      data-testid={`weekly-trend-row-${week.week_index}`}
+                    >
                       <div className="flex items-center justify-between text-xs text-zinc-500">
                         <span>{week.label}</span>
                         <span>
                           {week.post_volume} posts · {week.comment_volume} comments · {week.engagement.toLocaleString()} engagement
                         </span>
                       </div>
-                      <div className="h-2 rounded-full bg-zinc-100">
-                        <div className="h-2 rounded-full bg-zinc-800" style={{ width }} />
-                      </div>
+                      {hasData ? (
+                        <div className="space-y-1 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2">
+                          {WEEKLY_ENGAGEMENT_PLATFORMS.map((platform) => {
+                            const value = engagement[platform] ?? 0;
+                            const width =
+                              value > 0
+                                ? `${Math.max(0, (value / weeklyPlatformEngagementMax) * 100)}%`
+                                : "0%";
+                            return (
+                              <div key={`${week.week_index}-${platform}`} className="flex items-center gap-2">
+                                <span className="w-16 text-[11px] text-zinc-500">
+                                  {PLATFORM_LABELS[platform]}
+                                </span>
+                                <div className="h-2 flex-1 rounded-full bg-zinc-200">
+                                  {value > 0 ? (
+                                    <div
+                                      data-testid={`weekly-engagement-bar-${week.week_index}-${platform}`}
+                                      className={`h-2 rounded-full ${WEEKLY_ENGAGEMENT_BAR_CLASS[platform]}`}
+                                      style={{ width }}
+                                    />
+                                  ) : null}
+                                </div>
+                                <span className="w-16 text-right text-[11px] text-zinc-500">
+                                  {value.toLocaleString()}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p
+                          data-testid={`weekly-no-data-${week.week_index}`}
+                          className="text-xs text-zinc-400"
+                        >
+                          No data yet
+                        </p>
+                      )}
                     </div>
                   );
                 })}
@@ -738,11 +1222,11 @@ export default function SeasonSocialAnalyticsSection({
               <p className="mt-3 text-xs text-zinc-500">
                 Run scope:{" "}
                 <span className="font-semibold text-zinc-700">
-                  {weekFilter === "all" ? "All Weeks" : weekFilter === 0 ? "Pre-Season" : `Week ${weekFilter}`}
+                  {activeRunScope.weekLabel}
                 </span>
                 {" · "}
                 <span className="font-semibold text-zinc-700">
-                  {platformFilter === "all" ? "All Platforms" : PLATFORM_LABELS[platformFilter]}
+                  {activeRunScope.platformLabel}
                 </span>
                 {activeRunId && (
                   <>
@@ -751,6 +1235,19 @@ export default function SeasonSocialAnalyticsSection({
                   </>
                 )}
               </p>
+              {activeRunId && !runningIngest && liveRunLogs.length > 0 && (
+                <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                  <p className="font-semibold text-zinc-700">Last Run Log</p>
+                  <div className="mt-1 space-y-0.5">
+                    {liveRunLogs.slice(0, 4).map((entry) => (
+                      <p key={entry.id} className="flex items-center gap-2">
+                        <span className="shrink-0 font-mono text-[10px] tabular-nums text-zinc-400">{entry.timestampLabel}</span>
+                        <span>{entry.message}</span>
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
                 <p className="font-semibold text-zinc-700">Configured Targets</p>
                 <ul className="mt-1 space-y-1">
@@ -788,15 +1285,37 @@ export default function SeasonSocialAnalyticsSection({
                 <tbody>
                   {weeklyPlatformRows.map((week) => (
                     <tr key={`table-week-${week.week_index}`} className="border-b border-zinc-100 text-zinc-700">
-                      <td className="px-3 py-2 font-semibold text-zinc-900">{week.label ?? (week.week_index === 0 ? "Pre-Season" : `Week ${week.week_index}`)}</td>
+                      <td className="px-3 py-2 font-semibold">
+                        <Link
+                          href={`/admin/trr-shows/${showId}/seasons/${seasonNumber}/social/week/${week.week_index}?source_scope=${scope}`}
+                          className="text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          {week.label ?? (week.week_index === 0 ? "Pre-Season" : `Week ${week.week_index}`)}
+                        </Link>
+                      </td>
                       <td className="px-3 py-2 text-xs text-zinc-500">
                         {formatDateTime(week.start)} to {formatDateTime(week.end)}
                       </td>
-                      <td className="px-3 py-2">{week.posts.instagram}</td>
-                      <td className="px-3 py-2">{week.posts.youtube}</td>
-                      <td className="px-3 py-2">{week.posts.tiktok}</td>
-                      <td className="px-3 py-2">{week.posts.twitter}</td>
-                      <td className="px-3 py-2 font-semibold text-zinc-900">{week.total_posts}</td>
+                      <td className="px-3 py-2">
+                        <div>{week.posts.instagram}</div>
+                        <div className="text-xs text-zinc-400">{week.comments?.instagram ?? 0} comments</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div>{week.posts.youtube}</div>
+                        <div className="text-xs text-zinc-400">{week.comments?.youtube ?? 0} comments</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div>{week.posts.tiktok}</div>
+                        <div className="text-xs text-zinc-400">{week.comments?.tiktok ?? 0} comments</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div>{week.posts.twitter}</div>
+                        <div className="text-xs text-zinc-400">{week.comments?.twitter ?? 0} comments</div>
+                      </td>
+                      <td className="px-3 py-2 font-semibold text-zinc-900">
+                        <div>{week.total_posts}</div>
+                        <div className="text-xs font-normal text-zinc-400">{week.total_comments ?? 0} comments</div>
+                      </td>
                       <td className="px-3 py-2">
                         <button
                           type="button"
@@ -854,6 +1373,9 @@ export default function SeasonSocialAnalyticsSection({
 
             <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <h4 className="mb-4 text-lg font-semibold text-zinc-900">Top Sentiment Drivers</h4>
+              <p className="-mt-2 mb-4 text-xs text-zinc-500">
+                Cast names and social handles are excluded from driver terms.
+              </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Positive</p>
@@ -932,11 +1454,27 @@ export default function SeasonSocialAnalyticsSection({
           </section>
 
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h4 className="text-lg font-semibold text-zinc-900">Ingest Job Status</h4>
+            <button
+              type="button"
+              onClick={() => setJobsOpen((c) => !c)}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-3">
+                <h4 className="text-lg font-semibold text-zinc-900">Ingest Job Status</h4>
+                {runScopedJobs.length > 0 && (
+                  <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-semibold text-zinc-600">
+                    {runScopedJobs.length} job{runScopedJobs.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+              <span className="text-sm font-medium text-zinc-500">{jobsOpen ? "Hide" : "Show"}</span>
+            </button>
+            {jobsOpen && (<>
+            <div className="mt-4 mb-4 flex justify-end">
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   void fetchJobs(activeRunId);
                 }}
                 className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
@@ -945,23 +1483,78 @@ export default function SeasonSocialAnalyticsSection({
               </button>
             </div>
             <div className="space-y-2">
-              {runScopedJobs.slice(0, 10).map((job) => (
-                <div key={job.id} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                    <span className="font-semibold text-zinc-900">
-                      {PLATFORM_LABELS[job.platform] ?? job.platform} · {job.status}
-                    </span>
-                    <span className="text-xs text-zinc-500">{job.items_found ?? 0} items</span>
-                  </div>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Started {formatDateTime(job.started_at ?? job.created_at)}
-                    {job.completed_at ? ` · Completed ${formatDateTime(job.completed_at)}` : ""}
-                  </p>
-                  {job.error_message && <p className="mt-1 text-xs text-red-600">{job.error_message}</p>}
-                </div>
-              ))}
-              {runScopedJobs.length === 0 && <p className="text-sm text-zinc-500">No jobs found for this season.</p>}
+              {(() => {
+                const statusOrder: Record<string, number> = { running: 0, retrying: 1, queued: 2, pending: 3, failed: 4, completed: 5, cancelled: 6 };
+                const statusBadge: Record<string, string> = {
+                  completed: "bg-green-100 text-green-700",
+                  failed: "bg-red-100 text-red-700",
+                  running: "bg-blue-100 text-blue-700 animate-pulse",
+                  pending: "bg-zinc-100 text-zinc-600",
+                  queued: "bg-zinc-100 text-zinc-600",
+                  retrying: "bg-amber-100 text-amber-700 animate-pulse",
+                  cancelled: "bg-zinc-100 text-zinc-400",
+                };
+                const sorted = [...runScopedJobs].sort(
+                  (a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9)
+                );
+                return sorted.map((job) => {
+                  const stage =
+                    (typeof job.config?.stage === "string" ? job.config.stage : undefined) ??
+                    (typeof job.metadata?.stage === "string" ? job.metadata.stage : undefined) ??
+                    job.job_type ?? "posts";
+                  const account = typeof job.config?.account === "string" && job.config.account ? job.config.account : null;
+                  const counters = (job.metadata as Record<string, unknown>)?.stage_counters as
+                    | Record<string, number>
+                    | undefined;
+                  const duration =
+                    job.started_at && job.completed_at
+                      ? `${Math.round((new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 1000)}s`
+                      : job.started_at
+                        ? `${Math.round((Date.now() - new Date(job.started_at).getTime()) / 1000)}s`
+                        : null;
+                  const isActive = job.status === "running" || job.status === "retrying";
+                  return (
+                    <div key={job.id} className={`rounded-lg border px-3 py-2 ${
+                      isActive ? "border-blue-200 bg-blue-50" : job.status === "failed" ? "border-red-200 bg-red-50" : "border-zinc-200 bg-zinc-50"
+                    }`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-zinc-900">
+                            {PLATFORM_LABELS[job.platform] ?? job.platform}
+                          </span>
+                          {account && <span className="text-xs text-zinc-500">@{account}</span>}
+                          <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-xs font-medium text-zinc-600">
+                            {stage}
+                          </span>
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge[job.status] ?? "bg-zinc-100 text-zinc-500"}`}>
+                            {job.status}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-zinc-500">
+                          {counters && (counters.posts > 0 || counters.comments > 0) ? (
+                            <span className="font-semibold tabular-nums text-zinc-700">
+                              {counters.posts ?? 0}p / {counters.comments ?? 0}c
+                            </span>
+                          ) : (
+                            <span className="font-semibold tabular-nums text-zinc-700">{(job.items_found ?? 0).toLocaleString()} items</span>
+                          )}
+                          {duration && <span className="tabular-nums text-zinc-400">{duration}</span>}
+                        </div>
+                      </div>
+                      {job.error_message && (
+                        <p className="mt-1.5 rounded bg-red-100 px-2 py-1 text-xs text-red-700">{job.error_message}</p>
+                      )}
+                      <p className="mt-1 text-xs text-zinc-400">
+                        {job.started_at ? `Started ${formatDateTime(job.started_at)}` : `Created ${formatDateTime(job.created_at)}`}
+                        {job.completed_at ? ` · Done ${formatDateTime(job.completed_at)}` : ""}
+                      </p>
+                    </div>
+                  );
+                });
+              })()}
+              {runScopedJobs.length === 0 && <p className="text-sm text-zinc-500">No jobs found for this season. Run an ingest to get started.</p>}
             </div>
+            </>)}
           </section>
 
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">

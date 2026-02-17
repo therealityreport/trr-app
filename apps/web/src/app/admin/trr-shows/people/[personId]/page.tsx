@@ -157,6 +157,7 @@ interface TrrPersonPhoto {
   url: string | null;
   hosted_url: string | null;
   original_url?: string | null;
+  thumb_url?: string | null;
   display_url?: string | null;
   detail_url?: string | null;
   crop_display_url?: string | null;
@@ -322,7 +323,7 @@ const pickNonEmptyUrl = (...values: Array<string | null | undefined>): string | 
 };
 
 const getPersonPhotoCardUrl = (photo: TrrPersonPhoto): string | null =>
-  pickNonEmptyUrl(photo.crop_display_url, photo.display_url, photo.hosted_url, photo.url);
+  pickNonEmptyUrl(photo.crop_display_url, photo.thumb_url, photo.display_url, photo.hosted_url, photo.url);
 
 const getPersonPhotoDetailUrl = (photo: TrrPersonPhoto): string | null =>
   pickNonEmptyUrl(photo.crop_detail_url, photo.detail_url, photo.hosted_url, photo.url);
@@ -1743,6 +1744,7 @@ export default function PersonProfilePage() {
   const [canonicalSourceOrderError, setCanonicalSourceOrderError] = useState<string | null>(null);
   const [canonicalSourceOrderNotice, setCanonicalSourceOrderNotice] = useState<string | null>(null);
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
+  const [photosVisibleCount, setPhotosVisibleCount] = useState(120);
   const [credits, setCredits] = useState<TrrPersonCredit[]>([]);
   const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
@@ -2113,6 +2115,37 @@ export default function PersonProfilePage() {
     getPhotoSortDate,
   ]);
 
+  const gallerySections = useMemo(() => {
+    const profilePictures: TrrPersonPhoto[] = [];
+    const otherPhotos: TrrPersonPhoto[] = [];
+
+    for (const photo of filteredPhotos.slice(0, photosVisibleCount)) {
+      const normalizedContextType = (photo.context_type ?? "").toLowerCase().trim();
+      const normalizedContextSection = (photo.context_section ?? "").toLowerCase().trim();
+      const isProfilePicture =
+        normalizedContextType === "profile_picture" ||
+        normalizedContextType === "profile" ||
+        normalizedContextSection === "bravo_profile";
+      if (isProfilePicture) {
+        profilePictures.push(photo);
+      } else {
+        otherPhotos.push(photo);
+      }
+    }
+
+    return { profilePictures, otherPhotos };
+  }, [filteredPhotos, photosVisibleCount]);
+
+  const filteredPhotoIndexById = useMemo(() => {
+    const indexMap = new Map<string, number>();
+    filteredPhotos.forEach((photo, index) => indexMap.set(photo.id, index));
+    return indexMap;
+  }, [filteredPhotos]);
+
+  useEffect(() => {
+    setPhotosVisibleCount(120);
+  }, [galleryShowFilter, selectedOtherShowKey, advancedFilters]);
+
   // Helper to get auth headers
   const getAuthHeaders = useCallback(async () => {
     const token = await auth.currentUser?.getIdToken();
@@ -2272,7 +2305,7 @@ export default function PersonProfilePage() {
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/photos?limit=500`,
+        `/api/admin/trr-api/people/${personId}/photos?limit=250&offset=0`,
         { headers }
       );
       const data = await response.json().catch(() => ({}));
@@ -3908,38 +3941,98 @@ export default function PersonProfilePage() {
                 </p>
               </div>
 
-              <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {filteredPhotos.map((photo, index) => (
-                  <div
-                    key={photo.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        openLightbox(photo, index, e.currentTarget as HTMLElement);
-                      }
-                    }}
-                    className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                  >
-                    <GalleryPhoto
-                      photo={photo}
-                      onClick={() => {}}
-                      isCover={coverPhoto?.photo_id === photo.id}
-                      onSetCover={photo.hosted_url ? () => handleSetCover(photo) : undefined}
-                      settingCover={settingCover}
-                    />
-                    {/* Overlay with source info */}
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
-                      <p className="text-xs text-white truncate">
-                        {photo.source}
-                        {photo.season && ` • S${photo.season}`}
-                      </p>
+              <div className="space-y-6">
+                {gallerySections.profilePictures.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Profile Pictures</h4>
+                    <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                      {gallerySections.profilePictures.map((photo) => {
+                        const index = filteredPhotoIndexById.get(photo.id) ?? 0;
+                        return (
+                          <div
+                            key={photo.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openLightbox(photo, index, e.currentTarget as HTMLElement);
+                              }
+                            }}
+                            className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                          >
+                            <GalleryPhoto
+                              photo={photo}
+                              onClick={() => {}}
+                              isCover={coverPhoto?.photo_id === photo.id}
+                              onSetCover={photo.hosted_url ? () => handleSetCover(photo) : undefined}
+                              settingCover={settingCover}
+                            />
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
+                              <p className="text-xs text-white truncate">
+                                {photo.source}
+                                {photo.season && ` • S${photo.season}`}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
-                ))}
+                  </section>
+                )}
+
+                {gallerySections.otherPhotos.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Other Photos</h4>
+                    <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                      {gallerySections.otherPhotos.map((photo) => {
+                        const index = filteredPhotoIndexById.get(photo.id) ?? 0;
+                        return (
+                          <div
+                            key={photo.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openLightbox(photo, index, e.currentTarget as HTMLElement);
+                              }
+                            }}
+                            className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                          >
+                            <GalleryPhoto
+                              photo={photo}
+                              onClick={() => {}}
+                              isCover={coverPhoto?.photo_id === photo.id}
+                              onSetCover={photo.hosted_url ? () => handleSetCover(photo) : undefined}
+                              settingCover={settingCover}
+                            />
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
+                              <p className="text-xs text-white truncate">
+                                {photo.source}
+                                {photo.season && ` • S${photo.season}`}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
               </div>
+              {filteredPhotos.length > photosVisibleCount && (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setPhotosVisibleCount((prev) => prev + 120)}
+                    className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    Load More Photos
+                  </button>
+                </div>
+              )}
               {filteredPhotos.length === 0 && photos.length > 0 && (
                 <p className="text-sm text-zinc-500">
                   No photos match the current filter.

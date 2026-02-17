@@ -23,14 +23,65 @@ const TOKEN_BASE_SIZE = 80;
 const TOKEN_MIN_SIZE = 44;
 const MIN_SLOT_HEIGHT = 8;
 const MAX_SLOT_HEIGHT = 64;
-const GRID_CIRCLE_SIZE = 96;
-const GRID_TOKEN_SIZE = 72;
-const FIGMA_SLOT_SIZE = "100%";
-const FIGMA_TOKEN_SIZE = "calc(100% - 12px)";
-const FIGMA_TRAY_TOKEN_SIZE = "clamp(72px, 18vw, 92px)";
-const FIGMA_OVERLAY_TOKEN_SIZE = 120;
+const GRID_CIRCLE_SIZE = 92;
+const GRID_TOKEN_SIZE = 68;
+const FIGMA_GRID_MAX_WIDTH = 708;
+const FIGMA_RECT_GRID_MAX_WIDTH = 690;
 
-type FlashbackRankerLayoutPreset = "legacy" | "figma-rank-circles";
+type FlashbackRankerLayoutPreset = "legacy" | "figma-rank-circles" | "figma-rank-rectangles";
+type TokenVariant = "circle" | "season-card";
+type SeasonCardSize = number | "fill";
+
+type FigmaCircleLayoutMetrics = {
+  containerWidth: number;
+  gridWidth: number;
+  columns: 2 | 4;
+  gapX: number;
+  gapY: number;
+  slotSize: number;
+  tokenSize: number;
+  rankNumberSize: number;
+  rankNumberMarginBottom: number;
+  removeButtonSize: number;
+  removeButtonOffset: number;
+  removeButtonFontSize: number;
+  overlaySize: number;
+};
+
+type FigmaRectangleLayoutMetrics = {
+  containerWidth: number;
+  frameWidth: number;
+  framePaddingX: number;
+  framePaddingY: number;
+  gridWidth: number;
+  columns: 2 | 3;
+  gapX: number;
+  gapY: number;
+  slotWidth: number;
+  rankNumberSize: number;
+  rankNumberMarginBottom: number;
+  removeButtonSize: number;
+  removeButtonOffset: number;
+  removeButtonFontSize: number;
+  overlaySize: number;
+  trayCardWidth: number;
+  trayGap: number;
+  trayMarginTop: number;
+  trayLabelFontSize: number;
+  trayLabelTracking: number;
+  trayPaddingX: number;
+  trayPaddingY: number;
+  trayWrap: boolean;
+  cardLabelFontSize: number;
+};
+
+export interface FlashbackRankerFontOverrides {
+  rankNumberFontFamily?: string;
+  trayLabelFontFamily?: string;
+  cardLabelFontFamily?: string;
+  pickerTitleFontFamily?: string;
+  pickerItemFontFamily?: string;
+}
 
 export interface FlashbackRankerProps {
   items: SurveyRankingItem[];
@@ -40,9 +91,31 @@ export interface FlashbackRankerProps {
   onChange?(ranking: SurveyRankingItem[]): void;
   variant?: "classic" | "grid";
   layoutPreset?: FlashbackRankerLayoutPreset;
+  fontOverrides?: FlashbackRankerFontOverrides;
+  shapeScalePercent?: number;
+  buttonScalePercent?: number;
 }
 
 type LineMetrics = { slotHeight: number; tokenSize: number };
+
+const DEFAULT_RANK_NUMBER_FONT = "\"Rude Slab Condensed\", var(--font-sans), sans-serif";
+const DEFAULT_TRAY_LABEL_FONT = "\"Plymouth Serial\", var(--font-sans), sans-serif";
+const DEFAULT_CARD_LABEL_FONT = "\"Rude Slab Condensed\", var(--font-sans), sans-serif";
+const DEFAULT_PICKER_TITLE_FONT = "\"Plymouth Serial\", var(--font-sans), sans-serif";
+const DEFAULT_PICKER_ITEM_FONT = "\"Plymouth Serial\", var(--font-sans), sans-serif";
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function interpolate(min: number, max: number, progress: number): number {
+  return min + (max - min) * progress;
+}
+
+function normalizeScalePercent(value: number | undefined, fallback = 100): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return clampNumber(value, 40, 220);
+}
 
 export default function FlashbackRanker({
   items,
@@ -52,11 +125,22 @@ export default function FlashbackRanker({
   onChange,
   variant = "classic",
   layoutPreset = "legacy",
+  fontOverrides,
+  shapeScalePercent = 100,
+  buttonScalePercent = 100,
 }: FlashbackRankerProps) {
   const isGridMode = variant === "grid";
   const isFigmaRankCircles = isGridMode && layoutPreset === "figma-rank-circles";
+  const isFigmaRankRectangles = isGridMode && layoutPreset === "figma-rank-rectangles";
+  const isFigmaPreset = isFigmaRankCircles || isFigmaRankRectangles;
+  const shapeScaleFactor = normalizeScalePercent(shapeScalePercent, 100) / 100;
+  const buttonScaleFactor = normalizeScalePercent(buttonScalePercent, 100) / 100;
   const itemMap = React.useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const syncedRankingRef = React.useRef<string[] | null>(null);
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = React.useState(() =>
+    typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : 960,
+  );
 
   const [bench, setBench] = React.useState<SurveyRankingItem[]>(items);
   const [line, setLine] = React.useState<SurveyRankingItem[]>([]);
@@ -92,6 +176,28 @@ export default function FlashbackRanker({
     setSlots(slotSeed);
     syncedRankingRef.current = initialLine.map((item) => item.id);
   }, [initialRankingIds, itemMap, items]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const applyWidth = (next: number) => {
+      if (!Number.isFinite(next) || next <= 0) return;
+      setContainerWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+    };
+
+    applyWidth(container.getBoundingClientRect().width);
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const measured = entries[0]?.contentRect.width;
+      if (typeof measured === "number") {
+        applyWidth(measured);
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -315,17 +421,39 @@ export default function FlashbackRanker({
   const lineItems = previewLine ?? line;
   const lineLength = lineItems.length;
   const lineMetrics = React.useMemo(() => computeLineMetrics(lineLength), [lineLength]);
+  const circleLayout = React.useMemo(
+    () => computeFigmaCircleLayoutMetrics(containerWidth, shapeScaleFactor, buttonScaleFactor),
+    [buttonScaleFactor, containerWidth, shapeScaleFactor],
+  );
+  const rectangleLayout = React.useMemo(
+    () => computeFigmaRectangleLayoutMetrics(containerWidth, shapeScaleFactor, buttonScaleFactor),
+    [buttonScaleFactor, containerWidth, shapeScaleFactor],
+  );
+  const shouldForceMobilePicker = isFigmaPreset && containerWidth < 640;
   const activeIsOnLine = React.useMemo(
     () => lineItems.some((entry) => entry.id === activeId),
     [activeId, lineItems],
   );
-  const activeOverlaySize: number | string = isFigmaRankCircles
-    ? FIGMA_OVERLAY_TOKEN_SIZE
-    : isGridMode
-      ? GRID_TOKEN_SIZE
-      : activeIsOnLine
-        ? lineMetrics.tokenSize
-        : TOKEN_BASE_SIZE;
+  const activeOverlaySize: number = isFigmaRankCircles
+    ? circleLayout.overlaySize
+    : isFigmaRankRectangles
+      ? rectangleLayout.overlaySize
+      : isGridMode
+        ? Math.round(clampNumber(GRID_TOKEN_SIZE * shapeScaleFactor, 36, 148))
+        : activeIsOnLine
+          ? lineMetrics.tokenSize
+          : Math.round(clampNumber(TOKEN_BASE_SIZE * shapeScaleFactor, 42, 160));
+  const activeOverlayVariant: TokenVariant = isFigmaRankRectangles ? "season-card" : "circle";
+  const resolvedFontOverrides = React.useMemo<Required<FlashbackRankerFontOverrides>>(
+    () => ({
+      rankNumberFontFamily: fontOverrides?.rankNumberFontFamily ?? DEFAULT_RANK_NUMBER_FONT,
+      trayLabelFontFamily: fontOverrides?.trayLabelFontFamily ?? DEFAULT_TRAY_LABEL_FONT,
+      cardLabelFontFamily: fontOverrides?.cardLabelFontFamily ?? DEFAULT_CARD_LABEL_FONT,
+      pickerTitleFontFamily: fontOverrides?.pickerTitleFontFamily ?? DEFAULT_PICKER_TITLE_FONT,
+      pickerItemFontFamily: fontOverrides?.pickerItemFontFamily ?? DEFAULT_PICKER_ITEM_FONT,
+    }),
+    [fontOverrides],
+  );
   const totalSlots = items.length;
   const slotItems = slots;
   const gridBench = React.useMemo(() => {
@@ -342,8 +470,8 @@ export default function FlashbackRanker({
   }, [isGridMode]);
 
   return (
-    <div className="w-full max-w-[1440px] mx-auto">
-      {!isFigmaRankCircles && (
+    <div ref={containerRef} className="mx-auto w-full max-w-[1440px]">
+      {!isFigmaPreset && (
         <div className="flex items-center justify-center sm:justify-between gap-4 px-4 py-3">
           <div className="text-sm font-semibold text-gray-600">{donePct}% Done</div>
           <Progress value={donePct} />
@@ -360,8 +488,9 @@ export default function FlashbackRanker({
               activeId={activeId}
               onSlotClick={handleSlotClick}
               onRemoveItem={handleSlotClear}
+              fontOverrides={resolvedFontOverrides}
+              layout={circleLayout}
             />
-            <FigmaBench items={benchItems} />
             <SelectionPicker
               open={pickerSlotIndex !== null}
               onClose={closePicker}
@@ -369,8 +498,51 @@ export default function FlashbackRanker({
               onSelect={handlePickerSelect}
               position={pickerPosition}
               mobileSheet
+              forceMobileSheet={shouldForceMobilePicker}
+              titleFontFamily={resolvedFontOverrides.pickerTitleFontFamily}
+              itemFontFamily={resolvedFontOverrides.pickerItemFontFamily}
+              shapeScaleFactor={shapeScaleFactor}
+              buttonScaleFactor={buttonScaleFactor}
             />
           </>
+        ) : isFigmaRankRectangles ? (
+          <section
+            className="mx-auto w-full rounded-[18px] bg-black"
+            style={{
+              maxWidth: `${rectangleLayout.frameWidth}px`,
+              padding: `${rectangleLayout.framePaddingY}px ${rectangleLayout.framePaddingX}px`,
+            }}
+          >
+            <FigmaRectangleRankingGrid
+              totalSlots={totalSlots}
+              slotItems={slotItems}
+              activeId={activeId}
+              onSlotClick={handleSlotClick}
+              onRemoveItem={handleSlotClear}
+              fontOverrides={resolvedFontOverrides}
+              layout={rectangleLayout}
+            />
+            <FigmaRectangleBench
+              items={benchItems}
+              fontOverrides={resolvedFontOverrides}
+              layout={rectangleLayout}
+            />
+            <SelectionPicker
+              open={pickerSlotIndex !== null}
+              onClose={closePicker}
+              items={gridBench}
+              onSelect={handlePickerSelect}
+              position={pickerPosition}
+              mobileSheet
+              forceMobileSheet={shouldForceMobilePicker}
+              pickerVariant="season-card"
+              title="Pick a season"
+              titleFontFamily={resolvedFontOverrides.pickerTitleFontFamily}
+              itemFontFamily={resolvedFontOverrides.pickerItemFontFamily}
+              shapeScaleFactor={shapeScaleFactor}
+              buttonScaleFactor={buttonScaleFactor}
+            />
+          </section>
         ) : isGridMode ? (
           <>
             <Bench items={benchItems} className="hidden sm:block" />
@@ -380,6 +552,8 @@ export default function FlashbackRanker({
               activeId={activeId}
               onSlotClick={handleSlotClick}
               onRemoveItem={handleSlotClear}
+              shapeScaleFactor={shapeScaleFactor}
+              buttonScaleFactor={buttonScaleFactor}
             />
             <SelectionPicker
               open={pickerSlotIndex !== null}
@@ -387,6 +561,8 @@ export default function FlashbackRanker({
               items={gridBench}
               onSelect={handlePickerSelect}
               position={pickerPosition}
+              shapeScaleFactor={shapeScaleFactor}
+              buttonScaleFactor={buttonScaleFactor}
             />
           </>
         ) : (
@@ -402,7 +578,16 @@ export default function FlashbackRanker({
           </>
         )}
         <DragOverlay dropAnimation={null}>
-          {activeItem ? <Token item={activeItem} overlay size={activeOverlaySize} /> : null}
+          {activeItem ? (
+            <Token
+              item={activeItem}
+              overlay
+              size={activeOverlaySize}
+              variant={activeOverlayVariant}
+              seasonCardLabelFontFamily={resolvedFontOverrides.cardLabelFontFamily}
+              seasonCardLabelSize={rectangleLayout.cardLabelFontSize}
+            />
+          ) : null}
         </DragOverlay>
       </DndContext>
     </div>
@@ -426,32 +611,111 @@ function Bench({ items, className = "" }: { items: SurveyRankingItem[]; classNam
   );
 }
 
-function FigmaBench({ items }: { items: SurveyRankingItem[] }) {
+function FigmaRectangleBench({
+  items,
+  fontOverrides,
+  layout,
+}: {
+  items: SurveyRankingItem[];
+  fontOverrides: Required<FlashbackRankerFontOverrides>;
+  layout: FigmaRectangleLayoutMetrics;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: "bench" });
 
   return (
-    <section className="mx-auto mt-6 w-full max-w-[880px] px-3 pb-1 sm:px-4">
+    <section
+      className="mx-auto w-full"
+      style={{ marginTop: `${layout.trayMarginTop}px`, paddingInline: "2px" }}
+    >
       <div
         ref={setNodeRef}
-        className={`rounded-2xl border px-3 py-3 transition sm:px-4 ${
-          isOver ? "border-black bg-black/5" : "border-black/10 bg-white"
+        className={`rounded-[12px] border transition ${
+          isOver ? "border-white bg-white/20" : "border-white/20 bg-white/8"
         }`}
-        aria-label="Unranked cast members"
-        data-testid="figma-unranked-tray"
+        style={{
+          padding: `${layout.trayPaddingY}px ${layout.trayPaddingX}px`,
+        }}
+        aria-label="Unranked seasons"
+        data-testid="figma-rectangle-unranked-tray"
       >
         <p
-          className="text-[12px] font-semibold uppercase tracking-[0.22em] text-black/70"
-          style={{ fontFamily: "var(--font-plymouth-serial)" }}
+          className="uppercase text-white/90"
+          style={{
+            fontFamily: fontOverrides.trayLabelFontFamily,
+            fontSize: `${layout.trayLabelFontSize}px`,
+            letterSpacing: `${layout.trayLabelTracking}em`,
+          }}
         >
           Unranked
         </p>
-        <div className="mt-3 flex gap-3 overflow-x-auto pb-1 snap-x snap-mandatory sm:flex-wrap sm:overflow-visible sm:pb-0">
+        <div
+          className={`mt-2.5 flex ${layout.trayWrap ? "flex-wrap overflow-visible" : "overflow-x-auto snap-x snap-mandatory pb-1"}`}
+          style={{ gap: `${layout.trayGap}px` }}
+        >
           {items.map((item) => (
             <div key={item.id} className="shrink-0 snap-start">
-              <Token item={item} size={FIGMA_TRAY_TOKEN_SIZE} />
+              <Token
+                item={item}
+                variant="season-card"
+                size={layout.trayCardWidth}
+                seasonCardLabelFontFamily={fontOverrides.cardLabelFontFamily}
+                seasonCardLabelSize={layout.cardLabelFontSize}
+              />
             </div>
           ))}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function FigmaRectangleRankingGrid({
+  totalSlots,
+  slotItems,
+  activeId,
+  onSlotClick,
+  onRemoveItem,
+  fontOverrides,
+  layout,
+}: {
+  totalSlots: number;
+  slotItems: (SurveyRankingItem | null)[];
+  activeId: string | null;
+  onSlotClick?(index: number, anchor?: DOMRect): void;
+  onRemoveItem?(item: SurveyRankingItem): void;
+  fontOverrides: Required<FlashbackRankerFontOverrides>;
+  layout: FigmaRectangleLayoutMetrics;
+}) {
+  return (
+    <section
+      className="mx-auto w-full px-1"
+      style={{ maxWidth: `${layout.gridWidth}px` }}
+      data-testid="figma-rectangle-grid-wrap"
+    >
+      <div
+        className="grid justify-center"
+        style={{
+          gridTemplateColumns: `repeat(${layout.columns}, minmax(0, ${layout.slotWidth}px))`,
+          columnGap: `${layout.gapX}px`,
+          rowGap: `${layout.gapY}px`,
+        }}
+        data-columns={layout.columns}
+        data-testid="figma-rectangle-grid"
+      >
+        {Array.from({ length: totalSlots }, (_, index) => (
+          <GridSlot
+            key={index}
+            index={index}
+            number={index + 1}
+            item={slotItems[index] ?? null}
+            activeId={activeId}
+            onSlotClick={onSlotClick}
+            onRemoveItem={onRemoveItem}
+            preset="figma-rank-rectangles"
+            fontOverrides={fontOverrides}
+            rectangleLayout={layout}
+          />
+        ))}
       </div>
     </section>
   );
@@ -463,17 +727,31 @@ function FigmaRankingGrid({
   activeId,
   onSlotClick,
   onRemoveItem,
+  fontOverrides,
+  layout,
 }: {
   totalSlots: number;
   slotItems: (SurveyRankingItem | null)[];
   activeId: string | null;
   onSlotClick?(index: number, anchor?: DOMRect): void;
   onRemoveItem?(item: SurveyRankingItem): void;
+  fontOverrides: Required<FlashbackRankerFontOverrides>;
+  layout: FigmaCircleLayoutMetrics;
 }) {
   return (
-    <section className="mx-auto w-full max-w-[920px] overflow-hidden px-3 sm:px-4" data-testid="figma-rank-grid-wrap">
+    <section
+      className="mx-auto w-full overflow-hidden px-1"
+      style={{ maxWidth: `${layout.gridWidth}px` }}
+      data-testid="figma-rank-grid-wrap"
+    >
       <div
-        className="grid grid-cols-2 place-items-center gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-4"
+        className="grid justify-center"
+        style={{
+          gridTemplateColumns: `repeat(${layout.columns}, minmax(0, ${layout.slotSize}px))`,
+          columnGap: `${layout.gapX}px`,
+          rowGap: `${layout.gapY}px`,
+        }}
+        data-columns={layout.columns}
         data-testid="figma-rank-grid"
       >
         {Array.from({ length: totalSlots }, (_, index) => (
@@ -486,6 +764,8 @@ function FigmaRankingGrid({
             onSlotClick={onSlotClick}
             onRemoveItem={onRemoveItem}
             preset="figma-rank-circles"
+            fontOverrides={fontOverrides}
+            circleLayout={layout}
           />
         ))}
       </div>
@@ -499,12 +779,16 @@ function RankingGrid({
   activeId,
   onSlotClick,
   onRemoveItem,
+  shapeScaleFactor,
+  buttonScaleFactor,
 }: {
   totalSlots: number;
   slotItems: (SurveyRankingItem | null)[];
   activeId: string | null;
   onSlotClick?(index: number, anchor?: DOMRect): void;
   onRemoveItem?(item: SurveyRankingItem): void;
+  shapeScaleFactor: number;
+  buttonScaleFactor: number;
 }) {
   return (
     <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
@@ -518,6 +802,8 @@ function RankingGrid({
             activeId={activeId}
             onSlotClick={onSlotClick}
             onRemoveItem={onRemoveItem}
+            shapeScaleFactor={shapeScaleFactor}
+            buttonScaleFactor={buttonScaleFactor}
           />
         ))}
       </div>
@@ -572,20 +858,101 @@ function Token({
   overlay = false,
   asPlaceholder = false,
   size = TOKEN_BASE_SIZE,
+  variant = "circle",
+  seasonCardLabelFontFamily = DEFAULT_CARD_LABEL_FONT,
+  seasonCardLabelSize,
 }: {
   item: SurveyRankingItem;
   dragging?: boolean;
   overlay?: boolean;
   asPlaceholder?: boolean;
-  size?: number | string;
+  size?: SeasonCardSize;
+  variant?: TokenVariant;
+  seasonCardLabelFontFamily?: string;
+  seasonCardLabelSize?: number;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: item.id,
-    disabled: asPlaceholder,
+    disabled: asPlaceholder || overlay,
   });
 
   if (asPlaceholder) {
+    if (variant === "season-card") {
+      const placeholderStyle = resolveSeasonCardStyle(size);
+      return <div className="rounded-[9px] bg-gray-200 opacity-60" aria-hidden style={placeholderStyle} />;
+    }
     return <div className="rounded-full bg-gray-200 opacity-60" aria-hidden style={{ width: size, height: size }} />;
+  }
+
+  if (variant === "season-card") {
+    const seasonCardStyle = resolveSeasonCardStyle(size);
+    const style: React.CSSProperties | undefined = transform
+      ? { ...seasonCardStyle, transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+      : seasonCardStyle;
+    const state = dragging || isDragging ? "ring-2 ring-white scale-[1.02]" : "hover:ring-2 hover:ring-white/60";
+    const widthForImage = typeof seasonCardStyle.width === "number" ? seasonCardStyle.width : 512;
+    const heightForImage = typeof seasonCardStyle.height === "number" ? seasonCardStyle.height : 640;
+    const resolvedLabelSize = Math.round(
+      clampNumber(
+        seasonCardLabelSize ?? (typeof seasonCardStyle.width === "number" ? seasonCardStyle.width * 0.145 : 24),
+        14,
+        30,
+      ),
+    );
+
+    const contents = (
+      <>
+        {item.img ? (
+          <Image
+            src={item.img}
+            alt={item.label}
+            width={Math.max(1, Math.round(widthForImage))}
+            height={Math.max(1, Math.round(heightForImage))}
+            className="h-full w-full object-cover"
+            unoptimized
+            draggable={false}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-[#D9D9D9]" />
+        )}
+        <div className="absolute inset-x-0 bottom-0 h-[16.4%] min-h-[34px] bg-[#ECECEC]">
+          <div
+            className="flex h-full items-center justify-center px-1 text-center text-black uppercase"
+            style={{
+              fontFamily: seasonCardLabelFontFamily,
+              fontSize: `${resolvedLabelSize}px`,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              lineHeight: "0.9",
+            }}
+          >
+            {item.label}
+          </div>
+        </div>
+      </>
+    );
+
+    if (overlay) {
+      return (
+        <div className={`relative overflow-hidden rounded-[9px] bg-[#D9D9D9] select-none touch-none shadow-sm ${state}`} style={style}>
+          {contents}
+        </div>
+      );
+    }
+
+    return (
+      <button
+        ref={setNodeRef}
+        style={style}
+        {...listeners}
+        {...attributes}
+        aria-label={`Drag ${item.label}`}
+        className={`relative overflow-hidden rounded-[9px] bg-[#D9D9D9] select-none touch-none shadow-sm ${state} focus:outline-none focus:ring-2 focus:ring-white`}
+        type="button"
+      >
+        {contents}
+      </button>
+    );
   }
 
   const style: React.CSSProperties | undefined = transform
@@ -640,6 +1007,19 @@ function Token({
   );
 }
 
+function resolveSeasonCardStyle(size: SeasonCardSize): React.CSSProperties {
+  if (typeof size === "number") {
+    return { width: size, height: Math.round(size * (257 / 205)) };
+  }
+  if (size === "fill") {
+    return { width: "100%", height: "100%" };
+  }
+  return {
+    width: size,
+    aspectRatio: "205 / 257",
+  };
+}
+
 function Slot({ index, height }: { index: number; height: number }) {
   const id = `slot-${index}`;
   const { setNodeRef, isOver } = useDroppable({ id });
@@ -668,6 +1048,11 @@ function GridSlot({
   onSlotClick,
   onRemoveItem,
   preset = "legacy",
+  fontOverrides,
+  circleLayout,
+  rectangleLayout,
+  shapeScaleFactor = 1,
+  buttonScaleFactor = 1,
 }: {
   index: number;
   number: number;
@@ -676,33 +1061,63 @@ function GridSlot({
   onSlotClick?(index: number, anchor?: DOMRect): void;
   onRemoveItem?(item: SurveyRankingItem): void;
   preset?: FlashbackRankerLayoutPreset;
+  fontOverrides?: Required<FlashbackRankerFontOverrides>;
+  circleLayout?: FigmaCircleLayoutMetrics;
+  rectangleLayout?: FigmaRectangleLayoutMetrics;
+  shapeScaleFactor?: number;
+  buttonScaleFactor?: number;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `slot-${index}` });
   const isActive = Boolean(item && item.id === activeId);
   const isFigmaPreset = preset === "figma-rank-circles";
+  const isFigmaRectanglePreset = preset === "figma-rank-rectangles";
+  const resolvedCircleLayout = circleLayout ?? computeFigmaCircleLayoutMetrics(390);
+  const resolvedRectangleLayout = rectangleLayout ?? computeFigmaRectangleLayoutMetrics(390);
+  const legacyCircleSize = Math.round(clampNumber(GRID_CIRCLE_SIZE * shapeScaleFactor, 54, 188));
+  const legacyTokenSize = Math.round(clampNumber(GRID_TOKEN_SIZE * shapeScaleFactor, 36, legacyCircleSize - 10));
+  const legacyRemoveButtonSize = Math.round(clampNumber(24 * buttonScaleFactor, 18, 44));
+  const legacyRemoveOffset = Math.round(clampNumber(4 * buttonScaleFactor, 2, 10));
+  const legacyRemoveFontSize = Math.round(clampNumber(12 * buttonScaleFactor, 10, 20));
+  const legacyNumberSize = Math.round(clampNumber(30 * buttonScaleFactor, 16, 50));
 
   if (isFigmaPreset) {
     return (
-      <div ref={setNodeRef} className="relative flex w-full min-w-0 max-w-[156px] flex-col items-center">
+      <div
+        ref={setNodeRef}
+        className="relative flex min-w-0 flex-col items-center"
+        style={{ width: `${resolvedCircleLayout.slotSize}px` }}
+      >
         <span
-          className="mb-1.5 text-base font-bold leading-none text-black sm:text-lg"
-          style={{ fontFamily: "var(--font-rude-slab)" }}
+          className="font-bold leading-none text-black"
+          style={{
+            fontFamily: fontOverrides?.rankNumberFontFamily ?? DEFAULT_RANK_NUMBER_FONT,
+            letterSpacing: "0.01em",
+            fontSize: `${resolvedCircleLayout.rankNumberSize}px`,
+            marginBottom: `${resolvedCircleLayout.rankNumberMarginBottom}px`,
+          }}
         >
           {number}
         </span>
         <div
-          className={`relative flex aspect-square w-full items-center justify-center rounded-full border-2 transition ${
-            isOver || isActive ? "border-black shadow-[0_0_0_3px_rgba(0,0,0,0.08)]" : "border-black/70"
+          className={`relative flex aspect-square w-full items-center justify-center rounded-full transition ${
+            isOver || isActive ? "ring-4 ring-black/20" : ""
           } ${item ? "bg-black/5" : "bg-black"}`}
-          style={{ width: FIGMA_SLOT_SIZE }}
+          style={{ width: `${resolvedCircleLayout.slotSize}px` }}
         >
           {item ? (
             <>
-              <Token item={item} size={FIGMA_TOKEN_SIZE} />
+              <Token item={item} size={resolvedCircleLayout.tokenSize} />
               <button
                 type="button"
                 onClick={() => onRemoveItem?.(item)}
-                className="absolute -right-2 -top-2 inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-lg font-bold text-black shadow ring-1 ring-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                className="absolute inline-flex items-center justify-center rounded-full bg-white font-bold text-black shadow ring-1 ring-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                style={{
+                  width: `${resolvedCircleLayout.removeButtonSize}px`,
+                  height: `${resolvedCircleLayout.removeButtonSize}px`,
+                  top: `-${resolvedCircleLayout.removeButtonOffset}px`,
+                  right: `-${resolvedCircleLayout.removeButtonOffset}px`,
+                  fontSize: `${resolvedCircleLayout.removeButtonFontSize}px`,
+                }}
                 aria-label={`Remove ${item.label} from rank ${number}`}
               >
                 ×
@@ -721,21 +1136,84 @@ function GridSlot({
     );
   }
 
+  if (isFigmaRectanglePreset) {
+    return (
+      <div ref={setNodeRef} className="relative flex w-full min-w-0 flex-col items-center">
+        <span
+          className="font-bold leading-none text-white"
+          style={{
+            fontFamily: fontOverrides?.rankNumberFontFamily ?? DEFAULT_RANK_NUMBER_FONT,
+            fontSize: `${resolvedRectangleLayout.rankNumberSize}px`,
+            marginBottom: `${resolvedRectangleLayout.rankNumberMarginBottom}px`,
+          }}
+        >
+          {number}
+        </span>
+        <div
+          className={`relative aspect-[205/257] w-full rounded-[9px] transition ${
+            isOver || isActive ? "ring-4 ring-white/30" : ""
+          } ${item ? "bg-[#D9D9D9]" : "bg-[#D9D9D9]"}`}
+        >
+          {item ? (
+            <>
+              <Token
+                item={item}
+                variant="season-card"
+                size="fill"
+                seasonCardLabelFontFamily={fontOverrides?.cardLabelFontFamily ?? DEFAULT_CARD_LABEL_FONT}
+                seasonCardLabelSize={resolvedRectangleLayout.cardLabelFontSize}
+              />
+              <button
+                type="button"
+                onClick={() => onRemoveItem?.(item)}
+                className="absolute inline-flex items-center justify-center rounded-full bg-white font-bold text-black shadow ring-1 ring-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                style={{
+                  width: `${resolvedRectangleLayout.removeButtonSize}px`,
+                  height: `${resolvedRectangleLayout.removeButtonSize}px`,
+                  top: `-${resolvedRectangleLayout.removeButtonOffset}px`,
+                  right: `-${resolvedRectangleLayout.removeButtonOffset}px`,
+                  fontSize: `${resolvedRectangleLayout.removeButtonFontSize}px`,
+                }}
+                aria-label={`Remove ${item.label} from rank ${number}`}
+              >
+                ×
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="absolute inset-0 rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              onClick={(event) => onSlotClick?.(index, event.currentTarget.getBoundingClientRect())}
+              aria-label={`Select season for rank ${number}`}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div ref={setNodeRef} className="relative flex flex-col items-center">
       <div
         className={`relative flex items-center justify-center rounded-full border-2 bg-white shadow-lg transition ${
           isOver || isActive ? "border-[#5C0F4F]" : "border-transparent"
         }`}
-        style={{ width: GRID_CIRCLE_SIZE, height: GRID_CIRCLE_SIZE }}
+        style={{ width: legacyCircleSize, height: legacyCircleSize }}
       >
         {item ? (
           <>
-            <Token item={item} size={GRID_TOKEN_SIZE} />
+            <Token item={item} size={legacyTokenSize} />
             <button
               type="button"
               onClick={() => onRemoveItem?.(item)}
-              className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-bold text-[#5C0F4F] shadow"
+              className="absolute flex items-center justify-center rounded-full bg-white font-bold text-[#5C0F4F] shadow"
+              style={{
+                top: -legacyRemoveOffset,
+                right: -legacyRemoveOffset,
+                width: legacyRemoveButtonSize,
+                height: legacyRemoveButtonSize,
+                fontSize: `${legacyRemoveFontSize}px`,
+              }}
               aria-label={`Remove ${item.label} from rank ${number}`}
             >
               ×
@@ -743,8 +1221,11 @@ function GridSlot({
           </>
         ) : (
           <span
-            className="text-3xl font-semibold text-[#5C0F4F]"
-            style={{ fontFamily: "var(--font-gloucester)" }}
+            className="font-semibold text-[#5C0F4F]"
+            style={{
+              fontFamily: fontOverrides?.rankNumberFontFamily ?? DEFAULT_RANK_NUMBER_FONT,
+              fontSize: `${legacyNumberSize}px`,
+            }}
           >
             {number}
           </span>
@@ -769,6 +1250,13 @@ function SelectionPicker({
   onClose,
   position,
   mobileSheet = false,
+  forceMobileSheet = false,
+  pickerVariant = "circle",
+  title = "Pick a cast member",
+  titleFontFamily = DEFAULT_PICKER_TITLE_FONT,
+  itemFontFamily = DEFAULT_PICKER_ITEM_FONT,
+  shapeScaleFactor = 1,
+  buttonScaleFactor = 1,
 }: {
   open: boolean;
   items: SurveyRankingItem[];
@@ -776,17 +1264,33 @@ function SelectionPicker({
   onClose(): void;
   position: { top: number; left: number } | null;
   mobileSheet?: boolean;
+  forceMobileSheet?: boolean;
+  pickerVariant?: TokenVariant;
+  title?: string;
+  titleFontFamily?: string;
+  itemFontFamily?: string;
+  shapeScaleFactor?: number;
+  buttonScaleFactor?: number;
 }) {
   if (!open) return null;
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
-  const showMobileSheet = mobileSheet && viewportWidth > 0 && viewportWidth < 640;
+  const showMobileSheet = mobileSheet && (forceMobileSheet || (viewportWidth > 0 && viewportWidth < 640));
+  const isSeasonPicker = pickerVariant === "season-card";
+  const closeButtonSize = Math.round(clampNumber(36 * buttonScaleFactor, 28, 56));
+  const pickerLabelFontSize = Math.round(clampNumber(12 * buttonScaleFactor, 10, 20));
+  const pickerNameFontSize = Math.round(clampNumber(14 * buttonScaleFactor, 11, 22));
+  const pickerRowMinHeight = Math.round(clampNumber(40 * buttonScaleFactor, 34, 84));
+  const pickerGap = Math.round(clampNumber(10 * shapeScaleFactor, 6, 20));
+  const seasonPickerCardSize = Math.round(clampNumber(84 * shapeScaleFactor, 60, 168));
+  const avatarSizeMobile = Math.round(clampNumber(40 * shapeScaleFactor, 28, 86));
+  const avatarSizeDesktop = Math.round(clampNumber(48 * shapeScaleFactor, 32, 94));
 
   if (showMobileSheet) {
     return (
       <div className="fixed inset-0 z-50 bg-black/35" onClick={onClose}>
         <div
-          className="absolute bottom-0 left-0 right-0 rounded-t-3xl border border-black/10 bg-white px-4 pt-4 shadow-2xl"
+          className="absolute bottom-0 left-0 right-0 rounded-t-3xl border border-black/10 bg-white px-3 pt-3 shadow-2xl sm:px-4 sm:pt-4"
           style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
           onClick={(event) => event.stopPropagation()}
           data-testid="selection-picker-mobile"
@@ -794,47 +1298,99 @@ function SelectionPicker({
           <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-black/15" />
           <div className="mb-3 flex items-center justify-between">
             <p
-              className="text-xs font-semibold uppercase tracking-[0.24em] text-black/70"
-              style={{ fontFamily: "var(--font-plymouth-serial)" }}
+              className="text-[11px] font-semibold uppercase tracking-[0.18em] text-black/70 sm:text-xs sm:tracking-[0.24em]"
+              style={{ fontFamily: titleFontFamily }}
             >
-              Pick a cast member
+              {title}
             </p>
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/5 text-lg font-bold text-black"
+              className="inline-flex items-center justify-center rounded-full bg-black/5 font-bold text-black"
+              style={{
+                width: `${closeButtonSize}px`,
+                height: `${closeButtonSize}px`,
+                fontSize: `${Math.round(clampNumber(16 * buttonScaleFactor, 12, 24))}px`,
+              }}
               aria-label="Close picker"
             >
               ×
             </button>
           </div>
           {items.length === 0 ? (
-            <p className="pb-3 text-sm text-gray-600">Everyone is placed. Drag a portrait out to swap someone else in.</p>
+            <p className="pb-3 text-sm text-gray-600">
+              {isSeasonPicker
+                ? "Everything is placed. Drag a ranked card back out to swap in another season."
+                : "Everyone is placed. Drag a portrait out to swap someone else in."}
+            </p>
           ) : (
-            <div className="grid max-h-[60vh] grid-cols-2 gap-3 overflow-y-auto pb-1">
+            <div
+              className={`grid max-h-[60vh] gap-2.5 overflow-y-auto pb-1 ${
+                isSeasonPicker ? "grid-cols-1" : "grid-cols-2"
+              }`}
+              style={{ gap: `${pickerGap}px` }}
+            >
               {items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onSelect?.(item)}
-                  className="flex min-h-11 items-center gap-3 rounded-2xl border border-black/10 bg-white px-2 py-2 text-left shadow-sm transition hover:border-black/40"
-                >
-                  <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-black">
-                    {item.img ? (
-                      <Image
-                        src={item.img}
-                        alt={item.label}
-                        width={48}
-                        height={48}
-                        className="h-full w-full object-cover"
-                        unoptimized
-                      />
-                    ) : (
-                      <span className="text-sm font-semibold text-white">{item.label.slice(0, 2)}</span>
-                    )}
-                  </span>
-                  <span className="text-sm font-semibold text-black">{item.label}</span>
-                </button>
+                isSeasonPicker ? (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onSelect?.(item)}
+                    className="flex items-center rounded-2xl border border-black/10 bg-white px-2 py-2 text-left shadow-sm transition hover:border-black/40"
+                    style={{ minHeight: `${pickerRowMinHeight}px`, gap: `${pickerGap}px` }}
+                  >
+                    <Token
+                      item={item}
+                      variant="season-card"
+                      size={seasonPickerCardSize}
+                      overlay
+                      seasonCardLabelFontFamily={itemFontFamily}
+                    />
+                    <span
+                      className="font-semibold text-black"
+                      style={{ fontFamily: itemFontFamily, fontSize: `${pickerNameFontSize}px` }}
+                    >
+                      {item.label}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onSelect?.(item)}
+                    className="flex items-center rounded-2xl border border-black/10 bg-white px-2 py-2 text-left shadow-sm transition hover:border-black/40"
+                    style={{ minHeight: `${pickerRowMinHeight}px`, gap: `${pickerGap}px` }}
+                  >
+                    <span
+                      className="flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-black"
+                      style={{ width: `${avatarSizeMobile}px`, height: `${avatarSizeMobile}px` }}
+                    >
+                      {item.img ? (
+                        <Image
+                          src={item.img}
+                          alt={item.label}
+                          width={avatarSizeMobile}
+                          height={avatarSizeMobile}
+                          className="h-full w-full object-cover"
+                          unoptimized
+                        />
+                      ) : (
+                        <span
+                          className="font-semibold text-white"
+                          style={{ fontSize: `${Math.round(clampNumber(13 * buttonScaleFactor, 10, 20))}px` }}
+                        >
+                          {item.label.slice(0, 2)}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className="font-semibold text-black"
+                      style={{ fontFamily: itemFontFamily, fontSize: `${pickerNameFontSize}px` }}
+                    >
+                      {item.label}
+                    </span>
+                  </button>
+                )
               ))}
             </div>
           )}
@@ -874,49 +1430,221 @@ function SelectionPicker({
         data-testid="selection-picker-popover"
       >
         <div className="mb-3 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[#5C0F4F]/70">Pick a cast member</p>
+          <p
+            className={`text-xs font-semibold uppercase tracking-[0.35em] ${
+              isSeasonPicker ? "text-black/75" : "text-[#5C0F4F]/70"
+            }`}
+            style={{ fontFamily: titleFontFamily, fontSize: `${pickerLabelFontSize}px` }}
+          >
+            {title}
+          </p>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-[#5C0F4F]/10 text-sm font-bold text-[#5C0F4F]"
+            className={`flex items-center justify-center rounded-full font-bold ${
+              isSeasonPicker ? "bg-black/10 text-black" : "bg-[#5C0F4F]/10 text-[#5C0F4F]"
+            }`}
+            style={{
+              width: `${Math.round(clampNumber(28 * buttonScaleFactor, 22, 46))}px`,
+              height: `${Math.round(clampNumber(28 * buttonScaleFactor, 22, 46))}px`,
+              fontSize: `${Math.round(clampNumber(14 * buttonScaleFactor, 10, 22))}px`,
+            }}
             aria-label="Close picker"
           >
             ×
           </button>
         </div>
         {items.length === 0 ? (
-          <p className="text-sm text-gray-500">Everyone is placed. Drag a portrait out to swap someone else in.</p>
+          <p className="text-sm text-gray-500">
+            {isSeasonPicker
+              ? "Everything is placed. Drag a ranked card back out to swap in another season."
+              : "Everyone is placed. Drag a portrait out to swap someone else in."}
+          </p>
         ) : (
-          <div className="grid grid-cols-2 gap-3">
+          <div className={`grid gap-3 ${isSeasonPicker ? "grid-cols-1" : "grid-cols-2"}`}>
             {items.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onSelect?.(item)}
-                className="flex items-center gap-3 rounded-xl border border-[#5C0F4F]/10 bg-white p-2 text-left shadow-sm transition hover:border-[#5C0F4F]/60"
-              >
-                <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-[#FDF5FB]">
-                  {item.img ? (
-                    <Image
-                      src={item.img}
-                      alt={item.label}
-                      width={48}
-                      height={48}
-                      className="h-full w-full object-cover"
-                      unoptimized
-                    />
-                  ) : (
-                    <span className="text-sm font-semibold text-[#5C0F4F]">{item.label.slice(0, 2)}</span>
-                  )}
-                </span>
-                <span className="text-sm font-semibold text-[#5C0F4F]">{item.label}</span>
-              </button>
+              isSeasonPicker ? (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onSelect?.(item)}
+                  className="flex items-center rounded-xl border border-black/15 bg-white p-2 text-left shadow-sm transition hover:border-black/60"
+                  style={{ gap: `${pickerGap}px`, minHeight: `${pickerRowMinHeight}px` }}
+                >
+                  <Token
+                    item={item}
+                    variant="season-card"
+                    size={Math.round(clampNumber(86 * shapeScaleFactor, 62, 172))}
+                    overlay
+                    seasonCardLabelFontFamily={itemFontFamily}
+                  />
+                  <span
+                    className="font-semibold text-black"
+                    style={{ fontFamily: itemFontFamily, fontSize: `${pickerNameFontSize}px` }}
+                  >
+                    {item.label}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onSelect?.(item)}
+                  className="flex items-center rounded-xl border border-[#5C0F4F]/10 bg-white p-2 text-left shadow-sm transition hover:border-[#5C0F4F]/60"
+                  style={{ gap: `${pickerGap}px`, minHeight: `${pickerRowMinHeight}px` }}
+                >
+                  <span
+                    className="flex items-center justify-center overflow-hidden rounded-full bg-[#FDF5FB]"
+                    style={{ width: `${avatarSizeDesktop}px`, height: `${avatarSizeDesktop}px` }}
+                  >
+                    {item.img ? (
+                      <Image
+                        src={item.img}
+                        alt={item.label}
+                        width={avatarSizeDesktop}
+                        height={avatarSizeDesktop}
+                        className="h-full w-full object-cover"
+                        unoptimized
+                      />
+                    ) : (
+                      <span
+                        className="font-semibold text-[#5C0F4F]"
+                        style={{ fontSize: `${Math.round(clampNumber(13 * buttonScaleFactor, 10, 20))}px` }}
+                      >
+                        {item.label.slice(0, 2)}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className="font-semibold text-[#5C0F4F]"
+                    style={{ fontFamily: itemFontFamily, fontSize: `${pickerNameFontSize}px` }}
+                  >
+                    {item.label}
+                  </span>
+                </button>
+              )
             ))}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function computeFigmaCircleLayoutMetrics(
+  containerWidth: number,
+  shapeScaleFactor = 1,
+  buttonScaleFactor = 1,
+): FigmaCircleLayoutMetrics {
+  const clampedContainerWidth = clampNumber(containerWidth, 280, FIGMA_GRID_MAX_WIDTH);
+  const columns: 2 | 4 = clampedContainerWidth < 560 ? 2 : 4;
+  const horizontalScale = clampNumber((clampedContainerWidth - 280) / 428, 0, 1);
+  const gapX = Math.round(
+    columns === 2
+      ? interpolate(8, 16, horizontalScale)
+      : interpolate(16, 26, horizontalScale),
+  );
+  const gapY = Math.round(
+    columns === 2
+      ? interpolate(16, 34, horizontalScale)
+      : interpolate(28, 54, horizontalScale),
+  );
+  const available = clampedContainerWidth - gapX * (columns - 1);
+  const baseSlotSize = clampNumber(
+    available / columns,
+    columns === 2 ? 82 : 112,
+    columns === 2 ? 136 : 156,
+  );
+  const maxSlotByContainer = Math.max(52, Math.floor(available / columns));
+  const slotSize = Math.round(clampNumber(
+    baseSlotSize * shapeScaleFactor,
+    columns === 2 ? 56 : 80,
+    maxSlotByContainer,
+  ));
+  const tokenInset = clampNumber(slotSize * 0.07, 6, 14);
+  const tokenSize = Math.round(clampNumber(slotSize - tokenInset * 2, 48, 170));
+  const rankNumberSize = Math.round(clampNumber(slotSize * 0.16 * buttonScaleFactor, 12, 32));
+  const rankNumberMarginBottom = Math.round(clampNumber(slotSize * 0.08, 5, 12));
+  const removeButtonSize = Math.round(clampNumber(slotSize * 0.27 * buttonScaleFactor, 18, 52));
+  const removeButtonOffset = Math.round(clampNumber(removeButtonSize * 0.22, 3, 12));
+  const removeButtonFontSize = Math.round(clampNumber(removeButtonSize * 0.48, 10, 24));
+  const overlaySize = Math.round(clampNumber(tokenSize + 16 * shapeScaleFactor, 70, 198));
+
+  return {
+    containerWidth: clampedContainerWidth,
+    gridWidth: clampedContainerWidth,
+    columns,
+    gapX,
+    gapY,
+    slotSize,
+    tokenSize,
+    rankNumberSize,
+    rankNumberMarginBottom,
+    removeButtonSize,
+    removeButtonOffset,
+    removeButtonFontSize,
+    overlaySize,
+  };
+}
+
+function computeFigmaRectangleLayoutMetrics(
+  containerWidth: number,
+  shapeScaleFactor = 1,
+  buttonScaleFactor = 1,
+): FigmaRectangleLayoutMetrics {
+  const frameWidth = clampNumber(containerWidth, 280, 920);
+  const horizontalScale = clampNumber((frameWidth - 280) / 640, 0, 1);
+  const framePaddingX = Math.round(interpolate(10, 24, horizontalScale));
+  const framePaddingY = Math.round(interpolate(12, 24, horizontalScale));
+  const gridWidth = clampNumber(frameWidth - framePaddingX * 2 - 4, 220, FIGMA_RECT_GRID_MAX_WIDTH);
+  const columns: 2 | 3 = gridWidth < 560 ? 2 : 3;
+  const gapX = Math.round(columns === 2 ? interpolate(8, 12, horizontalScale) : interpolate(9, 16, horizontalScale));
+  const gapY = Math.round(interpolate(14, 24, horizontalScale));
+  const baseSlotWidth = clampNumber((gridWidth - gapX * (columns - 1)) / columns, 88, 204);
+  const maxSlotWidthByGrid = Math.max(72, Math.floor((gridWidth - gapX * (columns - 1)) / columns));
+  const slotWidth = Math.round(clampNumber(baseSlotWidth * shapeScaleFactor, 72, maxSlotWidthByGrid));
+  const rankNumberSize = Math.round(clampNumber(slotWidth * 0.16 * buttonScaleFactor, 12, 30));
+  const rankNumberMarginBottom = Math.round(clampNumber(slotWidth * 0.07, 4, 10));
+  const removeButtonSize = Math.round(clampNumber(slotWidth * 0.2 * buttonScaleFactor, 18, 44));
+  const removeButtonOffset = Math.round(clampNumber(removeButtonSize * 0.22, 3, 10));
+  const removeButtonFontSize = Math.round(clampNumber(removeButtonSize * 0.5, 10, 22));
+  const overlaySize = Math.round(clampNumber(slotWidth * 1.05, 106, 240));
+  const trayCardWidth = Math.round(clampNumber(slotWidth * (columns === 2 ? 0.78 : 0.84), 72, 188));
+  const trayGap = Math.round(interpolate(8, 12, horizontalScale));
+  const trayMarginTop = Math.round(interpolate(14, 24, horizontalScale));
+  const trayLabelFontSize = Math.round(clampNumber(interpolate(10, 12, horizontalScale) * buttonScaleFactor, 8, 18));
+  const trayLabelTracking = interpolate(0.2, 0.24, horizontalScale);
+  const trayPaddingX = Math.round(interpolate(10, 16, horizontalScale));
+  const trayPaddingY = Math.round(interpolate(10, 12, horizontalScale));
+  const trayWrap = columns === 3;
+  const cardLabelFontSize = Math.round(clampNumber(slotWidth * 0.145 * buttonScaleFactor, 12, 34));
+
+  return {
+    containerWidth: frameWidth,
+    frameWidth,
+    framePaddingX,
+    framePaddingY,
+    gridWidth,
+    columns,
+    gapX,
+    gapY,
+    slotWidth,
+    rankNumberSize,
+    rankNumberMarginBottom,
+    removeButtonSize,
+    removeButtonOffset,
+    removeButtonFontSize,
+    overlaySize,
+    trayCardWidth,
+    trayGap,
+    trayMarginTop,
+    trayLabelFontSize,
+    trayLabelTracking,
+    trayPaddingX,
+    trayPaddingY,
+    trayWrap,
+    cardLabelFontSize,
+  };
 }
 
 function Progress({ value }: { value: number }) {

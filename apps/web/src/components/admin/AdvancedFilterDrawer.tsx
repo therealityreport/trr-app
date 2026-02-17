@@ -16,6 +16,7 @@ const CONTENT_TYPE_OPTIONS: Array<{ value: ContentTypeFilter; label: string }> =
   { value: "confessional", label: "Confessionals" },
   { value: "reunion", label: "Reunion" },
   { value: "promo", label: "Promo Portraits" },
+  { value: "profile_picture", label: "Profile Pictures" },
   { value: "episode_still", label: "Episode Still" },
   { value: "intro", label: "Intro Card" },
   { value: "wwhl", label: "WWHL" },

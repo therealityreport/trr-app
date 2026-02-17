@@ -2,7 +2,478 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
-## Latest Update (2026-02-11)
+## Latest Update (2026-02-17)
+
+- February 17, 2026: Fixed cast-matrix sync error messaging and collapsed `Self*` role variants in show/season cast UIs.
+  - Files:
+    - `apps/web/src/lib/admin/cast-role-normalization.ts`
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast-matrix/sync/route.ts`
+    - `apps/web/tests/cast-role-normalization.test.ts`
+    - `apps/web/tests/show-cast-matrix-sync-proxy-route.test.ts`
+  - Changes:
+    - Added canonical role normalization helper:
+      - `Self`, `Self - ...`, `Self (as ...)`, `Themselves` => `Self`.
+    - Applied canonicalization to cast role chips and cast-card role badges on show cast page, removing noisy `Self (as ...)` duplicates.
+    - Applied the same role canonicalization behavior to season cast page role chips and role badges.
+    - Updated show cast-role-members fetch to scope by selected seasons only (no role/image/sort narrowing), preventing raw variant role names from breaking canonical role filters.
+    - Hardened cast-matrix proxy route error handling:
+      - 180s backend timeout returns explicit 504.
+      - backend connectivity failures return actionable 502 message instead of opaque `fetch failed`.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/cast-matrix/sync/route.ts' 'src/lib/admin/cast-role-normalization.ts' 'tests/show-cast-matrix-sync-proxy-route.test.ts' 'tests/cast-role-normalization.test.ts'` (pass, existing unrelated warnings only)
+    - `pnpm -C apps/web exec vitest run tests/show-cast-matrix-sync-proxy-route.test.ts tests/cast-role-normalization.test.ts tests/cast-role-season-filtering.test.ts` (pass)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)
+  - MCP verification:
+    - Opened `http://localhost:3000/admin/trr-shows/7782652f-783a-488b-8860-41b97de32e75?tab=cast`.
+    - Confirmed `Roles` chips now include a single `Self` chip (no longer listing many `Self (as ...)` variants).
+
+- February 17, 2026: Added social intelligence dashboard structure and source-scope week-detail routing for Bravo content.
+  - Social media admin IA updates:
+    - `apps/web/src/app/admin/social-media/page.tsx`
+    - New category-first hub with `Bravo Content` and `Creator Content`.
+  - New category pages:
+    - `apps/web/src/app/admin/social-media/bravo-content/page.tsx`
+    - `apps/web/src/app/admin/social-media/creator-content/page.tsx`
+    - `Creator Content` is scaffolded as a separate dashboard and intentionally read-only/placeholder for now.
+  - Season/week social routing updates:
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - Week links now carry `source_scope`, and week-detail fetches use the selected scope (default `bravo`).
+  - Test and typed-route follow-up:
+    - `apps/web/tests/week-social-thumbnails.test.tsx`
+    - Added `useSearchParams` mock support after week page scope parsing changes.
+    - Updated typed route usage in social media hub links.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/social-media/page.tsx' 'src/app/admin/social-media/bravo-content/page.tsx' 'src/app/admin/social-media/creator-content/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'tests/week-social-thumbnails.test.tsx'` (pass)
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/week-social-thumbnails.test.tsx` (`2 files passed`, `4 tests passed`)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)
+
+- February 17, 2026: Stabilized Reddit community creation flow and added persisted post-flair enrichment (non-blocking, empty-flair safe).
+  - Migration:
+    - `apps/web/db/migrations/024_add_post_flares_to_admin_reddit_communities.sql`
+    - Added `post_flares jsonb not null default []` and `post_flares_updated_at timestamptz` on `admin.reddit_communities`.
+  - Server/data layer:
+    - `apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+      - Extended community row shape with `post_flares` and `post_flares_updated_at`.
+      - Added `updateRedditCommunityPostFlares(...)`.
+    - `apps/web/src/lib/server/admin/reddit-flairs-service.ts`
+      - Added flair API-first retrieval with listing fallback (`new/hot/top`) and normalization/dedupe/cap.
+    - `apps/web/src/app/api/admin/reddit/communities/[communityId]/flares/refresh/route.ts`
+      - New admin route to fetch + persist post flairs and return success even when empty.
+  - Reddit URL hardening:
+    - `apps/web/src/app/api/admin/reddit/threads/route.ts`
+    - `apps/web/src/app/api/admin/reddit/threads/[threadId]/route.ts`
+    - Enforced Reddit-host validation for thread `url` and `permalink`; invalid inputs now return `400`.
+  - UI flow + stability:
+    - `apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - Create-community now:
+      - inserts created community immediately into local state
+      - clears busy state immediately after create completes
+      - refreshes flairs asynchronously
+      - keeps create success even when flairs are empty/unavailable.
+    - Discover flow now also triggers flair refresh.
+    - Added request timeout handling and action-level busy lockouts to reduce duplicate submits.
+    - Added selected-community flair chips and empty-state helper text (`No post flairs available yet.`).
+    - Client URL parser now rejects non-Reddit hosts.
+  - Tests:
+    - `apps/web/tests/reddit-sources-manager.test.tsx`
+    - `apps/web/tests/reddit-communities-route.test.ts`
+    - `apps/web/tests/reddit-community-flares-refresh-route.test.ts`
+    - `apps/web/tests/reddit-flairs-service.test.ts`
+    - `apps/web/tests/reddit-threads-route.test.ts`
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/components/admin/reddit-sources-manager.tsx' 'src/app/api/admin/reddit/communities/route.ts' 'src/app/api/admin/reddit/communities/[communityId]/flares/refresh/route.ts' 'src/app/api/admin/reddit/threads/route.ts' 'src/app/api/admin/reddit/threads/[threadId]/route.ts' 'src/lib/server/admin/reddit-flairs-service.ts' 'src/lib/server/admin/reddit-sources-repository.ts' 'tests/reddit-sources-manager.test.tsx' 'tests/reddit-flairs-service.test.ts' 'tests/reddit-community-flares-refresh-route.test.ts' 'tests/reddit-threads-route.test.ts' 'tests/reddit-communities-route.test.ts'` (pass)
+    - `pnpm -C apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-communities-route.test.ts tests/reddit-community-flares-refresh-route.test.ts tests/reddit-flairs-service.test.ts tests/reddit-threads-route.test.ts` (pass; 5 files / 18 tests)
+    - `pnpm -C apps/web run db:migrate` (pass; applied migration `024_add_post_flares_to_admin_reddit_communities.sql`)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)
+
+- February 17, 2026: Fixed season cast grid fallback messaging + episode labels and brought show-cast filtering/sorting controls into season cast view.
+  - File:
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - Changes:
+    - Replaced ambiguous season cast label text (`Appeared this season`) with explicit numeric episode labels (`N episode(s) this season`), including `0` when evidence is missing.
+    - Added season cast controls aligned with show cast grid behavior:
+      - sort by (`episodes`, `season recency`, `name`)
+      - sort order (`asc`/`desc`)
+      - has-image filter
+      - role filter chips
+      - credit-category filter chips
+      - clear filters action
+    - Added season-scoped cast-role-member enrichment fetch (`cast-role-members?seasons={season}`) and merged role/season recency/photo metadata into season cast cards.
+    - Merged show cast metadata for credit-category/role fallbacks so season cast cards can expose the same filter dimensions as show cast.
+    - Updated season fallback warning to a concise sync-state message and only surface it when the season is still on show-fallback with zero episode evidence.
+    - Converted season cast rendering from heuristic Main/Recurring/Guest buckets to a filterable/sortable unified grid, while keeping archive-footage credits section.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx'` (pass)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)
+
+- February 17, 2026: Implemented Reddit communities/threads management UX + APIs, wired season/global Reddit pages, and added IG/TT/YT week-card thumbnails.
+  - App DB migration:
+    - `apps/web/db/migrations/023_create_admin_reddit_sources.sql`
+    - Added `admin.reddit_communities` (show-level) and `admin.reddit_threads` (optional season scope), indexes, triggers, grants.
+  - Server data layer + discovery:
+    - `apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+    - `apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+    - Added communities/threads CRUD, community->thread grouping helpers, subreddit `new/hot/top` discovery, show-match scoring, and include/exclude hint generation.
+  - New internal admin APIs:
+    - `apps/web/src/app/api/admin/reddit/communities/route.ts`
+    - `apps/web/src/app/api/admin/reddit/communities/[communityId]/route.ts`
+    - `apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+    - `apps/web/src/app/api/admin/reddit/threads/route.ts`
+    - `apps/web/src/app/api/admin/reddit/threads/[threadId]/route.ts`
+  - Shared Reddit manager UI + page wiring:
+    - `apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx` (season Reddit tab now uses manager)
+    - `apps/web/src/app/admin/social-media/page.tsx` (global landing now uses manager)
+  - Week detail thumbnail rendering:
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - Added thumbnail preview behavior:
+      - YouTube: `thumbnail_url`
+      - Instagram: `thumbnail_url` or first `media_urls[]`
+      - TikTok: `thumbnail_url`
+  - Env docs:
+    - `apps/web/.env.example`
+    - Added `REDDIT_USER_AGENT` and `REDDIT_FETCH_TIMEOUT_MS`.
+  - Tests added/updated:
+    - `apps/web/tests/reddit-discovery-service.test.ts`
+    - `apps/web/tests/reddit-communities-route.test.ts`
+    - `apps/web/tests/reddit-sources-manager.test.tsx`
+    - `apps/web/tests/week-social-thumbnails.test.tsx`
+    - `apps/web/tests/setup.ts` (test shim for `server-only`)
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/lib/server/admin/reddit-sources-repository.ts src/lib/server/admin/reddit-discovery-service.ts src/components/admin/reddit-sources-manager.tsx src/app/api/admin/reddit/communities/route.ts 'src/app/api/admin/reddit/communities/[communityId]/route.ts' 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/app/api/admin/reddit/threads/route.ts 'src/app/api/admin/reddit/threads/[threadId]/route.ts' src/components/admin/season-social-analytics-section.tsx src/app/admin/social-media/page.tsx 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' tests/reddit-discovery-service.test.ts tests/reddit-communities-route.test.ts tests/reddit-sources-manager.test.tsx tests/week-social-thumbnails.test.tsx` (pass)
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/reddit-discovery-service.test.ts tests/reddit-communities-route.test.ts tests/reddit-sources-manager.test.tsx tests/week-social-thumbnails.test.tsx tests/season-social-analytics-section.test.tsx` (`5 passed`, `12 tests passed`)
+    - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit` (pass)
+
+- February 17, 2026: Added cast-matrix sync admin controls and Bravo-profile link visibility improvements for show admin.
+  - Added new proxy route:
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast-matrix/sync/route.ts`
+  - Show admin cast tab updates:
+    - Added `Sync Cast Roles (Wiki/Fandom)` action with loading/error/result panel
+    - Displays sync counts and unmatched/missing-season-evidence output
+    - Files:
+      - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+      - `apps/web/src/components/admin/CastMatrixSyncPanel.tsx`
+  - Season filter role semantics update:
+    - Season filtering now trusts scoped cast-role rows (selected season(s) + global season `0`) once loaded.
+    - File:
+      - `apps/web/src/lib/admin/cast-role-filtering.ts`
+      - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Links UI update:
+    - Person-level `bravo_profile` links now render explicit `Bravo Person Profile` badge with existing review actions.
+    - File:
+      - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Added targeted tests:
+    - `apps/web/tests/show-cast-matrix-sync-proxy-route.test.ts`
+    - `apps/web/tests/cast-matrix-sync-panel.test.tsx`
+    - `apps/web/tests/cast-role-season-filtering.test.ts`
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/show-cast-matrix-sync-proxy-route.test.ts tests/cast-matrix-sync-panel.test.tsx tests/cast-role-season-filtering.test.ts` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+    - `pnpm -C apps/web exec eslint src/app/admin/trr-shows/[showId]/page.tsx src/components/admin/CastMatrixSyncPanel.tsx src/lib/admin/cast-role-filtering.ts src/app/api/admin/trr-api/shows/[showId]/cast-matrix/sync/route.ts` (warnings only; no errors)
+
+- February 13, 2026: Fixed unresolved `var(--font-sans)` fallback in template preview stacks and improved filename-to-font-family linking.
+  - Files:
+    - `apps/web/src/app/globals.css`
+    - `apps/web/src/lib/fonts/cdn-fonts.ts`
+    - `apps/web/tests/cdn-fonts.test.ts`
+  - Changes:
+    - Added explicit runtime CSS font alias variables in `:root` (`--font-sans`, `--font-serif`, `--font-display`, `--font-body`, `--font-games`) using concrete family names, so inline template stacks like `"Font Name", var(--font-sans), sans-serif` no longer collapse to fallback fonts.
+    - Extended CDN font resolver normalization so filename-style values map back to canonical font families (for example `SofiaProBold-930940338.otf` → `Sofia Pro`, `RudeSlabCondensedCondensedBold-930861866.otf` → `Rude Slab Condensed`, `GeoSlab703_Md_BT` → `Geometric Slabserif 703`).
+    - Added tests for canonical-name and filename-token resolution behavior.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/cdn-fonts.test.ts tests/matrix-likert-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+    - `pnpm -C apps/web exec eslint src/lib/fonts/cdn-fonts.ts tests/cdn-fonts.test.ts` (pass)
+    - Playwright verification on `/admin/fonts?tab=questions-forms` confirmed editor font changes now update Matrix (`agree-likert-scale`) row/column labels and Rank Order slot/tray labels live.
+
+- February 13, 2026: Fixed font overrides not applying in Matrix/Likert and Rank Order preview internals.
+  - Files:
+    - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+    - `apps/web/src/components/flashback-ranker.tsx`
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+    - `apps/web/tests/matrix-likert-input.test.tsx`
+    - `apps/web/tests/flashback-ranker.test.tsx`
+  - Changes:
+    - Added CDN-aware font override resolution to `MatrixLikertInput` and applied it to:
+      - matrix row labels
+      - matrix column labels
+    - Added missing-font warning in matrix renderer:
+      - `Missing CloudFront CDN fonts: X, Y, Z`
+    - Extended Questions tab preview config injection for `agree-likert-scale` so template editor title/sub-text fonts now map into matrix internals (`rowLabelFontFamily` / `columnLabelFontFamily` + `fonts.*` aliases).
+    - Replaced remaining hardcoded circle-slot number font in `flashback-ranker` with `fontOverrides.rankNumberFontFamily` fallback, so rank-number typography now follows assigned preview fonts.
+    - Added test coverage for:
+      - matrix font application + missing-font warning
+      - flashback rank-number font override path
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/components/survey/MatrixLikertInput.tsx src/components/flashback-ranker.tsx src/app/admin/fonts/_components/QuestionsTab.tsx tests/matrix-likert-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+    - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+- February 13, 2026: Persisted Questions tab template editor font/style settings across hard reloads.
+  - File:
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - Changes:
+    - Added `localStorage` persistence for survey template editor state per catalog key and example index.
+    - Added `localStorage` persistence for standalone template editor state per catalog key.
+    - Added safe state sanitization during load to avoid malformed persisted payloads breaking rendering.
+    - Wired editor-selected fonts into preview configs for ranking and three-choice template internals so component-level text uses chosen CDN fonts.
+  - Additional font-debug updates:
+    - `apps/web/src/components/survey/RankOrderInput.tsx`
+    - `apps/web/src/components/survey/ThreeChoiceSliderInput.tsx`
+    - `apps/web/src/components/flashback-ranker.tsx`
+    - Added runtime CDN font load checks via `document.fonts.load(...)` and explicit warnings when a browser fails to load requested CloudFront font files.
+    - Added rank template font override plumbing through `FlashbackRanker` for numbers, `Unranked` labels, season labels, and picker text.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+    - `pnpm -C apps/web exec vitest run tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx tests/three-choice-slider-input.test.tsx` (pass)
+
+- February 13, 2026: Fixed Questions page template font application for ranking templates and wired editor font selections into ranking internals.
+  - Files:
+    - `apps/web/src/components/survey/RankOrderInput.tsx`
+    - `apps/web/src/components/flashback-ranker.tsx`
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+    - `apps/web/src/app/admin/fonts/page.tsx`
+    - `apps/web/tests/rank-order-input.test.tsx`
+  - Changes:
+    - Added CDN font override resolution in `RankOrderInput` for ranking UIs (`circle-ranking` and `rectangle-ranking`) with support for multiple config key paths.
+    - Added in-component warning when a requested ranking font is not in CloudFront CDN:
+      - `Missing CloudFront CDN fonts: X, Y, Z`
+    - Extended `FlashbackRanker` with `fontOverrides` support so internal labels now use configured fonts:
+      - rank numbers (`1, 2, 3...`)
+      - `Unranked` tray labels
+      - season card labels
+      - picker title and picker item labels
+    - Wired Questions tab editor-selected fonts into preview question config (ranking + three-choice variants) and standalone `flashback-ranker` preview, so font changes actually affect template internals.
+    - Tightened `/admin/fonts` tab URL helper typing so Next typed router accepts tab routes during typecheck.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/components/flashback-ranker.tsx src/components/survey/RankOrderInput.tsx src/app/admin/fonts/_components/QuestionsTab.tsx tests/rank-order-input.test.tsx` (pass)
+    - `pnpm -C apps/web exec vitest run tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+- February 13, 2026: Added URL-addressable tabs for Admin UI Design System sections (`Fonts`, `Colors`, `Questions & Forms`).
+  - File:
+    - `apps/web/src/app/admin/fonts/page.tsx`
+  - Changes:
+    - Replaced local-only tab state with URL-driven tab resolution via `useSearchParams`.
+    - Added tab query mapping and canonical tab href generation:
+      - `Fonts` -> `/admin/fonts`
+      - `Colors` -> `/admin/fonts?tab=colors`
+      - `Questions & Forms` -> `/admin/fonts?tab=questions-forms`
+    - Updated tab click behavior to push the corresponding URL so each tab is linkable/shareable.
+    - Added guard for invalid `tab` query values to route back to `/admin/fonts`.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/app/admin/fonts/page.tsx` (pass)
+
+- February 13, 2026: Enforced deterministic Figma-style preview defaults (no random palette colors) and aligned season + keep/fire previews.
+  - Files:
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - Changes:
+    - Removed palette-index-driven default preview colors that produced random-looking title/subtext/container defaults.
+    - Set preview defaults to:
+      - page/canvas: white (`#FFFFFF`)
+      - container/frame: black (`#000000`)
+      - title/subtext color: white (`#FFFFFF`)
+    - Updated rank-order defaults to include both circle and rectangle templates as Figma rank presets.
+    - Rectangle rank defaults now use Figma season copy:
+      - `Rank the Seasons of RHOSLC.`
+      - `Drag-and-Drop the Seasons to their Rank.`
+    - Added conditional header rendering for survey/standalone previews so templates like Keep/Fire/Demote can default to no extra wrapper copy.
+    - Added responsive font sizing for rank preset headings/subheadings to improve cross-screen fidelity.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx src/components/flashback-ranker.tsx src/components/survey/RankOrderInput.tsx src/components/survey/ThreeChoiceSliderInput.tsx` (pass)
+    - `pnpm -C apps/web exec vitest run tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx tests/three-choice-slider-input.test.tsx` (pass)
+
+- February 13, 2026: Implemented Figma-based rectangle season ranking template (`20:455`) with cast-ranking interactions.
+  - Files:
+    - `apps/web/src/components/flashback-ranker.tsx`
+    - `apps/web/src/components/survey/RankOrderInput.tsx`
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+    - `apps/web/tests/rank-order-input.test.tsx`
+    - `apps/web/tests/flashback-ranker.test.tsx`
+  - Changes:
+    - Added new `flashback-ranker` layout preset: `figma-rank-rectangles`.
+    - Updated `rectangle-ranking` renderer wiring to use slot-grid ranking mode (same interaction model as cast rankings):
+      - unranked tray
+      - tap-to-pick slot assignment
+      - drag-and-drop support
+    - Implemented Figma-inspired rectangle visuals for season slots:
+      - black stage
+      - numbered rectangle slots
+      - gray card fills
+      - bottom white season label strip
+      - Rude Slab + Plymouth Serial typography usage to match template style
+    - Updated Questions tab rank-order sample to include a seasons-focused rectangle example (`SEASON 1` … `SEASON 6`).
+    - Added/updated tests for rectangle preset rendering and rank update behavior.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/components/flashback-ranker.tsx src/components/survey/RankOrderInput.tsx src/app/admin/fonts/_components/QuestionsTab.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+    - `pnpm -C apps/web exec vitest run tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+
+- February 13, 2026: Implemented thumbnail-first + `Profile Pictures` gallery/category rollout for Bravo people images.
+  - Added `profile_picture` content type end-to-end in filters/classification:
+    - `apps/web/src/lib/admin/advanced-filters.ts`
+    - `apps/web/src/components/admin/AdvancedFilterDrawer.tsx`
+    - `apps/web/src/lib/gallery-filter-utils.ts`
+  - Added dedicated `Profile Pictures` sections in:
+    - show assets: `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - season assets: `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - person gallery: `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - Updated gallery image URL selection to prefer lightweight thumbnail variants (`thumb_url`) before larger variants/hosted originals.
+  - Added render-side batching via `Load More` in show/season/person galleries to reduce initial DOM/image work.
+  - Added route-level source/pagination controls for gallery APIs:
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/assets/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/assets/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/people/[personId]/photos/route.ts`
+  - Updated cast photo precedence and robustness in repository:
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - prefer `profile_picture` context first, then legacy Bravo profile;
+    - removed failing fallback selects on missing `v_cast_photos.thumbnail_focus_*` columns.
+  - Validation:
+    - `pnpm -C apps/web exec eslint <touched files>` (warnings only)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+
+- February 13, 2026: Added Canva-template font resolution against CloudFront CDN fonts for Fire/Keep/Demote question templates, with missing-font warnings.
+  - Files:
+    - `apps/web/src/components/survey/ThreeChoiceSliderInput.tsx`
+    - `apps/web/src/lib/fonts/cdn-fonts.ts`
+    - `apps/web/tests/three-choice-slider-input.test.tsx`
+  - Changes:
+    - Added shared CDN font resolver utility (`cdn-fonts.ts`) that maps incoming font names to the canonical CloudFront font list (`CDN Fonts 30`), including aliases for common Canva/Figma naming variants (for example `GeoSlab703_Md_BT`).
+    - Updated `ThreeChoiceSliderInput` to read optional template font fields from question config and apply resolved CDN font families to:
+      - prompt text
+      - cast name heading
+      - option labels
+      - next button
+    - Added in-question warning banner when requested template fonts are not in CloudFront CDN:
+      - `Missing CloudFront CDN fonts: X, Y, Z`
+    - Added test coverage for:
+      - applying valid CDN/alias fonts
+      - warning behavior for missing fonts
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/three-choice-slider-input.test.tsx` (pass)
+    - `pnpm -C apps/web exec eslint src/components/survey/ThreeChoiceSliderInput.tsx src/lib/fonts/cdn-fonts.ts tests/three-choice-slider-input.test.tsx` (pass)
+    - `pnpm -C apps/web run lint` (pass; warnings only, unrelated)
+
+- February 12, 2026: Implemented Figma-based Fire/Keep/Demote template behavior for `three-choice-slider` using SURVEY-TEMPLATES nodes `160:34` (default) and `160:69` (selected + Next).
+  - Files:
+    - `apps/web/src/components/survey/ThreeChoiceSliderInput.tsx`
+    - `apps/web/src/components/survey/QuestionRenderer.tsx`
+    - `apps/web/src/components/survey/index.ts`
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+    - `apps/web/tests/three-choice-slider-input.test.tsx`
+  - Changes:
+    - Added new dedicated `ThreeChoiceSliderInput` renderer for `uiVariant: "three-choice-slider"` and routed `QuestionRenderer` to use it.
+    - Matched Figma default state structure:
+      - light gray canvas
+      - `KEEP, FIRE OR DEMOTE` heading
+      - large active cast-name title
+      - three circular verdict options (`Fire`, `Demote`, `Keep`) with mapped palette colors.
+    - Matched Figma selected-state behavior:
+      - selected option circle renders the current cast member image inside the circle
+      - applies color overlay/tint + image treatment over the portrait
+      - `Next` button appears only after a selection and advances to the next cast member row.
+    - Updated Questions tab “Cast Verdict (Fire/Demote/Keep)” sample rows to include cast image paths so editor preview demonstrates selected-image behavior.
+    - Added component tests covering render, selection state, and Next-row progression.
+  - Validation:
+    - `pnpm -C apps/web run lint` (pass; warnings only, unrelated)
+    - `pnpm -C apps/web run test:ci` (pass, 37 files / 125 tests)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+
+- February 12, 2026: Unified Rank Order + Flashback Ranker template editing controls and wired editor tokens to shared Design System sources.
+  - Files:
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+    - `apps/web/src/app/admin/fonts/page.tsx`
+    - `apps/web/src/lib/admin/design-system-tokens.ts`
+  - Changes:
+    - Added shared design-token module for:
+      - base color palette + storage key
+      - full CDN font option list for template editors
+    - Completed Colors tab persistence wiring in `fonts/page.tsx`:
+      - loads base colors from `localStorage` on mount
+      - persists updates (including added base colors) to `localStorage`
+      - passes live `designSystemColors` into `QuestionsTab` so editor palettes match the Colors tab immediately
+    - Updated survey template editor controls (`QuestionsTab`) to:
+      - use all CDN fonts from the Fonts page list
+      - allow unrestricted numeric font-size values (removed min/max clamping)
+      - use base-color palette selectors sourced from the Colors tab list
+    - Added matching `Edit Template` modal to standalone template cards, including `flashback-ranker`, with same controls and viewport toggles as rank-order cards.
+    - Refactored standalone preview layout so title/sub-text are editor-controlled for parity with survey template cards.
+  - Validation:
+    - `pnpm -C apps/web run lint` (pass; warnings only, unrelated)
+    - `pnpm -C apps/web run test:ci` (pass, 36 files / 123 tests)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+
+- February 12, 2026: Added per-template visual editor modal for Question Templates in UI Design System.
+  - File:
+    - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - Changes:
+    - Added an edit icon/button on each survey question template preview card (`Edit Template`).
+    - Added a large popup editor modal with live preview for the selected template.
+    - Added editable controls for preview styling and copy:
+      - title text and sub-text content
+      - title/sub-text colors
+      - title/sub-text font family
+      - title/sub-text font size
+      - preview canvas and frame background colors
+    - Added reset and close controls in modal header.
+    - Reused existing interactive question preview so edits are visible immediately while interacting with the component.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+    - `pnpm -C apps/web run lint` (pass; warnings only, unrelated)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+    - `pnpm -C apps/web run test:ci` (pass, 36 files / 123 tests)
+
+- February 12, 2026: Implemented generated tints/shades and add-base-color workflow in Admin UI Design System `Colors` tab using the same RGB mixing approach as `edelstone/tints-and-shades`.
+  - Files:
+    - `apps/web/src/app/admin/fonts/page.tsx`
+  - Changes:
+    - Added tint/shade generation helpers (hex normalize, RGB conversion, channel mixing) following the reference logic:
+      - shades mix channels toward `0` (black)
+      - tints mix channels toward `255` (white)
+    - Replaced placeholder white swatches with generated swatches per color row:
+      - 3 shades (left) + base color (center) + 3 tints (right)
+    - Added `Add Base Color` controls on the Colors tab:
+      - color picker + hex text input
+      - validation for hex format
+      - duplicate prevention
+      - newly added base color immediately renders with generated tints/shades
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/app/admin/fonts/page.tsx` (pass)
+    - `pnpm -C apps/web run lint` (pass; warnings only, unrelated)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+    - `pnpm -C apps/web run test:ci` (pass, 36 files / 123 tests)
+
+- February 12, 2026: Added a new `Colors` tab to Admin UI Design System and implemented per-color tint/shade row scaffolding from TRR style-guide palette.
+  - File:
+    - `apps/web/src/app/admin/fonts/page.tsx`
+  - Changes:
+    - Expanded design-system tabs from `fonts | questions` to `fonts | colors | questions`.
+    - Added `DESIGN_SYSTEM_COLORS` palette and a dedicated `Colors` tab surface.
+    - Implemented one row per color with the requested structure:
+      - 3 white swatch placeholders on the left
+      - 1 center base color swatch
+      - 3 white swatch placeholders on the right
+    - Added per-row labels (`Row NN`) and visible hex tokens for easy future tint/shade population.
+  - Validation:
+    - `pnpm -C apps/web run lint` (pass; warnings only, none from touched file)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+    - `pnpm -C apps/web run test:ci` (pass, 36 files / 123 tests)
+
+- February 12, 2026: Follow-up Figma parity pass for Survey Templates node `0:3` (Ranking Circles) and admin preview fidelity.
+  - Updated rank-circle geometry in `apps/web/src/components/flashback-ranker.tsx` to better match Figma desktop spacing:
+    - 156px max slot width, increased row/column rhythm, larger rank numerals, black empty-circle styling.
+    - Width now constrained by the component container (not viewport `vw`) to prevent overlap in constrained previews.
+    - Preserved responsive behavior + interactive tray/picker patterns.
+  - Updated admin fonts preview UX in `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`:
+    - Added device-like preview framing with desktop/tablet/phone viewport modes as explicit screen surfaces.
+    - Default preview mode switched to desktop for clearer first render.
+    - Rank-order circle preview now uses Figma-like heading/subheading styling and light gray canvas treatment.
+    - Standalone `flashback-ranker` preview now renders the `grid` + `figma-rank-circles` variant.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/components/flashback-ranker.tsx src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+    - `pnpm -C apps/web exec vitest run tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
 
 - February 12, 2026: Implemented responsive Figma-style circle rank-order UI (`figma-rank-circles`) for survey rank questions.
   - Circle ranking (`uiVariant: circle-ranking`) now uses a dedicated layout preset in `RankOrderInput`:
@@ -1372,3 +1843,301 @@ Social ingest active-run UX fix + full-ingest payload (this session, 2026-02-12)
 - Validation:
   - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
   - `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx` (pass)
+
+Show/season gallery poster/profile classification + hidden "Other" gating (this session, 2026-02-13):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+- Changes:
+  - Show assets page:
+    - profile-picture detection now runs before poster/season grouping to prevent cast profile photos from landing in poster sections.
+    - merged show + season poster group into a single `Posters` section.
+    - hidden `Other` images by default and only reveals them after explicit `Load More Images` action.
+  - Season assets page:
+    - tightened poster classification to `kind=poster` only.
+    - cast-like assets (`type=cast`, `kind=cast|promo`) route to cast section first.
+    - retained separate `Profile Pictures` section and renamed poster heading to `Posters`.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx'` (pass with existing warnings on show page only)
+
+Cast profile-photo source priority + show-page override stability fix (this session, 2026-02-13):
+- Files:
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Reordered cast photo preference in `getPreferredCastPhotoMap(...)`:
+    - Bravo profile (season-matched first)
+    - official season announcement (season-matched first)
+    - then single-person (`people_count=1`) candidates
+    - generic `profile/profile_picture` downgraded below those priorities.
+  - Updated cast-photos fallback ordering from `v_cast_photos` to prefer Bravo/official season announcement context over generic rows.
+  - On show cast UI merge, now prefers `member.photo_url` from main cast endpoint over cast-role-members `photo_url` to avoid late async override with inferior images.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/lib/server/trr-api/trr-shows-repository.ts' 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass with pre-existing warnings)
+  - `pnpm -C apps/web exec vitest run tests/show-cast-route-default-min-episodes.test.ts` (pass)
+  - `pnpm -C apps/web exec vitest run tests/season-cast-route-fallback.test.ts` (pass)
+
+Question mobile typography/spacing compaction (this session, 2026-02-13):
+- Files:
+  - `apps/web/src/components/survey/NormalizedSurveyPlay.tsx`
+  - `apps/web/src/components/survey/ThreeChoiceSliderInput.tsx`
+  - `apps/web/src/components/flashback-ranker.tsx`
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `apps/web/src/components/survey/SliderInput.tsx`
+  - `apps/web/src/components/survey/SingleSelectInput.tsx`
+  - `apps/web/src/components/survey/MultiSelectInput.tsx`
+  - `apps/web/src/components/survey/WhoseSideInput.tsx`
+- Changes:
+  - Reduced base (mobile) font sizes, paddings, and gaps across question cards and common question inputs.
+  - Tightened three-choice slider mobile prompt/cast/choice/CTA sizing while preserving `sm`/`lg` desktop behavior.
+  - Compacted flashback ranker mobile tray, slot labels, remove buttons, and mobile picker sheet density.
+  - Tightened matrix/likert table cell padding, image size, and control sizes on mobile.
+  - Reduced questions preview phone frame height and rank-preview title/subtitle minimum clamps in admin Fonts > Questions previews.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/components/survey/NormalizedSurveyPlay.tsx src/components/survey/ThreeChoiceSliderInput.tsx src/components/survey/MatrixLikertInput.tsx src/components/survey/SliderInput.tsx src/components/survey/SingleSelectInput.tsx src/components/survey/MultiSelectInput.tsx src/components/survey/WhoseSideInput.tsx src/components/flashback-ranker.tsx src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+  - `pnpm -C apps/web run test -- tests/flashback-ranker.test.tsx tests/rank-order-input.test.tsx tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx` (pass)
+
+RHOSLC profile images for circular question templates (this session, 2026-02-13):
+- File:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+- Changes:
+  - Updated circular-frame preview templates to use RHOSLC cast profile images (`/images/cast/rhoslc-s6/*.png`).
+  - Applied image metadata for image-select, whose-side, and circle-ranking options.
+  - Added RHOSLC profile images to two-axis grid row tokens and standalone `RHOSLC_CAST` ranker items.
+  - Added RHOSLC subject image to numeric-slider template example.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Ingest + Export run-scope + live-progress logging fix (this session, 2026-02-12):
+- File:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+- Changes:
+  - Replaced static run scope label logic (`weekFilter`/`platformFilter`) with active-run-aware scope resolution:
+    - derives scope from actual active run jobs (`run_id`-scoped job rows, platform set, and `config.date_start/date_end` week windows),
+    - falls back to the run request (week/platform) before first job rows appear.
+  - Added active run request state so per-button overrides (Run Week / per-platform ingest) are reflected immediately in scope text.
+  - Added compact `Live Progress Log` block inside `Ingest + Export`:
+    - latest run-scoped job events with timestamp, platform, stage, status, items, and stage counters.
+  - Tightened run-scoped job behavior to avoid fallback to non-run historical jobs while an active run is selected.
+  - Cleared active run request scope on run completion/cancel/failure.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx` (pass)
+
+Figma node 160:34 text-role mapping for three-choice likert template (this session, 2026-02-13):
+- Figma source:
+  - `https://www.figma.com/design/0wc00O3Vam7AFGu2N2s9U9/SURVEY-TEMPLATES?node-id=160-34`
+- Files:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `apps/web/src/components/survey/ThreeChoiceSliderInput.tsx`
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+- Changes:
+  - Added semantic font-role mapping for three-choice template:
+    - `KEEP, FIRE OR DEMOTE` -> `subTextHeading` (`subTextHeadingFontFamily`)
+    - cast name (e.g. `WHITNEY ROSE`) -> `questionText` (`questionTextFontFamily`)
+    - option labels (`FIRE`, `DEMOTE`, `KEEP`) -> `optionText` (`optionTextFontFamily`)
+  - Extended font path resolution in `ThreeChoiceSliderInput` and `MatrixLikertInput` to read the semantic keys above from root, `fonts.*`, and `typography.*` config shapes.
+  - Tuned three-choice option label max size/line-height closer to Figma node values.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx src/components/survey/ThreeChoiceSliderInput.tsx src/components/survey/MatrixLikertInput.tsx` (pass)
+  - `pnpm -C apps/web run test -- tests/three-choice-slider-input.test.tsx tests/matrix-likert-input.test.tsx` (pass)
+
+Figma node 0:3 cast-ranking parity update (this session, 2026-02-13):
+- Figma source:
+  - `https://www.figma.com/design/0wc00O3Vam7AFGu2N2s9U9/SURVEY-TEMPLATES?node-id=0-3`
+- Files:
+  - `apps/web/src/components/survey/RankOrderInput.tsx`
+  - `apps/web/src/components/flashback-ranker.tsx`
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `apps/web/tests/flashback-ranker.test.tsx`
+- Changes:
+  - Added cast-ranking wrapper styling in `RankOrderInput` for circle preset (`#D9D9D9` canvas with Figma-like spacing).
+  - Updated `figma-rank-circles` layout in `FlashbackRanker` to better match node geometry:
+    - slot size uses `clamp(112px, 23vw, 156.291px)`
+    - grid spacing updated to Figma-like x/y gaps
+    - responsive columns now `2 -> 4`
+    - rank number typography tightened for Figma parity
+    - removed visible unranked tray for circle preset; placement handled via slot picker + drag between slots
+  - Updated cast-ranking preview question text to match Figma copy (`Rank the Cast of RHOSLC S6.`).
+  - Updated tests for the new circle-preset behavior.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/components/survey/RankOrderInput.tsx src/components/flashback-ranker.tsx src/app/admin/fonts/_components/QuestionsTab.tsx tests/flashback-ranker.test.tsx` (pass)
+  - `pnpm -C apps/web run test -- tests/flashback-ranker.test.tsx tests/rank-order-input.test.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Preview default background/text reset + cast-ranking review follow-up (this session, 2026-02-13):
+- File:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+- Changes:
+  - Updated template-editor default visual baseline to white page/frame with black text for non-Figma-specialized previews.
+  - For Figma rank previews, default frame now uses design gray (`#D9D9D9`) with black text.
+  - Bumped preview editor local storage key from `v1` to `v2` so prior saved black-theme defaults do not persist.
+  - For `two-choice-slider` previews, default top title/subtext are now empty (component-level heading handles design).
+- Validation:
+  - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx src/components/survey/RankOrderInput.tsx src/components/flashback-ranker.tsx src/components/survey/WhoseSideInput.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Figma node 69:94 agree/disagree likert parity update (this session, 2026-02-13):
+- Figma source:
+  - `https://www.figma.com/design/0wc00O3Vam7AFGu2N2s9U9/SURVEY-TEMPLATES?node-id=69-94`
+- Files:
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/tests/matrix-likert-input.test.tsx`
+- Changes:
+  - Replaced the old table-grid `agree-likert-scale` UI with a stacked Figma-style layout:
+    - uppercase prompt heading,
+    - large statement text,
+    - full-width rounded option bars.
+  - Added option color/text-color resolution to match node `69:94` palette for standard Likert labels (`Strongly Agree` -> `Strongly Disagree`), with metadata color override support.
+  - Expanded font-role resolution so heading, statement, and option text each honor template-config font names via CloudFront CDN mappings.
+  - Kept row-by-row answer shape unchanged (`Record<rowId, optionKey>`), preserving existing completion logic.
+  - Added behavior test coverage for per-row selection updates in the new layout.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx` (pass)
+
+Season Social Analytics V3 — weekly trend no-data handling + grouped platform bars (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `apps/web/tests/season-social-analytics-section.test.tsx`
+  - `docs/cross-collab/TASK7/PLAN.md`
+  - `docs/cross-collab/TASK7/STATUS.md`
+  - `docs/cross-collab/TASK7/OTHER_PROJECTS.md`
+- Changes:
+  - Added support for backend `weekly_platform_engagement` in season social analytics UI.
+  - Replaced legacy single minimum-width weekly bar with grouped per-platform comparative bars.
+  - No-data weeks now render visible rows with `No data yet` and no bars.
+  - Added sentiment-driver UI hint clarifying cast names/handles are excluded from driver terms.
+  - Added targeted UI regression tests covering:
+    - no-data row behavior,
+    - grouped bars width/color mapping,
+    - zero-value platform bars not rendering artificial minimum widths.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'tests/season-social-analytics-section.test.tsx'` (pass)
+  - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx` (3 passed)
+
+Mobile-responsiveness pass + preview layout defaults (this session, 2026-02-17):
+- Scope:
+  - `apps/web/src/components/survey/WhoseSideInput.tsx`
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/src/components/survey/RankOrderInput.tsx`
+  - `apps/web/src/components/flashback-ranker.tsx`
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+- Design source checked via Figma MCP:
+  - `20:544` (Whose Side), `69:94` (Likert), `0:3` (Cast ranking)
+- Changes:
+  - Reduced mobile typography and control sizing for Whose Side (heading + circle options + neutral button) using mobile-first dimensions.
+  - Tightened mobile type scale, spacing, and option-bar sizing for agree/disagree likert while preserving answer model.
+  - Reduced mobile slot/token/remove-control sizes and gaps in flashback ranker circle/rectangle ranking layouts.
+  - Minor mobile padding adjustment in rank-order wrapper for circle preset.
+  - Fonts preview UI now defaults to `Phone` viewport for survey and standalone cards.
+  - Fonts preview cards are now single-column across sections (one preview per row) for clearer per-device inspection.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+  - `pnpm -C apps/web exec eslint src/components/survey/WhoseSideInput.tsx src/components/survey/MatrixLikertInput.tsx src/components/survey/RankOrderInput.tsx src/components/flashback-ranker.tsx src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+
+Survey-wide default styling controls + per-device defaults (this session, 2026-02-17):
+- File:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+- Changes:
+  - Added a new `Default Settings` panel above Survey Questions previews.
+  - Added separate `Mobile` and `Desktop` default style profiles (font family, font size, colors, canvas/frame styling).
+  - Persisted survey default profiles in localStorage (`trr.questions-tab.survey-defaults.v1`).
+  - Updated survey preview cards to consume global defaults by active viewport:
+    - `phone` uses `Mobile` defaults
+    - `tablet/desktop` use `Desktop` defaults
+  - Added per-preview override behavior:
+    - previews use global defaults by default,
+    - editing a specific preview field switches that preview to custom override,
+    - `Use Defaults` action restores default-driven behavior.
+  - Maintained existing per-preview local storage compatibility while extending saved shape to include default-usage flags.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+
+Follow-up on survey defaults behavior (this session, 2026-02-17):
+- File:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+- Adjustment:
+  - Editing text-only fields (`titleText`, `subText`) now keeps a preview on global defaults.
+  - Editing style fields (font/color/size/frame/canvas) switches that preview to custom override mode.
+
+Font editor dropdown sync + WhoseSide mobile face sizing fix (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `apps/web/src/components/survey/WhoseSideInput.tsx`
+- Changes:
+  - Added two-choice-slider config font override mapping in preview transformation so editor font selections and rendered preview stay in sync.
+  - Added font-select value normalization (via CDN font resolver) so dropdowns select the canonical matching option when stored font strings differ in format.
+  - Reworked WhoseSide mobile scaling to be container-width driven (ResizeObserver) instead of viewport-breakpoint/viewport-unit driven sizing.
+  - Reduced and stabilized mobile heading/circle sizes in WhoseSide so circles do not render oversized in phone previews.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/components/survey/WhoseSideInput.tsx src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+
+Matrix + Ranker mobile-frame scaling parity (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/src/components/survey/RankOrderInput.tsx`
+  - `apps/web/src/components/flashback-ranker.tsx`
+  - `apps/web/tests/flashback-ranker.test.tsx`
+- Changes:
+  - Converted `MatrixLikertInput` key layout sizing (prompt, statement, option bars, paddings, gaps) to container-width responsive values via `ResizeObserver` so Phone preview scales correctly even on desktop viewport.
+  - Refactored `flashback-ranker` Figma cast/season presets away from viewport `vw` + breakpoint-driven sizing:
+    - added container-measured layout metrics for circle and rectangle presets,
+    - grid columns/gaps/slot sizes/remove-button sizes now derive from measured preview width,
+    - season tray card sizing + label sizing now follow container-based metrics,
+    - picker supports forced mobile-sheet mode when rendered inside narrow preview containers.
+  - Reduced circle-preset wrapper padding in `RankOrderInput` to avoid oversized framing in mobile previews.
+  - Updated flashback ranker tests to assert responsive grid behavior via layout data attributes rather than removed breakpoint class names.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/components/survey/MatrixLikertInput.tsx src/components/survey/RankOrderInput.tsx src/components/flashback-ranker.tsx tests/flashback-ranker.test.tsx tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+
+Figma node 160:34 Keep/Fire/Demote parity + mobile responsiveness (this session, 2026-02-17):
+- Figma source:
+  - `https://www.figma.com/design/0wc00O3Vam7AFGu2N2s9U9/SURVEY-TEMPLATES?node-id=160-34`
+- Files:
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/tests/matrix-likert-input.test.tsx`
+- Changes:
+  - Added explicit Figma-style rendering path for `three-choice-slider` matrix variant:
+    - prompt rendered as `KEEP, FIRE OR DEMOTE` (derived from options when keep/fire/demote are present),
+    - cast/member row label treated as primary question text,
+    - circular color-coded options for Fire/Demote/Keep matching Figma palette.
+  - Preserved existing `agree-likert-scale` stacked-bar behavior.
+  - Added container-width responsive sizing for the three-choice layout (typography, circle size, spacing) so mobile previews at narrow widths do not stay desktop-sized.
+  - Kept CDN font override resolution active for heading, statement, and option text in both variants.
+  - Added test coverage for three-choice heading and circular option styling.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/components/survey/MatrixLikertInput.tsx tests/matrix-likert-input.test.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx` (pass)
+
+Question editor shape/button size controls wired to previews (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/components/survey/WhoseSideInput.tsx`
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/src/components/survey/RankOrderInput.tsx`
+  - `apps/web/src/components/flashback-ranker.tsx`
+  - `apps/web/tests/matrix-likert-input.test.tsx`
+  - `apps/web/tests/rank-order-input.test.tsx`
+  - `apps/web/tests/flashback-ranker.test.tsx`
+- Changes:
+  - Implemented `shapeScale` / `buttonScale` consumption in question previews so template-editor size controls now visibly affect components.
+  - `WhoseSideInput` now scales:
+    - cast portrait circle sizes/gaps via `shapeScale`
+    - neutral button height/padding/font-size via `buttonScale`.
+  - `MatrixLikertInput` now scales:
+    - three-choice circle size via `shapeScale`
+    - option text + button height/padding via `buttonScale`
+    - agree/disagree option radius via `shapeScale`.
+  - `RankOrderInput` now forwards `shapeScale` / `buttonScale` to `FlashbackRanker`.
+  - `flashback-ranker` now scales Figma circle/rectangle ranking metrics and picker controls from those scale values (slot/token/remove button/picker avatars and control sizes).
+  - Added/updated tests to verify scale props are forwarded and applied.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/components/survey/MatrixLikertInput.tsx src/components/survey/WhoseSideInput.tsx src/components/survey/RankOrderInput.tsx src/components/flashback-ranker.tsx tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+  - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
