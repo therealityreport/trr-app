@@ -50,7 +50,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
 
-    const response = await fetch(backendBase, {
+    const query = request.nextUrl.searchParams.toString();
+    const backendUrl = query ? `${backendBase}?${query}` : backendBase;
+
+    const response = await fetch(backendUrl, {
       headers: {
         Authorization: `Bearer ${getServiceRoleKey()}`,
       },

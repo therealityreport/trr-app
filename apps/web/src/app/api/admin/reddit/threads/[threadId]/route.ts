@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
 import {
   deleteRedditThread,
+  getRedditCommunityById,
   getRedditThreadById,
   updateRedditThread,
 } from "@/lib/server/admin/reddit-sources-repository";
@@ -105,8 +106,27 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // Enforce show consistency: if reassigning community, verify it belongs to the same show
+    const newCommunityId = typeof body.community_id === "string" ? body.community_id : undefined;
+    if (newCommunityId) {
+      const existingThread = await getRedditThreadById(threadId);
+      if (!existingThread) {
+        return NextResponse.json({ error: "Thread not found" }, { status: 404 });
+      }
+      const targetCommunity = await getRedditCommunityById(newCommunityId);
+      if (!targetCommunity) {
+        return NextResponse.json({ error: "Target community not found" }, { status: 404 });
+      }
+      if (targetCommunity.trr_show_id !== existingThread.trr_show_id) {
+        return NextResponse.json(
+          { error: "Cannot reassign thread to a community belonging to a different show" },
+          { status: 400 },
+        );
+      }
+    }
+
     const thread = await updateRedditThread(authContext, threadId, {
-      communityId: typeof body.community_id === "string" ? body.community_id : undefined,
+      communityId: newCommunityId,
       trrSeasonId:
         body.trr_season_id === null
           ? null
