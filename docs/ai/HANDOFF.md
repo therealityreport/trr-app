@@ -4,6 +4,26 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-17)
 
+- February 17, 2026: Implemented Task 10 social admin completion/polling correctness and incremental/full-refresh ingest UX.
+  - Files:
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+    - `docs/cross-collab/TASK9/PLAN.md`
+    - `docs/cross-collab/TASK9/OTHER_PROJECTS.md`
+    - `docs/cross-collab/TASK9/STATUS.md`
+  - Changes:
+    - Fixed false ingest completion race by deriving completion from authoritative run lifecycle status/summary, not transient run-scoped jobs emptiness.
+    - Replaced overlapping interval polling with single-flight polling loop and stale-response guards.
+    - Preserved last-good jobs data on transient empty/error poll responses while run remains active.
+    - Added ingest `Sync Mode` UI with default `Incremental` and explicit `Full Refresh` override; payload now includes `sync_strategy`.
+    - Upgraded run dropdown labels to include week scope, platform scope, progress, item totals, timestamp, and short run id.
+    - Extended `SocialRun` typing for additive backend fields (`config`, `initiated_by`, richer summary reads).
+  - Validation:
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (`11 passed`)
+  - Cross-repo:
+    - Backend contract/migration updates completed under `TRR-Backend/docs/cross-collab/TASK10/`.
+    - screenalytics compatibility validation completed with no required code changes.
+
 - February 17, 2026: Completed social admin reliability hardening across social proxy routes and season analytics run-scoped UX.
   - Files:
     - `apps/web/src/lib/server/trr-api/social-admin-proxy.ts`
@@ -2433,6 +2453,62 @@ Likert prompt spacing tune + post-selection Continue CTA (this session, 2026-02-
   - `pnpm -C apps/web exec vitest run tests/matrix-likert-input.test.tsx` (pass)
   - `pnpm -C apps/web exec eslint src/components/survey/MatrixLikertInput.tsx src/components/survey/NormalizedSurveyPlay.tsx tests/matrix-likert-input.test.tsx` (pass)
 
+Rank cast unassigned mobile token parity with TwoAxis bench (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/components/flashback-ranker.tsx`
+  - `apps/web/tests/flashback-ranker.test.tsx`
+- Changes:
+  - Updated Figma circle rank bench sizing so mobile unassigned cast token size matches `TwoAxisGridInput` bench token size (`48px`, from `w-12`).
+  - Desktop bench token target remains aligned with TwoAxis desktop bench (`56px`, from `sm:w-14`).
+  - Preserved shape scaling behavior and existing drag/picker interactions.
+  - Added explicit regression assertion that mobile circle unassigned bank token width is `48px`.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/flashback-ranker.test.tsx tests/rank-order-input.test.tsx` (pass)
+  - `pnpm -C apps/web exec eslint src/components/flashback-ranker.tsx tests/flashback-ranker.test.tsx` (pass)
+
+Expanded editor-driven component style customization (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `apps/web/src/components/flashback-ranker.tsx`
+  - `apps/web/src/components/survey/RankOrderInput.tsx`
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/src/components/survey/WhoseSideInput.tsx`
+  - `apps/web/src/components/survey/CastDecisionCardInput.tsx`
+  - `apps/web/src/lib/surveys/question-config-types.ts`
+  - `apps/web/tests/rank-order-input.test.tsx`
+- Changes:
+  - Added advanced template-editor/default settings controls for additional component primitives:
+    - question text color,
+    - component background color,
+    - placeholder shape fill/border colors,
+    - unassigned container fill/border colors,
+    - unassigned cast circle border color,
+    - unassigned cast circle size (%).
+  - Wired these style tokens from editor state into per-question config payloads in `withEditorFontOverridesForQuestion`.
+  - Added base config typing for these style tokens in `BaseQuestionConfig`.
+  - Extended rank-order rendering pipeline:
+    - `RankOrderInput` now extracts style overrides from config and passes them to `FlashbackRanker`.
+    - `FlashbackRanker` now supports style overrides for placeholder slots and unassigned banks (fill/border/number color and unassigned size scaling).
+  - `MatrixLikertInput`, `WhoseSideInput`, and `CastDecisionCardInput` now consume config color overrides for question/prompt/background and related controls.
+  - `StandalonePreviewCard` editor now also threads shape/button/style overrides into `flashback-ranker` preview.
+  - Added rank-order unit test coverage for style override forwarding.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx tests/matrix-likert-input.test.tsx` (pass)
+  - `pnpm -C apps/web exec eslint src/app/admin/fonts/_components/QuestionsTab.tsx src/components/flashback-ranker.tsx src/components/survey/RankOrderInput.tsx src/components/survey/MatrixLikertInput.tsx src/components/survey/WhoseSideInput.tsx src/components/survey/CastDecisionCardInput.tsx tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx tests/matrix-likert-input.test.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
+Cast ranking single-render-path alignment + Figma-inspired white surface defaults (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/components/survey/RankOrderInput.tsx`
+  - `apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+- Changes:
+  - Removed cast-specific gray wrapper from `RankOrderInput` so cast ranking now uses one shared render surface path through `FlashbackRanker` (same behavior for direct and wrapped usage).
+  - Updated template-editor rank preview defaults to white frame/background with black typography orientation to match requested Figma-inspired direction while keeping unassigned bank styling unchanged.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/rank-order-input.test.tsx tests/flashback-ranker.test.tsx` (pass)
+  - `pnpm -C apps/web exec eslint src/components/survey/RankOrderInput.tsx src/components/flashback-ranker.tsx src/app/admin/fonts/_components/QuestionsTab.tsx` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+
 Person fandom data ownership guard for profile hydration (this session, 2026-02-17):
 - Files:
   - `apps/web/src/lib/server/trr-api/fandom-ownership.ts`
@@ -2458,3 +2534,175 @@ Show cast card fallback for latest season rendering (this session, 2026-02-17):
   - In cast display merge logic, `latest_season` now falls back to the base cast payload when cast-role-members payload is missing/null for that field, preventing unnecessary null regression in UI.
 - Validation:
   - `pnpm -C apps/web exec eslint apps/web/src/app/admin/trr-shows/[showId]/page.tsx` (pass with existing repo warnings only; no new errors)
+
+TRR stack audit remediation baseline (this session, 2026-02-17):
+- Files:
+  - `.github/workflows/web-tests.yml`
+  - `apps/web/package.json`
+  - `apps/web/pnpm-lock.yaml`
+  - `apps/web/DEPLOY.md`
+  - `apps/web/.env.example`
+  - `scripts/check_env_example.py`
+  - `docs/cross-collab/TASK8/PLAN.md`
+  - `docs/cross-collab/TASK8/OTHER_PROJECTS.md`
+  - `docs/cross-collab/TASK8/STATUS.md`
+- Changes:
+  - Added CI merge-marker guard.
+  - Converted web CI to explicit Node matrix:
+    - Node 20 full lane (lint + full tests + build)
+    - Node 22 compatibility lane (lint + smoke tests + build)
+  - Aligned `eslint-config-next` with `next@16.1.6` and regenerated lockfile.
+  - Updated deploy docs to state Node 20 + 22 support and Node 20 local default.
+  - Added env contract check for `apps/web/.env.example` in CI.
+  - Fixed `SCREENALYTICS_API_URL` default to workspace mode (`http://127.0.0.1:8001`) and removed duplicate `DATABASE_URL` key.
+- Validation:
+  - `python3 scripts/check_env_example.py --file apps/web/.env.example --required TRR_API_URL SCREENALYTICS_API_URL TRR_INTERNAL_ADMIN_SHARED_SECRET` (pass)
+  - `pnpm -C apps/web run lint` (pass; existing warnings only)
+  - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/validation.test.ts tests/cdn-fonts.test.ts` (pass)
+  - `pnpm -C apps/web run build` (pass)
+
+Show cast episode-scope behavior update (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/lib/admin/cast-episode-scope.ts`
+  - `apps/web/tests/cast-episode-scope.test.ts`
+- Changes:
+  - Added `resolveShowCastEpisodeCount(...)` helper to make episode-count scope explicit.
+  - Show cast cards now resolve episode labels as:
+    - no season chips selected: all-season totals from show cast payload,
+    - season chips selected: season-scoped totals from cast-role-members payload.
+  - Added dynamic helper text under season chips clarifying whether episode counts reflect selected seasons or all seasons.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/cast-episode-scope.test.ts tests/show-cast-route-default-min-episodes.test.ts` (pass)
+  - `pnpm -C apps/web exec eslint src/app/admin/trr-shows/[showId]/page.tsx src/lib/admin/cast-episode-scope.ts tests/cast-episode-scope.test.ts` (pass with existing warnings in `page.tsx` only)
+
+Person canonical source priority now includes IMDb (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+- Changes:
+  - Added `imdb` to canonical profile source allowlist used by API/repository validation.
+  - Added `imdb` to default source-priority order on person page so Source Priority shows 4 entries.
+  - Added source label rendering for IMDb (`IMDb`) in the priority list UI.
+  - Save/Reset now persist and restore a 4-source order: `tmdb`, `imdb`, `fandom`, `manual`.
+- Validation:
+  - `pnpm -C apps/web exec eslint src/lib/server/trr-api/trr-shows-repository.ts src/app/admin/trr-shows/people/[personId]/page.tsx` (pass with existing unrelated warning in `trr-shows-repository.ts`)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+
+Continuation (same session, 2026-02-17) — cross-collab sync only:
+- Updated `docs/cross-collab/TASK8/STATUS.md` to record downstream readiness from screenalytics TASK7 (lint restoration + Wave A validation complete).
+- No TRR-APP runtime/codepath changes in this continuation block.
+
+Continuation (same session, 2026-02-17) — auth abstraction stage 1 (Supabase target):
+- Updated `apps/web/src/lib/server/auth.ts` to support dual-provider verification:
+  - Primary provider configurable via `TRR_AUTH_PROVIDER` (`firebase` default, `supabase` optional)
+  - Optional shadow verification via `TRR_AUTH_SHADOW_MODE`
+  - Automatic fallback to the secondary provider when primary verification fails
+  - Preserved existing `requireUser` / `requireAdmin` call signatures and behavior
+- Updated `apps/web/src/app/api/session/login/route.ts`:
+  - Supabase mode now stores access token in `__session` cookie for server verification path
+  - Response now includes provider metadata (`provider`, `shadowMode`)
+  - Firebase mode remains default behavior with existing service-account gating
+- Updated config/docs:
+  - `apps/web/.env.example`: added `TRR_AUTH_PROVIDER`, `TRR_AUTH_SHADOW_MODE`
+  - `apps/web/DEPLOY.md`: added migration auth env documentation
+
+Validation evidence:
+- `pnpm -C apps/web run lint` (pass; warnings only)
+- `pnpm -C apps/web run test -- tests/admin-shows-by-trr-show-route.test.ts tests/reddit-threads-route.test.ts tests/reddit-community-flares-refresh-route.test.ts tests/show-bravo-videos-proxy-route.test.ts tests/person-refresh-images-stream-route.test.ts` (pass; run executed with 57 files / 215 tests)
+- `pnpm -C apps/web exec next build --webpack` (pass)
+
+Per-person URL coverage matrix in Settings links (this session, 2026-02-17):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Reworked `Settings -> Links -> Cast Member Pages` rendering from flat link rows into one container per person.
+  - Added source coverage matrix per person for:
+    - Bravo
+    - IMDb
+    - TMDb
+    - Knowledge Graph (Wikidata/Wikipedia)
+    - Fandom/Wikia
+  - Added source "logo" badges and state coloring:
+    - green = `Found` (approved URL), clickable hyperlink
+    - red = `Missing`/`Pending`/`Rejected` (not clickable)
+  - Added per-source admin controls in each person card (`Approve`, `Reject`, `Edit`, `Delete`) for the selected source URL.
+  - Added person-link source classification + preference logic:
+    - status priority (`approved` > `pending` > `rejected`)
+    - knowledge-source priority (`wikidata` over `wikipedia`)
+- Validation:
+  - `pnpm -C apps/web exec eslint src/app/admin/trr-shows/[showId]/page.tsx` (pass with existing warnings only)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+
+Continuation (same session, 2026-02-17) — next-five tasks (auth migration prep hardening):
+- Hardened auth shadow parity diagnostics in `apps/web/src/lib/server/auth.ts`:
+  - added normalized claim summaries
+  - added mismatch detection (`uid`, `email`, `name`) for shadow-mode comparisons
+  - logs structured mismatch details for Stage 2 monitoring
+- Added dedicated auth adapter test coverage:
+  - `apps/web/tests/server-auth-adapter.test.ts`
+  - scenarios covered:
+    - firebase primary success
+    - supabase fallback when firebase verification fails
+    - shadow mismatch diagnostics emission
+    - supabase provider path with admin allowlist
+- Added migration execution runbook:
+  - `docs/cross-collab/TASK8/AUTH_MIGRATION_RUNBOOK.md`
+  - includes Stage 2 shadow rollout gates, Stage 3 cutover gates, rollback, and decommission checklist
+- Updated task coordination docs:
+  - `docs/cross-collab/TASK8/PLAN.md`
+  - `docs/cross-collab/TASK8/OTHER_PROJECTS.md`
+  - `docs/cross-collab/TASK8/STATUS.md`
+
+Validation evidence:
+- `pnpm -C apps/web run test -- tests/server-auth-adapter.test.ts` (pass; test suite run completed with 58 files / 223 tests)
+
+Continuation (same session, 2026-02-17) — auth observability endpoint + diagnostics counters:
+- Files:
+  - `apps/web/src/lib/server/auth.ts`
+  - `apps/web/src/app/api/admin/auth/status/route.ts`
+  - `apps/web/tests/server-auth-adapter.test.ts`
+  - `apps/web/tests/admin-auth-status-route.test.ts`
+- Changes:
+  - Added in-memory auth diagnostics counters in server auth adapter:
+    - shadow checks / failures / mismatch events
+    - mismatch field counts (`uid`, `email`, `name`)
+    - fallback success count
+  - Added `getAuthDiagnosticsSnapshot()` export with provider/shadow-mode metadata and allowlist size summary.
+  - Added admin-only diagnostics endpoint:
+    - `GET /api/admin/auth/status`
+    - returns diagnostics snapshot + caller identity summary.
+  - Added/extended tests for:
+    - diagnostics counter updates across fallback and shadow mismatch flows
+    - endpoint success and unauthorized paths.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/server-auth-adapter.test.ts tests/admin-auth-status-route.test.ts` (`7 passed`)
+  - `pnpm -C apps/web run lint` (pass; warnings only)
+
+Continuation (same session, 2026-02-17) — Stage 3 cutover readiness gating + dashboard signal:
+- Files:
+  - `apps/web/src/lib/server/auth-cutover.ts`
+  - `apps/web/src/app/api/admin/auth/status/route.ts`
+  - `apps/web/src/app/admin/dev-dashboard/page.tsx`
+  - `apps/web/tests/auth-cutover-readiness.test.ts`
+  - `apps/web/tests/admin-auth-status-route.test.ts`
+  - `apps/web/.env.example`
+  - `apps/web/DEPLOY.md`
+- Changes:
+  - Added `evaluateAuthCutoverReadiness(...)` with threshold-based gate logic:
+    - min shadow checks
+    - max shadow failures
+    - max shadow mismatch events
+  - Extended `/api/admin/auth/status` to return `cutoverReadiness` in addition to diagnostics and viewer metadata.
+  - Added auth migration readiness card to `/admin/dev-dashboard`:
+    - current provider + shadow mode
+    - observed counters vs thresholds
+    - blocking reasons when not ready
+  - Added new env/config knobs for cutover gating:
+    - `TRR_AUTH_CUTOVER_MIN_SHADOW_CHECKS` (default 50)
+    - `TRR_AUTH_CUTOVER_MAX_SHADOW_FAILURES` (default 0)
+    - `TRR_AUTH_CUTOVER_MAX_SHADOW_MISMATCH_EVENTS` (default 0)
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/auth-cutover-readiness.test.ts tests/admin-auth-status-route.test.ts tests/server-auth-adapter.test.ts` (`10 passed`)
+  - `pnpm -C apps/web run lint` (pass; warnings only)
+  - `pnpm -C apps/web exec next build --webpack` (pass)

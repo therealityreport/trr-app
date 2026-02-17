@@ -6,17 +6,64 @@ import { adminAuth } from "@/lib/firebaseAdmin";
 import { DEFAULT_ADMIN_DISPLAY_NAMES, DEFAULT_ADMIN_UIDS } from "@/lib/admin/constants";
 import { normalizeDisplayNameKey } from "@/lib/admin/display-names";
 
+export type AuthProvider = "firebase" | "supabase";
+export type AuthTokenClaims = {
+  uid: string;
+  sub?: string;
+  email?: string;
+  name?: string;
+  [key: string]: unknown;
+};
+
 export interface AuthenticatedUser {
   uid: string;
   email?: string;
-  token: DecodedIdToken;
+  provider: AuthProvider;
+  token: AuthTokenClaims;
 }
 
 type TokenKind = "id" | "session";
+type ShadowMismatchField = "uid" | "email" | "name";
+
+interface AuthDiagnosticsCounters {
+  shadowChecks: number;
+  shadowFailures: number;
+  shadowMismatchEvents: number;
+  shadowMismatchFieldCounts: Record<ShadowMismatchField, number>;
+  fallbackSuccesses: number;
+}
+
+export interface AuthDiagnosticsSnapshot {
+  provider: AuthProvider;
+  shadowMode: boolean;
+  allowlistSizes: {
+    emails: number;
+    uids: number;
+    displayNames: number;
+  };
+  counters: AuthDiagnosticsCounters;
+}
+
+const AUTH_PROVIDER: AuthProvider =
+  (process.env.TRR_AUTH_PROVIDER ?? "firebase").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "firebase";
+const AUTH_SHADOW_MODE = (process.env.TRR_AUTH_SHADOW_MODE ?? "false").toLowerCase() === "true";
 
 const USE_EMULATORS = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
 const HAS_SERVICE_ACCOUNT = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT) || USE_EMULATORS;
 const FIREBASE_WEB_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "";
+const authDiagnosticsCounters: AuthDiagnosticsCounters = {
+  shadowChecks: 0,
+  shadowFailures: 0,
+  shadowMismatchEvents: 0,
+  shadowMismatchFieldCounts: {
+    uid: 0,
+    email: 0,
+    name: 0,
+  },
+  fallbackSuccesses: 0,
+};
 
 function parseTokenFromRequest(request: NextRequest): { token: string; kind: TokenKind } | null {
   const authHeader = request.headers.get("authorization") ?? request.headers.get("Authorization");
@@ -30,7 +77,7 @@ function parseTokenFromRequest(request: NextRequest): { token: string; kind: Tok
   return null;
 }
 
-async function verifyToken(token: string, kind: TokenKind): Promise<DecodedIdToken | null> {
+async function verifyFirebaseToken(token: string, kind: TokenKind): Promise<AuthTokenClaims | null> {
   if (!token) return null;
   if (kind === "id" && !HAS_SERVICE_ACCOUNT) {
     const fallback = await verifyIdTokenWithoutAdmin(token);
@@ -38,9 +85,9 @@ async function verifyToken(token: string, kind: TokenKind): Promise<DecodedIdTok
   }
   try {
     if (kind === "session") {
-      return await adminAuth.verifySessionCookie(token, true);
+      return (await adminAuth.verifySessionCookie(token, true)) as AuthTokenClaims;
     }
-    return await adminAuth.verifyIdToken(token, true);
+    return (await adminAuth.verifyIdToken(token, true)) as AuthTokenClaims;
   } catch (error) {
     console.error("[auth] Failed to verify token", error);
     if (kind === "id") {
@@ -50,7 +97,47 @@ async function verifyToken(token: string, kind: TokenKind): Promise<DecodedIdTok
   }
 }
 
-async function verifyIdTokenWithoutAdmin(token: string): Promise<DecodedIdToken | null> {
+async function verifySupabaseToken(token: string): Promise<AuthTokenClaims | null> {
+  const supabaseUrl = process.env.TRR_CORE_SUPABASE_URL;
+  const supabaseServiceRoleKey =
+    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    return null;
+  }
+
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const client = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data, error } = await client.auth.getUser(token);
+    if (error || !data.user) {
+      return null;
+    }
+
+    const user = data.user;
+    const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
+    const displayName =
+      (typeof metadata.full_name === "string" && metadata.full_name.trim()) ||
+      (typeof metadata.name === "string" && metadata.name.trim()) ||
+      undefined;
+
+    return {
+      uid: user.id,
+      sub: user.id,
+      email: user.email ?? undefined,
+      name: displayName,
+      app_metadata: user.app_metadata ?? {},
+      user_metadata: metadata,
+      provider_identities: user.identities ?? [],
+    } as AuthTokenClaims;
+  } catch (error) {
+    console.error("[auth] Failed Supabase token verification", error);
+    return null;
+  }
+}
+
+async function verifyIdTokenWithoutAdmin(token: string): Promise<AuthTokenClaims | null> {
   if (!FIREBASE_WEB_API_KEY) return null;
   const payload = decodeJwtPayload(token);
   if (!payload) return null;
@@ -94,11 +181,104 @@ async function verifyIdTokenWithoutAdmin(token: string): Promise<DecodedIdToken 
     if (userInfo?.email || typeof payload.email === "string") {
       decoded.email = userInfo?.email ?? (payload.email as string);
     }
-    return decoded;
+    return decoded as AuthTokenClaims;
   } catch (error) {
     console.error("[auth] Failed fallback token verification", error);
     return null;
   }
+}
+
+async function verifyWithProvider(
+  provider: AuthProvider,
+  token: string,
+  kind: TokenKind,
+): Promise<AuthTokenClaims | null> {
+  if (provider === "supabase") {
+    return verifySupabaseToken(token);
+  }
+  return verifyFirebaseToken(token, kind);
+}
+
+function _normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
+function _summarizeClaims(claims: AuthTokenClaims): { uid: string; email: string | null; name: string | null } {
+  return {
+    uid: claims.uid,
+    email: _normalizeOptionalString(claims.email),
+    name: _normalizeOptionalString(claims.name),
+  };
+}
+
+function _shadowParityMismatches(
+  primaryClaims: AuthTokenClaims,
+  shadowClaims: AuthTokenClaims,
+): ShadowMismatchField[] {
+  const mismatches: ShadowMismatchField[] = [];
+  const primary = _summarizeClaims(primaryClaims);
+  const shadow = _summarizeClaims(shadowClaims);
+
+  if (primary.uid !== shadow.uid) {
+    mismatches.push("uid");
+  }
+  if (primary.email !== shadow.email) {
+    mismatches.push("email");
+  }
+  if (primary.name !== shadow.name) {
+    mismatches.push("name");
+  }
+  return mismatches;
+}
+
+async function verifyToken(
+  token: string,
+  kind: TokenKind,
+): Promise<{ provider: AuthProvider; claims: AuthTokenClaims } | null> {
+  if (!token) return null;
+
+  const primary = AUTH_PROVIDER;
+  const secondary: AuthProvider = primary === "firebase" ? "supabase" : "firebase";
+
+  const primaryClaims = await verifyWithProvider(primary, token, kind);
+  if (primaryClaims?.uid) {
+    if (AUTH_SHADOW_MODE) {
+      authDiagnosticsCounters.shadowChecks += 1;
+      const shadowClaims = await verifyWithProvider(secondary, token, kind);
+      if (!shadowClaims?.uid) {
+        authDiagnosticsCounters.shadowFailures += 1;
+        console.warn("[auth] Shadow verification failed", { primary, secondary, kind });
+      } else {
+        const mismatches = _shadowParityMismatches(primaryClaims, shadowClaims);
+        if (mismatches.length > 0) {
+          authDiagnosticsCounters.shadowMismatchEvents += 1;
+          for (const mismatch of mismatches) {
+            authDiagnosticsCounters.shadowMismatchFieldCounts[mismatch] += 1;
+          }
+          console.warn("[auth] Shadow verification mismatch", {
+            primary,
+            secondary,
+            kind,
+            mismatches,
+            primary_summary: _summarizeClaims(primaryClaims),
+            shadow_summary: _summarizeClaims(shadowClaims),
+          });
+        }
+      }
+    }
+    return { provider: primary, claims: primaryClaims };
+  }
+
+  const fallbackClaims = await verifyWithProvider(secondary, token, kind);
+  if (fallbackClaims?.uid) {
+    authDiagnosticsCounters.fallbackSuccesses += 1;
+    console.warn("[auth] Auth provider fallback succeeded", { primary, secondary, kind });
+    return { provider: secondary, claims: fallbackClaims };
+  }
+
+  return null;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -115,9 +295,14 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 export async function getUserFromRequest(request: NextRequest): Promise<AuthenticatedUser | null> {
   const parsed = parseTokenFromRequest(request);
   if (!parsed) return null;
-  const decoded = await verifyToken(parsed.token, parsed.kind);
-  if (!decoded?.uid) return null;
-  return { uid: decoded.uid, email: decoded.email, token: decoded };
+  const verified = await verifyToken(parsed.token, parsed.kind);
+  if (!verified?.claims?.uid) return null;
+  return {
+    uid: verified.claims.uid,
+    email: verified.claims.email,
+    provider: verified.provider,
+    token: verified.claims,
+  };
 }
 
 export async function requireUser(request: NextRequest): Promise<AuthenticatedUser> {
@@ -161,6 +346,29 @@ const allowedDisplayNameKeys = new Set<string>(
     .map((value) => normalizeDisplayNameKey(value))
     .filter((value): value is string => Boolean(value)),
 );
+
+export function getAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
+  return {
+    provider: AUTH_PROVIDER,
+    shadowMode: AUTH_SHADOW_MODE,
+    allowlistSizes: {
+      emails: allowedEmails.size,
+      uids: allowedUids.size,
+      displayNames: allowedDisplayNameKeys.size,
+    },
+    counters: {
+      shadowChecks: authDiagnosticsCounters.shadowChecks,
+      shadowFailures: authDiagnosticsCounters.shadowFailures,
+      shadowMismatchEvents: authDiagnosticsCounters.shadowMismatchEvents,
+      shadowMismatchFieldCounts: {
+        uid: authDiagnosticsCounters.shadowMismatchFieldCounts.uid,
+        email: authDiagnosticsCounters.shadowMismatchFieldCounts.email,
+        name: authDiagnosticsCounters.shadowMismatchFieldCounts.name,
+      },
+      fallbackSuccesses: authDiagnosticsCounters.fallbackSuccesses,
+    },
+  };
+}
 
 export async function requireAdmin(request: NextRequest): Promise<AuthenticatedUser> {
   const user = await requireUser(request);

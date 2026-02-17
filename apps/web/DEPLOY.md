@@ -7,7 +7,9 @@ Build
 - Install: `pnpm install`
 - Build: `pnpm run build`
 - Output: `.next`
-- Node: 22.x (recommended)
+- Node support: 20.x and 22.x
+- Local default: Node 20 (`TRR-APP/.nvmrc`)
+- Deploy recommendation: Node 22.x
 
 Environment Variables (Preview + Production)
 - `NEXT_PUBLIC_FIREBASE_API_KEY`
@@ -20,6 +22,11 @@ Environment Variables (Preview + Production)
 - `NEXT_PUBLIC_ENABLE_APPLE` (optional)
 - `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=false`
 - `FIREBASE_SERVICE_ACCOUNT` (full JSON)
+- `TRR_AUTH_PROVIDER` (`firebase` default; `supabase` for migration stages)
+- `TRR_AUTH_SHADOW_MODE` (`true` to run secondary-provider parity checks)
+- `TRR_AUTH_CUTOVER_MIN_SHADOW_CHECKS` (default `50`)
+- `TRR_AUTH_CUTOVER_MAX_SHADOW_FAILURES` (default `0`)
+- `TRR_AUTH_CUTOVER_MAX_SHADOW_MISMATCH_EVENTS` (default `0`)
 
 Firebase Console
 - Auth → enable Email/Password + Google (Apple optional)
