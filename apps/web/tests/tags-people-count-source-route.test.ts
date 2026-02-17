@@ -5,6 +5,7 @@ const {
   requireAdminMock,
   getTagsByPhotoIdsMock,
   upsertCastPhotoTagsMock,
+  setCastPhotoFaceBoxesMock,
   getMediaLinkByIdMock,
   ensureMediaLinksForPeopleMock,
   updateMediaLinksContextMock,
@@ -12,6 +13,7 @@ const {
   requireAdminMock: vi.fn(),
   getTagsByPhotoIdsMock: vi.fn(),
   upsertCastPhotoTagsMock: vi.fn(),
+  setCastPhotoFaceBoxesMock: vi.fn(),
   getMediaLinkByIdMock: vi.fn(),
   ensureMediaLinksForPeopleMock: vi.fn(),
   updateMediaLinksContextMock: vi.fn(),
@@ -24,6 +26,7 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/admin/cast-photo-tags-repository", () => ({
   getTagsByPhotoIds: getTagsByPhotoIdsMock,
   upsertCastPhotoTags: upsertCastPhotoTagsMock,
+  setCastPhotoFaceBoxes: setCastPhotoFaceBoxesMock,
 }));
 
 vi.mock("@/lib/server/trr-api/media-links-repository", () => ({
@@ -40,6 +43,7 @@ describe("tags route people_count_source semantics", () => {
     requireAdminMock.mockReset();
     getTagsByPhotoIdsMock.mockReset();
     upsertCastPhotoTagsMock.mockReset();
+    setCastPhotoFaceBoxesMock.mockReset();
     getMediaLinkByIdMock.mockReset();
     ensureMediaLinksForPeopleMock.mockReset();
     updateMediaLinksContextMock.mockReset();
@@ -132,5 +136,52 @@ describe("tags route people_count_source semantics", () => {
     );
     expect(payload.people_count).toBe(4);
     expect(payload.people_count_source).toBe("manual");
+  });
+
+  it("media-link update persists face_boxes in context payload", async () => {
+    getMediaLinkByIdMock.mockResolvedValue({
+      id: "link-1",
+      media_asset_id: "asset-1",
+      context: {
+        people_count: 2,
+        people_count_source: "manual",
+      },
+    });
+    ensureMediaLinksForPeopleMock.mockResolvedValue(undefined);
+    updateMediaLinksContextMock.mockResolvedValue(undefined);
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/media-links/link-1/tags", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        people: [{ id: "person-1", name: "Person One" }],
+        face_boxes: [
+          { index: 1, x: 0.1, y: 0.2, width: 0.3, height: 0.35, person_name: "Person One" },
+        ],
+      }),
+    });
+
+    const response = await putMediaLinkTags(request, {
+      params: Promise.resolve({ linkId: "link-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(updateMediaLinksContextMock).toHaveBeenCalledWith(
+      "asset-1",
+      expect.objectContaining({
+        face_boxes: expect.arrayContaining([
+          expect.objectContaining({
+            index: 1,
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.35,
+            person_name: "Person One",
+          }),
+        ]),
+      })
+    );
+    expect(payload.face_boxes).toHaveLength(1);
   });
 });

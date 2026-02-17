@@ -18,6 +18,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     await requireAdmin(request);
 
     const { personId } = await params;
+    const { searchParams } = new URL(request.url);
+    const showIdParam = searchParams.get("showId");
+    const showId = typeof showIdParam === "string" && showIdParam.trim().length > 0
+      ? showIdParam.trim()
+      : undefined;
 
     if (!personId) {
       return NextResponse.json(
@@ -26,7 +31,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const fandomData = await getFandomDataByPersonId(personId);
+    const fandomData = await getFandomDataByPersonId(personId, { showId });
 
     return NextResponse.json({
       fandomData,
