@@ -25,6 +25,23 @@ type SocialJob = {
   metadata?: Record<string, unknown>;
 };
 
+type SocialRun = {
+  id: string;
+  status: "queued" | "pending" | "retrying" | "running" | "completed" | "failed" | "cancelled";
+  source_scope?: string;
+  summary?: {
+    total_jobs?: number;
+    completed_jobs?: number;
+    failed_jobs?: number;
+    active_jobs?: number;
+    items_found_total?: number;
+  };
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+};
+
 type SocialTarget = {
   platform: string;
   accounts?: string[];
@@ -235,9 +252,22 @@ export default function SeasonSocialAnalyticsSection({
   const [weekFilter, setWeekFilter] = useState<number | "all">("all");
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [targets, setTargets] = useState<SocialTarget[]>([]);
+  const [runs, setRuns] = useState<SocialRun[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<SocialJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sectionErrors, setSectionErrors] = useState<{
+    analytics: string | null;
+    targets: string | null;
+    runs: string | null;
+    jobs: string | null;
+  }>({
+    analytics: null,
+    targets: null,
+    runs: null,
+    jobs: null,
+  });
   const [ingestMessage, setIngestMessage] = useState<string | null>(null);
   const [runningIngest, setRunningIngest] = useState(false);
   const [cancellingRun, setCancellingRun] = useState(false);
@@ -252,6 +282,7 @@ export default function SeasonSocialAnalyticsSection({
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [elapsedTick, setElapsedTick] = useState(0);
+  const [pollingStatus, setPollingStatus] = useState<"idle" | "retrying" | "recovered">("idle");
 
   const getAuthHeaders = useCallback(async () => {
     const token = await auth.currentUser?.getIdToken();
@@ -270,6 +301,14 @@ export default function SeasonSocialAnalyticsSection({
     return search.toString();
   }, [scope, platformFilter, weekFilter]);
 
+  const readErrorMessage = useCallback(async (response: Response, fallback: string): Promise<string> => {
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      detail?: string;
+    };
+    return data.error ?? data.detail ?? fallback;
+  }, []);
+
   const fetchAnalytics = useCallback(async () => {
     const headers = await getAuthHeaders();
     const response = await fetch(
@@ -277,63 +316,164 @@ export default function SeasonSocialAnalyticsSection({
       { headers, cache: "no-store" }
     );
     if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(data.error ?? "Failed to load social analytics");
+      throw new Error(await readErrorMessage(response, "Failed to load social analytics"));
     }
     const data = (await response.json()) as AnalyticsResponse;
     setAnalytics(data);
     setLastUpdated(new Date());
-  }, [getAuthHeaders, queryString, seasonNumber, showId]);
+    return data;
+  }, [getAuthHeaders, queryString, readErrorMessage, seasonNumber, showId]);
+
+  const fetchRuns = useCallback(async () => {
+    const headers = await getAuthHeaders();
+    const params = new URLSearchParams({ limit: "100" });
+    params.set("source_scope", scope);
+    const response = await fetch(
+      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/runs?${params.toString()}`,
+      { headers, cache: "no-store" },
+    );
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, "Failed to load social runs"));
+    }
+    const data = (await response.json()) as { runs?: SocialRun[] };
+    const nextRuns = data.runs ?? [];
+    setRuns(nextRuns);
+    return nextRuns;
+  }, [getAuthHeaders, readErrorMessage, scope, seasonNumber, showId]);
 
   const fetchTargets = useCallback(async () => {
     const headers = await getAuthHeaders();
     const response = await fetch(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/targets?source_scope=${scope}`,
-      { headers, cache: "no-store" }
+      { headers, cache: "no-store" },
     );
     if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(data.error ?? "Failed to load social targets");
+      throw new Error(await readErrorMessage(response, "Failed to load social targets"));
     }
     const data = (await response.json()) as { targets?: SocialTarget[] };
     setTargets(data.targets ?? []);
-  }, [getAuthHeaders, scope, seasonNumber, showId]);
+    return data.targets ?? [];
+  }, [getAuthHeaders, readErrorMessage, scope, seasonNumber, showId]);
 
   const fetchJobs = useCallback(async (runId?: string | null) => {
-    const headers = await getAuthHeaders();
-    const params = new URLSearchParams({ limit: "250" });
-    if (runId) {
-      params.set("run_id", runId);
+    if (!runId) {
+      setJobs([]);
+      return [] as SocialJob[];
     }
+    const headers = await getAuthHeaders();
+    const params = new URLSearchParams({ limit: "250", run_id: runId });
     const response = await fetch(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?${params.toString()}`,
-      { headers, cache: "no-store" }
+      { headers, cache: "no-store" },
     );
-    if (!response.ok) return;
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, "Failed to load social jobs"));
+    }
     const data = (await response.json()) as { jobs?: SocialJob[] };
-    setJobs(data.jobs ?? []);
-  }, [getAuthHeaders, seasonNumber, showId]);
+    const nextJobs = data.jobs ?? [];
+    setJobs(nextJobs);
+    return nextJobs;
+  }, [getAuthHeaders, readErrorMessage, seasonNumber, showId]);
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      await Promise.all([fetchAnalytics(), fetchTargets(), fetchJobs()]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load social dashboard");
-    } finally {
-      setLoading(false);
+    const nextSectionErrors = {
+      analytics: null as string | null,
+      targets: null as string | null,
+      runs: null as string | null,
+      jobs: null as string | null,
+    };
+
+    const [analyticsResult, targetsResult, runsResult] = await Promise.allSettled([
+      fetchAnalytics(),
+      fetchTargets(),
+      fetchRuns(),
+    ]);
+
+    if (analyticsResult.status === "rejected") {
+      nextSectionErrors.analytics =
+        analyticsResult.reason instanceof Error ? analyticsResult.reason.message : "Failed to load social analytics";
     }
-  }, [fetchAnalytics, fetchTargets, fetchJobs]);
+    if (targetsResult.status === "rejected") {
+      nextSectionErrors.targets =
+        targetsResult.reason instanceof Error ? targetsResult.reason.message : "Failed to load social targets";
+    }
+
+    let runIdToLoad = selectedRunId;
+    if (runsResult.status === "fulfilled") {
+      const loadedRuns = runsResult.value;
+      const activeRun = loadedRuns.find((run) =>
+        ["queued", "pending", "retrying", "running"].includes(run.status),
+      );
+      if (activeRun) {
+        setActiveRunId(activeRun.id);
+        if (!runIdToLoad) {
+          runIdToLoad = activeRun.id;
+        }
+      } else if (!runningIngest) {
+        setActiveRunId(null);
+      }
+
+      if (runIdToLoad && !loadedRuns.some((run) => run.id === runIdToLoad)) {
+        runIdToLoad = null;
+      }
+      if (runIdToLoad !== selectedRunId) {
+        setSelectedRunId(runIdToLoad);
+      }
+    } else {
+      nextSectionErrors.runs = runsResult.reason instanceof Error ? runsResult.reason.message : "Failed to load social runs";
+    }
+
+    try {
+      await fetchJobs(runIdToLoad);
+    } catch (jobsError) {
+      nextSectionErrors.jobs = jobsError instanceof Error ? jobsError.message : "Failed to load social jobs";
+    }
+
+    setSectionErrors(nextSectionErrors);
+    setLoading(false);
+  }, [fetchAnalytics, fetchJobs, fetchRuns, fetchTargets, runningIngest, selectedRunId]);
 
   useEffect(() => {
-    refreshAll();
+    void refreshAll();
   }, [refreshAll]);
 
+  useEffect(() => {
+    if (!selectedRunId) {
+      setJobs([]);
+      return;
+    }
+    void fetchJobs(selectedRunId)
+      .then(() => {
+        setSectionErrors((current) => ({ ...current, jobs: null }));
+      })
+      .catch((jobsError) => {
+        setSectionErrors((current) => ({
+          ...current,
+          jobs: jobsError instanceof Error ? jobsError.message : "Failed to load social jobs",
+        }));
+      });
+  }, [fetchJobs, selectedRunId]);
+
+  const refreshSelectedRunJobs = useCallback(async () => {
+    const runId = selectedRunId ?? activeRunId;
+    try {
+      await fetchJobs(runId);
+      setSectionErrors((current) => ({ ...current, jobs: null }));
+    } catch (jobsError) {
+      setSectionErrors((current) => ({
+        ...current,
+        jobs: jobsError instanceof Error ? jobsError.message : "Failed to load social jobs",
+      }));
+    }
+  }, [activeRunId, fetchJobs, selectedRunId]);
+
   const runScopedJobs = useMemo(() => {
-    if (!activeRunId) return jobs;
-    return jobs.filter((job) => job.run_id === activeRunId);
-  }, [activeRunId, jobs]);
+    if (!selectedRunId) return [];
+    return jobs.filter((job) => job.run_id === selectedRunId);
+  }, [jobs, selectedRunId]);
+
 
   const weeklyWindowLookup = useMemo(() => {
     const map = new Map<string, string>();
@@ -360,7 +500,7 @@ export default function SeasonSocialAnalyticsSection({
     const fallbackWeekLabel = formatWeekScopeLabel(fallbackWeek);
     const fallbackPlatformLabel = formatPlatformScopeLabel(fallbackPlatform);
 
-    if (!activeRunId || runScopedJobs.length === 0) {
+    if (!selectedRunId || runScopedJobs.length === 0) {
       return {
         weekLabel: fallbackWeekLabel,
         platformLabel: fallbackPlatformLabel,
@@ -406,10 +546,10 @@ export default function SeasonSocialAnalyticsSection({
       weekLabel,
       platformLabel,
     };
-  }, [activeRunId, activeRunRequest, platformFilter, runScopedJobs, weekFilter, weeklyWindowLookup]);
+  }, [activeRunRequest, platformFilter, runScopedJobs, selectedRunId, weekFilter, weeklyWindowLookup]);
 
   const liveRunLogs = useMemo(() => {
-    if (!activeRunId) return [];
+    if (!selectedRunId) return [];
     return [...runScopedJobs]
       .map((job) => {
         const stage =
@@ -437,13 +577,12 @@ export default function SeasonSocialAnalyticsSection({
       })
       .sort((a, b) => b.timestampMs - a.timestampMs)
       .slice(0, 8);
-  }, [activeRunId, runScopedJobs]);
+  }, [runScopedJobs, selectedRunId]);
 
   const hasRunningJobs = useMemo(() => {
     const runningStatuses = new Set(["queued", "pending", "retrying", "running"]);
-    const source = activeRunId ? runScopedJobs : jobs;
-    return source.some((job) => runningStatuses.has(job.status));
-  }, [activeRunId, runScopedJobs, jobs]);
+    return runScopedJobs.some((job) => runningStatuses.has(job.status));
+  }, [runScopedJobs]);
 
   useEffect(() => {
     if (!activeRunId) {
@@ -488,6 +627,7 @@ export default function SeasonSocialAnalyticsSection({
     if (failed.length > 0) {
       msg += ` · ${failed.length} failed`;
     }
+    const completedRunId = activeRunId;
     setIngestMessage(msg);
     setRunningIngest(false);
     setIngestingWeek(null);
@@ -498,7 +638,9 @@ export default function SeasonSocialAnalyticsSection({
     setIngestStartedAt(null);
     // Refresh analytics to reflect new data
     fetchAnalytics().catch(() => {});
-  }, [activeRunId, hasObservedRunJobs, noRunningJobsCount, runningIngest, runScopedJobs, fetchAnalytics, ingestStartedAt]);
+    fetchRuns().catch(() => {});
+    fetchJobs(completedRunId).catch(() => {});
+  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, hasObservedRunJobs, ingestStartedAt, noRunningJobsCount, runningIngest, runScopedJobs]);
 
   // Poll for job updates when there are running jobs or an active ingest
   useEffect(() => {
@@ -508,15 +650,25 @@ export default function SeasonSocialAnalyticsSection({
     const timer = window.setInterval(async () => {
       try {
         await fetchJobs(activeRunId);
+        await fetchRuns();
         if (!runningIngest) {
           await fetchAnalytics();
         }
+        if (pollingStatus === "retrying") {
+          setPollingStatus("recovered");
+        }
       } catch {
-        // Polling errors are transient; silently retry on next interval
+        setPollingStatus("retrying");
       }
     }, interval);
     return () => window.clearInterval(timer);
-  }, [activeRunId, fetchAnalytics, fetchJobs, hasRunningJobs, runningIngest]);
+  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, hasRunningJobs, pollingStatus, runningIngest]);
+
+  useEffect(() => {
+    if (pollingStatus !== "recovered") return;
+    const timer = window.setTimeout(() => setPollingStatus("idle"), 3000);
+    return () => window.clearTimeout(timer);
+  }, [pollingStatus]);
 
   // Tick elapsed timer every second for smooth display
   useEffect(() => {
@@ -554,23 +706,26 @@ export default function SeasonSocialAnalyticsSection({
       setIngestingWeek(null);
       setIngestingPlatform(null);
       setActiveRunRequest(null);
+      setSelectedRunId(activeRunId);
       setActiveRunId(null);
       setNoRunningJobsCount(0);
       setIngestStartedAt(null);
       await fetchJobs(activeRunId);
       await fetchAnalytics();
+      await fetchRuns();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to cancel run");
     } finally {
       setCancellingRun(false);
     }
-  }, [activeRunId, fetchAnalytics, fetchJobs, getAuthHeaders, seasonNumber, showId]);
+  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, getAuthHeaders, seasonNumber, showId]);
 
   const runIngest = useCallback(async (override?: { week?: number; platform?: "all" | Platform }) => {
     setRunningIngest(true);
     setError(null);
     setIngestMessage(null);
     setJobs([]);
+    setSelectedRunId(null);
     setActiveRunId(null);
     setHasObservedRunJobs(false);
     setNoRunningJobsCount(0);
@@ -655,6 +810,7 @@ export default function SeasonSocialAnalyticsSection({
         throw new Error(result.message ?? "Ingest started without a run id");
       }
       setActiveRunId(runId);
+      setSelectedRunId(runId);
 
       // Backend returns queued/staged run metadata immediately.
       const stages = (result.stages ?? []).join(" -> ") || "posts -> comments";
@@ -663,6 +819,7 @@ export default function SeasonSocialAnalyticsSection({
 
       // Immediately fetch jobs to pick up the newly created running jobs
       await fetchJobs(runId);
+      await fetchRuns();
 
       // The hasRunningJobs polling effect will handle ongoing updates.
       // We keep runningIngest=true until polling detects no more running jobs.
@@ -674,11 +831,12 @@ export default function SeasonSocialAnalyticsSection({
       setIngestingWeek(null);
       setIngestingPlatform(null);
       setActiveRunRequest(null);
+      setSelectedRunId(null);
       setActiveRunId(null);
       setNoRunningJobsCount(0);
       setIngestStartedAt(null);
     }
-  }, [analytics, fetchJobs, getAuthHeaders, platformFilter, scope, seasonNumber, showId, weekFilter]);
+  }, [analytics, fetchJobs, fetchRuns, getAuthHeaders, platformFilter, scope, seasonNumber, showId, weekFilter]);
 
   const downloadExport = useCallback(
     async (format: "csv" | "pdf") => {
@@ -715,6 +873,21 @@ export default function SeasonSocialAnalyticsSection({
   );
 
   const weeklyPlatformRows = useMemo(() => analytics?.weekly_platform_posts ?? [], [analytics]);
+  const sectionErrorItems = useMemo(() => {
+    const labels: Record<keyof typeof sectionErrors, string> = {
+      analytics: "Analytics",
+      targets: "Targets",
+      runs: "Runs",
+      jobs: "Jobs",
+    };
+    return (Object.keys(sectionErrors) as Array<keyof typeof sectionErrors>)
+      .filter((key) => Boolean(sectionErrors[key]))
+      .map((key) => ({
+        key,
+        label: labels[key],
+        message: sectionErrors[key] as string,
+      }));
+  }, [sectionErrors]);
   const weeklyPlatformEngagementRows = useMemo(
     () => analytics?.weekly_platform_engagement ?? [],
     [analytics]
@@ -746,7 +919,7 @@ export default function SeasonSocialAnalyticsSection({
               Bravo-owned social analytics with viewer sentiment and weekly rollups.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-3">
             <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
               Scope
               <select
@@ -770,6 +943,26 @@ export default function SeasonSocialAnalyticsSection({
                 {(analytics?.weekly ?? []).map((week) => (
                   <option key={week.week_index} value={week.week_index}>
                     {week.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+              Run
+              <select
+                value={selectedRunId ?? ""}
+                onChange={(event) => {
+                  const nextRunId = event.target.value || null;
+                  setSelectedRunId(nextRunId);
+                  setSectionErrors((current) => ({ ...current, jobs: null }));
+                }}
+                disabled={runningIngest}
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">No Run Selected</option>
+                {runs.map((run) => (
+                  <option key={run.id} value={run.id}>
+                    {`${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
                   </option>
                 ))}
               </select>
@@ -819,10 +1012,29 @@ export default function SeasonSocialAnalyticsSection({
         </div>
       )}
 
+      {pollingStatus === "retrying" && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Live updates temporarily unavailable. Retrying...
+        </div>
+      )}
+      {pollingStatus === "recovered" && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          Live updates connection restored.
+        </div>
+      )}
+
+      {sectionErrorItems.length > 0 && (
+        <div className="space-y-2">
+          {sectionErrorItems.map((item) => (
+            <div key={item.key} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              <span className="font-semibold">{item.label}:</span> {item.message}
+            </div>
+          ))}
+        </div>
+      )}
+
       {ingestMessage && !error && (() => {
-        const activeJobs = runScopedJobs.filter((j) =>
-          activeRunId ? j.run_id === activeRunId : ["queued", "pending", "retrying", "running"].includes(j.status)
-        );
+        const activeJobs = runScopedJobs;
         const totalJobs = activeJobs.length;
         const completedJobs = activeJobs.filter((j) => j.status === "completed");
         const failedJobs = activeJobs.filter((j) => j.status === "failed");
@@ -1228,14 +1440,14 @@ export default function SeasonSocialAnalyticsSection({
                 <span className="font-semibold text-zinc-700">
                   {activeRunScope.platformLabel}
                 </span>
-                {activeRunId && (
+                {selectedRunId && (
                   <>
                     {" · "}
-                    <span className="font-semibold text-zinc-700">Run {activeRunId.slice(0, 8)}</span>
+                    <span className="font-semibold text-zinc-700">Run {selectedRunId.slice(0, 8)}</span>
                   </>
                 )}
               </p>
-              {activeRunId && !runningIngest && liveRunLogs.length > 0 && (
+              {selectedRunId && !runningIngest && liveRunLogs.length > 0 && (
                 <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
                   <p className="font-semibold text-zinc-700">Last Run Log</p>
                   <div className="mt-1 space-y-0.5">
@@ -1475,7 +1687,7 @@ export default function SeasonSocialAnalyticsSection({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  void fetchJobs(activeRunId);
+                  void refreshSelectedRunJobs();
                 }}
                 className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
@@ -1552,7 +1764,12 @@ export default function SeasonSocialAnalyticsSection({
                   );
                 });
               })()}
-              {runScopedJobs.length === 0 && <p className="text-sm text-zinc-500">No jobs found for this season. Run an ingest to get started.</p>}
+              {!selectedRunId && (
+                <p className="text-sm text-zinc-500">No run selected. Pick a run above or start a new ingest.</p>
+              )}
+              {selectedRunId && runScopedJobs.length === 0 && (
+                <p className="text-sm text-zinc-500">No jobs found for the selected run yet.</p>
+              )}
             </div>
             </>)}
           </section>
