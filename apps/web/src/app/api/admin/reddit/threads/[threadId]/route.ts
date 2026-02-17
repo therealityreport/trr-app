@@ -108,6 +108,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     // Enforce show consistency: if reassigning community, verify it belongs to the same show
     const newCommunityId = typeof body.community_id === "string" ? body.community_id : undefined;
+    let syncedShowId: string | undefined;
+    let syncedShowName: string | undefined;
     if (newCommunityId) {
       const existingThread = await getRedditThreadById(threadId);
       if (!existingThread) {
@@ -123,10 +125,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           { status: 400 },
         );
       }
+      syncedShowId = targetCommunity.trr_show_id;
+      syncedShowName = targetCommunity.trr_show_name;
     }
 
     const thread = await updateRedditThread(authContext, threadId, {
       communityId: newCommunityId,
+      trrShowId: syncedShowId,
+      trrShowName: syncedShowName,
       trrSeasonId:
         body.trr_season_id === null
           ? null
