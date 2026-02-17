@@ -6,6 +6,12 @@ import {
   getTagsByPhotoIds,
 } from "@/lib/server/admin/cast-photo-tags-repository";
 import { dedupePhotosByCanonicalKeysPreferMediaLinks } from "@/lib/server/trr-api/person-photo-utils";
+import {
+  castFandomRowMatchesExpectedPerson,
+  isFandomPhotoOwnedByExpectedPerson,
+  resolveParentRelationLabel,
+  resolveSiblingRelationLabel,
+} from "@/lib/server/trr-api/fandom-ownership";
 
 // ============================================================================
 // Types
@@ -1244,6 +1250,131 @@ const isLikelyImage = (
   return true;
 };
 
+type DeducedFamilyPersonRow = {
+  person_id: string;
+  full_name: string | null;
+  fandom_gender: string | null;
+};
+
+const getDeducedFamilyRelationshipsByPersonId = async (
+  personId: string,
+  showId?: string | null
+): Promise<Record<string, string>> => {
+  const showScopeClause = showId ? " AND sra.show_id = $2::uuid" : "";
+  const parentNameArgs: unknown[] = showId ? [personId, showId] : [personId];
+  const parentNamesResult = await pgQuery<{ relationship_from: string | null }>(
+    `SELECT DISTINCT NULLIF(BTRIM(COALESCE(sra.metadata->>'relationship_from', '')), '') AS relationship_from
+     FROM core.show_cast_role_assignments sra
+     JOIN core.show_role_catalog rc ON rc.id = sra.role_id
+     WHERE sra.person_id = $1::uuid
+       ${showScopeClause}
+       AND LOWER(rc.name) = 'kid'`,
+    parentNameArgs
+  );
+  const parentNames = parentNamesResult.rows
+    .map((row) => (row.relationship_from ?? "").trim())
+    .filter(Boolean);
+  if (parentNames.length === 0) return {};
+
+  const dedupedParentNames = [...new Set(parentNames)];
+  const parentPeopleArgs: unknown[] = showId ? [showId, dedupedParentNames] : [dedupedParentNames];
+  const parentPeopleSql = showId
+    ? `SELECT DISTINCT p.id::text AS person_id,
+         p.full_name,
+         cf.gender AS fandom_gender
+       FROM UNNEST($2::text[]) AS rel(name)
+       JOIN core.v_show_cast sc
+         ON sc.show_id = $1::uuid
+       JOIN core.people p
+         ON p.id = sc.person_id
+        AND LOWER(p.full_name) = LOWER(rel.name)
+       LEFT JOIN core.cast_fandom cf
+         ON cf.person_id = p.id
+        AND cf.source = 'fandom'`
+    : `SELECT DISTINCT p.id::text AS person_id,
+         p.full_name,
+         cf.gender AS fandom_gender
+       FROM UNNEST($1::text[]) AS rel(name)
+       JOIN core.people p
+         ON LOWER(p.full_name) = LOWER(rel.name)
+       LEFT JOIN core.cast_fandom cf
+         ON cf.person_id = p.id
+        AND cf.source = 'fandom'`;
+  const parentPeopleResult = await pgQuery<DeducedFamilyPersonRow>(parentPeopleSql, parentPeopleArgs);
+  const parents = parentPeopleResult.rows.filter((row) => row.full_name);
+  if (parents.length === 0) return {};
+
+  const parentIds = parents.map((row) => row.person_id);
+  const parentRoleArgs: unknown[] = showId ? [parentIds, showId] : [parentIds];
+  const parentRoleScope = showId ? " AND sra.show_id = $2::uuid" : "";
+  const parentRolesResult = await pgQuery<{ person_id: string; role_name: string | null }>(
+    `SELECT sra.person_id::text AS person_id,
+            LOWER(rc.name) AS role_name
+     FROM core.show_cast_role_assignments sra
+     JOIN core.show_role_catalog rc ON rc.id = sra.role_id
+     WHERE sra.person_id = ANY($1::uuid[])
+       ${parentRoleScope}`,
+    parentRoleArgs
+  );
+  const spouseLikeRoles = new Set([
+    "husband",
+    "ex-husband",
+    "boyfriend",
+    "ex-boyfriend",
+    "fiance",
+    "ex-fiance",
+  ]);
+  const rolesByParent = new Map<string, Set<string>>();
+  for (const row of parentRolesResult.rows) {
+    if (!row.person_id || !row.role_name) continue;
+    const existing = rolesByParent.get(row.person_id) ?? new Set<string>();
+    existing.add(row.role_name);
+    rolesByParent.set(row.person_id, existing);
+  }
+
+  const family: Record<string, string> = {};
+  for (const parent of parents) {
+    const parentName = parent.full_name?.trim();
+    if (!parentName || family[parentName]) continue;
+    const parentRoles = rolesByParent.get(parent.person_id) ?? new Set<string>();
+    const hasSpouseLikeRole = Array.from(parentRoles).some((roleName) =>
+      spouseLikeRoles.has(roleName)
+    );
+    family[parentName] = resolveParentRelationLabel({
+      gender: parent.fandom_gender,
+      hasSpouseLikeRole,
+      parentCount: parents.length,
+    });
+  }
+
+  const siblingArgs: unknown[] = showId ? [personId, dedupedParentNames, showId] : [personId, dedupedParentNames];
+  const siblingScope = showId ? " AND sra.show_id = $3::uuid" : "";
+  const siblingsResult = await pgQuery<DeducedFamilyPersonRow>(
+    `SELECT DISTINCT p.id::text AS person_id,
+            p.full_name,
+            cf.gender AS fandom_gender
+     FROM core.show_cast_role_assignments sra
+     JOIN core.show_role_catalog rc ON rc.id = sra.role_id
+     JOIN core.people p ON p.id = sra.person_id
+     LEFT JOIN core.cast_fandom cf
+       ON cf.person_id = p.id
+      AND cf.source = 'fandom'
+     WHERE sra.person_id <> $1::uuid
+       AND LOWER(rc.name) = 'kid'
+       ${siblingScope}
+       AND NULLIF(BTRIM(COALESCE(sra.metadata->>'relationship_from', '')), '') = ANY($2::text[])`,
+    siblingArgs
+  );
+
+  for (const sibling of siblingsResult.rows) {
+    const siblingName = sibling.full_name?.trim();
+    if (!siblingName || family[siblingName]) continue;
+    family[siblingName] = resolveSiblingRelationLabel(sibling.fandom_gender);
+  }
+
+  return family;
+};
+
 export interface TrrPersonPhoto {
   id: string;
   person_id: string;
@@ -1272,6 +1403,7 @@ export interface TrrPersonPhoto {
   people_ids: string[] | null;
   people_count?: number | null;
   people_count_source?: "auto" | "manual" | null;
+  face_boxes?: FaceBoxTag[] | null;
   ingest_status?: string | null;
   title_names: string[] | null;
   metadata: Record<string, unknown> | null;
@@ -1286,6 +1418,19 @@ export interface TrrPersonPhoto {
   thumbnail_focus_y: number | null;
   thumbnail_zoom: number | null;
   thumbnail_crop_mode: "manual" | "auto" | null;
+}
+
+export interface FaceBoxTag {
+  index: number;
+  kind: "face";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence?: number | null;
+  person_id?: string;
+  person_name?: string;
+  label?: string;
 }
 
 export interface TrrPersonCredit {
@@ -1406,6 +1551,64 @@ const toThumbnailCropFields = (value: unknown): ThumbnailCropFields => {
     thumbnail_zoom: parsed.zoom,
     thumbnail_crop_mode: parsed.mode,
   };
+};
+
+const clampFaceCoord = (value: number): number => Math.min(1, Math.max(0, value));
+
+const toFaceBoxes = (value: unknown): FaceBoxTag[] | null => {
+  if (!Array.isArray(value)) return null;
+  const boxes: FaceBoxTag[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? clampFaceCoord(candidate.x) : null;
+    const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? clampFaceCoord(candidate.y) : null;
+    const width =
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? clampFaceCoord(candidate.width)
+        : null;
+    const height =
+      typeof candidate.height === "number" && Number.isFinite(candidate.height)
+        ? clampFaceCoord(candidate.height)
+        : null;
+    if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+      continue;
+    }
+    const index =
+      typeof candidate.index === "number" && Number.isFinite(candidate.index)
+        ? Math.max(1, Math.floor(candidate.index))
+        : boxes.length + 1;
+    const confidence =
+      typeof candidate.confidence === "number" && Number.isFinite(candidate.confidence)
+        ? clampFaceCoord(candidate.confidence)
+        : null;
+    const personId =
+      typeof candidate.person_id === "string" && candidate.person_id.trim().length > 0
+        ? candidate.person_id.trim()
+        : undefined;
+    const personName =
+      typeof candidate.person_name === "string" && candidate.person_name.trim().length > 0
+        ? candidate.person_name.trim()
+        : undefined;
+    const label =
+      typeof candidate.label === "string" && candidate.label.trim().length > 0
+        ? candidate.label.trim()
+        : undefined;
+
+    boxes.push({
+      index,
+      kind: "face",
+      x,
+      y,
+      width,
+      height,
+      ...(confidence !== null ? { confidence } : {}),
+      ...(personId ? { person_id: personId } : {}),
+      ...(personName ? { person_name: personName } : {}),
+      ...(label ? { label } : {}),
+    });
+  }
+  return boxes;
 };
 
 type PersonPhotoVariantUrls = Pick<
@@ -1718,6 +1921,7 @@ export async function getPhotosByPersonId(
     const mdPeopleCountSourceRaw = md.people_count_source;
     const mdPeopleCountSource =
       typeof mdPeopleCountSourceRaw === "string" ? mdPeopleCountSourceRaw : null;
+    const faceBoxes = toFaceBoxes(md.face_boxes);
     const thumbnailCropFields = toThumbnailCropFields(md.thumbnail_crop);
     const variantUrls = resolvePersonPhotoVariantUrls(
       normalizedFandom.metadata,
@@ -1731,6 +1935,7 @@ export async function getPhotosByPersonId(
       people_ids: null,
       people_count: mdPeopleCount,
       people_count_source: mdPeopleCountSource as "auto" | "manual" | null,
+      face_boxes: faceBoxes,
       ingest_status: null,
       origin: "cast_photos" as const,
       link_id: null,
@@ -1742,7 +1947,15 @@ export async function getPhotosByPersonId(
   });
 
   const castPhotosFiltered = castPhotos.filter((photo) =>
-    isLikelyImage(photo.hosted_content_type, photo.hosted_url)
+    isLikelyImage(photo.hosted_content_type, photo.hosted_url) &&
+    isFandomPhotoOwnedByExpectedPerson({
+      source: photo.source,
+      sourcePageUrl: photo.source_page_url,
+      sourceUrl: photo.url,
+      metadata: photo.metadata,
+      peopleNames: photo.people_names,
+      expectedPersonName: fullName,
+    })
   );
 
   const tagRows = await getTagsByPhotoIds(
@@ -1835,6 +2048,9 @@ export async function getPhotosByPersonId(
           typeof (context as { people_count_source?: unknown } | null)?.people_count_source === "string"
             ? ((context as { people_count_source: string }).people_count_source as "auto" | "manual")
             : null;
+        const contextFaceBoxes = toFaceBoxes(
+          (context as { face_boxes?: unknown } | null)?.face_boxes
+        );
         const metadataPeopleNames = Array.isArray((row.metadata as { people_names?: unknown } | null)?.people_names)
           ? ((row.metadata as { people_names: unknown }).people_names as string[])
           : null;
@@ -1875,6 +2091,13 @@ export async function getPhotosByPersonId(
           normalizedFandom.metadata,
           row.hosted_url,
         );
+        const sourcePageUrl =
+          getMetadataString(normalizedFandom.metadata, "source_page_url") ??
+          getMetadataString(normalizedFandom.metadata, "sourcePageUrl") ??
+          null;
+        const metadataFaceBoxes = toFaceBoxes(
+          (normalizedFandom.metadata as { face_boxes?: unknown } | null)?.face_boxes
+        );
 
         return {
           id: row.link_id,
@@ -1891,10 +2114,12 @@ export async function getPhotosByPersonId(
           context_section: (context as { context_section?: string | null } | null)?.context_section ?? null,
           context_type: (context as { context_type?: string | null } | null)?.context_type ?? null,
           season: (context as { season?: number | null } | null)?.season ?? null,
+          source_page_url: sourcePageUrl,
           people_names: peopleNames,
           people_ids: contextPeopleIds,
           people_count: contextPeopleCount,
           people_count_source: contextPeopleCountSource,
+          face_boxes: contextFaceBoxes ?? metadataFaceBoxes,
           ingest_status: row.ingest_status ?? null,
           title_names: null,
           metadata: normalizedFandom.metadata,
@@ -1915,7 +2140,15 @@ export async function getPhotosByPersonId(
 
   if (mediaPhotos.length > 0) {
     mediaPhotos = mediaPhotos.filter((photo) =>
-      isLikelyImage(photo.hosted_content_type, photo.hosted_url)
+      isLikelyImage(photo.hosted_content_type, photo.hosted_url) &&
+      isFandomPhotoOwnedByExpectedPerson({
+        source: photo.source,
+        sourcePageUrl: photo.source_page_url,
+        sourceUrl: photo.url,
+        metadata: photo.metadata,
+        peopleNames: photo.people_names,
+        expectedPersonName: fullName,
+      })
     );
   }
 
@@ -2399,6 +2632,7 @@ export interface SeasonAsset {
   // Where the row came from (used for admin actions like archive/star).
   origin_table?: "show_images" | "season_images" | "episode_images" | "cast_photos" | "media_assets";
   source: string;
+  source_url?: string | null;
   kind: string;
   hosted_url: string;
   original_url?: string;
@@ -2708,6 +2942,7 @@ export async function getAssetsByShowSeason(
           type: "season",
           origin_table: "media_assets",
           source: normalizedScrape,
+          source_url: row.source_url ?? null,
           kind: row.link_kind ?? "other",
           hosted_url: hostedUrl,
           ...resolveSeasonAssetVariantUrls(mergedMetadata, hostedUrl),
@@ -2848,6 +3083,7 @@ export async function getAssetsByShowSeason(
         id: string;
         person_id: string;
         source: string;
+        url: string | null;
         hosted_url: string | null;
         hosted_content_type: string | null;
         width: number | null;
@@ -2867,6 +3103,7 @@ export async function getAssetsByShowSeason(
            id,
            person_id,
            source,
+           url,
            hosted_url,
            hosted_content_type,
            width,
@@ -2919,6 +3156,7 @@ export async function getAssetsByShowSeason(
           type: "cast",
           origin_table: "cast_photos",
           source: photo.source,
+          source_url: photo.url ?? null,
           kind: "profile",
           hosted_url: photo.hosted_url,
           ...resolveSeasonAssetVariantUrls(photo.metadata, photo.hosted_url),
@@ -3072,6 +3310,7 @@ export async function getAssetsByShowId(
         type: "show",
         origin_table: "media_assets",
         source: normalizedScrape,
+        source_url: row.source_url ?? null,
         kind: row.link_kind ?? "other",
         hosted_url: hostedUrl,
         ...resolveSeasonAssetVariantUrls(mergedMetadata, hostedUrl),
@@ -3161,54 +3400,9 @@ export async function getAssetsByShowId(
  * Get Fandom/Wikia data for a person by their person_id.
  */
 export async function getFandomDataByPersonId(
-  personId: string
+  personId: string,
+  options?: { showId?: string | null }
 ): Promise<TrrCastFandom[]> {
-  const normalizeNameForMatch = (value: string | null | undefined): string => {
-    if (!value) return "";
-    const noParen = value.replace(/\(.*?\)/g, " ");
-    return noParen
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/&/g, " and ")
-      .replace(/[^a-zA-Z0-9]+/g, " ")
-      .trim()
-      .toLowerCase();
-  };
-  const namesMatch = (
-    expected: string | null | undefined,
-    candidate: string | null | undefined
-  ): boolean => {
-    const expectedNorm = normalizeNameForMatch(expected);
-    const candidateNorm = normalizeNameForMatch(candidate);
-    if (!expectedNorm || !candidateNorm) return false;
-    if (expectedNorm === candidateNorm) return true;
-    if (expectedNorm.includes(candidateNorm) || candidateNorm.includes(expectedNorm)) return true;
-    const expectedTokens = expectedNorm.split(" ").filter(Boolean);
-    const candidateTokens = candidateNorm.split(" ").filter(Boolean);
-    if (expectedTokens.length === 0 || candidateTokens.length === 0) return false;
-    if (expectedTokens[expectedTokens.length - 1] === candidateTokens[candidateTokens.length - 1]) {
-      return true;
-    }
-    return expectedTokens.some((token) => candidateTokens.includes(token));
-  };
-  const nameFromFandomUrl = (url: string | null | undefined): string | null => {
-    if (!url) return null;
-    try {
-      const parsed = new URL(url);
-      const idx = parsed.pathname.indexOf("/wiki/");
-      if (idx === -1) return null;
-      let slug = parsed.pathname.slice(idx + "/wiki/".length);
-      if (slug.includes("/")) slug = slug.split("/")[0];
-      slug = decodeURIComponent(slug).replace(/_/g, " ").trim();
-      if (slug.toLowerCase().endsWith(" gallery")) {
-        slug = slug.slice(0, -" gallery".length).trim();
-      }
-      return slug || null;
-    } catch {
-      return null;
-    }
-  };
-
   const personResult = await pgQuery<{ full_name: string | null }>(
     `SELECT full_name
      FROM core.people
@@ -3228,9 +3422,45 @@ export async function getFandomDataByPersonId(
   if (!expectedPersonName) return result.rows;
 
   const filtered = result.rows.filter((row) =>
-    namesMatch(expectedPersonName, row.full_name) ||
-    namesMatch(expectedPersonName, row.page_title) ||
-    namesMatch(expectedPersonName, nameFromFandomUrl(row.source_url))
+    castFandomRowMatchesExpectedPerson(expectedPersonName, row)
   );
-  return filtered;
+  if (filtered.length > 0) return filtered;
+
+  const deducedFamily = await getDeducedFamilyRelationshipsByPersonId(
+    personId,
+    options?.showId ?? null
+  );
+  if (Object.keys(deducedFamily).length === 0) return [];
+
+  const nowIso = new Date().toISOString();
+  return [
+    {
+      id: `deduced-${personId}`,
+      person_id: personId,
+      source: "deduced_relationships",
+      source_url: "",
+      page_title: expectedPersonName,
+      scraped_at: nowIso,
+      full_name: expectedPersonName,
+      birthdate: null,
+      birthdate_display: null,
+      gender: null,
+      resides_in: null,
+      hair_color: null,
+      eye_color: null,
+      height_display: null,
+      weight_display: null,
+      romances: null,
+      family: deducedFamily,
+      friends: null,
+      enemies: null,
+      installment: null,
+      installment_url: null,
+      main_seasons_display: null,
+      summary: null,
+      taglines: null,
+      reunion_seating: null,
+      trivia: null,
+    },
+  ];
 }

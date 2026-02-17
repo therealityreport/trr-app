@@ -13,4 +13,11 @@ describe("cdn font resolver", () => {
     expect(resolveCloudfrontCdnFont("GeoSlab703_Md_BT")?.name).toBe("Geometric Slabserif 703");
     expect(resolveCloudfrontCdnFont("StaffordSerialExtraBoldItalic-930108999.otf")?.name).toBe("Stafford Serial");
   });
+
+  it("resolves figma-exported font tokens to canonical families", () => {
+    expect(resolveCloudfrontCdnFont("Gloucester_MT_Std:Bold")?.name).toBe("Gloucester");
+    expect(resolveCloudfrontCdnFont("GloucesterOldStyle-5735713.ttf")?.name).toBe("Gloucester");
+    expect(resolveCloudfrontCdnFont("Rude_Slab:Cond_XBd")?.name).toBe("Rude Slab Condensed");
+    expect(resolveCloudfrontCdnFont("Plymouth_Serial:Medium")?.name).toBe("Plymouth Serial");
+  });
 });

@@ -168,12 +168,12 @@ export const UI_TEMPLATES: UiTemplate[] = [
     usesRows: true,
   },
   {
-    uiVariant: "three-choice-slider",
-    label: "3-choice matrix",
-    description: "Matrix: rows are subjects (config.rows), columns are the choices (options).",
+    uiVariant: "cast-decision-card",
+    label: "Cast decision card",
+    description: "Single-cast decision cards (Keep/Fire/Demote, Bring Back/Keep Gone).",
     questionType: "likert",
     defaultConfig: {
-      uiVariant: "three-choice-slider",
+      uiVariant: "cast-decision-card",
       choices: [
         { value: "keep", label: "Keep" },
         { value: "demote", label: "Demote" },
@@ -208,6 +208,7 @@ export function getQuestionUiVariant(question: SurveyQuestion): UiVariant {
 export function uiVariantLabel(uiVariant: UiVariant): string {
   const template = getUiTemplate(uiVariant);
   if (template) return template.label;
+  if (uiVariant === "three-choice-slider") return "Cast decision card";
   // Fallback for any variants not in the picker yet.
   return uiVariant;
 }

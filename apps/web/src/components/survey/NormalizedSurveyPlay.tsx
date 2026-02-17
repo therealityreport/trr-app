@@ -265,6 +265,8 @@ export default function NormalizedSurveyPlay({
             <div
               key={question.id}
               className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6"
+              data-survey-question-card
+              data-survey-question-id={question.id}
             >
               <div className="mb-3 sm:mb-4">
                 {showSectionHeader && (

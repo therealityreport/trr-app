@@ -3,6 +3,7 @@
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type {
   AgreeLikertScaleConfig,
+  CastDecisionCardConfig,
   QuestionConfig,
   ThreeChoiceSliderConfig,
   TwoAxisGridConfig,
@@ -56,8 +57,9 @@ export function isQuestionComplete(question: QuestionWithOptions, value: unknown
   if (isPlainObject(value)) {
     switch (uiVariant) {
       case "agree-likert-scale":
+      case "cast-decision-card":
       case "three-choice-slider": {
-        const cfg = config as AgreeLikertScaleConfig | ThreeChoiceSliderConfig;
+        const cfg = config as AgreeLikertScaleConfig | CastDecisionCardConfig | ThreeChoiceSliderConfig;
         const rows = cfg.rows ?? [];
         if (rows.length === 0) return false;
         return rows.every((row) => isNonEmptyString(value[row.id]));
@@ -79,4 +81,3 @@ export function isQuestionComplete(question: QuestionWithOptions, value: unknown
 
   return false;
 }
-

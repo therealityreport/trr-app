@@ -60,9 +60,17 @@ const CDN_FONT_ALIASES: Record<string, string> = {
   geoslab703xbdbt: "Geometric Slabserif 703",
   geoslab703bt: "Geometric Slabserif 703",
   geoslab712bt: "Geometric Slabserif 712",
+  gloucesteroldstyle: "Gloucester",
+  gloucesteroldstylemt: "Gloucester",
+  gloucestermt: "Gloucester",
+  gloucesterosmt: "Gloucester",
+  gloucesterosmtstd: "Gloucester",
   plymouthserialxbold: "Plymouth Serial",
   plymouthserialbold: "Plymouth Serial",
+  plymouthserialmedium: "Plymouth Serial",
   plymouthserial: "Plymouth Serial",
+  rudeslabcond: "Rude Slab Condensed",
+  rudeslabcondxbd: "Rude Slab Condensed",
   hamburgserial: "Hamburg Serial",
 };
 

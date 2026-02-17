@@ -26,8 +26,8 @@ function makeQuestion(configOverride: Record<string, unknown> = {}) {
       {
         id: "o1",
         question_id: "q-agree",
-        option_key: "disagree",
-        option_text: "Disagree",
+        option_key: "strongly_disagree",
+        option_text: "Strongly Disagree",
         display_order: 1,
         metadata: {},
         created_at: "",
@@ -35,61 +35,36 @@ function makeQuestion(configOverride: Record<string, unknown> = {}) {
       {
         id: "o2",
         question_id: "q-agree",
-        option_key: "agree",
-        option_text: "Agree",
-        display_order: 2,
-        metadata: {},
-        created_at: "",
-      },
-    ],
-  };
-}
-
-function makeThreeChoiceQuestion() {
-  return {
-    id: "q-verdict",
-    survey_id: "survey-1",
-    question_key: "cast_verdict",
-    question_text: "For each cast member, should Bravo keep, demote, or fire them?",
-    question_type: "likert",
-    display_order: 2,
-    is_required: true,
-    config: {
-      uiVariant: "three-choice-slider",
-      rows: [{ id: "whitney", label: "Whitney Rose" }],
-      choices: [
-        { value: "fire", label: "Fire" },
-        { value: "demote", label: "Demote" },
-        { value: "keep", label: "Keep" },
-      ],
-    },
-    created_at: "",
-    updated_at: "",
-    options: [
-      {
-        id: "o1",
-        question_id: "q-verdict",
-        option_key: "fire",
-        option_text: "Fire",
-        display_order: 1,
-        metadata: {},
-        created_at: "",
-      },
-      {
-        id: "o2",
-        question_id: "q-verdict",
-        option_key: "demote",
-        option_text: "Demote",
+        option_key: "somewhat_disagree",
+        option_text: "Somewhat Disagree",
         display_order: 2,
         metadata: {},
         created_at: "",
       },
       {
         id: "o3",
-        question_id: "q-verdict",
-        option_key: "keep",
-        option_text: "Keep",
+        question_id: "q-agree",
+        option_key: "neutral",
+        option_text: "Neither",
         display_order: 3,
+        metadata: {},
+        created_at: "",
+      },
+      {
+        id: "o4",
+        question_id: "q-agree",
+        option_key: "somewhat_agree",
+        option_text: "Somewhat Agree",
+        display_order: 4,
+        metadata: {},
+        created_at: "",
+      },
+      {
+        id: "o5",
+        question_id: "q-agree",
+        option_key: "strongly_agree",
+        option_text: "Strongly Agree",
+        display_order: 5,
         metadata: {},
         created_at: "",
       },
@@ -98,12 +73,13 @@ function makeThreeChoiceQuestion() {
 }
 
 describe("MatrixLikertInput", () => {
-  it("applies CDN-resolved font overrides to row and column labels", () => {
+  it("applies CDN-resolved font overrides to prompt, statement, and options", () => {
     render(
       <MatrixLikertInput
         question={makeQuestion({
-          rowLabelFontFamily: "Sofia Pro",
-          columnLabelFontFamily: "Plymouth Serial",
+          subTextHeadingFontFamily: "Gloucester",
+          rowLabelFontFamily: "Rude Slab Condensed",
+          optionTextFontFamily: "Plymouth Serial",
         }) as never}
         value={{}}
         onChange={() => {}}
@@ -111,13 +87,13 @@ describe("MatrixLikertInput", () => {
     );
 
     expect(screen.getByTestId("agree-likert-prompt")).toHaveStyle({
-      fontFamily: "\"Plymouth Serial\", var(--font-sans), sans-serif",
+      fontFamily: '"Gloucester", var(--font-sans), sans-serif',
     });
     expect(screen.getByText("Statement one")).toHaveStyle({
-      fontFamily: "\"Sofia Pro\", var(--font-sans), sans-serif",
+      fontFamily: '"Rude Slab Condensed", var(--font-sans), sans-serif',
     });
-    expect(screen.getByRole("button", { name: "Select Disagree for Statement one" })).toHaveStyle({
-      fontFamily: "\"Plymouth Serial\", var(--font-sans), sans-serif",
+    expect(screen.getByRole("button", { name: "Select Strongly Agree for Statement one" })).toHaveStyle({
+      fontFamily: '"Plymouth Serial", var(--font-sans), sans-serif',
     });
     expect(screen.queryByTestId("matrix-likert-missing-fonts")).not.toBeInTheDocument();
   });
@@ -157,38 +133,19 @@ describe("MatrixLikertInput", () => {
     }
 
     render(<Harness />);
+    expect(screen.queryByTestId("agree-likert-continue")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Select Agree for Statement one" }));
-    fireEvent.click(screen.getByRole("button", { name: "Select Disagree for Statement two" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Somewhat Agree for Statement one" }));
+    expect(screen.getByTestId("agree-likert-continue")).toHaveTextContent("Continue");
+    fireEvent.click(screen.getByRole("button", { name: "Select Strongly Disagree for Statement two" }));
 
-    expect(updates).toContainEqual({ s1: "agree" });
-    expect(updates).toContainEqual({ s1: "agree", s2: "disagree" });
+    expect(updates).toContainEqual({ s1: "somewhat_agree" });
+    expect(updates).toContainEqual({ s1: "somewhat_agree", s2: "strongly_disagree" });
   });
 
-  it("uses figma keep/fire/demote heading for three-choice slider layout", () => {
-    render(
-      <MatrixLikertInput
-        question={makeThreeChoiceQuestion() as never}
-        value={{}}
-        onChange={() => {}}
-      />,
-    );
-
-    expect(screen.getByText("KEEP, FIRE OR DEMOTE")).toBeInTheDocument();
-    const fireButton = screen.getByRole("button", { name: "Select Fire for Whitney Rose" });
-    expect(fireButton).toHaveStyle({
-      borderRadius: "9999px",
-      backgroundColor: "rgb(179, 0, 11)",
-    });
-  });
-
-  it("applies shape and button scale overrides for three-choice slider buttons", () => {
-    const question = makeThreeChoiceQuestion();
-    question.config = {
-      ...question.config,
-      shapeScale: 70,
-      buttonScale: 130,
-    };
+  it("orders and colors options in figma agree-to-disagree sequence", () => {
+    const question = makeQuestion();
+    question.options = [...question.options].reverse();
 
     render(
       <MatrixLikertInput
@@ -198,11 +155,31 @@ describe("MatrixLikertInput", () => {
       />,
     );
 
-    const fireButton = screen.getByRole("button", { name: "Select Fire for Whitney Rose" });
-    const fireLabel = within(fireButton).getByText("Fire");
+    const row = screen.getByTestId("agree-likert-row-s1");
+    const buttons = within(row).getAllByRole("button");
+    expect(buttons).toHaveLength(5);
 
-    expect(Number.parseInt(fireButton.style.width, 10)).toBeGreaterThan(50);
-    expect(Number.parseInt(fireButton.style.width, 10)).toBeLessThan(90);
-    expect(Number.parseInt(fireLabel.style.fontSize, 10)).toBeGreaterThan(20);
+    expect(buttons[0]).toHaveTextContent("Strongly Agree");
+    expect(buttons[0]).toHaveStyle({ backgroundColor: "rgb(53, 106, 59)" });
+
+    expect(buttons[4]).toHaveTextContent("Strongly Disagree");
+    expect(buttons[4]).toHaveStyle({ backgroundColor: "rgb(153, 6, 10)" });
+  });
+
+  it("applies shape and button scale overrides to bars and labels", () => {
+    render(
+      <MatrixLikertInput
+        question={makeQuestion({ shapeScale: 70, buttonScale: 130 }) as never}
+        value={{}}
+        onChange={() => {}}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "Select Strongly Agree for Statement one" });
+    const label = within(button).getByText("Strongly Agree");
+
+    expect(Number.parseInt(button.style.borderRadius, 10)).toBeGreaterThanOrEqual(7);
+    expect(Number.parseInt(button.style.minHeight, 10)).toBeGreaterThan(40);
+    expect(Number.parseInt(label.style.fontSize, 10)).toBeGreaterThanOrEqual(12);
   });
 });

@@ -17,6 +17,7 @@ export type QuestionType =
   | "numeric-ranking"      // Episode rating with stars (was star-rating)
   | "circle-ranking"       // Cast power rankings - grid with circles (was rank-order grid)
   | "rectangle-ranking"    // Season/franchise rankings - classic list (was rank-order classic)
+  | "cast-decision-card"   // Cast decision cards (Keep/Fire/Demote, Bring Back/Keep Gone)
   | "three-choice-slider"  // Keep/Fire/Demote slider (was matrix-likert for verdicts)
   | "agree-likert-scale"   // Agree/Disagree scale (was matrix-likert for statements)
   | "numeric-scale-slider" // Boring/Entertaining slider per cast member (was slider)
@@ -65,11 +66,16 @@ export interface RectangleRankingQuestion extends BaseQuestion {
 // Slider Questions
 // ============================================================================
 
-/** Three-choice slider (Fire/Demote/Keep) for cast verdicts */
-export interface ThreeChoiceSliderQuestion extends BaseQuestion {
-  type: "three-choice-slider";
+/** Cast decision card (Keep/Fire/Demote, Bring Back/Keep Gone, etc.) */
+export interface CastDecisionCardQuestion extends BaseQuestion {
+  type: "cast-decision-card";
   subjects: CastMemberOption[];
   choices: SliderChoice[];
+}
+
+/** Legacy alias for cast decision cards */
+export interface ThreeChoiceSliderQuestion extends Omit<CastDecisionCardQuestion, "type"> {
+  type: "three-choice-slider";
 }
 
 /** Agree/Disagree likert scale for statements */
@@ -211,6 +217,7 @@ export type SurveyQuestion =
   | NumericRankingQuestion
   | CircleRankingQuestion
   | RectangleRankingQuestion
+  | CastDecisionCardQuestion
   | ThreeChoiceSliderQuestion
   | AgreeLikertScaleQuestion
   | NumericScaleSliderQuestion

@@ -120,6 +120,7 @@ interface PostDetailResponse {
   posted_at: string | null;
   title?: string;
   display_name?: string;
+  thumbnail_url?: string | null;
   stats: Record<string, number>;
   total_comments_in_db: number;
   comments: ThreadedComment[];
@@ -308,25 +309,34 @@ function PostStatsDrawer({
   const [data, setData] = useState<PostDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("Not authenticated");
+    const token = await user.getIdToken();
+    const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(
+        (body as Record<string, string>).error || `HTTP ${res.status}`,
+      );
+    }
+    return (await res.json()) as PostDetailResponse;
+  }, [showId, seasonNumber, platform, sourceId]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
+      setError(null);
       try {
-        const user = auth.currentUser;
-        if (!user) throw new Error("Not authenticated");
-        const token = await user.getIdToken();
-        const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(
-            (body as Record<string, string>).error || `HTTP ${res.status}`,
-          );
-        }
-        if (!cancelled) setData(await res.json());
+        const payload = await fetchPostStats();
+        if (!cancelled) setData(payload);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
       } finally {
@@ -336,33 +346,87 @@ function PostStatsDrawer({
     return () => {
       cancelled = true;
     };
+  }, [fetchPostStats]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const handleRefreshComments = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      setRefreshError(null);
+      const user = auth.currentUser;
+      if (!user) throw new Error("Not authenticated");
+      const token = await user.getIdToken();
+      const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          max_comments_per_post: 100000,
+          fetch_replies: true,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as Record<string, string>).error || `HTTP ${res.status}`);
+      }
+      setData((await res.json()) as PostDetailResponse);
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : "Failed to refresh comments");
+    } finally {
+      setRefreshing(false);
+    }
   }, [showId, seasonNumber, platform, sourceId]);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
-      {/* Drawer */}
-      <div className="relative w-full max-w-2xl bg-white shadow-xl overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
+      {/* Modal */}
+      <div className="relative z-10 flex w-full max-w-4xl max-h-[90vh] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
           <h2 className="text-lg font-bold text-gray-900">Post Stats</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
-          >
-            ×
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefreshComments}
+              disabled={refreshing}
+              className="text-xs font-semibold tracking-wide px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {refreshing ? "Refreshing..." : "REFRESH"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            >
+              ×
+            </button>
+          </div>
         </div>
 
-        <div className="px-6 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading && (
             <div className="text-center text-gray-500 py-12">Loading all comments...</div>
           )}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
               {error}
+            </div>
+          )}
+          {refreshError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm mb-4">
+              {refreshError}
             </div>
           )}
 
@@ -381,6 +445,25 @@ function PostStatsDrawer({
                   </span>
                   <span className="text-xs text-gray-500">{fmtDateTime(data.posted_at)}</span>
                 </div>
+                {data.thumbnail_url && (
+                  <div className="mb-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={data.thumbnail_url}
+                      alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      onError={(event) => {
+                        event.currentTarget.style.display = "none";
+                      }}
+                      className={`w-full ${
+                        data.platform === "youtube"
+                          ? "max-h-[360px] object-contain bg-black/5"
+                          : "max-h-72 object-cover"
+                      }`}
+                    />
+                  </div>
+                )}
                 {data.title && (
                   <h3 className="text-sm font-semibold text-gray-900 mb-1">{data.title}</h3>
                 )}
@@ -548,7 +631,11 @@ function PostCard({
               onError={(event) => {
                 event.currentTarget.style.display = "none";
               }}
-              className="h-44 w-full object-cover"
+              className={`w-full ${
+                platform === "youtube"
+                  ? "max-h-[360px] object-contain bg-black/5"
+                  : "h-44 object-cover"
+              }`}
             />
           </div>
         )}

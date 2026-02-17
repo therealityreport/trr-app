@@ -3,7 +3,6 @@ import {
   mapPhotoToMetadata,
   mapSeasonAssetToMetadata,
   resolveMetadataDimensions,
-  type PhotoMetadata,
 } from "@/lib/photo-metadata";
 
 describe("mapPhotoToMetadata", () => {
@@ -301,6 +300,92 @@ describe("mapPhotoToMetadata", () => {
 
     expect(result.people).toEqual(["Meredith Marks"]);
   });
+
+  it("derives s3 mirror filename from hosted URL", () => {
+    const result = mapPhotoToMetadata({
+      id: "mirror-from-url",
+      person_id: "p1",
+      source: "tmdb",
+      url: null,
+      hosted_url: "https://cdn.example.com/media/ab/1234567890.webp",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+
+    expect(result.s3MirrorFileName).toBe("1234567890.webp");
+  });
+
+  it("prefers explicit hosted key metadata for s3 mirror filename", () => {
+    const result = mapPhotoToMetadata({
+      id: "mirror-from-key",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: null,
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: {
+        hosted_key: "images/people/nm123/photos/imdb/cast-portrait.jpg",
+      },
+      fetched_at: null,
+    });
+
+    expect(result.s3MirrorFileName).toBe("cast-portrait.jpg");
+  });
+
+  it("sets originalImageUrl from true source URL instead of hosted mirror URL", () => {
+    const result = mapPhotoToMetadata({
+      id: "original-url",
+      person_id: "p1",
+      source: "web_scrape:fandom.com",
+      url: "https://static.wikia.nocookie.net/rhoslc/images/1/1b/lisa.jpg",
+      hosted_url: "https://d111111abcdef8.cloudfront.net/media/aa/bb.webp",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+
+    expect(result.originalImageUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/1/1b/lisa.jpg");
+  });
+
+  it("keeps originalImageUrl null when only hosted/mirror URLs exist", () => {
+    const result = mapPhotoToMetadata({
+      id: "hosted-only",
+      person_id: "p1",
+      source: "web_scrape:fandom.com",
+      url: "https://d111111abcdef8.cloudfront.net/media/aa/bb.webp",
+      hosted_url: "https://d111111abcdef8.cloudfront.net/media/aa/bb.webp",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+
+    expect(result.originalImageUrl).toBeNull();
+  });
 });
 
 describe("resolveMetadataDimensions", () => {
@@ -373,5 +458,58 @@ describe("mapSeasonAssetToMetadata", () => {
     );
 
     expect(meta.contextType).toBe("Other");
+  });
+
+  it("extracts s3 mirror filename for season assets", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "a3",
+        type: "season",
+        source: "tmdb",
+        kind: "poster",
+        hosted_url: "https://cdn.example.com/images/seasons/rhoslc/season-4/poster-main.png",
+        width: null,
+        height: null,
+        caption: null,
+        season_number: 4,
+        person_name: null,
+        metadata: null,
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: "image/png",
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      4,
+      "RHOSLC",
+    );
+
+    expect(meta.s3MirrorFileName).toBe("poster-main.png");
+  });
+
+  it("prefers source_url as originalImageUrl for imported season assets", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "a4",
+        type: "season",
+        source: "web_scrape:fandom.com",
+        source_url: "https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg",
+        kind: "other",
+        hosted_url: "https://d111111abcdef8.cloudfront.net/media/aa/bb.webp",
+        width: null,
+        height: null,
+        caption: null,
+        season_number: 4,
+        person_name: null,
+        metadata: null,
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: "image/webp",
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      4,
+      "RHOSLC",
+    );
+
+    expect(meta.originalImageUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg");
   });
 });

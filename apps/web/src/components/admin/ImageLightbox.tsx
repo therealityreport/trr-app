@@ -140,10 +140,69 @@ function formatSourceBadgeLabel(source: string, sourceUrl?: string | null): stri
   return raw;
 }
 
+function formatFoundOnSourceLabel(source: string, sourceUrl?: string | null): string {
+  const raw = (source || "").trim();
+  const lower = raw.toLowerCase();
+  if (lower.includes("fandom")) return "FANDOM";
+  if (lower.includes("imdb")) return "IMDB";
+  if (lower.includes("tmdb")) return "TMDB";
+
+  if (sourceUrl) {
+    try {
+      const hostname = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
+      if (hostname.includes("fandom")) return "FANDOM";
+      if (hostname.includes("imdb")) return "IMDB";
+      if (hostname.includes("tmdb") || hostname.includes("themoviedb")) return "TMDB";
+      return hostname.toUpperCase();
+    } catch {
+      // Ignore parse failures and use source fallback.
+    }
+  }
+
+  if (lower.startsWith("web_scrape") || lower.startsWith("webscrape")) {
+    return "WEB";
+  }
+  return raw ? raw.toUpperCase() : "UNKNOWN";
+}
+
+const CONTENT_TYPE_OPTIONS = [
+  "PROMO",
+  "CONFESSIONAL",
+  "REUNION",
+  "INTRO",
+  "EPISODE STILL",
+  "CAST PHOTOS",
+  "BACKDROP",
+  "POSTER",
+  "LOGO",
+  "OTHER",
+] as const;
+
 const clampPercent = (value: number, min = 0, max = 100): number =>
   Math.min(max, Math.max(min, value));
 const clampZoom = (value: number): number =>
   Math.min(THUMBNAIL_CROP_LIMITS.zoomMax, Math.max(THUMBNAIL_CROP_LIMITS.zoomMin, value));
+
+const copyTextToClipboard = async (value: string): Promise<boolean> => {
+  if (!value) return false;
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+
+  if (typeof document === "undefined") return false;
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  const didCopy = document.execCommand("copy");
+  document.body.removeChild(textArea);
+  return didCopy;
+};
 
 export type ImageType = "cast" | "episode" | "season";
 
@@ -157,6 +216,7 @@ interface ImageManagementProps {
   onArchive?: () => Promise<void>;
   onUnarchive?: () => Promise<void>;
   onToggleStar?: (starred: boolean) => Promise<void>;
+  onUpdateContentType?: (contentType: string) => Promise<void>;
   onDelete?: () => Promise<void>;
   onReassign?: () => void;
 }
@@ -205,6 +265,7 @@ interface MetadataPanelProps {
     onArchive?: () => Promise<void>;
     onUnarchive?: () => Promise<void>;
     onToggleStar?: (starred: boolean) => Promise<void>;
+    onUpdateContentType?: (contentType: string) => Promise<void>;
     onDelete?: () => Promise<void>;
     onReassign?: () => void;
   };
@@ -222,6 +283,12 @@ function MetadataPanel({
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [starLoading, setStarLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [copyMirrorFileNotice, setCopyMirrorFileNotice] = useState<string | null>(null);
+  const [contentTypeValue, setContentTypeValue] = useState<string>(
+    metadata.sectionTag ? metadata.sectionTag.toUpperCase() : "OTHER"
+  );
+  const [contentTypeSaving, setContentTypeSaving] = useState(false);
+  const [contentTypeError, setContentTypeError] = useState<string | null>(null);
   const captionTruncateLength = 200;
   const needsTruncation =
     metadata.caption && metadata.caption.length > captionTruncateLength;
@@ -234,6 +301,13 @@ function MetadataPanel({
     normalizedContextType !== normalizedImdbType;
   const sourcePageLabel = metadata.sourcePageTitle || metadata.sourceUrl || null;
   const sourceBadgeLabel = formatSourceBadgeLabel(metadata.source, metadata.sourceUrl);
+  const foundOnSourceLabel = formatFoundOnSourceLabel(metadata.source, metadata.sourceUrl);
+  const foundOnPageTitle = metadata.sourcePageTitle || "Unknown";
+  const mirrorFileName =
+    typeof metadata.s3MirrorFileName === "string" && metadata.s3MirrorFileName.trim().length > 0
+      ? metadata.s3MirrorFileName.trim()
+      : null;
+  const canEditContentType = Boolean(management?.canManage && management?.onUpdateContentType);
   const formatDateLabel = (value: Date | null | undefined): string =>
     value ? value.toLocaleDateString() : "Unknown";
   const effectiveDimensions = metadata.dimensions ?? runtimeDimensions ?? null;
@@ -244,6 +318,7 @@ function MetadataPanel({
     { label: "Source Page", value: sourcePageLabel ?? "Unknown" },
     { label: "Source Logo", value: metadata.sourceLogo ?? "Unknown" },
     { label: "Name", value: metadata.assetName ?? "Unknown" },
+    { label: "S3 Mirror File", value: mirrorFileName ?? "Unknown" },
     {
       label: "Content Type",
       value: metadata.sectionTag ? formatContentTypeLabel(metadata.sectionTag) : "Unknown",
@@ -295,6 +370,15 @@ function MetadataPanel({
   const canDelete = Boolean(management?.onDelete);
   const canStar = Boolean(management?.onToggleStar);
   const hasAnyActions = canRefresh || canArchive || canReassign || canDelete;
+
+  useEffect(() => {
+    setCopyMirrorFileNotice(null);
+  }, [mirrorFileName]);
+
+  useEffect(() => {
+    setContentTypeValue(metadata.sectionTag ? metadata.sectionTag.toUpperCase() : "OTHER");
+    setContentTypeError(null);
+  }, [metadata.sectionTag]);
 
   return (
     <div
@@ -392,6 +476,69 @@ function MetadataPanel({
         </div>
       </div>
 
+        {mirrorFileName && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              S3 Mirror File
+            </span>
+            <div className="mt-1 flex items-center gap-2">
+              <code className="max-w-[70%] break-all rounded bg-white/10 px-2 py-1 text-xs text-white/90">
+                {mirrorFileName}
+              </code>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const copied = await copyTextToClipboard(mirrorFileName);
+                    setCopyMirrorFileNotice(copied ? "Copied." : "Copy failed.");
+                  } catch {
+                    setCopyMirrorFileNotice("Copy failed.");
+                  }
+                }}
+                className="rounded bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/20"
+              >
+                Copy
+              </button>
+            </div>
+            {copyMirrorFileNotice && (
+              <p
+                className={`mt-1 text-xs ${
+                  copyMirrorFileNotice === "Copied." ? "text-emerald-300" : "text-red-300"
+                }`}
+              >
+                {copyMirrorFileNotice}
+              </p>
+            )}
+            <div className="mt-3 space-y-2">
+              <div>
+                <span className="tracking-widest text-[10px] uppercase text-white/50">
+                  Original URL
+                </span>
+                {metadata.originalImageUrl ? (
+                  <a
+                    href={metadata.originalImageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 block break-all text-xs text-white/90 underline"
+                  >
+                    {metadata.originalImageUrl}
+                  </a>
+                ) : (
+                  <p className="mt-1 text-xs text-white/80">Original URL unavailable</p>
+                )}
+              </div>
+              <div>
+                <span className="tracking-widest text-[10px] uppercase text-white/50">
+                  Found on
+                </span>
+                <p className="mt-1 break-words text-xs text-white/90">
+                  {foundOnSourceLabel} | {foundOnPageTitle}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {metadata.sourceVariant && (
           <div className="mb-4">
             <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -441,14 +588,63 @@ function MetadataPanel({
           </div>
         )}
 
-        {metadata.sectionTag && (
+        {(metadata.sectionTag || canEditContentType) && (
           <div className="mb-4">
             <span className="tracking-widest text-[10px] uppercase text-white/50">
               Content Type
             </span>
-            <p className="mt-1 text-sm text-white/90">
-              {formatContentTypeLabel(metadata.sectionTag)}
-            </p>
+            {canEditContentType ? (
+              <div className="mt-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <select
+                    value={contentTypeValue}
+                    onChange={(event) => {
+                      setContentTypeValue(event.target.value);
+                      setContentTypeError(null);
+                    }}
+                    disabled={contentTypeSaving}
+                    className="rounded border border-white/20 bg-black/40 px-2 py-1 text-xs text-white focus:border-white/40 focus:outline-none"
+                  >
+                    {CONTENT_TYPE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {formatContentTypeLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={
+                      contentTypeSaving ||
+                      contentTypeValue === (metadata.sectionTag?.toUpperCase() ?? "OTHER")
+                    }
+                    onClick={async () => {
+                      if (!management?.onUpdateContentType) return;
+                      try {
+                        setContentTypeSaving(true);
+                        setContentTypeError(null);
+                        await management.onUpdateContentType(contentTypeValue);
+                      } catch (error) {
+                        setContentTypeError(
+                          error instanceof Error ? error.message : "Failed to update content type"
+                        );
+                      } finally {
+                        setContentTypeSaving(false);
+                      }
+                    }}
+                    className="rounded bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+                  >
+                    {contentTypeSaving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+                {contentTypeError && (
+                  <p className="text-xs text-red-300">{contentTypeError}</p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-1 text-sm text-white/90">
+                {formatContentTypeLabel(metadata.sectionTag ?? "OTHER")}
+              </p>
+            )}
           </div>
         )}
 
@@ -765,6 +961,7 @@ export function ImageLightbox({
   onArchive,
   onUnarchive,
   onToggleStar,
+  onUpdateContentType,
   onRefresh,
   onDelete,
   onReassign,
@@ -947,6 +1144,12 @@ export function ImageLightbox({
           heightPct: 100,
         }
       : null);
+  const faceBoxes = metadata?.faceBoxes ?? [];
+  const shouldShowFaceBoxes =
+    faceBoxes.length > 0 &&
+    (metadata?.peopleCount !== null && metadata?.peopleCount !== undefined
+      ? metadata.peopleCount > 1
+      : faceBoxes.length > 1);
   const previewCenter =
     effectivePreviewRect
       ? {
@@ -1196,6 +1399,31 @@ export function ImageLightbox({
                   }
                 }}
               />
+              {shouldShowFaceBoxes && (
+                <div className="pointer-events-none absolute inset-0">
+                  {faceBoxes.map((box, idx) => {
+                    const left = `${Math.max(0, Math.min(100, box.x * 100))}%`;
+                    const top = `${Math.max(0, Math.min(100, box.y * 100))}%`;
+                    const width = `${Math.max(0, Math.min(100, box.width * 100))}%`;
+                    const height = `${Math.max(0, Math.min(100, box.height * 100))}%`;
+                    const label =
+                      box.person_name ||
+                      box.label ||
+                      `Face ${box.index ?? idx + 1}`;
+                    return (
+                      <div
+                        key={`${box.index ?? idx}-${box.x}-${box.y}`}
+                        className="absolute border-2 border-emerald-300/90 bg-emerald-300/10"
+                        style={{ left, top, width, height }}
+                      >
+                        <span className="absolute -top-5 left-0 rounded bg-emerald-500/90 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white">
+                          {label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {effectivePreviewRect && (
                 <div className="pointer-events-none absolute inset-0">
                   <div
@@ -1350,6 +1578,7 @@ export function ImageLightbox({
                         onArchive,
                         onUnarchive,
                         onToggleStar,
+                        onUpdateContentType,
                         onDelete,
                         onReassign,
                       }

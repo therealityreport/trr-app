@@ -9,7 +9,7 @@ import type {
   NumericRankingQuestion,
   CircleRankingQuestion,
   RectangleRankingQuestion,
-  ThreeChoiceSliderQuestion,
+  CastDecisionCardQuestion,
   AgreeLikertScaleQuestion,
   NumericScaleSliderQuestion,
   TwoChoiceSliderQuestion,
@@ -104,10 +104,10 @@ export const franchiseRankingQuestion: RectangleRankingQuestion = {
   lineLabelBottom: "LEAST FAVORITE",
 };
 
-// Keep/Fire/Demote (ThreeChoiceSlider)
-export const keepFireDemoteQuestion: ThreeChoiceSliderQuestion = {
+// Keep/Fire/Demote (CastDecisionCard)
+export const keepFireDemoteQuestion: CastDecisionCardQuestion = {
   id: "keep_fire_demote",
-  type: "three-choice-slider",
+  type: "cast-decision-card",
   question: "For each cast member, should Bravo keep, demote, or fire them?",
   required: true,
   subjects: RHOSLC_S6_CAST,

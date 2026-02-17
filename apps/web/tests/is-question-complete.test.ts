@@ -47,6 +47,38 @@ describe("isQuestionComplete", () => {
     expect(isQuestionComplete(question, { r1: "yes", r2: "yes" })).toBe(true);
   });
 
+  it("requires all rows for cast-decision cards", () => {
+    const question = {
+      id: "q-cast",
+      survey_id: "s1",
+      question_key: "cast_decision",
+      question_text: "Cast decision",
+      question_type: "likert",
+      display_order: 0,
+      is_required: true,
+      config: {
+        uiVariant: "cast-decision-card",
+        choices: [
+          { value: "keep", label: "Keep" },
+          { value: "fire", label: "Fire" },
+        ],
+        rows: [
+          { id: "r1", label: "Row 1" },
+          { id: "r2", label: "Row 2" },
+        ],
+      },
+      created_at: "",
+      updated_at: "",
+      options: [
+        { id: "o1", question_id: "q-cast", option_key: "keep", option_text: "Keep", display_order: 0, metadata: {}, created_at: "", updated_at: "" },
+        { id: "o2", question_id: "q-cast", option_key: "fire", option_text: "Fire", display_order: 1, metadata: {}, created_at: "", updated_at: "" },
+      ],
+    } as any;
+
+    expect(isQuestionComplete(question, { r1: "keep" })).toBe(false);
+    expect(isQuestionComplete(question, { r1: "keep", r2: "fire" })).toBe(true);
+  });
+
   it("requires all subjects for two-axis-grid", () => {
     const question = {
       id: "q1",
@@ -77,4 +109,3 @@ describe("isQuestionComplete", () => {
     expect(isQuestionComplete(question, { a: { x: 0, y: 0 }, b: { x: 5, y: -5 } })).toBe(true);
   });
 });
-

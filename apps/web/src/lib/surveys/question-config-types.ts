@@ -9,7 +9,7 @@
  * - ranking → "circle-ranking" | "rectangle-ranking"
  * - single_choice → "two-choice-slider" | "text-multiple-choice" | "image-multiple-choice" | "dropdown"
  * - multi_choice → "multi-select-choice"
- * - likert → "three-choice-slider" | "agree-likert-scale" | "two-axis-grid"
+ * - likert → "cast-decision-card" | "three-choice-slider" | "agree-likert-scale" | "two-axis-grid"
  * - free_text → "text-entry"
  */
 
@@ -23,6 +23,7 @@ export type UiVariant =
   | "two-axis-grid"          // 2D perceptual map (snap-to-grid cast placement)
   | "circle-ranking"         // Cast power rankings - grid with circles
   | "rectangle-ranking"      // Season/franchise rankings - classic list
+  | "cast-decision-card"     // Cast decision cards (Keep/Fire/Demote, Bring Back/Keep Gone)
   | "three-choice-slider"    // Keep/Fire/Demote slider
   | "agree-likert-scale"     // Agree/Disagree statements
   | "two-choice-slider"      // Whose side feuds
@@ -151,15 +152,23 @@ export interface RectangleRankingConfig extends BaseQuestionConfig {
 }
 
 /**
- * Three Choice Slider Config (three-choice-slider)
- * Fire/Demote/Keep slider for cast verdicts
- * Rows are cast members, choices are the verdict options
+ * Cast Decision Card Config (cast-decision-card)
+ * Fire/Demote/Keep, Bring Back/Keep Gone, and other decision-card prompts.
+ * Rows are cast members, choices are the decision options.
  */
-export interface ThreeChoiceSliderConfig extends BaseQuestionConfig {
-  uiVariant: "three-choice-slider";
+export interface CastDecisionCardConfig extends BaseQuestionConfig {
+  uiVariant: "cast-decision-card";
   choices: SliderChoice[];
   /** Cast members or items to rate (rows in the matrix view) */
   rows?: MatrixRow[];
+}
+
+/**
+ * Three Choice Slider Config (three-choice-slider)
+ * Legacy alias for cast decision cards.
+ */
+export interface ThreeChoiceSliderConfig extends Omit<CastDecisionCardConfig, "uiVariant"> {
+  uiVariant: "three-choice-slider";
 }
 
 /**
@@ -245,6 +254,7 @@ export type QuestionConfig =
   | TwoAxisGridConfig
   | CircleRankingConfig
   | RectangleRankingConfig
+  | CastDecisionCardConfig
   | ThreeChoiceSliderConfig
   | AgreeLikertScaleConfig
   | TwoChoiceSliderConfig
@@ -277,6 +287,10 @@ export function isCircleRankingConfig(config: QuestionConfig): config is CircleR
 
 export function isRectangleRankingConfig(config: QuestionConfig): config is RectangleRankingConfig {
   return config.uiVariant === "rectangle-ranking";
+}
+
+export function isCastDecisionCardConfig(config: QuestionConfig): config is CastDecisionCardConfig {
+  return config.uiVariant === "cast-decision-card";
 }
 
 export function isThreeChoiceSliderConfig(config: QuestionConfig): config is ThreeChoiceSliderConfig {

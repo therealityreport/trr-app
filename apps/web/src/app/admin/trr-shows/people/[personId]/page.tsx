@@ -8,7 +8,8 @@ import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
-import { ImageLightbox } from "@/components/admin/ImageLightbox";
+import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
+import ReassignImageModal from "@/components/admin/ReassignImageModal";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { mapPhotoToMetadata, resolveMetadataDimensions } from "@/lib/photo-metadata";
@@ -174,6 +175,7 @@ interface TrrPersonPhoto {
   people_ids: string[] | null;
   people_count?: number | null;
   people_count_source?: "auto" | "manual" | null;
+  face_boxes?: FaceBoxTag[] | null;
   ingest_status?: string | null;
   title_names: string[] | null;
   metadata: Record<string, unknown> | null;
@@ -188,6 +190,19 @@ interface TrrPersonPhoto {
   thumbnail_focus_y: number | null;
   thumbnail_zoom: number | null;
   thumbnail_crop_mode: "manual" | "auto" | null;
+}
+
+interface FaceBoxTag {
+  index: number;
+  kind: "face";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence?: number | null;
+  person_id?: string;
+  person_name?: string;
+  label?: string;
 }
 
 type GallerySortOption = "newest" | "oldest" | "source" | "season-asc" | "season-desc";
@@ -277,6 +292,75 @@ const parsePeopleCount = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const clampFaceCoord = (value: number): number => Math.min(1, Math.max(0, value));
+
+const normalizeFaceBoxes = (value: unknown): FaceBoxTag[] => {
+  if (!Array.isArray(value)) return [];
+  const boxes: FaceBoxTag[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? clampFaceCoord(candidate.x) : null;
+    const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? clampFaceCoord(candidate.y) : null;
+    const width =
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? clampFaceCoord(candidate.width)
+        : null;
+    const height =
+      typeof candidate.height === "number" && Number.isFinite(candidate.height)
+        ? clampFaceCoord(candidate.height)
+        : null;
+    if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+      continue;
+    }
+    const index =
+      typeof candidate.index === "number" && Number.isFinite(candidate.index)
+        ? Math.max(1, Math.floor(candidate.index))
+        : boxes.length + 1;
+    const confidence =
+      typeof candidate.confidence === "number" && Number.isFinite(candidate.confidence)
+        ? clampFaceCoord(candidate.confidence)
+        : null;
+    const personId =
+      typeof candidate.person_id === "string" && candidate.person_id.trim().length > 0
+        ? candidate.person_id.trim()
+        : undefined;
+    const personName =
+      typeof candidate.person_name === "string" && candidate.person_name.trim().length > 0
+        ? candidate.person_name.trim()
+        : undefined;
+    const label =
+      typeof candidate.label === "string" && candidate.label.trim().length > 0
+        ? candidate.label.trim()
+        : undefined;
+    boxes.push({
+      index,
+      kind: "face",
+      x,
+      y,
+      width,
+      height,
+      ...(confidence !== null ? { confidence } : {}),
+      ...(personId ? { person_id: personId } : {}),
+      ...(personName ? { person_name: personName } : {}),
+      ...(label ? { label } : {}),
+    });
+  }
+  return boxes;
+};
+
+const contentTypeToContextType = (contentType: string): string => {
+  const normalized = contentType.trim().toUpperCase();
+  switch (normalized) {
+    case "EPISODE STILL":
+      return "episode still";
+    case "CAST PHOTOS":
+      return "cast photos";
+    default:
+      return normalized.toLowerCase();
+  }
 };
 
 const formatRefreshSummary = (summary: unknown): string | null => {
@@ -726,6 +810,7 @@ function TagPeoplePanel({
     peopleIds: string[];
     peopleCount: number | null;
     peopleCountSource: "auto" | "manual" | null;
+    faceBoxes: FaceBoxTag[];
   }) => void;
   onMirrorUpdated: (payload: {
     mediaAssetId: string | null;
@@ -757,6 +842,7 @@ function TagPeoplePanel({
     photo.people_count_source !== "manual";
   const isEditable = (isMediaLink && Boolean(photo.link_id)) || (isCastPhoto && !hasSourceTags);
   const [taggedPeople, setTaggedPeople] = useState<TagPerson[]>([]);
+  const [faceBoxes, setFaceBoxes] = useState<FaceBoxTag[]>([]);
   const [readonlyNames, setReadonlyNames] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TrrPerson[]>([]);
@@ -783,6 +869,8 @@ function TagPeoplePanel({
   const [cropError, setCropError] = useState<string | null>(null);
   const autoTagRequestedPhotoIdRef = useRef<string | null>(null);
   const currentPeopleCount = parsePeopleCount(photo.people_count);
+  const faceBoxesEnabled =
+    (currentPeopleCount ?? 0) > 1 || normalizeFaceBoxes(photo.face_boxes).length > 1;
   const originalCropMode = photo.thumbnail_crop_mode;
   const originalCropX = photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x;
   const originalCropY = photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y;
@@ -828,11 +916,13 @@ function TagPeoplePanel({
         ? String(currentPeopleCount)
         : ""
     );
+    setFaceBoxes(normalizeFaceBoxes(photo.face_boxes));
   }, [
     currentPeopleCount,
     defaultPersonTag?.id,
     defaultPersonTag?.name,
     isEditable,
+    photo.face_boxes,
     photo.id,
     photo.people_ids,
     photo.people_names,
@@ -920,7 +1010,11 @@ function TagPeoplePanel({
   }, [query, isEditable, getAuthHeaders]);
 
   const updateTags = useCallback(
-    async (nextPeople: TagPerson[], peopleCountOverride?: number | null) => {
+    async (
+      nextPeople: TagPerson[],
+      peopleCountOverride?: number | null,
+      faceBoxesOverride?: FaceBoxTag[] | null
+    ) => {
       if (!isEditable) return;
       if (isMediaLink && !photo.link_id) return;
       setSaving(true);
@@ -933,6 +1027,16 @@ function TagPeoplePanel({
         const payload: Record<string, unknown> = { people: nextPeople };
         if (peopleCountOverride !== undefined) {
           payload.people_count = peopleCountOverride;
+        }
+        if (
+          peopleCountOverride !== undefined &&
+          (peopleCountOverride === null || peopleCountOverride <= 1)
+        ) {
+          payload.face_boxes = null;
+        } else if (faceBoxesOverride !== undefined) {
+          payload.face_boxes = faceBoxesOverride;
+        } else if (faceBoxesEnabled && faceBoxes.length > 0) {
+          payload.face_boxes = faceBoxes;
         }
         const response = await fetch(endpoint, {
           method: "PUT",
@@ -986,8 +1090,18 @@ function TagPeoplePanel({
           typeof data.people_count_source === "string"
             ? (data.people_count_source as "auto" | "manual")
             : fallbackSource;
+        const responseFaceBoxes = normalizeFaceBoxes(data.face_boxes);
+        const nextFaceBoxes =
+          faceBoxesOverride !== undefined
+            ? normalizeFaceBoxes(faceBoxesOverride)
+            : responseFaceBoxes.length > 0
+              ? responseFaceBoxes
+              : faceBoxesEnabled
+                ? normalizeFaceBoxes(faceBoxes)
+                : [];
         setTaggedPeople(nextPeople);
         setReadonlyNames([]);
+        setFaceBoxes(nextFaceBoxes);
         setPeopleCountInput(
           peopleCount !== null && peopleCount !== undefined
             ? String(peopleCount)
@@ -1000,6 +1114,7 @@ function TagPeoplePanel({
           peopleIds,
           peopleCount,
           peopleCountSource,
+          faceBoxes: nextFaceBoxes,
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to update tags");
@@ -1012,6 +1127,8 @@ function TagPeoplePanel({
       isEditable,
       isMediaLink,
       isCastPhoto,
+      faceBoxes,
+      faceBoxesEnabled,
       onTagsUpdated,
       photo.id,
       photo.link_id,
@@ -1077,6 +1194,31 @@ function TagPeoplePanel({
       taggedPeople.length > 0 ? taggedPeople.map((person) => person.name) : readonlyNames;
     return [...new Set(names.filter((name) => typeof name === "string" && name.trim().length > 0))];
   }, [readonlyNames, taggedPeople]);
+
+  const faceBoxTagOptions = useMemo(
+    () => [...new Set([...taggedPeople.map((person) => person.name), ...readonlyNames])],
+    [readonlyNames, taggedPeople]
+  );
+
+  const handleFaceBoxAssignment = (faceIndex: number, personName: string) => {
+    const personId =
+      taggedPeople.find((person) => person.name === personName)?.id ??
+      undefined;
+    const next = faceBoxes.map((box) =>
+      box.index === faceIndex
+        ? {
+            ...box,
+            ...(personName ? { person_name: personName } : {}),
+            ...(personId ? { person_id: personId } : {}),
+            ...(!personName
+              ? { person_name: undefined, person_id: undefined }
+              : {}),
+          }
+        : box
+    );
+    setFaceBoxes(next);
+    void updateTags(taggedPeople, undefined, next);
+  };
 
   const normalizeCountInput = (value: string) => {
     const raw = value.trim();
@@ -1196,6 +1338,8 @@ function TagPeoplePanel({
       const peopleCount = parsePeopleCount(data.people_count);
       const peopleCountSource =
         (data.people_count_source as "auto" | "manual" | null) ?? "auto";
+      const nextFaceBoxes = normalizeFaceBoxes(data.face_boxes);
+      setFaceBoxes(nextFaceBoxes);
       setPeopleCountInput(
         peopleCount !== null && peopleCount !== undefined
           ? String(peopleCount)
@@ -1208,6 +1352,7 @@ function TagPeoplePanel({
         peopleIds: photo.people_ids ?? [],
         peopleCount,
         peopleCountSource,
+        faceBoxes: nextFaceBoxes,
       });
     };
 
@@ -1547,6 +1692,55 @@ function TagPeoplePanel({
         </div>
       )}
 
+      {faceBoxesEnabled && (
+        <div className="mt-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Face Boxes
+          </span>
+          {faceBoxes.length === 0 ? (
+            <p className="mt-2 text-xs text-white/60">
+              No face boxes detected yet. Use Recount to detect faces for multi-person tagging.
+            </p>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {faceBoxes
+                .slice()
+                .sort((a, b) => a.index - b.index)
+                .map((box) => (
+                  <div
+                    key={`face-box-${box.index}`}
+                    className="rounded-md border border-white/10 bg-black/30 p-2"
+                  >
+                    <p className="text-xs font-semibold text-white/90">
+                      Face {box.index}
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <select
+                        value={box.person_name ?? ""}
+                        onChange={(event) => handleFaceBoxAssignment(box.index, event.target.value)}
+                        disabled={!isEditable || saving}
+                        className="rounded border border-white/20 bg-black/40 px-2 py-1 text-xs text-white focus:border-white/40 focus:outline-none disabled:opacity-60"
+                      >
+                        <option value="">Unassigned</option>
+                        {faceBoxTagOptions.map((name) => (
+                          <option key={`face-option-${box.index}-${name}`} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      {box.confidence !== undefined && box.confidence !== null && (
+                        <span className="text-[11px] text-white/60">
+                          Confidence {(box.confidence * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mt-4">
         <span className="tracking-widest text-[10px] uppercase text-white/50">
           People Count
@@ -1760,6 +1954,11 @@ export default function PersonProfilePage() {
   const [lightboxPhoto, setLightboxPhoto] = useState<{
     photo: TrrPersonPhoto;
     index: number;
+  } | null>(null);
+  const [reassignModalImage, setReassignModalImage] = useState<{
+    imageId: string;
+    currentEntityId: string;
+    currentEntityLabel: string | null;
   } | null>(null);
   const [thumbnailCropPreview, setThumbnailCropPreview] = useState<ThumbnailCropPreview | null>(null);
   const [thumbnailCropOverlayUpdate, setThumbnailCropOverlayUpdate] =
@@ -2425,8 +2624,12 @@ export default function PersonProfilePage() {
   const fetchFandomData = useCallback(async () => {
     try {
       const headers = await getAuthHeaders();
+      const showIdQuery =
+        typeof showIdParam === "string" && showIdParam.trim().length > 0
+          ? `?showId=${encodeURIComponent(showIdParam.trim())}`
+          : "";
       const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/fandom`,
+        `/api/admin/trr-api/people/${personId}/fandom${showIdQuery}`,
         { headers }
       );
       if (!response.ok) return;
@@ -2435,7 +2638,7 @@ export default function PersonProfilePage() {
     } catch (err) {
       console.error("Failed to fetch fandom data:", err);
     }
-  }, [personId, getAuthHeaders]);
+  }, [personId, getAuthHeaders, showIdParam]);
 
   const fetchBravoContent = useCallback(async () => {
     if (!showIdParam) {
@@ -2523,6 +2726,7 @@ export default function PersonProfilePage() {
       peopleIds: string[];
       peopleCount: number | null;
       peopleCountSource: "auto" | "manual" | null;
+      faceBoxes: FaceBoxTag[];
     }) => {
       setPhotos((prev) =>
         prev.map((photo) =>
@@ -2533,6 +2737,7 @@ export default function PersonProfilePage() {
                 people_ids: payload.peopleIds,
                 people_count: payload.peopleCount,
                 people_count_source: payload.peopleCountSource,
+                face_boxes: payload.faceBoxes,
               }
             : payload.castPhotoId && photo.id === payload.castPhotoId
               ? {
@@ -2541,6 +2746,7 @@ export default function PersonProfilePage() {
                   people_ids: payload.peopleIds,
                   people_count: payload.peopleCount,
                   people_count_source: payload.peopleCountSource,
+                  face_boxes: payload.faceBoxes,
                 }
               : photo
         )
@@ -2559,6 +2765,7 @@ export default function PersonProfilePage() {
               people_ids: payload.peopleIds,
               people_count: payload.peopleCount,
               people_count_source: payload.peopleCountSource,
+              face_boxes: payload.faceBoxes,
             },
           };
         }
@@ -2571,6 +2778,7 @@ export default function PersonProfilePage() {
               people_ids: payload.peopleIds,
               people_count: payload.peopleCount,
               people_count_source: payload.peopleCountSource,
+              face_boxes: payload.faceBoxes,
             },
           };
         }
@@ -3199,12 +3407,48 @@ export default function PersonProfilePage() {
   };
 
   // Close lightbox and clean up state
-  const closeLightbox = () => {
+  const closeLightbox = useCallback(() => {
     setLightboxOpen(false);
     setLightboxPhoto(null);
+    setReassignModalImage(null);
     setThumbnailCropPreview(null);
     setThumbnailCropOverlayUpdate(null);
-  };
+  }, []);
+
+  const handleReassignCastPhoto = useCallback(
+    async (toType: ImageType, toEntityId: string) => {
+      if (!reassignModalImage) {
+        throw new Error("No image selected for reassignment.");
+      }
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/images/cast/${reassignModalImage.imageId}/reassign`,
+        {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toType,
+            toEntityId,
+            mode: "preserve",
+          }),
+        }
+      );
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to reassign image.");
+      }
+
+      setReassignModalImage(null);
+      await Promise.all([fetchPhotos(), fetchCoverPhoto()]);
+
+      if (toType === "cast" && toEntityId !== personId) {
+        closeLightbox();
+      }
+      setRefreshError(null);
+      setRefreshNotice("Image reassigned.");
+    },
+    [closeLightbox, fetchCoverPhoto, fetchPhotos, getAuthHeaders, personId, reassignModalImage]
+  );
 
   const handleThumbnailCropOverlayAdjust = useCallback(
     (nextPreview: ThumbnailCropPreview) => {
@@ -3245,7 +3489,7 @@ export default function PersonProfilePage() {
       setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
       closeLightbox();
     },
-    [getAuthHeaders]
+    [closeLightbox, getAuthHeaders]
   );
 
   const toggleStarGalleryPhoto = useCallback(
@@ -3283,6 +3527,76 @@ export default function PersonProfilePage() {
           return { ...p, metadata: meta };
         })
       );
+    },
+    [getAuthHeaders]
+  );
+
+  const updateGalleryPhotoContentType = useCallback(
+    async (photo: TrrPersonPhoto, contentType: string) => {
+      const origin = photo.origin === "cast_photos" ? "cast_photos" : "media_assets";
+      const assetId =
+        photo.origin === "cast_photos" ? photo.id : photo.media_asset_id ?? null;
+      if (!assetId) throw new Error("Cannot update content type: missing asset id");
+
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/trr-api/assets/content-type", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, asset_id: assetId, content_type: contentType }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          data?.error && data?.detail
+            ? `${data.error}: ${data.detail}`
+            : data?.detail || data?.error || "Content type update failed";
+        throw new Error(message);
+      }
+
+      const normalizedContentType =
+        typeof data.content_type === "string" && data.content_type.trim().length > 0
+          ? data.content_type.trim().toUpperCase()
+          : contentType.trim().toUpperCase();
+      const nextContextType =
+        typeof data.context_type === "string" && data.context_type.trim().length > 0
+          ? data.context_type.trim()
+          : contentTypeToContextType(normalizedContentType);
+
+      const applyUpdate = (candidate: TrrPersonPhoto): TrrPersonPhoto => {
+        const metadata =
+          candidate.metadata && typeof candidate.metadata === "object"
+            ? { ...(candidate.metadata as Record<string, unknown>) }
+            : {};
+        metadata.fandom_section_tag = normalizedContentType;
+        metadata.content_type = normalizedContentType;
+        return {
+          ...candidate,
+          context_type: nextContextType,
+          metadata,
+        };
+      };
+
+      setPhotos((prev) =>
+        prev.map((candidate) =>
+          origin === "media_assets"
+            ? candidate.media_asset_id === assetId
+              ? applyUpdate(candidate)
+              : candidate
+            : candidate.id === assetId
+              ? applyUpdate(candidate)
+              : candidate
+        )
+      );
+
+      setLightboxPhoto((prev) => {
+        if (!prev) return prev;
+        const matches =
+          origin === "media_assets"
+            ? prev.photo.media_asset_id === assetId
+            : prev.photo.id === assetId;
+        if (!matches) return prev;
+        return { ...prev, photo: applyUpdate(prev.photo) };
+      });
     },
     [getAuthHeaders]
   );
@@ -4360,6 +4674,9 @@ export default function PersonProfilePage() {
             isStarred={Boolean((lightboxPhoto.photo.metadata as Record<string, unknown> | null)?.starred)}
             onToggleStar={(starred) => toggleStarGalleryPhoto(lightboxPhoto.photo, starred)}
             onArchive={() => archiveGalleryPhoto(lightboxPhoto.photo)}
+            onUpdateContentType={(contentType) =>
+              updateGalleryPhotoContentType(lightboxPhoto.photo, contentType)
+            }
             metadataExtras={
               <TagPeoplePanel
                 photo={lightboxPhoto.photo}
@@ -4389,8 +4706,29 @@ export default function PersonProfilePage() {
             }
             onThumbnailCropPreviewAdjust={handleThumbnailCropOverlayAdjust}
             onRefresh={() => handleRefreshLightboxPhotoMetadata(lightboxPhoto.photo)}
+            onReassign={
+              lightboxPhoto.photo.origin === "cast_photos"
+                ? () =>
+                    setReassignModalImage({
+                      imageId: lightboxPhoto.photo.id,
+                      currentEntityId: lightboxPhoto.photo.person_id,
+                      currentEntityLabel: person.full_name ?? null,
+                    })
+                : undefined
+            }
           />
         )}
+
+        <ReassignImageModal
+          isOpen={Boolean(reassignModalImage)}
+          onClose={() => setReassignModalImage(null)}
+          onSubmit={handleReassignCastPhoto}
+          currentType="cast"
+          currentEntityId={reassignModalImage?.currentEntityId ?? personId}
+          currentEntityLabel={reassignModalImage?.currentEntityLabel ?? person.full_name}
+          allowedTypes={["cast"]}
+          getAuthHeaders={getAuthHeaders}
+        />
 
         {/* Image scrape drawer */}
         <ImageScrapeDrawer

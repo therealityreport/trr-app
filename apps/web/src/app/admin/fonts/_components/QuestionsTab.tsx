@@ -9,7 +9,7 @@ import {
   DESIGN_SYSTEM_CDN_FONT_OPTIONS,
   DESIGN_SYSTEM_COLORS_STORAGE_KEY,
 } from "@/lib/admin/design-system-tokens";
-import { resolveCloudfrontCdnFont } from "@/lib/fonts/cdn-fonts";
+import { extractPrimaryFontToken, resolveCloudfrontCdnFont } from "@/lib/fonts/cdn-fonts";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { SurveyRankingItem } from "@/lib/surveys/types";
 
@@ -97,6 +97,8 @@ interface QuestionsTabProps {
 
 const TEMPLATE_EDITOR_STORAGE_PREFIX = "trr.questions-tab.template-editor.v2";
 const SURVEY_QUESTION_DEFAULTS_STORAGE_KEY = "trr.questions-tab.survey-defaults.v1";
+const SURVEY_PREVIEW_SOURCE_STORAGE_KEY = "trr.questions-tab.preview-source.v1";
+const DEFAULT_SURVEY_PREVIEW_SOURCE = "RHOSLC S6 Survey";
 type TemplateEditorStringKey =
   | "titleText"
   | "subText"
@@ -219,25 +221,19 @@ const SURVEY_CATALOG: CatalogEntry[] = [
     { label: "Select Shows", source: "Signup / Onboarding", mockQuestion: mkQ("select_shows", "Which Real Housewives shows do you watch?", "multi_choice", { uiVariant: "multi-select-choice", minSelections: 1, maxSelections: 5 }, [{ key: "rhoslc", text: "RHOSLC" }, { key: "rhobh", text: "RHOBH" }, { key: "rhoa", text: "RHOA" }, { key: "rhop", text: "RHOP" }, { key: "rhonj", text: "RHONJ" }, { key: "rhony", text: "RHONY" }, { key: "rhod", text: "RHOD" }]), mockValue: ["rhoslc", "rhop"] },
     { label: "Favorite Moments", source: "Episode Survey", mockQuestion: mkQ("fav_moments", "Select all the scenes that stood out to you", "multi_choice", { uiVariant: "multi-select-choice", minSelections: 1 }, [{ key: "dinner", text: "The group dinner confrontation" }, { key: "confessional", text: "Lisa's confessional breakdown" }, { key: "trip", text: "The cast trip reveal" }, { key: "reunion", text: "The reunion preview" }]), mockValue: [] },
   ]},
-  { key: "dropdown", displayName: "Dropdown Select", description: "Native HTML select dropdown for compact option lists.", componentPath: "components/survey/DropdownInput.tsx", category: "survey", examples: [
-    { label: "Country Select", source: "Signup (Auth Finish)", mockQuestion: mkQ("country_survey", "What country are you in?", "single_choice", { uiVariant: "dropdown", placeholder: "Select your country..." }, [{ key: "us", text: "United States" }, { key: "ca", text: "Canada" }, { key: "uk", text: "United Kingdom" }, { key: "au", text: "Australia" }, { key: "other", text: "Other" }]), mockValue: null },
-  ]},
   { key: "text-entry", displayName: "Text Entry", description: "Single-line text input with optional validation (pattern, length).", componentPath: "components/survey/TextEntryInput.tsx", category: "survey", examples: [
     { label: "Free Text Response", source: "General Survey", mockQuestion: mkQ("thoughts", "What would you like to see next season?", "free_text", { uiVariant: "text-entry", placeholder: "Share your thoughts...", inputType: "text" }), mockValue: "" },
-  ]},
-  { key: "email-input", displayName: "Email", description: "Email text input with format validation.", componentPath: "components/survey/TextEntryInput.tsx (email)", category: "survey", examples: [
-    { label: "Email Address", source: "Signup / Login", mockQuestion: mkQ("email", "Email address", "free_text", { uiVariant: "text-entry", placeholder: "you@example.com", inputType: "email" }), mockValue: "" },
-  ]},
-  { key: "password-input", displayName: "Password", description: "Password text input with masked characters.", componentPath: "components/survey/TextEntryInput.tsx (password)", category: "survey", examples: [
-    { label: "Password", source: "Signup / Login", mockQuestion: mkQ("password", "Password", "free_text", { uiVariant: "text-entry", placeholder: "Enter your password", inputType: "password" }), mockValue: "" },
   ]},
   { key: "whose-side", displayName: "Whose Side (Head-to-Head)", description: "Two-choice comparison with VS divider and optional neutral option.", componentPath: "components/survey/WhoseSideInput.tsx", category: "survey", examples: [
     { label: "Feud: Lisa vs Meredith", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_lm", "Whose side are you on in the Lisa vs. Meredith feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neutral" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }]), mockValue: null },
     { label: "Feud: Whitney vs Heather", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_wh", "Whose side are you on in the Whitney vs. Heather feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neither" }, [{ key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } }]), mockValue: null },
   ]},
-  { key: "matrix-likert", displayName: "Matrix / Likert Scale", description: "Table-grid with rows (cast members or statements) and columns (verdict options).", componentPath: "components/survey/MatrixLikertInput.tsx", category: "survey", examples: [
-    { label: "Cast Verdict (Fire/Demote/Keep)", source: "RHOSLC S6 Survey", mockQuestion: mkQ("verdict", "For each cast member, should Bravo keep, demote, or fire them?", "likert", { uiVariant: "three-choice-slider", choices: [{ value: "fire", label: "Fire" }, { value: "demote", label: "Demote" }, { value: "keep", label: "Keep" }], rows: [{ id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" }, { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" }] }, [{ key: "fire", text: "Fire" }, { key: "demote", text: "Demote" }, { key: "keep", text: "Keep" }]), mockValue: {} },
-    { label: "Agree / Disagree", source: "General Survey", mockQuestion: mkQ("agree", "How do you feel about each statement?", "likert", { uiVariant: "agree-likert-scale", rows: [{ id: "s1", label: "The season had too much drama" }, { id: "s2", label: "The cast needs fresh faces" }, { id: "s3", label: "The reunion was satisfying" }] }, [{ key: "strongly_disagree", text: "Strongly Disagree" }, { key: "somewhat_disagree", text: "Somewhat Disagree" }, { key: "neutral", text: "Neither" }, { key: "somewhat_agree", text: "Somewhat Agree" }, { key: "strongly_agree", text: "Strongly Agree" }]), mockValue: {} },
+  { key: "matrix-likert", displayName: "Matrix / Likert Scale", description: "Statement-based agree/disagree bars with a 5-point sentiment scale.", componentPath: "components/survey/MatrixLikertInput.tsx", category: "survey", examples: [
+    { label: "Agree / Disagree", source: "RHOSLC S6 Survey", mockQuestion: mkQ("agree", "Heather and Whitney are telling the truth about Meredith on the Plane.", "likert", { uiVariant: "agree-likert-scale", promptText: "How much do you agree with the following statement:", rows: [{ id: "s1", label: "Heather and Whitney are telling the truth about Meredith on the Plane." }] }, [{ key: "strongly_disagree", text: "Strongly Disagree" }, { key: "somewhat_disagree", text: "Somewhat Disagree" }, { key: "neutral", text: "Neither" }, { key: "somewhat_agree", text: "Somewhat Agree" }, { key: "strongly_agree", text: "Strongly Agree" }]), mockValue: {} },
+  ]},
+  { key: "cast-decision", displayName: "Cast Decision Card", description: "Single-cast decision card for verdict-style prompts (Keep/Fire/Demote, Bring Back/Keep Gone).", componentPath: "components/survey/CastDecisionCardInput.tsx", category: "survey", examples: [
+    { label: "Cast Verdict (Keep/Fire/Demote)", source: "RHOSLC S6 Survey", mockQuestion: mkQ("verdict", "For each cast member, should Bravo keep, demote, or fire them?", "likert", { uiVariant: "cast-decision-card", choices: [{ value: "fire", label: "Fire" }, { value: "demote", label: "Demote" }, { value: "keep", label: "Keep" }], rows: [{ id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" }, { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" }] }, [{ key: "fire", text: "Fire" }, { key: "demote", text: "Demote" }, { key: "keep", text: "Keep" }]), mockValue: {} },
+    { label: "Ex-Wives: Bring Back / Keep Gone", source: "Legacy Cast Survey", mockQuestion: mkQ("exwives", "Should these former cast members return?", "likert", { uiVariant: "cast-decision-card", choices: [{ value: "bring_back", label: "Bring Back" }, { value: "keep_gone", label: "Keep Gone" }], rows: [{ id: "monica", label: "Monica Garcia" }, { id: "jen", label: "Jen Shah" }] }, [{ key: "bring_back", text: "Bring Back" }, { key: "keep_gone", text: "Keep Gone" }]), mockValue: {} },
   ]},
   { key: "rank-order", displayName: "Rank Order (Drag & Drop)", description: "Drag-and-drop ranked slots with an unranked tray. Supports circle cast and rectangle seasons templates.", componentPath: "components/survey/RankOrderInput.tsx + flashback-ranker.tsx", category: "survey", examples: [
     { label: "RHOSLC Season Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_seasons", "Rank the Seasons of RHOSLC.", "ranking", { uiVariant: "rectangle-ranking", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "s1", text: "SEASON 1" }, { key: "s2", text: "SEASON 2" }, { key: "s3", text: "SEASON 3" }, { key: "s4", text: "SEASON 4" }, { key: "s5", text: "SEASON 5" }, { key: "s6", text: "SEASON 6" }]), mockValue: [] },
@@ -253,6 +249,9 @@ const SURVEY_CATALOG: CatalogEntry[] = [
 /* ------------------------------------------------------------------ */
 
 const AUTH_CATALOG: CatalogEntry[] = [
+  { key: "auth-email", displayName: "Email", description: "Email text input with format validation.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
+  { key: "auth-password", displayName: "Password", description: "Password text input with masked characters.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
+  { key: "auth-country-dropdown", displayName: "Country Dropdown Select", description: "Native dropdown country select used for compact auth flows.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
   { key: "auth-username", displayName: "Username", description: "Text input, 3-20 chars, lowercase + digits + underscores. Checked for uniqueness on blur.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
   { key: "auth-birthday", displayName: "Birthday (Date)", description: "Native date picker (type=\"date\"). Must be 13+. Required for OAuth users.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
   { key: "auth-gender", displayName: "Gender (Select)", description: "Dropdown select with 5 options: Male, Female, Non-binary, Prefer not to say, Other.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
@@ -301,8 +300,29 @@ const TEMPLATE_FONT_OPTIONS: Array<{ label: string; value: string }> = DESIGN_SY
   value: font.fontFamily,
 }));
 
+function normalizeTemplateFontFamily(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+
+  const directMatch = TEMPLATE_FONT_OPTIONS.find((option) => option.value === trimmed);
+  if (directMatch) return directMatch.value;
+
+  const resolved = resolveCloudfrontCdnFont(trimmed);
+  if (resolved) return resolved.fontFamily;
+
+  const primaryToken = extractPrimaryFontToken(trimmed).toLowerCase();
+  const byLabel = TEMPLATE_FONT_OPTIONS.find((option) => {
+    const label = option.label.toLowerCase();
+    return label === trimmed.toLowerCase() || (primaryToken.length > 0 && label === primaryToken);
+  });
+  if (byLabel) return byLabel.value;
+
+  return trimmed;
+}
+
 const DEFAULT_TITLE_FONT = "\"Sofia Pro\", var(--font-sans), sans-serif";
 const DEFAULT_SUBTEXT_FONT = "\"Sofia Pro\", var(--font-sans), sans-serif";
+const FIGMA_MATRIX_HEADING_FONT = "\"Gloucester\", var(--font-sans), sans-serif";
 const FIGMA_TITLE_FONT = "\"Rude Slab Condensed\", var(--font-sans), sans-serif";
 const FIGMA_SUBTEXT_FONT = "\"Plymouth Serial\", var(--font-sans), sans-serif";
 
@@ -414,7 +434,11 @@ function sanitizeTemplateEditorState(
   for (const field of stringFields) {
     const raw = candidate[field];
     if (typeof raw === "string") {
-      sanitized[field] = raw;
+      if (field === "titleFontFamily" || field === "subTextFontFamily") {
+        sanitized[field] = normalizeTemplateFontFamily(raw);
+      } else {
+        sanitized[field] = raw;
+      }
     }
   }
   for (const field of numericFields) {
@@ -451,7 +475,11 @@ function sanitizeTemplateStyleDefaults(value: unknown): Partial<TemplateStyleDef
   for (const field of stringFields) {
     const raw = candidate[field];
     if (typeof raw === "string") {
-      sanitized[field] = raw;
+      if (field === "titleFontFamily" || field === "subTextFontFamily") {
+        sanitized[field] = normalizeTemplateFontFamily(raw);
+      } else {
+        sanitized[field] = raw;
+      }
     }
   }
 
@@ -498,7 +526,7 @@ function withEditorFontOverridesForQuestion(
   const baseConfig = asConfigRecord(question.config);
   const uiVariant = typeof baseConfig.uiVariant === "string" ? baseConfig.uiVariant : "";
 
-  if (uiVariant === "three-choice-slider") {
+  if (uiVariant === "cast-decision-card" || uiVariant === "three-choice-slider") {
     const existingFonts = asConfigRecord(baseConfig.fonts);
     return {
       ...question,
@@ -585,12 +613,21 @@ function withEditorFontOverridesForQuestion(
         ...baseConfig,
         shapeScale: editorState.shapeScale,
         buttonScale: editorState.buttonScale,
+        subTextHeadingFontFamily: FIGMA_MATRIX_HEADING_FONT,
+        promptFontFamily: FIGMA_MATRIX_HEADING_FONT,
+        headingFontFamily: FIGMA_MATRIX_HEADING_FONT,
         questionTextFontFamily: editorState.titleFontFamily,
+        statementFontFamily: editorState.titleFontFamily,
         optionTextFontFamily: editorState.subTextFontFamily,
+        scaleLabelFontFamily: editorState.subTextFontFamily,
+        optionLabelFontFamily: editorState.subTextFontFamily,
         rowLabelFontFamily: editorState.titleFontFamily,
         columnLabelFontFamily: editorState.subTextFontFamily,
         fonts: {
           ...existingFonts,
+          subTextHeading: FIGMA_MATRIX_HEADING_FONT,
+          prompt: FIGMA_MATRIX_HEADING_FONT,
+          heading: FIGMA_MATRIX_HEADING_FONT,
           questionText: editorState.titleFontFamily,
           optionText: editorState.subTextFontFamily,
           rowLabel: editorState.titleFontFamily,
@@ -691,20 +728,11 @@ function TemplateFontSelect({
   onChange: (next: string) => void;
 }) {
   const selectValue = useMemo(() => {
-    if (TEMPLATE_FONT_OPTIONS.some((option) => option.value === value)) {
-      return value;
+    const normalized = normalizeTemplateFontFamily(value);
+    if (TEMPLATE_FONT_OPTIONS.some((option) => option.value === normalized)) {
+      return normalized;
     }
-    const resolved = resolveCloudfrontCdnFont(value);
-    if (resolved) {
-      const matched = TEMPLATE_FONT_OPTIONS.find(
-        (option) => option.value === resolved.fontFamily || option.label === resolved.name,
-      );
-      if (matched) return matched.value;
-    }
-    const fallbackByLabel = TEMPLATE_FONT_OPTIONS.find(
-      (option) => option.label.toLowerCase() === value.trim().toLowerCase(),
-    );
-    return fallbackByLabel?.value ?? value;
+    return value;
   }, [value]);
 
   return (
@@ -809,12 +837,19 @@ function SurveyDefaultSettingsPanel({
   defaults,
   onChange,
   baseColors,
+  previewSource,
+  previewSourceOptions,
+  onPreviewSourceChange,
 }: {
   defaults: SurveyQuestionDefaultsState;
   onChange: (next: SurveyQuestionDefaultsState) => void;
   baseColors: string[];
+  previewSource: string;
+  previewSourceOptions: string[];
+  onPreviewSourceChange: (next: string) => void;
 }) {
   const [activeViewport, setActiveViewport] = useState<DefaultViewport>("mobile");
+  const [isExpanded, setIsExpanded] = useState(false);
   const activeDefaults = defaults[activeViewport];
 
   const updateActiveDefaults = useCallback(
@@ -839,100 +874,133 @@ function SurveyDefaultSettingsPanel({
             Set baseline styles for all survey question previews. Per-template edits override these defaults.
           </p>
         </div>
-        <div className="inline-flex rounded-full border border-zinc-300 bg-white p-1">
-          <button
-            type="button"
-            onClick={() => setActiveViewport("mobile")}
-            className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
-              activeViewport === "mobile" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100"
-            }`}
-            aria-pressed={activeViewport === "mobile"}
-          >
-            Mobile
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveViewport("desktop")}
-            className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
-              activeViewport === "desktop" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100"
-            }`}
-            aria-pressed={activeViewport === "desktop"}
-          >
-            Desktop
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setIsExpanded((prev) => !prev)}
+          className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900"
+          aria-expanded={isExpanded}
+        >
+          {isExpanded ? "Hide Settings" : "Edit Settings"}
+        </button>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-        <TemplateFontSelect
-          label="Title Font"
-          value={activeDefaults.titleFontFamily}
-          onChange={(titleFontFamily) => updateActiveDefaults({ titleFontFamily })}
-        />
-        <TemplateFontSelect
-          label="Sub-Text Font"
-          value={activeDefaults.subTextFontFamily}
-          onChange={(subTextFontFamily) => updateActiveDefaults({ subTextFontFamily })}
-        />
-      </div>
+      {isExpanded && (
+        <>
+          <div className="mt-3 max-w-sm space-y-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+              Preview Survey
+            </label>
+            <select
+              value={previewSource}
+              onChange={(event) => onPreviewSourceChange(event.target.value)}
+              className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs font-medium text-zinc-700"
+            >
+              {previewSourceOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-zinc-500">
+              Choose which show/survey examples are shown in preview cards.
+            </p>
+          </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-sm">
-        <TemplateFontSizeInput
-          label="Title Size"
-          value={activeDefaults.titleFontSize}
-          onChange={(titleFontSize) => updateActiveDefaults({ titleFontSize })}
-        />
-        <TemplateFontSizeInput
-          label="Sub-Text Size"
-          value={activeDefaults.subTextFontSize}
-          onChange={(subTextFontSize) => updateActiveDefaults({ subTextFontSize })}
-        />
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-sm">
-        <TemplateFontSizeInput
-          label="Shape Size (%)"
-          value={activeDefaults.shapeScale}
-          onChange={(shapeScale) => updateActiveDefaults({ shapeScale })}
-        />
-        <TemplateFontSizeInput
-          label="Button Size (%)"
-          value={activeDefaults.buttonScale}
-          onChange={(buttonScale) => updateActiveDefaults({ buttonScale })}
-        />
-      </div>
+          <div className="mt-3 inline-flex rounded-full border border-zinc-300 bg-white p-1">
+            <button
+              type="button"
+              onClick={() => setActiveViewport("mobile")}
+              className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                activeViewport === "mobile" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100"
+              }`}
+              aria-pressed={activeViewport === "mobile"}
+            >
+              Mobile
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveViewport("desktop")}
+              className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                activeViewport === "desktop" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100"
+              }`}
+              aria-pressed={activeViewport === "desktop"}
+            >
+              Desktop
+            </button>
+          </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-        <TemplateColorSelect
-          label="Title"
-          value={activeDefaults.titleColor}
-          baseColors={baseColors}
-          onChange={(titleColor) => updateActiveDefaults({ titleColor })}
-        />
-        <TemplateColorSelect
-          label="Sub-Text"
-          value={activeDefaults.subTextColor}
-          baseColors={baseColors}
-          onChange={(subTextColor) => updateActiveDefaults({ subTextColor })}
-        />
-        <TemplateColorSelect
-          label="Canvas"
-          value={activeDefaults.canvasBackground}
-          baseColors={baseColors}
-          onChange={(canvasBackground) => updateActiveDefaults({ canvasBackground })}
-        />
-        <TemplateColorSelect
-          label="Frame"
-          value={activeDefaults.frameBackground}
-          baseColors={baseColors}
-          onChange={(frameBackground) => updateActiveDefaults({ frameBackground })}
-        />
-        <TemplateColorSelect
-          label="Frame Border"
-          value={activeDefaults.frameBorderColor}
-          baseColors={baseColors}
-          onChange={(frameBorderColor) => updateActiveDefaults({ frameBorderColor })}
-        />
-      </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <TemplateFontSelect
+              label="Title Font"
+              value={activeDefaults.titleFontFamily}
+              onChange={(titleFontFamily) => updateActiveDefaults({ titleFontFamily })}
+            />
+            <TemplateFontSelect
+              label="Sub-Text Font"
+              value={activeDefaults.subTextFontFamily}
+              onChange={(subTextFontFamily) => updateActiveDefaults({ subTextFontFamily })}
+            />
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-sm">
+            <TemplateFontSizeInput
+              label="Title Size"
+              value={activeDefaults.titleFontSize}
+              onChange={(titleFontSize) => updateActiveDefaults({ titleFontSize })}
+            />
+            <TemplateFontSizeInput
+              label="Sub-Text Size"
+              value={activeDefaults.subTextFontSize}
+              onChange={(subTextFontSize) => updateActiveDefaults({ subTextFontSize })}
+            />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-sm">
+            <TemplateFontSizeInput
+              label="Shape Size (%)"
+              value={activeDefaults.shapeScale}
+              onChange={(shapeScale) => updateActiveDefaults({ shapeScale })}
+            />
+            <TemplateFontSizeInput
+              label="Button Size (%)"
+              value={activeDefaults.buttonScale}
+              onChange={(buttonScale) => updateActiveDefaults({ buttonScale })}
+            />
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+            <TemplateColorSelect
+              label="Title"
+              value={activeDefaults.titleColor}
+              baseColors={baseColors}
+              onChange={(titleColor) => updateActiveDefaults({ titleColor })}
+            />
+            <TemplateColorSelect
+              label="Sub-Text"
+              value={activeDefaults.subTextColor}
+              baseColors={baseColors}
+              onChange={(subTextColor) => updateActiveDefaults({ subTextColor })}
+            />
+            <TemplateColorSelect
+              label="Canvas"
+              value={activeDefaults.canvasBackground}
+              baseColors={baseColors}
+              onChange={(canvasBackground) => updateActiveDefaults({ canvasBackground })}
+            />
+            <TemplateColorSelect
+              label="Frame"
+              value={activeDefaults.frameBackground}
+              baseColors={baseColors}
+              onChange={(frameBackground) => updateActiveDefaults({ frameBackground })}
+            />
+            <TemplateColorSelect
+              label="Frame Border"
+              value={activeDefaults.frameBorderColor}
+              baseColors={baseColors}
+              onChange={(frameBorderColor) => updateActiveDefaults({ frameBorderColor })}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -945,18 +1013,32 @@ function SurveyPreviewCard({
   entry,
   baseColors,
   surveyDefaults,
+  selectedPreviewSource,
 }: {
   entry: CatalogEntry;
   baseColors: string[];
   surveyDefaults: SurveyQuestionDefaultsState;
+  selectedPreviewSource: string;
 }) {
-  const examples = entry.examples!;
-  const storageKey = `${TEMPLATE_EDITOR_STORAGE_PREFIX}.survey.${entry.key}`;
+  const examples = useMemo(() => {
+    const allExamples = entry.examples ?? [];
+    if (!allExamples.length) return allExamples;
+
+    const sourceMatched = allExamples.filter((exampleValue) => exampleValue.source === selectedPreviewSource);
+    if (sourceMatched.length) return sourceMatched;
+
+    const nonRhopFallback = allExamples.filter((exampleValue) => !/rhop/i.test(exampleValue.source));
+    return nonRhopFallback.length ? nonRhopFallback : allExamples;
+  }, [entry.examples, selectedPreviewSource]);
+  const sourceKey = selectedPreviewSource.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-") || "default";
+  const storageKey = `${TEMPLATE_EDITOR_STORAGE_PREFIX}.survey.${entry.key}.${sourceKey}`;
   const [exampleIdx, setExampleIdx] = useState(0);
   const [viewport, setViewport] = useState<PreviewViewport>("phone");
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const example = examples[exampleIdx];
+  const safeExampleIdx = Math.min(exampleIdx, Math.max(examples.length - 1, 0));
+  const example = examples[safeExampleIdx] as QuestionExample;
   const activeVariant = (example.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
+  const suppressTemplateHeading = activeVariant === "agree-likert-scale";
   const isRankOrderPreview =
     entry.key === "rank-order" &&
     (activeVariant === "circle-ranking" || activeVariant === "rectangle-ranking");
@@ -967,14 +1049,22 @@ function SurveyPreviewCard({
     });
     return init;
   });
+  const shouldUseGlobalDefaultsForExample = useCallback(
+    (exampleValue: QuestionExample) => {
+      const variant = (exampleValue.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
+      // Keep Figma matrix previews on template fonts by default.
+      return variant !== "agree-likert-scale";
+    },
+    [],
+  );
   const buildDefaults = useCallback(
     (exampleValue: QuestionExample) => {
       const variant = (exampleValue.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
       const isRankPreview = entry.key === "rank-order" && (variant === "circle-ranking" || variant === "rectangle-ranking");
       const isSeasonPreview = entry.key === "rank-order" && variant === "rectangle-ranking";
-      const isThreeChoice = variant === "three-choice-slider";
+      const isThreeChoice = variant === "three-choice-slider" || variant === "cast-decision-card";
       const isWhoseSide = variant === "two-choice-slider";
-      return buildTemplateEditorDefaults(
+      const defaults = buildTemplateEditorDefaults(
         isThreeChoice || isWhoseSide
           ? ""
           : isSeasonPreview
@@ -991,6 +1081,18 @@ function SurveyPreviewCard({
               : "",
         isRankPreview,
       );
+      if (variant === "agree-likert-scale") {
+        return {
+          ...defaults,
+          titleText: "",
+          subText: "",
+          titleFontFamily: FIGMA_TITLE_FONT,
+          subTextFontFamily: FIGMA_SUBTEXT_FONT,
+          frameBackground: "#D9D9D9",
+          frameBorderColor: "#D9D9D9",
+        };
+      }
+      return defaults;
     },
     [entry.key],
   );
@@ -1003,8 +1105,8 @@ function SurveyPreviewCard({
   });
   const [useGlobalDefaultsByExample, setUseGlobalDefaultsByExample] = useState<Record<number, boolean>>(() => {
     const initial: Record<number, boolean> = {};
-    examples.forEach((_, idx) => {
-      initial[idx] = true;
+    examples.forEach((exampleValue, idx) => {
+      initial[idx] = shouldUseGlobalDefaultsForExample(exampleValue);
     });
     return initial;
   });
@@ -1023,10 +1125,32 @@ function SurveyPreviewCard({
           : record;
         examples.forEach((exampleValue, index) => {
           const saved = sanitizeTemplateEditorState(savedStates[String(index)]);
-          next[index] = {
+          const merged = {
             ...buildDefaults(exampleValue),
             ...saved,
           };
+          const variant = (exampleValue.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
+          if (variant === "agree-likert-scale") {
+            const savedTitleFont = typeof saved.titleFontFamily === "string"
+              ? normalizeTemplateFontFamily(saved.titleFontFamily)
+              : "";
+            const savedSubTextFont = typeof saved.subTextFontFamily === "string"
+              ? normalizeTemplateFontFamily(saved.subTextFontFamily)
+              : "";
+            const defaultTitleFont = normalizeTemplateFontFamily(DEFAULT_TITLE_FONT);
+            const defaultSubTextFont = normalizeTemplateFontFamily(DEFAULT_SUBTEXT_FONT);
+
+            merged.titleFontFamily = !savedTitleFont || savedTitleFont === defaultTitleFont
+              ? FIGMA_TITLE_FONT
+              : savedTitleFont;
+            merged.subTextFontFamily = !savedSubTextFont || savedSubTextFont === defaultSubTextFont
+              ? FIGMA_SUBTEXT_FONT
+              : savedSubTextFont;
+            // The Figma likert template owns its own heading and statement copy.
+            merged.titleText = "";
+            merged.subText = "";
+          }
+          next[index] = merged;
         });
         return next;
       });
@@ -1035,16 +1159,21 @@ function SurveyPreviewCard({
         const savedFlags = record.useGlobal && typeof record.useGlobal === "object" && !Array.isArray(record.useGlobal)
           ? (record.useGlobal as Record<string, unknown>)
           : {};
-        examples.forEach((_, index) => {
+        examples.forEach((exampleValue, index) => {
           const saved = savedFlags[String(index)];
-          next[index] = typeof saved === "boolean" ? saved : true;
+          const shouldUseGlobal = shouldUseGlobalDefaultsForExample(exampleValue);
+          if (!shouldUseGlobal) {
+            next[index] = false;
+            return;
+          }
+          next[index] = typeof saved === "boolean" ? saved : shouldUseGlobal;
         });
         return next;
       });
     } catch {
       // Ignore malformed persisted editor settings.
     }
-  }, [buildDefaults, examples, storageKey]);
+  }, [buildDefaults, examples, shouldUseGlobalDefaultsForExample, storageKey]);
 
   useEffect(() => {
     try {
@@ -1065,15 +1194,16 @@ function SurveyPreviewCard({
   }, [editorStateByExample, storageKey, useGlobalDefaultsByExample]);
 
   const handleChange = useCallback((v: unknown) => {
-    setValues((prev) => ({ ...prev, [exampleIdx]: v }));
-  }, [exampleIdx]);
+    setValues((prev) => ({ ...prev, [safeExampleIdx]: v }));
+  }, [safeExampleIdx]);
   const editorState =
-    editorStateByExample[exampleIdx] ?? buildDefaults(example);
+    editorStateByExample[safeExampleIdx] ?? buildDefaults(example);
   const activeSurveyDefaults = useMemo(
     () => (viewport === "phone" ? surveyDefaults.mobile : surveyDefaults.desktop),
     [surveyDefaults.desktop, surveyDefaults.mobile, viewport],
   );
-  const isUsingGlobalDefaults = useGlobalDefaultsByExample[exampleIdx] ?? true;
+  const isUsingGlobalDefaults =
+    useGlobalDefaultsByExample[safeExampleIdx] ?? shouldUseGlobalDefaultsForExample(example);
   const effectiveEditorState = useMemo(
     () => (isUsingGlobalDefaults
       ? {
@@ -1095,31 +1225,31 @@ function SurveyPreviewCard({
       setEditorStateByExample((prev) => {
         const base = isUsingGlobalDefaults && touchesStyleDefaults
           ? effectiveEditorState
-          : prev[exampleIdx] ?? buildDefaults(example);
+          : prev[safeExampleIdx] ?? buildDefaults(example);
         return {
           ...prev,
-          [exampleIdx]: { ...base, ...partial },
+          [safeExampleIdx]: { ...base, ...partial },
         };
       });
       if (touchesStyleDefaults) {
         setUseGlobalDefaultsByExample((prev) => ({
           ...prev,
-          [exampleIdx]: false,
+          [safeExampleIdx]: false,
         }));
       }
     },
-    [buildDefaults, effectiveEditorState, example, exampleIdx, isUsingGlobalDefaults],
+    [buildDefaults, effectiveEditorState, example, isUsingGlobalDefaults, safeExampleIdx],
   );
   const resetEditorState = useCallback(() => {
     setEditorStateByExample((prev) => ({
       ...prev,
-      [exampleIdx]: buildDefaults(example),
+      [safeExampleIdx]: buildDefaults(example),
     }));
     setUseGlobalDefaultsByExample((prev) => ({
       ...prev,
-      [exampleIdx]: true,
+      [safeExampleIdx]: shouldUseGlobalDefaultsForExample(example),
     }));
-  }, [buildDefaults, example, exampleIdx]);
+  }, [buildDefaults, example, safeExampleIdx, shouldUseGlobalDefaultsForExample]);
 
   const renderPreview = (heightClass: string) => (
     <div
@@ -1138,7 +1268,7 @@ function SurveyPreviewCard({
           }}
         >
           <div className="p-3 sm:p-6">
-            {(effectiveEditorState.titleText.trim().length > 0 || effectiveEditorState.subText.trim().length > 0) && (
+            {!suppressTemplateHeading && (effectiveEditorState.titleText.trim().length > 0 || effectiveEditorState.subText.trim().length > 0) && (
               <div className="mb-3 sm:mb-4">
                 {effectiveEditorState.titleText.trim().length > 0 && (
                   <p
@@ -1170,7 +1300,7 @@ function SurveyPreviewCard({
             )}
             <QuestionRenderer
               question={previewQuestion}
-              value={values[exampleIdx]}
+              value={values[safeExampleIdx]}
               onChange={handleChange}
             />
           </div>
@@ -1185,7 +1315,7 @@ function SurveyPreviewCard({
         {examples.length > 1 && (
           <div className="mt-2">
             <select
-              value={exampleIdx}
+              value={safeExampleIdx}
               onChange={(e) => setExampleIdx(Number(e.target.value))}
               className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 focus:border-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-200"
             >
@@ -1272,7 +1402,7 @@ function SurveyPreviewCard({
                         Example
                       </label>
                       <select
-                        value={exampleIdx}
+                        value={safeExampleIdx}
                         onChange={(e) => setExampleIdx(Number(e.target.value))}
                         className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
                       >
@@ -1285,27 +1415,31 @@ function SurveyPreviewCard({
                     </div>
                   )}
 
-                  <div>
-                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Title Text
-                    </label>
-                    <textarea
-                      value={effectiveEditorState.titleText}
-                      onChange={(e) => updateEditorState({ titleText: e.target.value })}
-                      className="min-h-20 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
-                    />
-                  </div>
+                  {!suppressTemplateHeading && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Title Text
+                        </label>
+                        <textarea
+                          value={effectiveEditorState.titleText}
+                          onChange={(e) => updateEditorState({ titleText: e.target.value })}
+                          className="min-h-20 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Sub-Text
-                    </label>
-                    <textarea
-                      value={effectiveEditorState.subText}
-                      onChange={(e) => updateEditorState({ subText: e.target.value })}
-                      className="min-h-16 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
-                    />
-                  </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Sub-Text
+                        </label>
+                        <textarea
+                          value={effectiveEditorState.subText}
+                          onChange={(e) => updateEditorState({ subText: e.target.value })}
+                          className="min-h-16 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800"
+                        />
+                      </div>
+                    </>
+                  )}
 
                   <TemplateFontSelect
                     label="Title Font"
@@ -1416,13 +1550,64 @@ function AuthPreviewCard({ entry }: { entry: CatalogEntry }) {
 
 function AuthFieldPreview({ fieldKey }: { fieldKey: string }) {
   const [text, setText] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [date, setDate] = useState("");
   const [gender, setGender] = useState("");
   const [country, setCountry] = useState("");
+  const [countryDropdown, setCountryDropdown] = useState("");
   const [state, setState] = useState("");
   const [selectedShows, setSelectedShows] = useState<string[]>([]);
 
   switch (fieldKey) {
+    case "auth-email":
+      return (
+        <div className="space-y-2">
+          <label className={AUTH_LABEL}>Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className={AUTH_INPUT}
+          />
+          <p className="text-xs text-zinc-400">Used for account login and notifications.</p>
+        </div>
+      );
+
+    case "auth-password":
+      return (
+        <div className="space-y-2">
+          <label className={AUTH_LABEL}>Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter your password"
+            className={AUTH_INPUT}
+          />
+          <p className="text-xs text-zinc-400">At least 8 characters recommended.</p>
+        </div>
+      );
+
+    case "auth-country-dropdown":
+      return (
+        <div className="space-y-2">
+          <label className={AUTH_LABEL}>Country</label>
+          <select
+            value={countryDropdown}
+            onChange={(e) => setCountryDropdown(e.target.value)}
+            className={AUTH_INPUT}
+          >
+            <option value="">Select country...</option>
+            {SAMPLE_COUNTRIES.map((entry) => (
+              <option key={entry} value={entry}>{entry}</option>
+            ))}
+          </select>
+          <p className="text-xs text-zinc-400">Compact auth variant using native dropdown select.</p>
+        </div>
+      );
+
     case "auth-username":
       return (
         <div className="space-y-2">
@@ -1882,6 +2067,23 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
     mobile: { ...DEFAULT_SURVEY_STYLE_MOBILE },
     desktop: { ...DEFAULT_SURVEY_STYLE_DESKTOP },
   }));
+  const [selectedPreviewSource, setSelectedPreviewSource] = useState(DEFAULT_SURVEY_PREVIEW_SOURCE);
+
+  const previewSourceOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const entry of SURVEY_CATALOG) {
+      for (const example of entry.examples ?? []) {
+        if (/rhop/i.test(example.source)) continue;
+        values.add(example.source);
+      }
+    }
+    if (!values.has(DEFAULT_SURVEY_PREVIEW_SOURCE)) {
+      values.add(DEFAULT_SURVEY_PREVIEW_SOURCE);
+    }
+    const ordered = Array.from(values).sort((a, b) => a.localeCompare(b));
+    const withoutDefault = ordered.filter((value) => value !== DEFAULT_SURVEY_PREVIEW_SOURCE);
+    return [DEFAULT_SURVEY_PREVIEW_SOURCE, ...withoutDefault];
+  }, []);
 
   useEffect(() => {
     if (baseColors?.length) return;
@@ -1925,6 +2127,32 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
     }
   }, [surveyDefaults]);
 
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SURVEY_PREVIEW_SOURCE_STORAGE_KEY);
+      if (!raw) return;
+      if (typeof raw !== "string" || raw.trim().length === 0) return;
+      if (/rhop/i.test(raw)) return;
+      setSelectedPreviewSource(raw);
+    } catch {
+      // Ignore persisted preview-source failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!previewSourceOptions.includes(selectedPreviewSource)) {
+      setSelectedPreviewSource(previewSourceOptions[0] ?? DEFAULT_SURVEY_PREVIEW_SOURCE);
+    }
+  }, [previewSourceOptions, selectedPreviewSource]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SURVEY_PREVIEW_SOURCE_STORAGE_KEY, selectedPreviewSource);
+    } catch {
+      // Ignore persistence failures.
+    }
+  }, [selectedPreviewSource]);
+
   const totalCount = SURVEY_CATALOG.length + AUTH_CATALOG.length + STANDALONE_CATALOG.length;
 
   return (
@@ -1944,14 +2172,18 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
           defaults={surveyDefaults}
           onChange={setSurveyDefaults}
           baseColors={editorBaseColors}
+          previewSource={selectedPreviewSource}
+          previewSourceOptions={previewSourceOptions}
+          onPreviewSourceChange={setSelectedPreviewSource}
         />
         <div className="grid grid-cols-1 gap-6">
           {SURVEY_CATALOG.map((entry) => (
             <SurveyPreviewCard
-              key={entry.key}
+              key={`${entry.key}-${selectedPreviewSource}`}
               entry={entry}
               baseColors={editorBaseColors}
               surveyDefaults={surveyDefaults}
+              selectedPreviewSource={selectedPreviewSource}
             />
           ))}
         </div>

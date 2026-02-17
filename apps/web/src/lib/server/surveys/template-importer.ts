@@ -164,11 +164,12 @@ function mapSpecQuestion(specQuestion: SpecQuestion): MappedQuestion {
         ],
       };
 
+    case "cast-decision-card":
     case "three-choice-slider":
       return {
         dbType: "likert",
         config: {
-          uiVariant: "three-choice-slider",
+          uiVariant: "cast-decision-card",
           choices: specQuestion.choices,
           rows: specQuestion.subjects.map(
             (subject): ConfigMatrixRow => ({

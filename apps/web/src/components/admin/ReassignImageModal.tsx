@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { ImageType } from "./ImageLightbox";
 
 // Inline SVG icons
@@ -48,6 +48,8 @@ interface ReassignImageModalProps {
   currentType: ImageType;
   currentEntityId: string;
   currentEntityLabel?: string;
+  allowedTypes?: ImageType[];
+  getAuthHeaders?: () => Promise<{ Authorization: string }>;
 }
 
 const TYPE_LABELS: Record<ImageType, string> = {
@@ -63,8 +65,21 @@ export default function ReassignImageModal({
   currentType,
   currentEntityId,
   currentEntityLabel,
+  allowedTypes,
+  getAuthHeaders,
 }: ReassignImageModalProps) {
-  const [targetType, setTargetType] = useState<ImageType>(currentType);
+  const resolvedAllowedTypes = useMemo(() => {
+    const defaults = Object.keys(TYPE_LABELS) as ImageType[];
+    const filtered =
+      Array.isArray(allowedTypes) && allowedTypes.length > 0
+        ? allowedTypes.filter((type): type is ImageType => defaults.includes(type))
+        : defaults;
+    if (filtered.length === 0) return [currentType];
+    return Array.from(new Set(filtered));
+  }, [allowedTypes, currentType]);
+  const [targetType, setTargetType] = useState<ImageType>(
+    resolvedAllowedTypes.includes(currentType) ? currentType : resolvedAllowedTypes[0]
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [selectedEntity, setSelectedEntity] = useState<SearchResult | null>(
@@ -79,13 +94,15 @@ export default function ReassignImageModal({
   // Reset state when modal opens
   useEffect(() => {
     if (isOpen) {
-      setTargetType(currentType);
+      setTargetType(
+        resolvedAllowedTypes.includes(currentType) ? currentType : resolvedAllowedTypes[0]
+      );
       setSearchQuery("");
       setSearchResults([]);
       setSelectedEntity(null);
       setError(null);
     }
-  }, [isOpen, currentType]);
+  }, [isOpen, currentType, resolvedAllowedTypes]);
 
   // Debounced search
   const searchEntities = useCallback(
@@ -99,20 +116,23 @@ export default function ReassignImageModal({
       setError(null);
 
       try {
+        if (type !== "cast") {
+          setSearchResults([]);
+          setError("Only person reassignment is currently available.");
+          return;
+        }
+
         let endpoint: string;
         switch (type) {
           case "cast":
-            endpoint = `/api/admin/trr-api/people/search?q=${encodeURIComponent(query)}`;
+            endpoint = `/api/admin/trr-api/people?q=${encodeURIComponent(query)}&limit=10`;
             break;
-          case "episode":
-            endpoint = `/api/admin/trr-api/episodes/search?q=${encodeURIComponent(query)}`;
-            break;
-          case "season":
-            endpoint = `/api/admin/trr-api/seasons/search?q=${encodeURIComponent(query)}`;
-            break;
+          default:
+            endpoint = "";
         }
 
-        const res = await fetch(endpoint);
+        const authHeaders = getAuthHeaders ? await getAuthHeaders() : {};
+        const res = await fetch(endpoint, { headers: authHeaders });
         if (res.ok) {
           const data = await res.json();
           // API returns different shapes - normalize to { id, label }
@@ -134,7 +154,7 @@ export default function ReassignImageModal({
         setLoading(false);
       }
     },
-    []
+    [getAuthHeaders]
   );
 
   // Debounce search input
@@ -202,22 +222,28 @@ export default function ReassignImageModal({
           <label className="block text-sm font-medium text-zinc-700 mb-1">
             Destination type:
           </label>
-          <select
-            value={targetType}
-            onChange={(e) => {
-              setTargetType(e.target.value as ImageType);
-              setSelectedEntity(null);
-              setSearchQuery("");
-              setSearchResults([]);
-            }}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            {(Object.keys(TYPE_LABELS) as ImageType[]).map((type) => (
-              <option key={type} value={type}>
-                {TYPE_LABELS[type]}
-              </option>
-            ))}
-          </select>
+          {resolvedAllowedTypes.length === 1 ? (
+            <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+              {TYPE_LABELS[resolvedAllowedTypes[0]]}
+            </p>
+          ) : (
+            <select
+              value={targetType}
+              onChange={(e) => {
+                setTargetType(e.target.value as ImageType);
+                setSelectedEntity(null);
+                setSearchQuery("");
+                setSearchResults([]);
+              }}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {resolvedAllowedTypes.map((type) => (
+                <option key={type} value={type}>
+                  {TYPE_LABELS[type]}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Warning for type change */}
