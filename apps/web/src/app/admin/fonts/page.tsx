@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1105,7 +1105,7 @@ function RealiteaseFontCard({
 /*  Main Page                                                         */
 /* ------------------------------------------------------------------ */
 
-export default function AdminFontsPage() {
+function AdminFontsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, checking, hasAccess } = useAdminGuard();
@@ -1516,5 +1516,13 @@ export default function AdminFontsPage() {
         </main>
       </div>
     </ClientOnly>
+  );
+}
+
+export default function AdminFontsPage() {
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-sm text-zinc-500">Loading...</div>}>
+      <AdminFontsPageContent />
+    </Suspense>
   );
 }
