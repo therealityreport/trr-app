@@ -147,7 +147,6 @@ function _loadAuthDiagnosticsStateIfNeeded(): void {
 }
 
 function markAuthDiagnosticsObservedNow(): void {
-  _loadAuthDiagnosticsStateIfNeeded();
   authDiagnosticsLastObservedAt = new Date().toISOString();
   _persistAuthDiagnosticsState();
 }
@@ -325,6 +324,7 @@ async function verifyToken(
   kind: TokenKind,
 ): Promise<{ provider: AuthProvider; claims: AuthTokenClaims } | null> {
   if (!token) return null;
+  _loadAuthDiagnosticsStateIfNeeded();
 
   const primary = AUTH_PROVIDER;
   const secondary: AuthProvider = primary === "firebase" ? "supabase" : "firebase";
