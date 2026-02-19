@@ -1232,11 +1232,11 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: /Run Season Ingest \(All\)/i }));
 
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(3000);
     expect(runJobsCalls).toBeGreaterThan(0);
 
     await vi.advanceTimersByTimeAsync(7000);
     expect(screen.queryByText(/Ingest complete/i)).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 });
