@@ -2,7 +2,182 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
-## Latest Update (2026-02-17)
+## Latest Update (2026-02-19)
+
+- February 19, 2026: Completed `/admin/networks` production sync UI/auth hardening and BW logo variant visibility.
+  - Files:
+    - `apps/web/src/app/admin/networks/page.tsx`
+    - `apps/web/src/lib/server/admin/networks-streaming-repository.ts`
+    - `apps/web/tests/networks-streaming-summary-route.test.ts`
+    - `apps/web/tests/networks-streaming-sync-proxy-route.test.ts`
+    - `apps/web/tests/admin-networks-page-auth.test.tsx` (new)
+  - Changes:
+    - Fixed `/admin/networks` unauthorized behavior by adding Firebase bearer header flow (`auth.currentUser?.getIdToken()`) on:
+      - `GET /api/admin/networks-streaming/summary`
+      - `POST /api/admin/networks-streaming/sync`
+    - Extended summary row model + SQL metadata joins with:
+      - `hosted_logo_black_url`
+      - `hosted_logo_white_url`
+      - derived `has_bw_variants`.
+    - Expanded `/admin/networks` UI:
+      - added missing BW variants status/count chips and row-level status badges,
+      - sync success panel now shows black/white mirror counts and unresolved count,
+      - added expandable unresolved list (name/type/reason) + truncation note.
+    - Extended route tests to include new response fields and added page-level regression test asserting bearer auth headers and unresolved rendering.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/networks-streaming-summary-route.test.ts tests/networks-streaming-sync-proxy-route.test.ts tests/admin-networks-page-auth.test.tsx` (`8 passed`)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web run test:ci` (`80 files passed`, `296 tests passed`)
+    - `pnpm -C apps/web run lint` blocked by existing repo-level ESLint config issue (`TypeError: Converting circular structure to JSON`), not introduced by this task.
+
+- February 19, 2026: Updated admin landing behavior so Networks & Streaming is a standard tool card that routes to a dedicated page.
+  - Files:
+    - `apps/web/src/app/admin/page.tsx`
+    - `apps/web/src/app/admin/networks/page.tsx` (new)
+  - Changes:
+    - Removed inline Networks & Streaming table/sync container from `/admin` landing page.
+    - Added `Networks & Streaming` as a normal `Available Tools` card with route target `/admin/networks`.
+    - Added dedicated `/admin/networks` page that now hosts the full summary table, sync/mirror action, and refresh flow.
+  - Validation:
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec vitest run tests/networks-streaming-summary-route.test.ts tests/networks-streaming-sync-proxy-route.test.ts` (`6 passed`)
+
+- February 19, 2026: Added admin landing "Networks & Streaming" container with full summary + sync/mirror controls.
+  - Files:
+    - `apps/web/src/app/admin/page.tsx`
+    - `apps/web/src/lib/server/admin/networks-streaming-repository.ts`
+    - `apps/web/src/app/api/admin/networks-streaming/summary/route.ts` (new)
+    - `apps/web/src/app/api/admin/networks-streaming/sync/route.ts` (new)
+    - `apps/web/tests/networks-streaming-summary-route.test.ts` (new)
+    - `apps/web/tests/networks-streaming-sync-proxy-route.test.ts` (new)
+  - Changes:
+    - Added DB-backed summary repository for networks and streaming providers:
+      - Available counts from `core.shows`
+      - Added counts from `admin.covered_shows`
+      - Streaming primary source: `core.show_watch_providers + core.watch_providers` (`US`, `flatrate|ads`)
+      - Streaming fallback source: `core.shows.streaming_providers` for uncovered names
+      - Included persisted metadata/health fields (`hosted_logo_url`, `wikidata_id`, `wikipedia_url`, `has_logo`, `has_links`)
+      - Normalized joins/grouping case-insensitively and avoided unsafe UUID casts on covered IDs.
+    - Added admin API routes:
+      - `GET /api/admin/networks-streaming/summary`
+      - `POST /api/admin/networks-streaming/sync` (proxy to backend `/api/v1/admin/shows/sync-networks-streaming`)
+      - sync proxy includes auth forwarding, payload sanitization, 15m timeout, and actionable `502/504` failures.
+    - Added admin dashboard container:
+      - table columns for type/name/available/added/logo/wikipedia/wikidata/status
+      - manual `Sync/Mirror Networks & Streaming` action
+      - post-sync counters + automatic summary refresh.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/networks-streaming-summary-route.test.ts tests/networks-streaming-sync-proxy-route.test.ts` (`6 passed`)
+    - `pnpm -C apps/web run test:ci` (`75 files passed`, `286 tests passed`)
+    - `pnpm -C apps/web run lint` blocked by existing repo-level ESLint config issue (`TypeError: Converting circular structure to JSON`), not introduced by this task.
+
+- February 19, 2026: Added week-level social comment sync action to backfill/save comment coverage for the selected week window.
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - `apps/web/tests/week-social-thumbnails.test.tsx`
+  - Changes:
+    - Added `Sync All Comments` action in week/time-period view (and platform-specific label when a single platform tab is selected).
+    - Action enqueues social ingest scoped to the selected week range with high comment/reply caps and `sync_strategy=incremental`:
+      - `ingest_mode=posts_and_comments`
+      - `date_start/date_end` from selected week window
+      - `source_scope` preserved from query params
+      - optional `platforms` filter when tab is not `All`
+    - Added inline success/error status messaging for queued sync runs.
+    - Added clearer mismatch helper text in post stats drawer when platform comment totals exceed database totals.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/week-social-thumbnails.test.tsx` (`2 passed`)
+  - Notes:
+    - Targeted ESLint invocation in this workspace currently errors due a pre-existing shared-config issue (`TypeError: Converting circular structure to JSON`).
+
+- February 17, 2026: Completed person-gallery refresh UX and pipeline wiring (full per-image refresh, variant proxies, hosted-first fallback, and cross-tab refresh log popup).
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/refresh-progress.ts`
+    - `apps/web/src/components/admin/ImageLightbox.tsx`
+    - `apps/web/src/app/api/admin/trr-api/media-assets/[assetId]/variants/route.ts` (new)
+    - `apps/web/src/app/api/admin/trr-api/cast-photos/[photoId]/variants/route.ts` (new)
+    - `apps/web/tests/person-refresh-progress.test.ts`
+    - `apps/web/tests/image-lightbox-metadata.test.tsx`
+    - `apps/web/tests/person-gallery-thumbnail-wiring.test.ts`
+    - `apps/web/tests/media-asset-variants-proxy-route.test.ts` (new)
+    - `apps/web/tests/cast-photo-variants-proxy-route.test.ts` (new)
+  - Changes:
+    - Added route proxies for variant generation:
+      - `POST /api/admin/trr-api/media-assets/[assetId]/variants`
+      - `POST /api/admin/trr-api/cast-photos/[photoId]/variants`
+      - includes auth forwarding, timeout handling, and backend error passthrough.
+    - Added `resizing -> RESIZING` stage mapping in person refresh progress utilities.
+    - Person page updates:
+      - hosted-first fallback for original image URL resolution (`hosted_url` before external original URL),
+      - lightbox refresh now runs full best-effort pipeline:
+        - `mirror -> auto-count -> detect text -> variants (base + crop when crop exists)`,
+      - added unified refresh log state with header-level popup visible across all tabs,
+      - logs now ingest both page-level SSE progress/error/complete events and per-image pipeline step events.
+    - Lightbox management action label changed:
+      - `Refresh Metadata Jobs` -> `Refresh Full Pipeline`.
+  - Validation:
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec vitest run tests/person-refresh-progress.test.ts tests/image-lightbox-metadata.test.tsx tests/person-gallery-thumbnail-wiring.test.ts tests/media-asset-variants-proxy-route.test.ts tests/cast-photo-variants-proxy-route.test.ts` (`17 passed`)
+    - `pnpm -C apps/web exec eslint ...` blocked by existing repository config issue (`TypeError: Converting circular structure to JSON` from eslint/eslintrc); not introduced by this task.
+
+- February 17, 2026: Implemented canonical slug URLs and path-based tab routing for admin show/season pages with legacy URL auto-canonicalization.
+  - Files:
+    - `apps/web/src/lib/admin/show-admin-routes.ts` (new)
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/page.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - `apps/web/src/components/admin/SurveyQuestionsEditor.tsx`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - `apps/web/next.config.ts`
+    - `apps/web/tests/show-admin-routes.test.ts` (new)
+    - `apps/web/tests/trr-shows-slug-route.test.ts` (new)
+  - Changes:
+    - Added centralized route parser/builder utilities for show and season admin URLs:
+      - canonical show root = overview.
+      - show/season tabs and assets sub-tabs encoded in path segments.
+      - legacy `tab/assets` query parsing + cleanup helpers.
+    - Added explicit `next.config.ts` `beforeFiles` rewrites for path-based show/season tab routes to existing render pages.
+    - Updated show and season admin pages to:
+      - parse tab state from pathname first and query fallback second.
+      - navigate via canonical path URLs (no query-tab routing).
+      - auto-canonicalize legacy UUID/query/alias URLs to slug + path equivalents while preserving non-routing query params.
+    - Updated show list and covered-show links to emit canonical slug URLs.
+    - Updated week drilldown and season social back links to path-based routes.
+    - Updated survey cast-role setup guidance link to path form (`/cast`).
+    - Added slug-aware person-page handling:
+      - preserves slug in `showId` query context.
+      - resolves slug to UUID for API calls.
+      - prefers current slug context for same-show credit links, UUID fallback for others.
+    - Extended TRR show payloads from repository with `slug` and `canonical_slug` for both search and single-show fetches.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/show-admin-routes.ts' 'src/app/admin/trr-shows/page.tsx' 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/components/admin/SurveyQuestionsEditor.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/lib/server/trr-api/trr-shows-repository.ts' 'next.config.ts'` (pass with existing warnings only, no errors)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts tests/trr-shows-slug-route.test.ts` (pass; 2 files / 8 tests)
+  - Notes:
+    - Existing legacy alias pages remain in place as fallback, but canonical navigation now routes through slug/path builders.
+
+- February 17, 2026: Implemented Task 10 social admin completion/polling correctness and incremental/full-refresh ingest UX.
+  - Files:
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+    - `docs/cross-collab/TASK9/PLAN.md`
+    - `docs/cross-collab/TASK9/OTHER_PROJECTS.md`
+    - `docs/cross-collab/TASK9/STATUS.md`
+  - Changes:
+    - Fixed false ingest completion race by deriving completion from authoritative run lifecycle status/summary, not transient run-scoped jobs emptiness.
+    - Replaced overlapping interval polling with single-flight polling loop and stale-response guards.
+    - Preserved last-good jobs data on transient empty/error poll responses while run remains active.
+    - Added ingest `Sync Mode` UI with default `Incremental` and explicit `Full Refresh` override; payload now includes `sync_strategy`.
+    - Upgraded run dropdown labels to include week scope, platform scope, progress, item totals, timestamp, and short run id.
+    - Extended `SocialRun` typing for additive backend fields (`config`, `initiated_by`, richer summary reads).
+  - Validation:
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (`11 passed`)
+  - Cross-repo:
+    - Backend contract/migration updates completed under `TRR-Backend/docs/cross-collab/TASK10/`.
+    - screenalytics compatibility validation completed with no required code changes.
 
 - February 17, 2026: Implemented canonical slug URLs and path-based tab routing for admin show/season pages with legacy URL auto-canonicalization.
   - Files:
@@ -2839,3 +3014,98 @@ Continuation (same session, 2026-02-17) — Phase 9 CI stabilization and review-
     - `Web Tests / Web CI (Node 22 / compat)` (success)
     - `Repository Map / generate-repo-map` (success)
     - `Vercel` (success)
+
+Continuation (same session, 2026-02-18) — Health Center Sync Pipeline row model + dedupe:
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/lib/admin/refresh-log-pipeline.ts`
+  - `apps/web/tests/refresh-log-pipeline.test.ts`
+- Changes:
+  - Added deterministic refresh topic resolution with priority:
+    1) structured backend topic, 2) stage key map, 3) category map, 4) heuristic fallback.
+  - Added pipeline row builder that preserves fixed row order:
+    - `SHOWS`, `SEASONS`, `EPISODES`, `PEOPLE`, `MEDIA`, `BRAVOTV`.
+  - Added row-level latest update message rendering in Health Center Sync Pipeline.
+  - Added structured refresh log metadata support in UI entries:
+    - `topic`, `stageKey`, `provider`.
+  - Tightened dedupe to topic+stage+message+progress tuple.
+  - Removed duplicate wrapper-level per-target log lines.
+  - Made full refresh sequence explicit/non-redundant:
+    - `details -> seasons_episodes -> cast_credits -> photos`
+  - Removed implicit nested photos rerun from `seasons_episodes`.
+- Validation:
+  - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/refresh-log-pipeline.test.ts` (`4 passed`)
+
+Continuation (same session, 2026-02-18) — keep wrapper Refresh summaries out of pipeline topic rows:
+- Files:
+  - `apps/web/src/lib/admin/refresh-log-pipeline.ts`
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/tests/refresh-log-pipeline.test.ts`
+- Changes:
+  - Updated topic resolver to return `null` for generic wrapper-level `category: "Refresh"` summaries that would otherwise default to `shows`.
+  - Preserved stage/category/heuristic mapping for real sub-task logs (including `Refresh` entries that clearly mention a concrete domain like episodes).
+  - Updated pipeline grouping to ignore `null` topic entries so global summary lines do not overwrite `SHOWS` latest message/time.
+  - Added regression test asserting `"Completed full refresh successfully."` resolves to no pipeline topic.
+- Validation:
+  - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/refresh-log-pipeline.test.ts` (`5 passed`)
+  - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/refresh-log-pipeline.test.ts tests/show-gallery-delete-wiring.test.ts` (`6 passed`)
+
+Continuation (same session, 2026-02-18) — cast tab unfiltered scope and all-seasons episode totals:
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/lib/admin/cast-episode-scope.ts`
+  - `apps/web/tests/cast-episode-scope.test.ts`
+- Changes:
+  - Fixed cast card source to union base `cast` rows with missing people from `castRoleMembers`, so unfiltered show-cast view no longer drops members that only exist in scoped role/episode evidence.
+  - For unfiltered mode, updated episode total resolver to use the larger of `castTotalEpisodes` and `scopedTotalEpisodes` when both exist, preventing stale single-season totals from winning.
+  - Removed unreachable fallback branch comparison (`target === "photos"`) that triggered TS2367 in `refreshShow` fallback path.
+  - Added regression test for no-season-filter merge behavior in episode totals helper.
+- Validation:
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/cast-episode-scope.test.ts tests/refresh-log-pipeline.test.ts` (`11 passed`)
+
+Continuation (same session, 2026-02-19) — reprocess images stream proxy error handling:
+- Files:
+  - `apps/web/src/app/api/admin/trr-api/people/[personId]/reprocess-images/stream/route.ts`
+- Changes:
+  - Aligned reprocess stream proxy error behavior with refresh stream proxy by returning SSE `event: error` payloads with HTTP `200` for proxy/backend failures.
+  - Added `stage` metadata (`proxy`/`backend`) to error events for clearer client-side error labeling.
+  - Prevented client `response.ok` failure path from short-circuiting stream parsing, which was causing generic `"Failed to reprocess images"` throws and console error noise.
+- Validation:
+  - `pnpm -C apps/web run lint` (fails due existing ESLint config circular-structure error in current branch)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+
+Continuation (same session, 2026-02-19) — RHOSLC Google News sync + unified News tab validation:
+- Files (already present on current branch; validated in-session):
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/google-news/sync/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/news/route.ts`
+  - `apps/web/tests/show-google-news-sync-proxy-route.test.ts`
+  - `apps/web/tests/show-news-proxy-route.test.ts`
+  - `apps/web/tests/show-news-tab-google-wiring.test.ts`
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/show-news-tab-google-wiring.test.ts tests/show-google-news-sync-proxy-route.test.ts tests/show-news-proxy-route.test.ts tests/show-bravo-videos-proxy-route.test.ts` (`5 passed`)
+  - `pnpm -C apps/web exec eslint ...` (fails due existing ESLint circular-structure config error in this branch)
+  - `pnpm -C apps/web exec tsc --noEmit` (fails due existing tracked merge-conflict markers in unrelated files, e.g. `src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx` and `src/lib/admin/cast-episode-scope.ts`)
+
+Continuation (same session, 2026-02-19) — CI lint unblock + survey input test batch:
+- Files:
+  - `apps/web/eslint.config.mjs`
+  - `apps/web/src/components/survey/CastDecisionCardInput.tsx`
+  - `apps/web/src/components/survey/DropdownInput.tsx`
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/src/components/survey/NormalizedSurveyPlay.tsx`
+  - `apps/web/src/components/survey/SingleSelectInput.tsx`
+  - `apps/web/src/components/survey/WhoseSideInput.tsx`
+  - `apps/web/tests/matrix-likert-input.test.tsx`
+  - `apps/web/tests/three-choice-slider-input.test.tsx`
+  - `apps/web/tests/normalized-survey-play-continue.test.tsx`
+  - `apps/web/tests/single-select-input.test.tsx`
+- Changes:
+  - Replaced `FlatCompat`-based ESLint setup with Next.js native flat config imports to avoid ESLint 9 circular-config crash in CI.
+  - Added explicit overrides for strict `react-hooks/*` compiler rules to preserve existing lint contract for this branch.
+  - Included pending survey input/play refinements and associated regression tests.
+- Validation:
+  - `pnpm -C apps/web run lint` (pass; warnings only)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx tests/normalized-survey-play-continue.test.tsx tests/single-select-input.test.tsx` (`16 passed`)

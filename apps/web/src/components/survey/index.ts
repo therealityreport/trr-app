@@ -19,6 +19,10 @@ export type { TwoAxisGridInputProps } from "./TwoAxisGridInput";
 
 export { default as RankOrderInput } from "./RankOrderInput";
 export type { RankOrderInputProps } from "./RankOrderInput";
+export { default as PersonRankingsInput } from "./PersonRankingsInput";
+export type { PersonRankingsInputProps } from "./PersonRankingsInput";
+export { default as PosterRankingsInput } from "./PosterRankingsInput";
+export type { PosterRankingsInputProps } from "./PosterRankingsInput";
 
 export { default as WhoseSideInput } from "./WhoseSideInput";
 export type { WhoseSideInputProps } from "./WhoseSideInput";
@@ -34,6 +38,11 @@ export type { ThreeChoiceSliderInputProps } from "./ThreeChoiceSliderInput";
 
 export { default as MultiSelectInput } from "./MultiSelectInput";
 export type { MultiSelectInputProps } from "./MultiSelectInput";
+export { default as MultiSelectPills } from "./MultiSelectPills";
+export type {
+  MultiSelectPillsProps,
+  MultiSelectPillItem,
+} from "./MultiSelectPills";
 
 export { default as SingleSelectInput } from "./SingleSelectInput";
 export type { SingleSelectInputProps } from "./SingleSelectInput";

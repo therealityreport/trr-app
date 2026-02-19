@@ -9,12 +9,14 @@ import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { auth } from "@/lib/firebase";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
+import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
+import { resolveGalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import {
   canonicalizeCastRoleName,
   castRoleMatchesFilter,
@@ -756,6 +758,32 @@ export default function SeasonDetailPage() {
     show?.slug,
   ]);
 
+  useEffect(() => {
+    const routeSlug = showRouteParam.trim();
+    if (!routeSlug) return;
+    if (!Number.isFinite(seasonNumber)) return;
+
+    const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+    const canonicalRouteUrl = buildSeasonAdminUrl({
+      showSlug: routeSlug,
+      seasonNumber,
+      tab: seasonRouteState.tab,
+      assetsSubTab: seasonRouteState.assetsSubTab,
+      query: preservedQuery,
+    });
+    const currentQuery = searchParams.toString();
+    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
+    if (currentUrl === canonicalRouteUrl) return;
+    router.replace(canonicalRouteUrl as Route, { scroll: false });
+  }, [
+    pathname,
+    router,
+    searchParams,
+    seasonNumber,
+    seasonRouteState.assetsSubTab,
+    seasonRouteState.tab,
+    showRouteParam,
+  ]);
   const fetchShowCastForBrand = useCallback(async () => {
     if (!showId) return;
     setTrrShowCastError(null);
@@ -1661,10 +1689,126 @@ export default function SeasonDetailPage() {
     setAssetLightbox(null);
   };
 
-  const deleteMediaAsset = useCallback(
+  const applyAssetPatch = useCallback((target: SeasonAsset, patch: Partial<SeasonAsset>) => {
+    const applyPatch = (candidate: SeasonAsset): SeasonAsset => {
+      const sameAsset =
+        candidate.id === target.id ||
+        (candidate.media_asset_id &&
+          target.media_asset_id &&
+          candidate.media_asset_id === target.media_asset_id) ||
+        candidate.hosted_url === target.hosted_url;
+      if (!sameAsset) return candidate;
+      return {
+        ...candidate,
+        ...patch,
+        metadata: patch.metadata === undefined ? candidate.metadata : patch.metadata,
+      };
+    };
+
+    setAssets((prev) => prev.map(applyPatch));
+    setAssetLightbox((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        asset: applyPatch(prev.asset),
+        filteredAssets: prev.filteredAssets.map(applyPatch),
+      };
+    });
+  }, []);
+
+  const refreshAssetPipeline = useCallback(
     async (asset: SeasonAsset) => {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/media-assets/${asset.id}`, {
+      const base =
+        asset.origin_table === "media_assets"
+          ? { kind: "media" as const, id: asset.media_asset_id ?? asset.id }
+          : asset.origin_table === "cast_photos"
+            ? { kind: "cast" as const, id: asset.id }
+            : null;
+
+      if (!base) {
+        throw new Error("Full pipeline refresh is only available for media assets and cast photos.");
+      }
+
+      const callStep = async (endpoint: string, payload: Record<string, unknown>) => {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message =
+            data?.error && data?.detail
+              ? `${data.error}: ${data.detail}`
+              : data?.error || data?.detail || "Pipeline step failed";
+          throw new Error(message);
+        }
+        return data as Record<string, unknown>;
+      };
+
+      const prefix =
+        base.kind === "media"
+          ? `/api/admin/trr-api/media-assets/${base.id}`
+          : `/api/admin/trr-api/cast-photos/${base.id}`;
+
+      await callStep(`${prefix}/mirror`, { force: true });
+      const countPayload = await callStep(`${prefix}/auto-count`, { force: true });
+      const textPayload = await callStep(`${prefix}/detect-text-overlay`, { force: true });
+      await callStep(`${prefix}/variants`, { force: true });
+      const hasTextOverlay =
+        typeof textPayload.has_text_overlay === "boolean"
+          ? textPayload.has_text_overlay
+          : typeof textPayload.hasTextOverlay === "boolean"
+            ? textPayload.hasTextOverlay
+            : null;
+
+      const hasManualCrop =
+        asset.thumbnail_crop_mode === "manual" &&
+        typeof asset.thumbnail_focus_x === "number" &&
+        typeof asset.thumbnail_focus_y === "number" &&
+        typeof asset.thumbnail_zoom === "number";
+      if (hasManualCrop) {
+        await callStep(`${prefix}/variants`, {
+          force: true,
+          crop: {
+            x: asset.thumbnail_focus_x,
+            y: asset.thumbnail_focus_y,
+            zoom: asset.thumbnail_zoom,
+            mode: "manual",
+          },
+        });
+      }
+
+      applyAssetPatch(asset, {
+        people_count:
+          typeof countPayload.people_count === "number"
+            ? countPayload.people_count
+            : asset.people_count ?? null,
+        people_count_source:
+          countPayload.people_count_source === "auto" ||
+          countPayload.people_count_source === "manual"
+            ? countPayload.people_count_source
+            : asset.people_count_source ?? null,
+        metadata: {
+          ...((asset.metadata ?? {}) as Record<string, unknown>),
+          ...(hasTextOverlay === null ? {} : { has_text_overlay: hasTextOverlay }),
+        },
+      });
+
+      await fetchAssets();
+    },
+    [applyAssetPatch, fetchAssets, getAuthHeaders]
+  );
+
+  const deleteMediaAsset = useCallback(
+    async (asset: SeasonAsset) => {
+      if (asset.origin_table !== "media_assets") {
+        throw new Error("Delete is currently supported only for imported media assets.");
+      }
+      const headers = await getAuthHeaders();
+      const assetId = asset.media_asset_id ?? asset.id;
+      const response = await fetch(`/api/admin/trr-api/media-assets/${assetId}`, {
         method: "DELETE",
         headers,
       });
@@ -1793,6 +1937,41 @@ export default function SeasonDetailPage() {
     },
     [getAuthHeaders]
   );
+
+  const lightboxAssetCapabilities = assetLightbox
+    ? resolveGalleryAssetCapabilities(assetLightbox.asset)
+    : null;
+  const episodeLightboxAsset: SeasonAsset | null = episodeLightbox
+    ? {
+        id: episodeLightbox.episode.id,
+        type: "episode",
+        origin_table: "episode_images",
+        source: "episode_images",
+        kind: "episode_still",
+        hosted_url: episodeLightbox.episode.url_original_still ?? "",
+        width: null,
+        height: null,
+        caption:
+          episodeLightbox.episode.title ??
+          `Episode ${episodeLightbox.episode.episode_number}`,
+        episode_number: episodeLightbox.episode.episode_number,
+        season_number: seasonNumber,
+        metadata: null,
+        ingest_status: null,
+        hosted_content_type: null,
+        link_id: null,
+        media_asset_id: null,
+        people_count: null,
+        people_count_source: null,
+        thumbnail_focus_x: null,
+        thumbnail_focus_y: null,
+        thumbnail_zoom: null,
+        thumbnail_crop_mode: null,
+      }
+    : null;
+  const episodeLightboxCapabilities = episodeLightboxAsset
+    ? resolveGalleryAssetCapabilities(episodeLightboxAsset)
+    : null;
 
   const totalEpisodes = episodes.length;
   const seasonHasPremiereDate = Boolean(
@@ -3395,6 +3574,22 @@ export default function SeasonDetailPage() {
             isOpen={true}
             onClose={closeEpisodeLightbox}
             metadata={mapEpisodeToMetadata(episodeLightbox.episode, show?.name)}
+            canManage={true}
+            metadataExtras={
+              episodeLightboxAsset && episodeLightboxCapabilities ? (
+                <GalleryAssetEditTools
+                  asset={episodeLightboxAsset}
+                  capabilities={episodeLightboxCapabilities}
+                  getAuthHeaders={getAuthHeaders}
+                />
+              ) : null
+            }
+            actionDisabledReasons={{
+              refresh: "Full pipeline refresh is unavailable for episode still records from this origin.",
+              archive: "Archive is unavailable for episode still records from this origin.",
+              star: "Star/Flag is unavailable for episode still records from this origin.",
+              delete: "Delete is unavailable for episode still records from this origin.",
+            }}
             position={{
               current: episodeLightbox.index + 1,
               total: episodeLightbox.seasonEpisodes.length,
@@ -3407,7 +3602,7 @@ export default function SeasonDetailPage() {
           />
         )}
 
-        {assetLightbox && (
+        {assetLightbox && lightboxAssetCapabilities && (
           <ImageLightbox
             src={getAssetDetailUrl(assetLightbox.asset)}
             fallbackSrc={assetLightbox.asset.original_url ?? assetLightbox.asset.hosted_url}
@@ -3416,23 +3611,44 @@ export default function SeasonDetailPage() {
             onClose={closeAssetLightbox}
             metadata={mapSeasonAssetToMetadata(assetLightbox.asset, seasonNumber, show?.name)}
             canManage={true}
+            metadataExtras={
+              <GalleryAssetEditTools
+                asset={assetLightbox.asset}
+                capabilities={lightboxAssetCapabilities}
+                getAuthHeaders={getAuthHeaders}
+                onAssetUpdated={(patch) => applyAssetPatch(assetLightbox.asset, patch)}
+                onReload={fetchAssets}
+              />
+            }
             isStarred={Boolean((assetLightbox.asset.metadata as Record<string, unknown> | null)?.starred)}
+            actionDisabledReasons={{
+              refresh: lightboxAssetCapabilities.canEdit
+                ? undefined
+                : lightboxAssetCapabilities.reasons.edit,
+              archive: lightboxAssetCapabilities.canArchive
+                ? undefined
+                : lightboxAssetCapabilities.reasons.archive ?? "Archive is unavailable for this image.",
+              star: lightboxAssetCapabilities.canStar
+                ? undefined
+                : lightboxAssetCapabilities.reasons.star ?? "Star/Flag is unavailable for this image.",
+              delete:
+                assetLightbox.asset.origin_table === "media_assets"
+                  ? undefined
+                  : "Delete is only available for imported media assets.",
+            }}
+            onRefresh={() => refreshAssetPipeline(assetLightbox.asset)}
             onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
             onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
             onUpdateContentType={(contentType) =>
               updateGalleryAssetContentType(assetLightbox.asset, contentType)
             }
-            onDelete={
-              assetLightbox.asset.source?.toLowerCase?.().startsWith("web_scrape:")
-                ? async () => {
-                    try {
-                      await deleteMediaAsset(assetLightbox.asset);
-                    } catch (err) {
-                      alert(err instanceof Error ? err.message : "Failed to delete image");
-                    }
-                  }
-                : undefined
-            }
+            onDelete={async () => {
+              try {
+                await deleteMediaAsset(assetLightbox.asset);
+              } catch (err) {
+                alert(err instanceof Error ? err.message : "Failed to delete image");
+              }
+            }}
             position={{
               current: assetLightbox.index + 1,
               total: assetLightbox.filteredAssets.length,

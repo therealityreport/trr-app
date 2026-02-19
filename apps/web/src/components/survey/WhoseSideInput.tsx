@@ -40,6 +40,23 @@ function toTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeHexColor(colorValue: string): string | null {
+  const match = colorValue.trim().match(/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (!match || !match[1]) return null;
+  const hex = match[1];
+  const expanded = hex.length === 3
+    ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+    : hex;
+  return `#${expanded.toUpperCase()}`;
+}
+
+function toColorString(value: unknown): string | null {
+  const trimmed = toTrimmedString(value);
+  if (!trimmed) return null;
+  if (trimmed.startsWith("#")) return normalizeHexColor(trimmed) ?? trimmed;
+  return trimmed;
+}
+
 function readPath(record: UnknownRecord, path: string[]): unknown {
   let cursor: unknown = record;
   for (const key of path) {
@@ -62,6 +79,15 @@ function readFontValue(record: UnknownRecord, path: string[]): string | null {
     toTrimmedString(nested.family) ??
     null
   );
+}
+
+function readColorValue(record: UnknownRecord, path: string[]): string | null {
+  const value = readPath(record, path);
+  const direct = toColorString(value);
+  if (direct) return direct;
+  const nested = toRecord(value);
+  if (!nested) return null;
+  return toColorString(nested.color) ?? toColorString(nested.value) ?? null;
 }
 
 function pushUnique(values: string[], next: string | null) {
@@ -87,6 +113,7 @@ export default function WhoseSideInput({
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(390);
   const config = question.config as unknown as TwoChoiceSliderConfig;
+  const configRecord = config as unknown as UnknownRecord;
   const headingFontFamily = React.useMemo(() => {
     const configRecord = config as unknown as UnknownRecord;
     const headingCandidates: string[] = [];
@@ -113,6 +140,41 @@ export default function WhoseSideInput({
   const buttonScaleFactor = React.useMemo(
     () => normalizeScalePercent(config.buttonScale, 100) / 100,
     [config.buttonScale],
+  );
+  const componentBackgroundColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["componentBackgroundColor"]) ??
+      readColorValue(configRecord, ["styles", "componentBackgroundColor"]) ??
+      "#000000",
+    [configRecord],
+  );
+  const questionTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["questionTextColor"]) ??
+      readColorValue(configRecord, ["styles", "questionTextColor"]) ??
+      "#FFFFFF",
+    [configRecord],
+  );
+  const placeholderShapeColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["placeholderShapeColor"]) ??
+      readColorValue(configRecord, ["styles", "placeholderShapeColor"]) ??
+      "#D9D9D9",
+    [configRecord],
+  );
+  const placeholderShapeBorderColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["placeholderShapeBorderColor"]) ??
+      readColorValue(configRecord, ["styles", "placeholderShapeBorderColor"]) ??
+      "rgba(255,255,255,0.12)",
+    [configRecord],
+  );
+  const neutralButtonTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["optionTextColor"]) ??
+      readColorValue(configRecord, ["styles", "optionTextColor"]) ??
+      "#FFFFFF",
+    [configRecord],
   );
 
   React.useEffect(() => {
@@ -176,9 +238,9 @@ export default function WhoseSideInput({
   const handleSelect = React.useCallback(
     (optionKey: string) => {
       if (disabled) return;
-      onChange(optionKey);
+      onChange(value === optionKey ? "" : optionKey);
     },
-    [disabled, onChange]
+    [disabled, onChange, value]
   );
 
   const getImagePath = (option: QuestionOption): string | undefined => {
@@ -198,11 +260,12 @@ export default function WhoseSideInput({
         className={`
           relative rounded-full transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/60
           ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
-          ${isSelected ? "ring-4 ring-white shadow-[0_0_0_6px_rgba(255,255,255,0.24)]" : "ring-1 ring-white/12"}
+          ${isSelected ? "ring-4 ring-white shadow-[0_0_0_6px_rgba(255,255,255,0.24)]" : "ring-1"}
         `}
         style={{
           width: `${circleSize}px`,
           height: `${circleSize}px`,
+          borderColor: placeholderShapeBorderColor,
         }}
         aria-label={option.option_text}
         aria-pressed={isSelected}
@@ -217,7 +280,11 @@ export default function WhoseSideInput({
             unoptimized={imagePath.startsWith("http")}
           />
         ) : (
-          <span className="absolute inset-0 rounded-full bg-[#D9D9D9]" aria-hidden="true" />
+          <span
+            className="absolute inset-0 rounded-full"
+            style={{ backgroundColor: placeholderShapeColor }}
+            aria-hidden="true"
+          />
         )}
         <span className="sr-only">{option.option_text}</span>
       </button>
@@ -225,14 +292,19 @@ export default function WhoseSideInput({
   };
 
   return (
-    <div ref={containerRef} className="rounded-[18px] bg-black px-3 py-5 sm:px-8 sm:py-10">
+    <div
+      ref={containerRef}
+      className="rounded-[18px] bg-black px-3 py-5 sm:px-8 sm:py-10"
+      style={{ backgroundColor: componentBackgroundColor }}
+    >
       <h3
-        className="mx-auto max-w-5xl text-center leading-[0.94] text-white"
+        className="mx-auto max-w-5xl text-center leading-[0.94]"
         style={{
           fontFamily: headingFontFamily,
           fontWeight: 800,
           letterSpacing: "0.01em",
           fontSize: `${headingFontSize}px`,
+          color: questionTextColor,
         }}
       >
         {question.question_text}
@@ -265,6 +337,7 @@ export default function WhoseSideInput({
               paddingInline: `${neutralButtonPaddingX}px`,
               borderRadius: `${neutralButtonRadius}px`,
               fontSize: `${neutralButtonFontSize}px`,
+              color: value === (neutralOption?.option_key ?? "neutral") ? "#000000" : neutralButtonTextColor,
             }}
           >
             {neutralOption?.option_text ?? config.neutralOption}

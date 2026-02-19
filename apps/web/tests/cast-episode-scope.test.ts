@@ -16,6 +16,15 @@ describe("resolveShowCastEpisodeCount", () => {
     ).toBe(84);
   });
 
+  it("uses the larger count when both values exist without season filters", () => {
+    expect(
+      resolveShowCastEpisodeCount({
+        castTotalEpisodes: 16,
+        scopedTotalEpisodes: 84,
+        hasSeasonFilters: false,
+      })
+    ).toBe(84);
+  });
   it("uses season-scoped count when season filters are selected", () => {
     expect(
       resolveShowCastEpisodeCount({

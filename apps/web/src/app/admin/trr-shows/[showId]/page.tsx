@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -17,14 +17,25 @@ import {
 } from "@/components/admin/CastMatrixSyncPanel";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
+import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer, type EntityContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
+import { resolveGalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import { shouldIncludeCastMemberForSeasonFilter } from "@/lib/admin/cast-role-filtering";
 import {
   canonicalizeCastRoleName,
   castRoleMatchesFilter,
   normalizeCastRoleList,
 } from "@/lib/admin/cast-role-normalization";
+import {
+  resolveShowCastEpisodeCount,
+  showCastEpisodeScopeHint,
+} from "@/lib/admin/cast-episode-scope";
+import {
+  formatCastBatchCounts,
+  formatCastBatchMemberMessage,
+  formatCastBatchRunningMessage,
+} from "@/lib/admin/cast-batch-progress";
 import { mapSeasonAssetToMetadata } from "@/lib/photo-metadata";
 import {
   clearAdvancedFilters,
@@ -33,6 +44,20 @@ import {
   writeAdvancedFilters,
   type AdvancedFilterState,
 } from "@/lib/admin/advanced-filters";
+import {
+  buildSeasonAdminUrl,
+  buildShowAdminUrl,
+  cleanLegacyRoutingQuery,
+  parseShowRouteState,
+} from "@/lib/admin/show-admin-routes";
+import {
+  buildPipelineRows,
+  isRefreshLogTerminalSuccess,
+  resolveRefreshLogTopicKey,
+  shouldDedupeRefreshLogEntry,
+  type RefreshLogTopicDefinition,
+  type RefreshLogTopicKey,
+} from "@/lib/admin/refresh-log-pipeline";
 import {
   inferHasTextOverlay,
 } from "@/lib/gallery-filter-utils";
@@ -47,6 +72,8 @@ import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 interface TrrShow {
   id: string;
   name: string;
+  slug: string;
+  canonical_slug: string;
   alternative_names: string[];
   imdb_id: string | null;
   tmdb_id: number | null;
@@ -164,6 +191,26 @@ interface BravoNewsItem {
   person_tags?: BravoPersonTag[];
 }
 
+interface UnifiedNewsSeasonMatch {
+  season_number?: number | null;
+  match_types?: string[] | null;
+}
+
+interface UnifiedNewsItem {
+  source_id?: string | null;
+  headline?: string | null;
+  article_url: string;
+  image_url?: string | null;
+  published_at?: string | null;
+  publisher_name?: string | null;
+  publisher_domain?: string | null;
+  person_tags?: BravoPersonTag[];
+  topic_tags?: string[] | null;
+  season_matches?: UnifiedNewsSeasonMatch[] | null;
+  feed_rank?: number | null;
+  trending_rank?: number | null;
+}
+
 interface BravoPreviewPerson {
   name?: string | null;
   canonical_url?: string | null;
@@ -181,7 +228,8 @@ type BravoImportImageKind =
   | "other";
 
 type TabId = "seasons" | "assets" | "news" | "cast" | "surveys" | "social" | "details" | "settings";
-type ShowCastSource = "episode_evidence" | "show_fallback";
+type ShowCastSource = "episode_evidence" | "show_fallback" | "imdb_show_membership";
+type ShowCastRosterMode = "episode_evidence" | "imdb_show_membership";
 type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
 type ShowTab = { id: TabId; label: string };
 type RefreshProgressState = {
@@ -198,6 +246,9 @@ type RefreshLogEntry = {
   message: string;
   current: number | null;
   total: number | null;
+  stageKey?: string | null;
+  topic?: RefreshLogTopicKey | null;
+  provider?: string | null;
 };
 
 type ShowRefreshRunOptions = {
@@ -205,21 +256,24 @@ type ShowRefreshRunOptions = {
   includeCastProfiles?: boolean;
 };
 
-type RefreshLogTopicKey =
-  | "shows"
-  | "seasons"
-  | "episodes"
-  | "people"
-  | "media"
-  | "bravotv";
+type HealthStatus = "ready" | "missing" | "stale";
+type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "knowledge" | "fandom";
+type PersonLinkSourceState = "found" | "missing" | "pending" | "rejected";
 
-type RefreshLogTopicDefinition = {
-  key: RefreshLogTopicKey;
+type PersonLinkSourceSummary = {
+  key: PersonLinkSourceKey;
   label: string;
-  description: string;
+  state: PersonLinkSourceState;
+  url: string | null;
+  link: EntityLink | null;
 };
 
-type HealthStatus = "ready" | "missing" | "stale";
+type PersonLinkCoverageCard = {
+  personId: string;
+  personName: string;
+  seasons: number[];
+  sources: PersonLinkSourceSummary[];
+};
 
 const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
   { key: "shows", label: "SHOWS", description: "Show info, entities, providers" },
@@ -248,6 +302,14 @@ const ENTITY_LINK_GROUP_LABELS: Record<EntityLinkGroup, string> = {
   cast_announcements: "Cast Announcements",
   other: "Other",
 };
+
+const PERSON_LINK_SOURCE_DEFINITIONS: Array<{ key: PersonLinkSourceKey; label: string }> = [
+  { key: "bravo", label: "Bravo" },
+  { key: "imdb", label: "IMDb" },
+  { key: "tmdb", label: "TMDb" },
+  { key: "knowledge", label: "Knowledge Graph" },
+  { key: "fandom", label: "Fandom/Wikia" },
+];
 
 const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
   details: "Show Info",
@@ -301,6 +363,12 @@ const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
   word_id: "Word Detection",
 };
 
+const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
+const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
+const CAST_PROFILE_SYNC_CONCURRENCY = 3;
+const BRAVO_LOAD_TIMEOUT_MS = 15_000;
+const ROLE_LOAD_TIMEOUT_MS = 30_000;
+
 const SEASON_PAGE_TABS = [
   { tab: "episodes", label: "Seasons & Episodes" },
   { tab: "assets", label: "Assets" },
@@ -314,6 +382,91 @@ const SEASON_PAGE_TABS = [
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const looksLikeUuid = (value: string) => UUID_RE.test(value);
+
+const normalizeEntityLinkStatus = (value: unknown): EntityLinkStatus => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "approved") return "approved";
+  if (normalized === "rejected") return "rejected";
+  return "pending";
+};
+
+const classifyPersonLinkSource = (linkKind: string): PersonLinkSourceKey | null => {
+  const kind = linkKind.trim().toLowerCase();
+  if (!kind) return null;
+  if (kind === "bravo_profile" || kind.includes("bravo")) return "bravo";
+  if (kind.includes("imdb")) return "imdb";
+  if (kind.includes("tmdb")) return "tmdb";
+  if (kind === "wikidata" || kind === "wikipedia" || kind.includes("knowledge")) return "knowledge";
+  if (kind === "fandom" || kind === "wikia") return "fandom";
+  return null;
+};
+
+const parsePersonNameFromLink = (link: EntityLink): string | null => {
+  const rawLabel = typeof link.label === "string" ? link.label.trim() : "";
+  if (rawLabel) {
+    const cleaned = rawLabel
+      .replace(/\s+(wikipedia|wikidata|fandom|wikia|bravo profile|imdb|tmdb)$/i, "")
+      .trim();
+    if (cleaned) return cleaned;
+  }
+  try {
+    const parsed = new URL(link.url);
+    const slug = decodeURIComponent((parsed.pathname.split("/").pop() ?? "").trim());
+    if (!slug) return null;
+    const humanized = slug.replace(/_/g, " ").replace(/-/g, " ").trim();
+    return humanized || null;
+  } catch {
+    return null;
+  }
+};
+
+const getPersonSourceKindPriority = (sourceKey: PersonLinkSourceKey, linkKind: string): number => {
+  const kind = linkKind.trim().toLowerCase();
+  if (sourceKey !== "knowledge") return 99;
+  if (kind === "wikidata") return 0;
+  if (kind === "wikipedia") return 1;
+  return 2;
+};
+
+const pickPreferredPersonSourceLink = (
+  sourceKey: PersonLinkSourceKey,
+  links: EntityLink[]
+): EntityLink | null => {
+  if (links.length === 0) return null;
+  const rankByStatus = (status: EntityLinkStatus): number => {
+    if (status === "approved") return 0;
+    if (status === "pending") return 1;
+    return 2;
+  };
+  const sorted = [...links].sort((a, b) => {
+    const statusDiff = rankByStatus(normalizeEntityLinkStatus(a.status)) - rankByStatus(normalizeEntityLinkStatus(b.status));
+    if (statusDiff !== 0) return statusDiff;
+    const kindDiff =
+      getPersonSourceKindPriority(sourceKey, a.link_kind) -
+      getPersonSourceKindPriority(sourceKey, b.link_kind);
+    if (kindDiff !== 0) return kindDiff;
+    return (a.label || a.url).localeCompare(b.label || b.url);
+  });
+  return sorted[0] ?? null;
+};
+
+function PersonSourceLogo({ sourceKey }: { sourceKey: PersonLinkSourceKey }) {
+  const baseClass =
+    "inline-flex h-5 min-w-[2.1rem] items-center justify-center rounded border px-1 text-[10px] font-bold uppercase tracking-[0.08em]";
+  if (sourceKey === "imdb") {
+    return <span className={`${baseClass} border-zinc-300 bg-[#f5c518] text-zinc-900`}>IMDb</span>;
+  }
+  if (sourceKey === "tmdb") {
+    return <span className={`${baseClass} border-zinc-300 bg-[#01d277] text-zinc-900`}>TMDb</span>;
+  }
+  if (sourceKey === "bravo") {
+    return <span className={`${baseClass} border-zinc-300 bg-zinc-900 text-white`}>Bravo</span>;
+  }
+  if (sourceKey === "knowledge") {
+    return <span className={`${baseClass} border-zinc-300 bg-sky-600 text-white`}>KG</span>;
+  }
+  return <span className={`${baseClass} border-zinc-300 bg-[#f3f4f6] text-zinc-800`}>Fandom</span>;
+}
 
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -338,6 +491,23 @@ const parseProgressNumber = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError";
+
+const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 const parseAltNamesText = (value: string): string[] => {
@@ -438,41 +608,6 @@ const normalizeRefreshLogMessage = (value: string): string => {
     .trim();
 };
 
-const resolveRefreshLogTopic = (category: string, message: string): RefreshLogTopicKey => {
-  const haystack = `${category} ${message}`.toLowerCase();
-
-  if (haystack.includes("bravo")) return "bravotv";
-  if (haystack.includes("seasons & episodes") || haystack.includes("seasons_episodes")) {
-    return "seasons";
-  }
-  if (haystack.includes("episode")) return "episodes";
-  if (
-    haystack.includes("media") ||
-    haystack.includes("image") ||
-    haystack.includes("photo") ||
-    haystack.includes("mirror") ||
-    haystack.includes("auto-count") ||
-    haystack.includes("auto count") ||
-    haystack.includes("word detection") ||
-    haystack.includes("cleanup") ||
-    haystack.includes("prune")
-  ) {
-    return "media";
-  }
-  if (
-    haystack.includes("person") ||
-    haystack.includes("cast profile") ||
-    haystack.includes("cast member") ||
-    haystack.includes("cast credits") ||
-    haystack.includes("fandom profile") ||
-    haystack.includes("tmdb profile")
-  ) {
-    return "people";
-  }
-  if (haystack.includes("season")) return "seasons";
-  return "shows";
-};
-
 const extractRefreshLogSubJob = (entry: RefreshLogEntry): { subJob: string; details: string } => {
   const normalizedMessage = normalizeRefreshLogMessage(entry.message);
   const prefixMatch = normalizedMessage.match(/^([^:]{2,50}):\s+(.+)$/);
@@ -490,23 +625,7 @@ const extractRefreshLogSubJob = (entry: RefreshLogEntry): { subJob: string; deta
 };
 
 const isRefreshTopicDone = (entry: RefreshLogEntry | null): boolean => {
-  if (!entry) return false;
-  if (
-    typeof entry.current === "number" &&
-    typeof entry.total === "number" &&
-    entry.total > 0 &&
-    entry.current >= entry.total
-  ) {
-    return true;
-  }
-  const message = entry.message.toLowerCase();
-  return (
-    message.includes("complete") ||
-    message.includes("completed") ||
-    message.includes("done") ||
-    message.includes("synced") ||
-    message.includes("skipping")
-  );
+  return isRefreshLogTerminalSuccess(entry);
 };
 
 const isRefreshTopicFailed = (entry: RefreshLogEntry | null): boolean => {
@@ -838,6 +957,7 @@ function RefreshProgressBar({
 
 export default function TrrShowDetailPage() {
   const params = useParams();
+  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const showRouteParam = params.showId as string;
@@ -868,11 +988,26 @@ export default function TrrShowDetailPage() {
   const [selectedSocialSeasonId, setSelectedSocialSeasonId] = useState<string | null>(null);
   const [assetsView, setAssetsView] = useState<"images" | "videos" | "brand">("images");
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
-  const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
   const [bravoLoading, setBravoLoading] = useState(false);
   const [bravoError, setBravoError] = useState<string | null>(null);
   const [bravoLoaded, setBravoLoaded] = useState(false);
   const bravoLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const [unifiedNews, setUnifiedNews] = useState<UnifiedNewsItem[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsSyncing, setNewsSyncing] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsNotice, setNewsNotice] = useState<string | null>(null);
+  const [newsLoaded, setNewsLoaded] = useState(false);
+  const [newsGoogleUrlMissing, setNewsGoogleUrlMissing] = useState(false);
+  const [newsSort, setNewsSort] = useState<"trending" | "latest">("trending");
+  const [newsSourceFilter, setNewsSourceFilter] = useState<string>("");
+  const [newsPersonFilter, setNewsPersonFilter] = useState<string>("");
+  const [newsTopicFilter, setNewsTopicFilter] = useState<string>("");
+  const [newsSeasonFilter, setNewsSeasonFilter] = useState<string>("");
+  const newsLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const newsSyncInFlightRef = useRef<Promise<void> | null>(null);
+  const newsAutoSyncAttemptedRef = useRef(false);
+  const newsLoadedSortRef = useRef<"trending" | "latest" | null>(null);
   const [syncBravoOpen, setSyncBravoOpen] = useState(false);
   const [syncBravoUrl, setSyncBravoUrl] = useState("");
   const [syncBravoDescription, setSyncBravoDescription] = useState("");
@@ -921,11 +1056,20 @@ export default function TrrShowDetailPage() {
   const [linksLoading, setLinksLoading] = useState(false);
   const [linksError, setLinksError] = useState<string | null>(null);
   const [linksNotice, setLinksNotice] = useState<string | null>(null);
+  const [googleNewsLinkId, setGoogleNewsLinkId] = useState<string | null>(null);
+  const [googleNewsUrl, setGoogleNewsUrl] = useState("");
+  const [googleNewsSaving, setGoogleNewsSaving] = useState(false);
+  const [googleNewsError, setGoogleNewsError] = useState<string | null>(null);
+  const [googleNewsNotice, setGoogleNewsNotice] = useState<string | null>(null);
 
   const [showRoles, setShowRoles] = useState<ShowRole[]>([]);
+  const [showRolesLoadedOnce, setShowRolesLoadedOnce] = useState(false);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
   const [newRoleName, setNewRoleName] = useState("");
+  const showRolesLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const castRoleMembersLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const castRoleMembersLoadKeyRef = useRef<string | null>(null);
 
   const [castSortBy, setCastSortBy] = useState<"episodes" | "season" | "name">("episodes");
   const [castSortOrder, setCastSortOrder] = useState<"desc" | "asc">("desc");
@@ -1040,66 +1184,58 @@ export default function TrrShowDetailPage() {
     Record<string, RefreshProgressState>
   >({});
 
-  const tabParam = searchParams.get("tab");
-  const assetsParam = searchParams.get("assets");
-  useEffect(() => {
-    const allowedTabs: TabId[] = [
-      "seasons",
-      "assets",
-      "news",
-      "cast",
-      "surveys",
-      "social",
-      "details",
-      "settings",
-    ];
-    if (!tabParam) return;
-
-    // Back-compat alias: ?tab=gallery -> ASSETS (Images)
-    if (tabParam === "gallery") {
-      setActiveTab("assets");
-      setAssetsView("images");
-      return;
-    }
-    if (tabParam === "overview") {
-      setActiveTab("details");
-      return;
-    }
-
-    if (allowedTabs.includes(tabParam as TabId)) {
-      setActiveTab(tabParam as TabId);
-    }
-  }, [tabParam]);
+  const showRouteState = useMemo(
+    () => parseShowRouteState(pathname, new URLSearchParams(searchParams.toString())),
+    [pathname, searchParams]
+  );
 
   useEffect(() => {
-    if (!assetsParam) return;
-    if (assetsParam === "images" || assetsParam === "videos" || assetsParam === "brand") {
-      setAssetsView(assetsParam);
+    setActiveTab(showRouteState.tab);
+    if (showRouteState.tab === "assets") {
+      setAssetsView(showRouteState.assetsSubTab);
     }
-  }, [assetsParam]);
+  }, [showRouteState.assetsSubTab, showRouteState.tab]);
+
+  const showSlugForRouting = useMemo(() => {
+    const canonical = show?.canonical_slug?.trim();
+    if (canonical) return canonical;
+    const base = show?.slug?.trim();
+    if (base) return base;
+    return showRouteParam.trim();
+  }, [show?.canonical_slug, show?.slug, showRouteParam]);
 
   const setTab = useCallback(
     (tab: TabId) => {
       setActiveTab(tab);
-      const next = new URLSearchParams(searchParams.toString());
-      next.set("tab", tab);
-      if (tab !== "assets") {
-        next.delete("assets");
-      }
-      router.replace(`?${next.toString()}`, { scroll: false });
+      const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      router.replace(
+        buildShowAdminUrl({
+          showSlug: showSlugForRouting,
+          tab,
+          assetsSubTab: tab === "assets" ? assetsView : undefined,
+          query: preservedQuery,
+        }) as "/admin/trr-shows",
+        { scroll: false }
+      );
     },
-    [router, searchParams]
+    [assetsView, router, searchParams, showSlugForRouting]
   );
 
   const setAssetsSubTab = useCallback(
     (view: "images" | "videos" | "brand") => {
       setAssetsView(view);
-      const next = new URLSearchParams(searchParams.toString());
-      next.set("tab", "assets");
-      next.set("assets", view);
-      router.replace(`?${next.toString()}`, { scroll: false });
+      const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      router.replace(
+        buildShowAdminUrl({
+          showSlug: showSlugForRouting,
+          tab: "assets",
+          assetsSubTab: view,
+          query: preservedQuery,
+        }) as "/admin/trr-shows",
+        { scroll: false }
+      );
     },
-    [router, searchParams]
+    [router, searchParams, showSlugForRouting]
   );
 
   // Helper to get auth headers
@@ -1166,8 +1302,65 @@ export default function TrrShowDetailPage() {
     };
   }, [checking, getAuthHeaders, hasAccess, showRouteParam]);
 
+  useEffect(() => {
+    const canonicalSlug = show?.canonical_slug?.trim() || show?.slug?.trim();
+    if (!canonicalSlug) return;
+
+    const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+    const canonicalUrl = buildShowAdminUrl({
+      showSlug: canonicalSlug,
+      tab: showRouteState.tab,
+      assetsSubTab: showRouteState.assetsSubTab,
+      query: preservedQuery,
+    });
+    const currentQuery = searchParams.toString();
+    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
+    if (currentUrl === canonicalUrl) return;
+    router.replace(canonicalUrl as "/admin/trr-shows", { scroll: false });
+  }, [
+    pathname,
+    router,
+    searchParams,
+    show?.canonical_slug,
+    show?.slug,
+    showRouteState.assetsSubTab,
+    showRouteState.tab,
+  ]);
+
+  useEffect(() => {
+    const routeSlug = showRouteParam.trim();
+    if (!routeSlug) return;
+
+    const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+    const canonicalRouteUrl = buildShowAdminUrl({
+      showSlug: routeSlug,
+      tab: showRouteState.tab,
+      assetsSubTab: showRouteState.assetsSubTab,
+      query: preservedQuery,
+    });
+    const currentQuery = searchParams.toString();
+    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
+    if (currentUrl === canonicalRouteUrl) return;
+    router.replace(canonicalRouteUrl as "/admin/trr-shows", { scroll: false });
+  }, [
+    pathname,
+    router,
+    searchParams,
+    showRouteParam,
+    showRouteState.assetsSubTab,
+    showRouteState.tab,
+  ]);
+
   const appendRefreshLog = useCallback(
-    (entry: { category: string; message: string; current?: number | null; total?: number | null }) => {
+    (entry: {
+      category: string;
+      message: string;
+      current?: number | null;
+      total?: number | null;
+      stageKey?: string | null;
+      topic?: string | null;
+      provider?: string | null;
+    }) => {
       const normalizedMessage = normalizeRefreshLogMessage(entry.message);
       if (!normalizedMessage) return;
       setRefreshLogEntries((prev) => {
@@ -1182,14 +1375,36 @@ export default function TrrShowDetailPage() {
               : null,
           total:
             typeof entry.total === "number" && Number.isFinite(entry.total) ? entry.total : null,
+          stageKey: typeof entry.stageKey === "string" && entry.stageKey.trim() ? entry.stageKey.trim() : null,
+          topic: resolveRefreshLogTopicKey({
+            topic: entry.topic,
+            stageKey: entry.stageKey,
+            category: entry.category,
+            message: normalizedMessage,
+          }),
+          provider: typeof entry.provider === "string" && entry.provider.trim() ? entry.provider.trim() : null,
         };
         const previous = prev[prev.length - 1];
         if (
           previous &&
-          previous.category === nextEntry.category &&
-          previous.message === nextEntry.message &&
-          previous.current === nextEntry.current &&
-          previous.total === nextEntry.total
+          shouldDedupeRefreshLogEntry(
+            {
+              topic: previous.topic,
+              stageKey: previous.stageKey,
+              category: previous.category,
+              message: previous.message,
+              current: previous.current,
+              total: previous.total,
+            },
+            {
+              topic: nextEntry.topic,
+              stageKey: nextEntry.stageKey,
+              category: nextEntry.category,
+              message: nextEntry.message,
+              current: nextEntry.current,
+              total: nextEntry.total,
+            }
+          )
         ) {
           return prev;
         }
@@ -1205,7 +1420,8 @@ export default function TrrShowDetailPage() {
       grouped.set(topic.key, []);
     }
     for (const entry of refreshLogEntries) {
-      const topicKey = resolveRefreshLogTopic(entry.category, entry.message);
+      const topicKey = resolveRefreshLogTopicKey(entry);
+      if (!topicKey) continue;
       grouped.get(topicKey)?.push(entry);
     }
 
@@ -1214,8 +1430,11 @@ export default function TrrShowDetailPage() {
       const latest = entries.length > 0 ? entries[entries.length - 1] : null;
       const failed = isRefreshTopicFailed(latest);
       const done = !failed && isRefreshTopicDone(latest);
+      const forceActivePeopleTopic = topic.key === "people" && Boolean(refreshingTargets.cast_credits);
       const status: "pending" | "active" | "done" | "failed" = failed
         ? "failed"
+        : forceActivePeopleTopic
+          ? "active"
         : done
           ? "done"
           : entries.length > 0
@@ -1234,7 +1453,7 @@ export default function TrrShowDetailPage() {
       ...groups.filter((group) => group.status !== "done"),
       ...groups.filter((group) => group.status === "done"),
     ];
-  }, [refreshLogEntries]);
+  }, [refreshLogEntries, refreshingTargets.cast_credits]);
 
   // Refresh images for a person with streaming progress when available.
   const refreshPersonImages = useCallback(
@@ -1245,114 +1464,140 @@ export default function TrrShowDetailPage() {
       const headers = await getAuthHeaders();
       const body = { skip_mirror: false, show_id: showId };
 
-      let streamFailed = false;
       try {
-        const streamResponse = await fetch(
-          `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
-          {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }
+        const streamController = new AbortController();
+        const streamTimeout = setTimeout(
+          () => streamController.abort(),
+          PERSON_REFRESH_STREAM_TIMEOUT_MS
         );
-
-        if (!streamResponse.ok || !streamResponse.body) {
-          throw new Error("Person refresh stream unavailable");
-        }
-
-        const reader = streamResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let completePayload: Record<string, unknown> | null = null;
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          buffer = buffer.replace(/\r\n/g, "\n");
-
-          let boundaryIndex = buffer.indexOf("\n\n");
-          while (boundaryIndex !== -1) {
-            const rawEvent = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + 2);
-
-            const lines = rawEvent.split("\n").filter(Boolean);
-            let eventType = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-              }
+        try {
+          const streamResponse = await fetch(
+            `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+              signal: streamController.signal,
             }
+          );
 
-            const dataStr = dataLines.join("\n");
-            let payload: Record<string, unknown> | string = dataStr;
-            try {
-              payload = JSON.parse(dataStr) as Record<string, unknown>;
-            } catch {
-              payload = dataStr;
-            }
-
-            if (eventType === "progress" && payload && typeof payload === "object") {
-              const stageLabel = resolveStageLabel(
-                (payload as { stage?: unknown }).stage,
-                PERSON_REFRESH_STAGE_LABELS
-              );
-              const current = parseProgressNumber((payload as { current?: unknown }).current);
-              const total = parseProgressNumber((payload as { total?: unknown }).total);
-              onProgress?.({
-                stage: stageLabel,
-                message: buildProgressMessage(
-                  stageLabel,
-                  (payload as { message?: unknown }).message,
-                  "Refreshing cast media..."
-                ),
-                current,
-                total,
-              });
-            } else if (eventType === "error") {
-              const message =
-                payload && typeof payload === "object"
-                  ? (payload as { error?: unknown; detail?: unknown })
-                  : null;
-              const errorText =
-                typeof message?.error === "string" && message.error
-                  ? message.error
-                  : "Failed to refresh person images";
-              const detailText =
-                typeof message?.detail === "string" && message.detail ? message.detail : null;
-              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
-            } else if (eventType === "complete") {
-              completePayload =
-                payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-            }
-
-            boundaryIndex = buffer.indexOf("\n\n");
+          if (!streamResponse.ok || !streamResponse.body) {
+            throw new Error("Person refresh stream unavailable");
           }
-        }
 
-        return completePayload ?? {};
+          const reader = streamResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let completePayload: Record<string, unknown> | null = null;
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
+
+            let boundaryIndex = buffer.indexOf("\n\n");
+            while (boundaryIndex !== -1) {
+              const rawEvent = buffer.slice(0, boundaryIndex);
+              buffer = buffer.slice(boundaryIndex + 2);
+
+              const lines = rawEvent.split("\n").filter(Boolean);
+              let eventType = "message";
+              const dataLines: string[] = [];
+              for (const line of lines) {
+                if (line.startsWith("event:")) {
+                  eventType = line.slice(6).trim();
+                } else if (line.startsWith("data:")) {
+                  dataLines.push(line.slice(5).trim());
+                }
+              }
+
+              const dataStr = dataLines.join("\n");
+              let payload: Record<string, unknown> | string = dataStr;
+              try {
+                payload = JSON.parse(dataStr) as Record<string, unknown>;
+              } catch {
+                payload = dataStr;
+              }
+
+              if (eventType === "progress" && payload && typeof payload === "object") {
+                const stageLabel = resolveStageLabel(
+                  (payload as { stage?: unknown }).stage,
+                  PERSON_REFRESH_STAGE_LABELS
+                );
+                const current = parseProgressNumber((payload as { current?: unknown }).current);
+                const total = parseProgressNumber((payload as { total?: unknown }).total);
+                onProgress?.({
+                  stage: stageLabel,
+                  message: buildProgressMessage(
+                    stageLabel,
+                    (payload as { message?: unknown }).message,
+                    "Refreshing cast media..."
+                  ),
+                  current,
+                  total,
+                });
+              } else if (eventType === "error") {
+                const message =
+                  payload && typeof payload === "object"
+                    ? (payload as { error?: unknown; detail?: unknown })
+                    : null;
+                const errorText =
+                  typeof message?.error === "string" && message.error
+                    ? message.error
+                    : "Failed to refresh person images";
+                const detailText =
+                  typeof message?.detail === "string" && message.detail ? message.detail : null;
+                throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+              } else if (eventType === "complete") {
+                completePayload =
+                  payload && typeof payload === "object"
+                    ? (payload as Record<string, unknown>)
+                    : {};
+              }
+
+              boundaryIndex = buffer.indexOf("\n\n");
+            }
+          }
+
+          return completePayload ?? {};
+        } finally {
+          clearTimeout(streamTimeout);
+        }
       } catch (streamErr) {
-        streamFailed = true;
         console.warn("Person refresh stream failed, falling back to non-stream.", streamErr);
       }
 
-      if (streamFailed) {
-        onProgress?.({
-          stage: "Fallback",
-          message: "Refreshing cast media...",
-          current: null,
-          total: null,
-        });
-      }
-
-      const response = await fetch(`/api/admin/trr-api/people/${personId}/refresh-images`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      onProgress?.({
+        stage: "Fallback",
+        message: "Refreshing cast media...",
+        current: null,
+        total: null,
       });
+
+      const fallbackController = new AbortController();
+      const fallbackTimeout = setTimeout(
+        () => fallbackController.abort(),
+        PERSON_REFRESH_FALLBACK_TIMEOUT_MS
+      );
+      let response: Response;
+      try {
+        response = await fetch(`/api/admin/trr-api/people/${personId}/refresh-images`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: fallbackController.signal,
+        });
+      } catch (fallbackErr) {
+        if (isAbortError(fallbackErr)) {
+          throw new Error(
+            `Timed out refreshing cast media after ${Math.round(PERSON_REFRESH_FALLBACK_TIMEOUT_MS / 1000)}s.`
+          );
+        }
+        throw fallbackErr;
+      } finally {
+        clearTimeout(fallbackTimeout);
+      }
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -1391,39 +1636,55 @@ export default function TrrShowDetailPage() {
 
       let succeeded = 0;
       let failed = 0;
+      let completed = 0;
+      let dispatched = 0;
+      let inFlight = 0;
+      let nextIndex = 0;
+      const concurrency = Math.max(1, Math.min(CAST_PROFILE_SYNC_CONCURRENCY, total));
+
+      const setCastBatchProgress = (message: string, stage = "Cast Profiles & Media") => {
+        setRefreshTargetProgress((prev) => ({
+          ...prev,
+          cast_credits: {
+            stage,
+            message,
+            current: completed,
+            total,
+          },
+        }));
+      };
 
       setRefreshTargetProgress((prev) => ({
         ...prev,
         cast_credits: {
           stage: "Cast Profiles & Media",
-          message: "Syncing cast profiles and media from TMDb/IMDb/Fandom...",
+          message: `Syncing cast profiles and media from TMDb/IMDb/Fandom... (${formatCastBatchCounts({
+            completed,
+            total,
+            inFlight,
+          })})`,
           current: 0,
           total,
         },
       }));
       appendRefreshLog({
         category: "Cast Profiles",
-        message: `Syncing cast profiles and media (${total} members)...`,
+        message: `Syncing cast profiles and media (${total} members, concurrency ${concurrency}, full pipeline enabled)...`,
         current: 0,
         total,
       });
 
-      for (const [index, member] of uniqueMembers.entries()) {
+      const syncMember = async (memberIndex: number) => {
+        const member = uniqueMembers[memberIndex];
         const label =
-          member.full_name || member.cast_member_name || `Cast member ${index + 1}`;
-        setRefreshTargetProgress((prev) => ({
-          ...prev,
-          cast_credits: {
-            stage: "Cast Profiles & Media",
-            message: `Syncing ${label} (${index + 1}/${total})...`,
-            current: index,
-            total,
-          },
-        }));
+          member.full_name || member.cast_member_name || `Cast member ${memberIndex + 1}`;
+        dispatched += 1;
+        inFlight += 1;
+        setCastBatchProgress(formatCastBatchMemberMessage(label, { completed, total, inFlight }));
         appendRefreshLog({
           category: "Cast Profiles",
-          message: `Syncing ${label}...`,
-          current: index,
+          message: formatCastBatchMemberMessage(label, { completed, total, inFlight }),
+          current: completed,
           total,
         });
 
@@ -1434,9 +1695,14 @@ export default function TrrShowDetailPage() {
               cast_credits: {
                 stage: progress.stage ?? "Cast Profiles & Media",
                 message:
-                  progress.message ??
-                  `Syncing ${label} (${index + 1}/${total})...`,
-                current: index,
+                  progress.message
+                    ? `${label}: ${progress.message} (${formatCastBatchCounts({
+                        completed,
+                        total,
+                        inFlight,
+                      })})`
+                    : formatCastBatchMemberMessage(label, { completed, total, inFlight }),
+                current: completed,
                 total,
               },
             }));
@@ -1444,35 +1710,40 @@ export default function TrrShowDetailPage() {
           succeeded += 1;
         } catch (err) {
           console.warn(`Failed to refresh cast profile/media for ${label}:`, err);
+          const errorText = err instanceof Error ? err.message : "unknown error";
           appendRefreshLog({
             category: "Cast Profiles",
-            message: `Failed to sync ${label}.`,
-            current: index + 1,
+            message: `Failed to sync ${label}: ${errorText}`,
+            current: completed,
             total,
           });
           failed += 1;
         } finally {
-          setRefreshTargetProgress((prev) => ({
-            ...prev,
-            cast_credits: {
-              stage: "Cast Profiles & Media",
-              message: `Synced ${index + 1}/${total} cast profiles/media...`,
-              current: index + 1,
-              total,
-            },
-          }));
-          appendRefreshLog({
-            category: "Cast Profiles",
-            message: `Synced ${index + 1}/${total} cast members.`,
-            current: index + 1,
-            total,
-          });
+          completed += 1;
+          inFlight = Math.max(0, inFlight - 1);
+          setCastBatchProgress(formatCastBatchRunningMessage({ completed, total, inFlight }));
         }
-      }
+      };
 
+      const runWorker = async () => {
+        while (true) {
+          const memberIndex = nextIndex;
+          nextIndex += 1;
+          if (memberIndex >= total) {
+            return;
+          }
+          await syncMember(memberIndex);
+        }
+      };
+
+      await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
+
+      setCastBatchProgress(
+        `Completed cast profiles/media sync (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`
+      );
       appendRefreshLog({
         category: "Cast Profiles",
-        message: `Completed cast profile/media sync (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`,
+        message: `Completed cast profile/media sync (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}, dispatched ${dispatched}/${total}).`,
         current: total,
         total,
       });
@@ -1681,13 +1952,27 @@ export default function TrrShowDetailPage() {
   );
 
   // Fetch cast
-  const fetchCast = useCallback(async (): Promise<TrrCastMember[]> => {
+  const fetchCast = useCallback(
+    async (options?: { rosterMode?: ShowCastRosterMode; minEpisodes?: number | null }): Promise<TrrCastMember[]> => {
+    const rosterMode = options?.rosterMode ?? "imdb_show_membership";
+    const minEpisodes =
+      typeof options?.minEpisodes === "number"
+        ? options.minEpisodes
+        : rosterMode === "imdb_show_membership"
+          ? 0
+          : null;
     if (!showId) return [];
     try {
       const headers = await getAuthHeaders();
-      // Fetch all cast without filters - photo filtering done client-side if needed
+      const params = new URLSearchParams();
+      params.set("limit", "500");
+      params.set("roster_mode", rosterMode);
+      if (typeof minEpisodes === "number" && Number.isFinite(minEpisodes)) {
+        params.set("minEpisodes", String(minEpisodes));
+      }
+      // Fetch all cast without filters - photo filtering done client-side if needed.
       const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/cast?limit=500`,
+        `/api/admin/trr-api/shows/${showId}/cast?${params.toString()}`,
         { headers }
       );
       const data = await response.json().catch(() => ({}));
@@ -1708,7 +1993,13 @@ export default function TrrShowDetailPage() {
         : [];
       setCast(nextCast);
       setArchiveFootageCast(nextArchiveCast);
-      setCastSource(castSourceRaw === "show_fallback" ? "show_fallback" : "episode_evidence");
+      setCastSource(
+        castSourceRaw === "show_fallback"
+          ? "show_fallback"
+          : castSourceRaw === "imdb_show_membership"
+            ? "imdb_show_membership"
+            : "episode_evidence"
+      );
       setCastEligibilityWarning(
         typeof eligibilityWarningRaw === "string" && eligibilityWarningRaw.trim()
           ? eligibilityWarningRaw
@@ -1720,7 +2011,7 @@ export default function TrrShowDetailPage() {
       console.warn("Failed to fetch cast:", message);
       setError(message);
       setArchiveFootageCast([]);
-      setCastSource("episode_evidence");
+      setCastSource(rosterMode === "imdb_show_membership" ? "imdb_show_membership" : "episode_evidence");
       setCastEligibilityWarning(null);
       return [];
     }
@@ -1843,25 +2134,125 @@ export default function TrrShowDetailPage() {
     [fetchShowLinks, getAuthHeaders, showId]
   );
 
-  const fetchShowRoles = useCallback(async () => {
+  const saveGoogleNewsLink = useCallback(async () => {
     if (!showId) return;
-    setRolesLoading(true);
-    setRolesError(null);
+    const trimmedUrl = googleNewsUrl.trim();
+    if (!trimmedUrl) {
+      setGoogleNewsError("Google News URL is required.");
+      return;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmedUrl);
+    } catch {
+      setGoogleNewsError("Enter a valid URL.");
+      return;
+    }
+    if (!parsed.hostname.includes("news.google.com")) {
+      setGoogleNewsError("Google News URL must use news.google.com.");
+      return;
+    }
+
+    setGoogleNewsSaving(true);
+    setGoogleNewsError(null);
+    setGoogleNewsNotice(null);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
-        headers,
-        cache: "no-store",
-      });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error || "Failed to load roles");
-      setShowRoles(Array.isArray(data) ? (data as ShowRole[]) : []);
+      if (googleNewsLinkId) {
+        const response = await fetch(`/api/admin/trr-api/shows/${showId}/links/${googleNewsLinkId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: trimmedUrl,
+            label: "Google News URL",
+            link_group: "official",
+            link_kind: "google_news_url",
+            status: "approved",
+          }),
+        });
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to update Google News URL");
+        }
+      } else {
+        const response = await fetch(`/api/admin/trr-api/shows/${showId}/links`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entity_type: "show",
+            entity_id: showId,
+            link_group: "official",
+            link_kind: "google_news_url",
+            label: "Google News URL",
+            url: trimmedUrl,
+            season_number: 0,
+            status: "approved",
+            source: "manual",
+            metadata: {},
+          }),
+        });
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to create Google News URL");
+        }
+      }
+      setGoogleNewsNotice("Saved Google News URL.");
+      setNewsGoogleUrlMissing(false);
+      await fetchShowLinks();
     } catch (err) {
-      setRolesError(err instanceof Error ? err.message : "Failed to load roles");
+      setGoogleNewsError(err instanceof Error ? err.message : "Failed to save Google News URL");
     } finally {
-      setRolesLoading(false);
+      setGoogleNewsSaving(false);
     }
-  }, [getAuthHeaders, showId]);
+  }, [fetchShowLinks, getAuthHeaders, googleNewsLinkId, googleNewsUrl, showId]);
+
+  const fetchShowRoles = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!showId) return;
+      if (!force && showRolesLoadedOnce) return;
+      if (showRolesLoadInFlightRef.current) {
+        await showRolesLoadInFlightRef.current;
+        return;
+      }
+
+      const request = (async () => {
+        setRolesLoading(true);
+        setRolesError(null);
+        try {
+          const headers = await getAuthHeaders();
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showId}/roles`,
+            { headers, cache: "no-store" },
+            ROLE_LOAD_TIMEOUT_MS
+          );
+          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          if (!response.ok) throw new Error(data.error || "Failed to load roles");
+          setShowRoles(Array.isArray(data) ? (data as ShowRole[]) : []);
+          setShowRolesLoadedOnce(true);
+        } catch (err) {
+          setRolesError(
+            isAbortError(err)
+              ? `Timed out loading roles after ${Math.round(ROLE_LOAD_TIMEOUT_MS / 1000)}s`
+              : err instanceof Error
+                ? err.message
+                : "Failed to load roles"
+          );
+        } finally {
+          setRolesLoading(false);
+        }
+      })();
+
+      showRolesLoadInFlightRef.current = request;
+      try {
+        await request;
+      } finally {
+        if (showRolesLoadInFlightRef.current === request) {
+          showRolesLoadInFlightRef.current = null;
+        }
+      }
+    },
+    [getAuthHeaders, showId, showRolesLoadedOnce]
+  );
 
   const createShowRole = useCallback(async () => {
     const roleName = newRoleName.trim();
@@ -1877,7 +2268,7 @@ export default function TrrShowDetailPage() {
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(data.error || "Failed to create role");
       setNewRoleName("");
-      await fetchShowRoles();
+      await fetchShowRoles({ force: true });
     } catch (err) {
       setRolesError(err instanceof Error ? err.message : "Failed to create role");
     }
@@ -1898,66 +2289,99 @@ export default function TrrShowDetailPage() {
     [getAuthHeaders, showId]
   );
 
-  const fetchCastRoleMembers = useCallback(async () => {
-    if (!showId) return;
-    setCastRoleMembersLoading(true);
-    setCastRoleMembersLoadedOnce(false);
-    setCastRoleMembersError(null);
-    try {
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      if (castSeasonFilters.length > 0) {
-        params.set("seasons", castSeasonFilters.join(","));
+  const fetchCastRoleMembers = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!showId) return;
+      const seasonsParam = [...castSeasonFilters].sort((a, b) => a - b).join(",");
+      const fetchKey = `${showId}|${seasonsParam}`;
+      if (!force && castRoleMembersLoadKeyRef.current === fetchKey && castRoleMembersLoadedOnce) {
+        return;
+      }
+      if (castRoleMembersLoadInFlightRef.current) {
+        await castRoleMembersLoadInFlightRef.current;
+        if (!force && castRoleMembersLoadKeyRef.current === fetchKey && castRoleMembersLoadedOnce) {
+          return;
+        }
       }
 
-      const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
-        { headers, cache: "no-store" }
-      );
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error || "Failed to load cast role members");
-      setCastRoleMembers(
-        (Array.isArray(data) ? data : []).map((row) => {
-          const roles = Array.isArray((row as { roles?: unknown }).roles)
-            ? ((row as { roles: unknown[] }).roles.filter(
-                (value): value is string => typeof value === "string" && value.trim().length > 0
-              ) as string[])
-            : [];
-          return {
-            person_id: String((row as { person_id?: unknown }).person_id ?? ""),
-            person_name:
-              typeof (row as { person_name?: unknown }).person_name === "string"
-                ? (row as { person_name: string }).person_name
-                : null,
-            total_episodes:
-              typeof (row as { total_episodes?: unknown }).total_episodes === "number"
-                ? (row as { total_episodes: number }).total_episodes
-                : null,
-            seasons_appeared:
-              typeof (row as { seasons_appeared?: unknown }).seasons_appeared === "number"
-                ? (row as { seasons_appeared: number }).seasons_appeared
-                : null,
-            latest_season:
-              typeof (row as { latest_season?: unknown }).latest_season === "number"
-                ? (row as { latest_season: number }).latest_season
-                : null,
-            roles,
-            photo_url:
-              typeof (row as { photo_url?: unknown }).photo_url === "string"
-                ? (row as { photo_url: string }).photo_url
-                : null,
-          };
-        })
-      );
-      setCastRoleMembersLoadedOnce(true);
-    } catch (err) {
-      setCastRoleMembers([]);
-      setCastRoleMembersLoadedOnce(false);
-      setCastRoleMembersError(err instanceof Error ? err.message : "Failed to load cast role members");
-    } finally {
-      setCastRoleMembersLoading(false);
-    }
-  }, [castSeasonFilters, getAuthHeaders, showId]);
+      const request = (async () => {
+        setCastRoleMembersLoading(true);
+        setCastRoleMembersError(null);
+        try {
+          const headers = await getAuthHeaders();
+          const params = new URLSearchParams();
+          if (castSeasonFilters.length > 0) {
+            params.set("seasons", castSeasonFilters.join(","));
+          }
+
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
+            { headers, cache: "no-store" },
+            ROLE_LOAD_TIMEOUT_MS
+          );
+          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          if (!response.ok) throw new Error(data.error || "Failed to load cast role members");
+          setCastRoleMembers(
+            (Array.isArray(data) ? data : []).map((row) => {
+              const roles = Array.isArray((row as { roles?: unknown }).roles)
+                ? ((row as { roles: unknown[] }).roles.filter(
+                    (value): value is string => typeof value === "string" && value.trim().length > 0
+                  ) as string[])
+                : [];
+              return {
+                person_id: String((row as { person_id?: unknown }).person_id ?? ""),
+                person_name:
+                  typeof (row as { person_name?: unknown }).person_name === "string"
+                    ? (row as { person_name: string }).person_name
+                    : null,
+                total_episodes:
+                  typeof (row as { total_episodes?: unknown }).total_episodes === "number"
+                    ? (row as { total_episodes: number }).total_episodes
+                    : null,
+                seasons_appeared:
+                  typeof (row as { seasons_appeared?: unknown }).seasons_appeared === "number"
+                    ? (row as { seasons_appeared: number }).seasons_appeared
+                    : null,
+                latest_season:
+                  typeof (row as { latest_season?: unknown }).latest_season === "number"
+                    ? (row as { latest_season: number }).latest_season
+                    : null,
+                roles,
+                photo_url:
+                  typeof (row as { photo_url?: unknown }).photo_url === "string"
+                    ? (row as { photo_url: string }).photo_url
+                    : null,
+              };
+            })
+          );
+          castRoleMembersLoadKeyRef.current = fetchKey;
+          setCastRoleMembersLoadedOnce(true);
+        } catch (err) {
+          setCastRoleMembers([]);
+          setCastRoleMembersLoadedOnce(false);
+          setCastRoleMembersError(
+            isAbortError(err)
+              ? `Timed out loading cast role members after ${Math.round(ROLE_LOAD_TIMEOUT_MS / 1000)}s`
+              : err instanceof Error
+                ? err.message
+                : "Failed to load cast role members"
+          );
+        } finally {
+          setCastRoleMembersLoading(false);
+        }
+      })();
+
+      castRoleMembersLoadInFlightRef.current = request;
+      try {
+        await request;
+      } finally {
+        if (castRoleMembersLoadInFlightRef.current === request) {
+          castRoleMembersLoadInFlightRef.current = null;
+        }
+      }
+    },
+    [castRoleMembersLoadedOnce, castSeasonFilters, getAuthHeaders, showId]
+  );
 
   const syncCastMatrixRoles = useCallback(async () => {
     if (!showId) return;
@@ -1990,7 +2414,12 @@ export default function TrrShowDetailPage() {
         throw new Error(data.error || "Failed to sync cast matrix roles");
       }
       setCastMatrixSyncResult(data);
-      await Promise.all([fetchCastRoleMembers(), fetchShowRoles(), fetchShowLinks(), fetchCast()]);
+      await Promise.all([
+        fetchCastRoleMembers({ force: true }),
+        fetchShowRoles({ force: true }),
+        fetchShowLinks(),
+        fetchCast(),
+      ]);
     } catch (err) {
       setCastMatrixSyncError(err instanceof Error ? err.message : "Failed to sync cast matrix roles");
     } finally {
@@ -2014,8 +2443,8 @@ export default function TrrShowDetailPage() {
       try {
         setRolesError(null);
         await patchShowRole(role.id, { name: nextName.trim() });
-        await fetchShowRoles();
-        await fetchCastRoleMembers();
+        await fetchShowRoles({ force: true });
+        await fetchCastRoleMembers({ force: true });
       } catch (err) {
         setRolesError(err instanceof Error ? err.message : "Failed to rename role");
       }
@@ -2028,8 +2457,8 @@ export default function TrrShowDetailPage() {
       try {
         setRolesError(null);
         await patchShowRole(role.id, { is_active: !role.is_active });
-        await fetchShowRoles();
-        await fetchCastRoleMembers();
+        await fetchShowRoles({ force: true });
+        await fetchCastRoleMembers({ force: true });
       } catch (err) {
         setRolesError(err instanceof Error ? err.message : "Failed to update role");
       }
@@ -2076,7 +2505,7 @@ export default function TrrShowDetailPage() {
           }
         }
 
-        await fetchShowRoles();
+        await fetchShowRoles({ force: true });
         nextRoles = await (async () => {
           const response = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
             headers,
@@ -2101,7 +2530,7 @@ export default function TrrShowDetailPage() {
         );
         const assigned = (await assignResponse.json().catch(() => ({}))) as { error?: string };
         if (!assignResponse.ok) throw new Error(assigned.error || "Failed to assign roles");
-        await fetchCastRoleMembers();
+        await fetchCastRoleMembers({ force: true });
       } catch (err) {
         setCastRoleMembersError(err instanceof Error ? err.message : "Failed to assign roles");
       }
@@ -2123,39 +2552,34 @@ export default function TrrShowDetailPage() {
         setBravoError(null);
         const headers = await getAuthHeaders();
 
-        const [videosResponse, newsResponse] = await Promise.all([
-          fetch(`/api/admin/trr-api/shows/${showId}/bravo/videos?merge_person_sources=true`, {
+        const videosResponse = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/bravo/videos?merge_person_sources=true`,
+          {
             headers,
             cache: "no-store",
-          }),
-          fetch(`/api/admin/trr-api/shows/${showId}/bravo/news`, {
-            headers,
-            cache: "no-store",
-          }),
-        ]);
+          },
+          BRAVO_LOAD_TIMEOUT_MS
+        );
 
         const videosData = (await videosResponse.json().catch(() => ({}))) as {
           videos?: BravoVideoItem[];
-          error?: string;
-        };
-        const newsData = (await newsResponse.json().catch(() => ({}))) as {
-          news?: BravoNewsItem[];
           error?: string;
         };
 
         if (!videosResponse.ok) {
           throw new Error(videosData.error || "Failed to fetch Bravo videos");
         }
-        if (!newsResponse.ok) {
-          throw new Error(newsData.error || "Failed to fetch Bravo news");
-        }
 
         setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
-        setBravoNews(Array.isArray(newsData.news) ? newsData.news : []);
         setBravoLoaded(true);
       } catch (err) {
+        const message = isAbortError(err)
+          ? `Timed out loading Bravo data after ${Math.round(BRAVO_LOAD_TIMEOUT_MS / 1000)}s`
+          : err instanceof Error
+            ? err.message
+            : "Failed to load Bravo data";
         setBravoLoaded(false);
-        setBravoError(err instanceof Error ? err.message : "Failed to load Bravo data");
+        setBravoError(message);
       } finally {
         setBravoLoading(false);
       }
@@ -2170,6 +2594,121 @@ export default function TrrShowDetailPage() {
       }
     }
   }, [bravoLoaded, getAuthHeaders, showId]);
+
+  const syncGoogleNews = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!showId) return;
+      if (newsSyncInFlightRef.current) {
+        await newsSyncInFlightRef.current;
+        return;
+      }
+
+      const request = (async () => {
+        try {
+          setNewsSyncing(true);
+          const headers = await getAuthHeaders();
+          const response = await fetch(`/api/admin/trr-api/shows/${showId}/google-news/sync`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ force }),
+          });
+          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          if (!response.ok) {
+            if (response.status === 409) {
+              const message = data.error || "Google News URL is not configured for this show.";
+              setNewsGoogleUrlMissing(true);
+              setNewsNotice(message);
+              return;
+            }
+            throw new Error(data.error || "Failed to sync Google News");
+          }
+          setNewsGoogleUrlMissing(false);
+          setNewsNotice(null);
+        } catch (err) {
+          throw err;
+        } finally {
+          setNewsSyncing(false);
+        }
+      })();
+
+      newsSyncInFlightRef.current = request;
+      try {
+        await request;
+      } finally {
+        if (newsSyncInFlightRef.current === request) {
+          newsSyncInFlightRef.current = null;
+        }
+      }
+    },
+    [getAuthHeaders, showId]
+  );
+
+  const loadUnifiedNews = useCallback(
+    async ({ force = false, forceSync = false }: { force?: boolean; forceSync?: boolean } = {}) => {
+      if (!showId) return;
+      if (!force && newsLoaded && newsLoadedSortRef.current === newsSort) return;
+      if (newsLoadInFlightRef.current) {
+        await newsLoadInFlightRef.current;
+        return;
+      }
+
+      const request = (async () => {
+        try {
+          setNewsLoading(true);
+          setNewsError(null);
+          if (forceSync || !newsAutoSyncAttemptedRef.current) {
+            await syncGoogleNews({ force: forceSync });
+            newsAutoSyncAttemptedRef.current = true;
+          }
+
+          const headers = await getAuthHeaders();
+          const params = new URLSearchParams({
+            sources: "bravo,google_news",
+            sort: newsSort,
+          });
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showId}/news?${params.toString()}`,
+            {
+              headers,
+              cache: "no-store",
+            },
+            BRAVO_LOAD_TIMEOUT_MS
+          );
+          const data = (await response.json().catch(() => ({}))) as {
+            news?: UnifiedNewsItem[];
+            error?: string;
+          };
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to fetch unified news");
+          }
+          setUnifiedNews(Array.isArray(data.news) ? data.news : []);
+          setNewsLoaded(true);
+          newsLoadedSortRef.current = newsSort;
+        } catch (err) {
+          const message = isAbortError(err)
+            ? `Timed out loading news after ${Math.round(BRAVO_LOAD_TIMEOUT_MS / 1000)}s`
+            : err instanceof Error
+              ? err.message
+              : "Failed to load unified news";
+          setNewsLoaded(false);
+          newsLoadedSortRef.current = null;
+          setNewsError(message);
+        } finally {
+          setNewsLoading(false);
+        }
+      })();
+
+      newsLoadInFlightRef.current = request;
+      try {
+        await request;
+      } finally {
+        if (newsLoadInFlightRef.current === request) {
+          newsLoadInFlightRef.current = null;
+        }
+      }
+    },
+    [getAuthHeaders, newsLoaded, newsSort, showId, syncGoogleNews]
+  );
 
   const syncBravoSeasonOptions = useMemo(() => {
     const numbers = seasons
@@ -2446,7 +2985,9 @@ export default function TrrShowDetailPage() {
 
       await Promise.all([fetchShow(), fetchCast()]);
       setBravoLoaded(false);
+      setNewsLoaded(false);
       void loadBravoData({ force: true });
+      void loadUnifiedNews({ force: true });
     } catch (err) {
       appendRefreshLog({
         category: "BravoTV",
@@ -2462,6 +3003,7 @@ export default function TrrShowDetailPage() {
     fetchShow,
     getAuthHeaders,
     loadBravoData,
+    loadUnifiedNews,
     showId,
     syncBravoDescription,
     syncBravoImageKinds,
@@ -2472,6 +3014,7 @@ export default function TrrShowDetailPage() {
     syncBravoAirs,
     syncBravoTargetSeasonNumber,
     syncBravoUrl,
+    setNewsLoaded,
   ]);
 
   const syncBravoLoading = syncBravoPreviewLoading || syncBravoCommitLoading;
@@ -2536,13 +3079,19 @@ export default function TrrShowDetailPage() {
 
     const loadData = async () => {
       setLoading(true);
-      await fetchShow();
-      await Promise.all([fetchSeasons(), fetchCast(), checkCoverage(), loadBravoData()]);
-      setLoading(false);
+      try {
+        await fetchShow();
+        // Keep initial render fast: load core show data first.
+        await Promise.all([fetchSeasons(), fetchCast(), checkCoverage()]);
+      } finally {
+        setLoading(false);
+      }
+      // Bravo data can be slow/unavailable and should not block page load.
+      void loadBravoData();
     };
 
-    loadData();
-  }, [hasAccess, showId, fetchShow, fetchSeasons, fetchCast, checkCoverage]);
+    void loadData();
+  }, [hasAccess, showId, fetchShow, fetchSeasons, fetchCast, checkCoverage, loadBravoData]);
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "settings") return;
@@ -2550,9 +3099,37 @@ export default function TrrShowDetailPage() {
   }, [activeTab, fetchShowLinks, hasAccess, showId]);
 
   useEffect(() => {
+    const candidates = showLinks.filter(
+      (link) =>
+        link.entity_type === "show" &&
+        link.link_kind === "google_news_url" &&
+        Number(link.season_number || 0) === 0
+    );
+    if (candidates.length === 0) {
+      setGoogleNewsLinkId(null);
+      setGoogleNewsUrl("");
+      return;
+    }
+    const rankStatus = (status: EntityLinkStatus): number => {
+      if (status === "approved") return 0;
+      if (status === "pending") return 1;
+      return 2;
+    };
+    const sorted = [...candidates].sort((a, b) => {
+      const statusDiff = rankStatus(normalizeEntityLinkStatus(a.status)) - rankStatus(normalizeEntityLinkStatus(b.status));
+      if (statusDiff !== 0) return statusDiff;
+      return (b.updated_at || "").localeCompare(a.updated_at || "");
+    });
+    const selected = sorted[0] ?? null;
+    setGoogleNewsLinkId(selected?.id ?? null);
+    setGoogleNewsUrl(selected?.url ?? "");
+  }, [showLinks]);
+
+  useEffect(() => {
     if (!hasAccess || !showId || (activeTab !== "cast" && activeTab !== "settings")) return;
+    if (showRolesLoadedOnce) return;
     void fetchShowRoles();
-  }, [activeTab, fetchShowRoles, hasAccess, showId]);
+  }, [activeTab, fetchShowRoles, hasAccess, showId, showRolesLoadedOnce]);
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "cast") return;
@@ -2561,29 +3138,56 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     setBravoVideos([]);
-    setBravoNews([]);
     setBravoError(null);
     setBravoLoaded(false);
     bravoLoadInFlightRef.current = null;
+    setUnifiedNews([]);
+    setNewsError(null);
+    setNewsNotice(null);
+    setNewsLoaded(false);
+    setNewsGoogleUrlMissing(false);
+    setNewsSort("trending");
+    setNewsSourceFilter("");
+    setNewsPersonFilter("");
+    setNewsTopicFilter("");
+    setNewsSeasonFilter("");
+    newsLoadInFlightRef.current = null;
+    newsSyncInFlightRef.current = null;
+    newsAutoSyncAttemptedRef.current = false;
+    newsLoadedSortRef.current = null;
     setShowLinks([]);
     setShowRoles([]);
+    setShowRolesLoadedOnce(false);
     setCastRoleMembers([]);
     setCastRoleMembersLoadedOnce(false);
+    showRolesLoadInFlightRef.current = null;
+    castRoleMembersLoadInFlightRef.current = null;
+    castRoleMembersLoadKeyRef.current = null;
     setCastRoleMembersError(null);
     setCastMatrixSyncError(null);
     setCastMatrixSyncResult(null);
     setLinksError(null);
     setLinksNotice(null);
+    setGoogleNewsLinkId(null);
+    setGoogleNewsUrl("");
+    setGoogleNewsNotice(null);
+    setGoogleNewsError(null);
     setDetailsEditing(false);
   }, [showId]);
 
   useEffect(() => {
     if (!hasAccess || !showId) return;
-    const shouldLoadBravo =
-      refreshLogOpen || activeTab === "news" || (activeTab === "assets" && assetsView === "videos");
+    const shouldLoadBravo = refreshLogOpen || (activeTab === "assets" && assetsView === "videos");
     if (!shouldLoadBravo) return;
     void loadBravoData();
   }, [activeTab, assetsView, hasAccess, loadBravoData, refreshLogOpen, showId]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId) return;
+    const shouldLoadNews = refreshLogOpen || activeTab === "news";
+    if (!shouldLoadNews) return;
+    void loadUnifiedNews();
+  }, [activeTab, hasAccess, loadUnifiedNews, refreshLogOpen, showId]);
 
   useEffect(() => {
     if (seasons.length > 0) {
@@ -2610,6 +3214,21 @@ export default function TrrShowDetailPage() {
     () => new Map(castRoleMembers.map((member) => [member.person_id, member] as const)),
     [castRoleMembers]
   );
+
+  const castDisplayBaseMembers = useMemo(() => {
+    const seen = new Set<string>();
+    const base: TrrCastMember[] = [];
+
+    for (const member of cast) {
+      const personId = String(member.person_id || "").trim();
+      if (!personId) continue;
+      if (seen.has(personId)) continue;
+      seen.add(personId);
+      base.push(member);
+    }
+
+    return base;
+  }, [cast]);
 
   const availableCastRoles = useMemo(() => {
     const values = new Set<string>();
@@ -2685,8 +3304,13 @@ export default function TrrShowDetailPage() {
     return "Season scope: all show seasons (plus global season 0 roles).";
   }, [castSeasonFilters]);
 
+  const castEpisodeScopeLabel = useMemo(
+    () => showCastEpisodeScopeHint(castSeasonFilters.length > 0),
+    [castSeasonFilters]
+  );
+
   const castDisplayMembers = useMemo(() => {
-    const merged = cast.map((member) => {
+    const merged = castDisplayBaseMembers.map((member) => {
       const enriched = castRoleMemberByPersonId.get(member.person_id);
       const mergedRoles =
         enriched && enriched.roles.length > 0
@@ -2700,12 +3324,15 @@ export default function TrrShowDetailPage() {
           : typeof member.latest_season === "number"
             ? member.latest_season
             : null;
-      const mergedTotalEpisodes =
-        enriched && typeof enriched.total_episodes === "number"
-          ? enriched.total_episodes
-          : typeof member.total_episodes === "number"
-            ? member.total_episodes
-            : null;
+      const mergedTotalEpisodes = resolveShowCastEpisodeCount({
+        castTotalEpisodes:
+          typeof member.total_episodes === "number" ? member.total_episodes : null,
+        scopedTotalEpisodes:
+          enriched && typeof enriched.total_episodes === "number"
+            ? enriched.total_episodes
+            : null,
+        hasSeasonFilters: castSeasonFilters.length > 0,
+      });
       // Keep the primary cast endpoint photo stable; cast-role-members is supplemental.
       const mergedPhotoUrl =
         member.photo_url || enriched?.photo_url || member.cover_photo_url || null;
@@ -2767,7 +3394,7 @@ export default function TrrShowDetailPage() {
     });
     return sorted;
   }, [
-    cast,
+    castDisplayBaseMembers,
     castHasImageFilter,
     castRoleAndCreditFilters,
     castRoleMemberByPersonId,
@@ -2790,6 +3417,90 @@ export default function TrrShowDetailPage() {
     () => showLinks.filter((link) => link.status === "pending").length,
     [showLinks]
   );
+
+  const newsSourceOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const item of unifiedNews) {
+      const domain = String(item.publisher_domain || "").trim();
+      if (domain) {
+        values.add(domain);
+        continue;
+      }
+      const name = String(item.publisher_name || "").trim();
+      if (name) values.add(name);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [unifiedNews]);
+
+  const newsPeopleOptions = useMemo(() => {
+    const values = new Map<string, string>();
+    for (const item of unifiedNews) {
+      for (const tag of item.person_tags || []) {
+        const personId = String(tag?.person_id || "").trim();
+        const personName = String(tag?.person_name || "").trim();
+        if (!personId || !personName || values.has(personId)) continue;
+        values.set(personId, personName);
+      }
+    }
+    return Array.from(values.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [unifiedNews]);
+
+  const newsTopicOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const item of unifiedNews) {
+      for (const topicTag of item.topic_tags || []) {
+        const normalized = String(topicTag || "").trim();
+        if (normalized) values.add(normalized);
+      }
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [unifiedNews]);
+
+  const newsSeasonOptions = useMemo(() => {
+    const values = new Set<number>();
+    for (const item of unifiedNews) {
+      for (const match of item.season_matches || []) {
+        const seasonNumber = Number(match?.season_number || 0);
+        if (Number.isFinite(seasonNumber) && seasonNumber > 0) {
+          values.add(seasonNumber);
+        }
+      }
+    }
+    return Array.from(values).sort((a, b) => b - a);
+  }, [unifiedNews]);
+
+  const filteredUnifiedNews = useMemo(() => {
+    return unifiedNews.filter((item) => {
+      if (newsSourceFilter) {
+        const domain = String(item.publisher_domain || "").trim().toLowerCase();
+        const name = String(item.publisher_name || "").trim().toLowerCase();
+        const token = newsSourceFilter.toLowerCase();
+        if (domain !== token && name !== token) return false;
+      }
+      if (newsPersonFilter) {
+        const hasPerson = (item.person_tags || []).some(
+          (tag) => String(tag?.person_id || "").trim() === newsPersonFilter
+        );
+        if (!hasPerson) return false;
+      }
+      if (newsTopicFilter) {
+        const hasTopic = (item.topic_tags || []).some(
+          (topicTag) => String(topicTag || "").trim().toLowerCase() === newsTopicFilter.toLowerCase()
+        );
+        if (!hasTopic) return false;
+      }
+      if (newsSeasonFilter) {
+        const seasonNumber = Number(newsSeasonFilter);
+        const hasSeason = (item.season_matches || []).some(
+          (match) => Number(match?.season_number || 0) === seasonNumber
+        );
+        if (!hasSeason) return false;
+      }
+      return true;
+    });
+  }, [newsPersonFilter, newsSeasonFilter, newsSourceFilter, newsTopicFilter, unifiedNews]);
 
   const settingsLinkSections = useMemo(() => {
     const showPageLinks: EntityLink[] = [];
@@ -2835,6 +3546,108 @@ export default function TrrShowDetailPage() {
       },
     ] as const;
   }, [showLinks]);
+
+  const castMemberLinkCoverageCards = useMemo<PersonLinkCoverageCard[]>(() => {
+    const personLinks = showLinks.filter((link) => link.entity_type === "person");
+    if (personLinks.length === 0) return [];
+
+    const personNameById = new Map<string, string>();
+    for (const member of cast) {
+      const name = String(member.full_name || member.cast_member_name || "").trim();
+      if (member.person_id && name && !personNameById.has(member.person_id)) {
+        personNameById.set(member.person_id, name);
+      }
+    }
+    for (const link of personLinks) {
+      if (!link.entity_id || personNameById.has(link.entity_id)) continue;
+      const parsedName = parsePersonNameFromLink(link);
+      if (parsedName) personNameById.set(link.entity_id, parsedName);
+    }
+
+    const linksByPerson = new Map<string, EntityLink[]>();
+    for (const link of personLinks) {
+      const personId = String(link.entity_id || "").trim();
+      if (!personId) continue;
+      const existing = linksByPerson.get(personId);
+      if (existing) {
+        existing.push(link);
+      } else {
+        linksByPerson.set(personId, [link]);
+      }
+    }
+
+    const cards: PersonLinkCoverageCard[] = [];
+    for (const [personId, links] of linksByPerson.entries()) {
+      const linksBySource = new Map<PersonLinkSourceKey, EntityLink[]>();
+      const seasonSet = new Set<number>();
+      for (const link of links) {
+        if (typeof link.season_number === "number" && link.season_number > 0) {
+          seasonSet.add(link.season_number);
+        }
+        const sourceKey = classifyPersonLinkSource(link.link_kind);
+        if (!sourceKey) continue;
+        const sourceLinks = linksBySource.get(sourceKey);
+        if (sourceLinks) {
+          sourceLinks.push(link);
+        } else {
+          linksBySource.set(sourceKey, [link]);
+        }
+      }
+
+      const sources = PERSON_LINK_SOURCE_DEFINITIONS.map<PersonLinkSourceSummary>((definition) => {
+        const sourceLinks = linksBySource.get(definition.key) ?? [];
+        const selected = pickPreferredPersonSourceLink(definition.key, sourceLinks);
+        if (!selected) {
+          return {
+            key: definition.key,
+            label: definition.label,
+            state: "missing",
+            url: null,
+            link: null,
+          };
+        }
+
+        const normalizedStatus = normalizeEntityLinkStatus(selected.status);
+        if (normalizedStatus === "approved" && selected.url) {
+          return {
+            key: definition.key,
+            label: definition.label,
+            state: "found",
+            url: selected.url,
+            link: selected,
+          };
+        }
+        const fallbackState: PersonLinkSourceState =
+          normalizedStatus === "rejected"
+            ? "rejected"
+            : normalizedStatus === "pending"
+              ? "pending"
+              : "missing";
+        return {
+          key: definition.key,
+          label: definition.label,
+          state: fallbackState,
+          url: null,
+          link: selected,
+        };
+      });
+
+      const personName =
+        personNameById.get(personId) ||
+        parsePersonNameFromLink(links[0]) ||
+        "Unknown Person";
+
+      cards.push({
+        personId,
+        personName,
+        seasons: [...seasonSet].sort((a, b) => a - b),
+        sources,
+      });
+    }
+
+    cards.sort((a, b) => a.personName.localeCompare(b.personName));
+    return cards;
+  }, [cast, showLinks]);
 
   const filteredGalleryAssets = useMemo(() => {
     return applyAdvancedFiltersToSeasonAssets(galleryAssets, advancedFilters, {
@@ -3366,14 +4179,20 @@ export default function TrrShowDetailPage() {
               }
 
               if (eventType === "progress" && payload && typeof payload === "object") {
-                const stageRaw = (payload as { stage?: unknown; step?: unknown; target?: unknown }).stage
-                  ?? (payload as { stage?: unknown; step?: unknown; target?: unknown }).step
+                const stageKeyRaw =
+                  (payload as { stage_key?: unknown }).stage_key
+                  ?? (payload as { step?: unknown }).step;
+                const stageRaw =
+                  stageKeyRaw
+                  ?? (payload as { stage?: unknown; target?: unknown }).stage
                   ?? (payload as { stage?: unknown; step?: unknown; target?: unknown }).target;
                 const messageRaw = (payload as { message?: unknown }).message;
                 const stageCurrentRaw = (payload as { stage_current?: unknown }).stage_current;
                 const stageTotalRaw = (payload as { stage_total?: unknown }).stage_total;
                 const currentRaw = (payload as { current?: unknown }).current;
                 const totalRaw = (payload as { total?: unknown }).total;
+                const topicRaw = (payload as { topic?: unknown }).topic;
+                const providerRaw = (payload as { provider?: unknown }).provider;
                 const current = parseProgressNumber(stageCurrentRaw ?? currentRaw);
                 const total = parseProgressNumber(stageTotalRaw ?? totalRaw);
                 const stageLabel = resolveStageLabel(stageRaw, SHOW_REFRESH_STAGE_LABELS);
@@ -3397,6 +4216,9 @@ export default function TrrShowDetailPage() {
                   message: progressMessage,
                   current: typeof current === "number" && Number.isFinite(current) ? current : null,
                   total: typeof total === "number" && Number.isFinite(total) ? total : null,
+                  stageKey: typeof stageKeyRaw === "string" ? stageKeyRaw : null,
+                  topic: typeof topicRaw === "string" ? topicRaw : null,
+                  provider: typeof providerRaw === "string" ? providerRaw : null,
                 });
               } else if (eventType === "complete") {
                 sawComplete = true;
@@ -3486,23 +4308,19 @@ export default function TrrShowDetailPage() {
                     await fetchShow();
                   } else if (target === "seasons_episodes") {
                     await Promise.all([fetchShow(), fetchSeasons()]);
-                    const photosOk = await refreshShow("photos", {
-                      photoMode: fastPhotoMode ? "fast" : "full",
-                      includeCastProfiles: false,
-                    });
-                    if (!photosOk) {
-                      throw new Error("Seasons & Episodes refreshed, but photo mirroring failed.");
-                    }
                   } else if (target === "photos") {
                     if (activeTab === "assets" && assetsView === "images") {
                       await loadGalleryAssets(selectedGallerySeason);
                     }
                   } else if (target === "cast_credits") {
                     if (includeCastProfiles) {
-                      const castMembers = await fetchCast();
+                      const castMembers = await fetchCast({
+                        rosterMode: "imdb_show_membership",
+                        minEpisodes: 0,
+                      });
                       castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
                     }
-                    await fetchCast();
+                    await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 });
                   }
 
                   const durationMs =
@@ -3600,19 +4418,15 @@ export default function TrrShowDetailPage() {
             await fetchShow();
           } else if (target === "seasons_episodes") {
             await Promise.all([fetchShow(), fetchSeasons()]);
-            const photosOk = await refreshShow("photos", {
-              photoMode: fastPhotoMode ? "fast" : "full",
-              includeCastProfiles: false,
-            });
-            if (!photosOk) {
-              throw new Error("Seasons & Episodes refreshed, but photo mirroring failed.");
-            }
           } else if (target === "cast_credits") {
             if (includeCastProfiles) {
-              const castMembers = await fetchCast();
+              const castMembers = await fetchCast({
+                rosterMode: "imdb_show_membership",
+                minEpisodes: 0,
+              });
               castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
             }
-            await fetchCast();
+            await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 });
           }
 
           const durationMs = typeof step?.duration_ms === "number" ? step.duration_ms : null;
@@ -3691,35 +4505,29 @@ export default function TrrShowDetailPage() {
       stage: "Initializing",
       message: "Starting full show refresh...",
       current: 0,
-      total: 3,
+      total: 4,
     });
     appendRefreshLog({
       category: "Refresh",
       message: "Starting full refresh.",
       current: 0,
-      total: 3,
+      total: 4,
     });
 
     try {
-      const targets: ShowRefreshTarget[] = ["details", "seasons_episodes", "cast_credits"];
+      const targets: ShowRefreshTarget[] = ["details", "seasons_episodes", "cast_credits", "photos"];
       const failedLabels: string[] = [];
 
       for (const [index, target] of targets.entries()) {
         const targetLabel = getShowRefreshTargetLabel(target);
         const targetOptions: ShowRefreshRunOptions | undefined =
-          target === "seasons_episodes"
-            ? { photoMode: "fast", includeCastProfiles: false }
-            : target === "cast_credits"
+          target === "cast_credits"
               ? { includeCastProfiles: false }
+              : target === "photos"
+                ? { photoMode: "fast", includeCastProfiles: false }
               : undefined;
         setRefreshAllProgress({
           stage: targetLabel,
-          message: `Refreshing ${targetLabel}...`,
-          current: index,
-          total: targets.length,
-        });
-        appendRefreshLog({
-          category: targetLabel,
           message: `Refreshing ${targetLabel}...`,
           current: index,
           total: targets.length,
@@ -3731,16 +4539,11 @@ export default function TrrShowDetailPage() {
           current: index + 1,
           total: targets.length,
         });
-        appendRefreshLog({
-          category: targetLabel,
-          message: ok ? `${targetLabel} complete.` : `${targetLabel} failed.`,
-          current: index + 1,
-          total: targets.length,
-        });
         if (!ok) {
           if (target === "details") failedLabels.push("show info");
-          if (target === "seasons_episodes") failedLabels.push("seasons/episodes/media");
+          if (target === "seasons_episodes") failedLabels.push("seasons/episodes");
           if (target === "cast_credits") failedLabels.push("cast/credits");
+          if (target === "photos") failedLabels.push("media/photos");
         }
       }
 
@@ -3911,6 +4714,122 @@ export default function TrrShowDetailPage() {
     setAssetLightbox(null);
   };
 
+  const applyGalleryAssetPatch = useCallback(
+    (target: SeasonAsset, patch: Partial<SeasonAsset>) => {
+      const applyPatch = (candidate: SeasonAsset): SeasonAsset => {
+        const sameAsset =
+          candidate.id === target.id ||
+          (candidate.media_asset_id &&
+            target.media_asset_id &&
+            candidate.media_asset_id === target.media_asset_id) ||
+          candidate.hosted_url === target.hosted_url;
+        if (!sameAsset) return candidate;
+        return {
+          ...candidate,
+          ...patch,
+          metadata:
+            patch.metadata === undefined ? candidate.metadata : patch.metadata,
+        };
+      };
+
+      setGalleryAssets((prev) => prev.map(applyPatch));
+      setAssetLightbox((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          asset: applyPatch(prev.asset),
+          filteredAssets: prev.filteredAssets.map(applyPatch),
+        };
+      });
+    },
+    []
+  );
+
+  const refreshGalleryAssetPipeline = useCallback(
+    async (asset: SeasonAsset) => {
+      const headers = await getAuthHeaders();
+      const base =
+        asset.origin_table === "media_assets"
+          ? { kind: "media" as const, id: asset.media_asset_id ?? asset.id }
+          : asset.origin_table === "cast_photos"
+            ? { kind: "cast" as const, id: asset.id }
+            : null;
+
+      if (!base) {
+        throw new Error("Full pipeline refresh is only available for media assets and cast photos.");
+      }
+
+      const callStep = async (endpoint: string, payload: Record<string, unknown>) => {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message =
+            data?.error && data?.detail
+              ? `${data.error}: ${data.detail}`
+              : data?.error || data?.detail || "Pipeline step failed";
+          throw new Error(message);
+        }
+        return data as Record<string, unknown>;
+      };
+
+      const prefix =
+        base.kind === "media"
+          ? `/api/admin/trr-api/media-assets/${base.id}`
+          : `/api/admin/trr-api/cast-photos/${base.id}`;
+
+      await callStep(`${prefix}/mirror`, { force: true });
+      const countPayload = await callStep(`${prefix}/auto-count`, { force: true });
+      const textPayload = await callStep(`${prefix}/detect-text-overlay`, { force: true });
+      await callStep(`${prefix}/variants`, { force: true });
+      const hasTextOverlay =
+        typeof textPayload.has_text_overlay === "boolean"
+          ? textPayload.has_text_overlay
+          : typeof textPayload.hasTextOverlay === "boolean"
+            ? textPayload.hasTextOverlay
+            : null;
+
+      const hasManualCrop =
+        asset.thumbnail_crop_mode === "manual" &&
+        typeof asset.thumbnail_focus_x === "number" &&
+        typeof asset.thumbnail_focus_y === "number" &&
+        typeof asset.thumbnail_zoom === "number";
+      if (hasManualCrop) {
+        await callStep(`${prefix}/variants`, {
+          force: true,
+          crop: {
+            x: asset.thumbnail_focus_x,
+            y: asset.thumbnail_focus_y,
+            zoom: asset.thumbnail_zoom,
+            mode: "manual",
+          },
+        });
+      }
+
+      applyGalleryAssetPatch(asset, {
+        people_count:
+          typeof countPayload.people_count === "number"
+            ? countPayload.people_count
+            : asset.people_count ?? null,
+        people_count_source:
+          countPayload.people_count_source === "auto" ||
+          countPayload.people_count_source === "manual"
+            ? countPayload.people_count_source
+            : asset.people_count_source ?? null,
+        metadata: {
+          ...((asset.metadata ?? {}) as Record<string, unknown>),
+          ...(hasTextOverlay === null ? {} : { has_text_overlay: hasTextOverlay }),
+        },
+      });
+
+      await loadGalleryAssets(selectedGallerySeason);
+    },
+    [applyGalleryAssetPatch, getAuthHeaders, loadGalleryAssets, selectedGallerySeason]
+  );
+
   const archiveGalleryAsset = useCallback(
     async (asset: SeasonAsset) => {
       const origin = asset.origin_table ?? null;
@@ -4026,6 +4945,31 @@ export default function TrrShowDetailPage() {
     },
     [getAuthHeaders]
   );
+
+  const deleteGalleryAsset = useCallback(
+    async (asset: SeasonAsset) => {
+      if (asset.origin_table !== "media_assets") {
+        throw new Error("Delete is currently supported only for imported media assets.");
+      }
+      const headers = await getAuthHeaders();
+      const assetId = asset.media_asset_id ?? asset.id;
+      const response = await fetch(`/api/admin/trr-api/media-assets/${assetId}`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.detail || data?.error || "Delete failed");
+      }
+      setGalleryAssets((prev) => prev.filter((a) => a.id !== asset.id));
+      closeAssetLightbox();
+    },
+    [getAuthHeaders]
+  );
+
+  const lightboxAssetCapabilities = assetLightbox
+    ? resolveGalleryAssetCapabilities(assetLightbox.asset)
+    : null;
 
   if (checking) {
     return (
@@ -4146,15 +5090,7 @@ export default function TrrShowDetailPage() {
     : `Sync seasons, episodes, and cast first (missing: ${syncBravoReadinessIssues.join(", ")}).`;
   const autoGeneratedBravoUrl = inferBravoShowUrl(show?.name) || syncBravoUrl.trim() || "";
 
-  const refreshTopicStatusByKey = new Map(
-    refreshLogTopicGroups.map((group) => [group.topic.key, group.status] as const)
-  );
-
-  const pipelineSteps = REFRESH_LOG_TOPIC_DEFINITIONS.map((topic) => {
-    const status = refreshTopicStatusByKey.get(topic.key) ?? "pending";
-    const latest = refreshLogTopicGroups.find((group) => group.topic.key === topic.key)?.latest ?? null;
-    return { topic, status, latest };
-  });
+  const pipelineSteps = buildPipelineRows(REFRESH_LOG_TOPIC_DEFINITIONS, refreshLogTopicGroups);
 
   const healthBadgeClassName = (status: HealthStatus): string => {
     if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700";
@@ -4192,9 +5128,9 @@ export default function TrrShowDetailPage() {
     : bravoVideos.length > 0
       ? "ready"
       : "missing";
-  const newsHealthStatus: HealthStatus = bravoLoading
+  const newsHealthStatus: HealthStatus = newsLoading || newsSyncing
     ? "stale"
-    : bravoNews.length > 0
+    : unifiedNews.length > 0
       ? "ready"
       : "missing";
 
@@ -4256,7 +5192,7 @@ export default function TrrShowDetailPage() {
     {
       key: "news",
       label: "News",
-      countLabel: `${bravoNews.length}`,
+      countLabel: `${unifiedNews.length}`,
       status: newsHealthStatus,
       onClick: () => setTab("news"),
     },
@@ -4300,11 +5236,19 @@ export default function TrrShowDetailPage() {
       },
     });
   }
-  if (bravoNews.length === 0) {
+  if (newsGoogleUrlMissing) {
     operationsInboxItems.push({
-      id: "no-bravo-news",
-      title: "No Bravo news persisted",
-      detail: "Run Sync by Bravo so show and person news can be tagged and displayed.",
+      id: "google-news-url-missing",
+      title: "Google News URL missing",
+      detail: "Add Google News URL in Show Settings to enable Google sync in the News tab.",
+      onClick: () => setTab("settings"),
+    });
+  }
+  if (unifiedNews.length === 0) {
+    operationsInboxItems.push({
+      id: "no-unified-news",
+      title: "No news persisted",
+      detail: "Open News tab to sync Google + Bravo sources, then refresh if needed.",
       onClick: () => setTab("news"),
     });
   }
@@ -4708,7 +5652,11 @@ export default function TrrShowDetailPage() {
                           <div>
                             <div className="flex items-center gap-3">
                               <Link
-                                href={`/admin/trr-shows/${showId}/seasons/${season.season_number}?tab=episodes`}
+                                href={buildSeasonAdminUrl({
+                                  showSlug: showSlugForRouting,
+                                  seasonNumber: season.season_number,
+                                  tab: "episodes",
+                                }) as "/admin/trr-shows"}
                                 onClick={(e) => e.stopPropagation()}
                                 className="text-lg font-semibold text-zinc-900 hover:underline"
                               >
@@ -4750,7 +5698,11 @@ export default function TrrShowDetailPage() {
                             {SEASON_PAGE_TABS.map((tab) => (
                               <Link
                                 key={tab.tab}
-                                href={`/admin/trr-shows/${showId}/seasons/${season.season_number}?tab=${tab.tab}`}
+                                href={buildSeasonAdminUrl({
+                                  showSlug: showSlugForRouting,
+                                  seasonNumber: season.season_number,
+                                  tab: tab.tab,
+                                }) as "/admin/trr-shows"}
                                 className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
                               >
                                 {tab.label}
@@ -5236,30 +6188,149 @@ export default function TrrShowDetailPage() {
           {/* NEWS Tab */}
           {activeTab === "news" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Bravo News
+                    Unified News Feed
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void loadBravoData({ force: true })}
-                  disabled={bravoLoading}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  {bravoLoading ? "Refreshing..." : "Refresh"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setNewsSort("trending")}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                        newsSort === "trending"
+                          ? "bg-white text-zinc-900 shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700"
+                      }`}
+                    >
+                      Trending
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewsSort("latest")}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                        newsSort === "latest"
+                          ? "bg-white text-zinc-900 shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700"
+                      }`}
+                    >
+                      Latest
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadUnifiedNews({ force: true, forceSync: true })}
+                    disabled={newsLoading || newsSyncing}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {newsLoading || newsSyncing ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
               </div>
 
-              {bravoError && <p className="mb-4 text-sm text-red-600">{bravoError}</p>}
-              {!bravoLoading && bravoNews.length === 0 && !bravoError && (
-                <p className="text-sm text-zinc-500">No persisted Bravo news found for this show.</p>
+              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  Source
+                  <select
+                    value={newsSourceFilter}
+                    onChange={(event) => setNewsSourceFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                  >
+                    <option value="">All sources</option>
+                    {newsSourceOptions.map((sourceOption) => (
+                      <option key={`news-source-${sourceOption}`} value={sourceOption}>
+                        {sourceOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  People
+                  <select
+                    value={newsPersonFilter}
+                    onChange={(event) => setNewsPersonFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                  >
+                    <option value="">All people</option>
+                    {newsPeopleOptions.map((personOption) => (
+                      <option key={`news-person-${personOption.id}`} value={personOption.id}>
+                        {personOption.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  Topic
+                  <select
+                    value={newsTopicFilter}
+                    onChange={(event) => setNewsTopicFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                  >
+                    <option value="">All topics</option>
+                    {newsTopicOptions.map((topicOption) => (
+                      <option key={`news-topic-${topicOption}`} value={topicOption}>
+                        {topicOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  Season
+                  <select
+                    value={newsSeasonFilter}
+                    onChange={(event) => setNewsSeasonFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                  >
+                    <option value="">All seasons</option>
+                    {newsSeasonOptions.map((seasonOption) => (
+                      <option key={`news-season-${seasonOption}`} value={String(seasonOption)}>
+                        Season {seasonOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewsSourceFilter("");
+                      setNewsPersonFilter("");
+                      setNewsTopicFilter("");
+                      setNewsSeasonFilter("");
+                    }}
+                    className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+                <div className="flex items-end">
+                  <p className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-600">
+                    {filteredUnifiedNews.length} shown
+                  </p>
+                </div>
+              </div>
+
+              {(newsError || newsNotice) && (
+                <p className={`mb-4 text-sm ${newsError ? "text-red-600" : "text-zinc-500"}`}>
+                  {newsError || newsNotice}
+                </p>
+              )}
+              {newsGoogleUrlMissing && (
+                <p className="mb-4 text-sm text-amber-700">
+                  Google News URL is missing. Add it in Settings, then refresh this tab.
+                </p>
+              )}
+              {!newsLoading && filteredUnifiedNews.length === 0 && !newsError && (
+                <p className="text-sm text-zinc-500">
+                  No news items match the current filters. Sync Google News or adjust filters.
+                </p>
               )}
 
               <div className="grid gap-4 sm:grid-cols-2">
-                {bravoNews.map((item, index) => (
+                {filteredUnifiedNews.map((item, index) => (
                   <article key={`${item.article_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                     <a
                       href={item.article_url}
@@ -5271,7 +6342,7 @@ export default function TrrShowDetailPage() {
                         {item.image_url ? (
                           <GalleryImage
                             src={item.image_url}
-                            alt={item.headline || "Bravo news"}
+                            alt={item.headline || "News item"}
                             sizes="400px"
                             className="object-cover transition group-hover:scale-105"
                           />
@@ -5283,6 +6354,16 @@ export default function TrrShowDetailPage() {
                         {item.headline || "Untitled story"}
                       </h4>
                     </a>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700">
+                        {(item.publisher_name || item.publisher_domain || item.source_id || "Source").toString()}
+                      </span>
+                      {item.source_id === "google_news" && typeof item.feed_rank === "number" && (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
+                          Feed #{item.feed_rank + 1}
+                        </span>
+                      )}
+                    </div>
                     {Array.isArray(item.person_tags) && item.person_tags.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {item.person_tags.map((tag, tagIndex) => (
@@ -5291,6 +6372,33 @@ export default function TrrShowDetailPage() {
                             className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700"
                           >
                             {tag.person_name || "Person"}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(item.topic_tags) && item.topic_tags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {item.topic_tags.map((topicTag) => (
+                          <span
+                            key={`${item.article_url}-topic-${topicTag}`}
+                            className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700"
+                          >
+                            {topicTag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(item.season_matches) && item.season_matches.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {item.season_matches.map((match, matchIndex) => (
+                          <span
+                            key={`${item.article_url}-season-${match?.season_number || "x"}-${matchIndex}`}
+                            className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700"
+                          >
+                            Season {match?.season_number || "?"}
+                            {Array.isArray(match?.match_types) && match.match_types.length > 0
+                              ? ` (${match.match_types.join("+")})`
+                              : ""}
                           </span>
                         ))}
                       </div>
@@ -5320,7 +6428,7 @@ export default function TrrShowDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {castGalleryMembers.length} cast · {crewGalleryMembers.length} crew · {cast.length} total
+                    {castGalleryMembers.length} cast · {crewGalleryMembers.length} crew · {castDisplayMembers.length} total
                   </span>
                   <button
                     type="button"
@@ -5463,7 +6571,8 @@ export default function TrrShowDetailPage() {
                     )}
                   </div>
                   <p className="text-[11px] text-zinc-500">
-                    Season filters use season-scoped role assignments plus global season-0 roles.
+                    Season filters use season-scoped role assignments plus global season-0 roles.{" "}
+                    {castEpisodeScopeLabel}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
@@ -5519,7 +6628,7 @@ export default function TrrShowDetailPage() {
                         return (
                           <Link
                             key={member.id}
-                            href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                            href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}`}
                             className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                           >
                             <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -5620,7 +6729,7 @@ export default function TrrShowDetailPage() {
                         return (
                           <Link
                             key={`crew-${member.id}`}
-                            href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                            href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}`}
                             className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
                           >
                             <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -5720,7 +6829,7 @@ export default function TrrShowDetailPage() {
                         return (
                           <Link
                             key={`archive-${member.id}`}
-                            href={`/admin/trr-shows/people/${member.person_id}?showId=${show.id}`}
+                            href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}`}
                             className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 transition hover:border-amber-300 hover:bg-amber-100/40"
                           >
                             <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -5817,6 +6926,7 @@ export default function TrrShowDetailPage() {
               {selectedSocialSeason ? (
                 <SeasonSocialAnalyticsSection
                   showId={showId}
+                  showSlug={showSlugForRouting}
                   seasonNumber={selectedSocialSeason.season_number}
                   seasonId={selectedSocialSeason.id}
                   showName={show.name}
@@ -5853,13 +6963,46 @@ export default function TrrShowDetailPage() {
                 </button>
               </div>
 
-              {(linksError || linksNotice || rolesError) && (
+              {(linksError || linksNotice || rolesError || googleNewsError || googleNewsNotice) && (
                 <p className={`mb-4 text-sm ${linksError || rolesError ? "text-red-600" : "text-zinc-500"}`}>
-                  {linksError || rolesError || linksNotice}
+                  {linksError || rolesError || googleNewsError || linksNotice || googleNewsNotice}
                 </p>
               )}
 
               <div className="space-y-6">
+                <section>
+                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Google News Feed</h4>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    <p className="mb-2 text-xs text-zinc-500">
+                      Configure the show-level Google News topic URL used by auto-sync in the News tab.
+                    </p>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        value={googleNewsUrl}
+                        onChange={(event) => setGoogleNewsUrl(event.target.value)}
+                        placeholder="https://news.google.com/topics/..."
+                        className="min-w-[320px] flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void saveGoogleNewsLink()}
+                        disabled={googleNewsSaving}
+                        className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                      >
+                        {googleNewsSaving ? "Saving..." : "Save URL"}
+                      </button>
+                    </div>
+                    {(googleNewsError || googleNewsNotice) && (
+                      <p className={`mt-2 text-sm ${googleNewsError ? "text-red-600" : "text-zinc-500"}`}>
+                        {googleNewsError || googleNewsNotice}
+                      </p>
+                    )}
+                    {googleNewsLinkId && (
+                      <p className="mt-2 text-xs text-zinc-500">Linked as `google_news_url` (show-level).</p>
+                    )}
+                  </div>
+                </section>
+
                 <section>
                   <h4 className="mb-3 text-sm font-semibold text-zinc-700">Role Catalog</h4>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
@@ -5958,7 +7101,122 @@ export default function TrrShowDetailPage() {
                               </p>
                               <p className="text-xs text-zinc-500">{section.description}</p>
                             </div>
-                            {section.links.length === 0 ? (
+                            {section.key === "cast-member-pages" ? (
+                              castMemberLinkCoverageCards.length === 0 ? (
+                                <p className="text-sm text-zinc-500">No cast-member links in this category yet.</p>
+                              ) : (
+                                <div className="grid gap-3 lg:grid-cols-2">
+                                  {castMemberLinkCoverageCards.map((card) => (
+                                    <div
+                                      key={`person-link-coverage-${card.personId}`}
+                                      className="rounded-lg border border-zinc-200 bg-white p-3"
+                                    >
+                                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm font-semibold text-zinc-900">{card.personName}</p>
+                                        {card.seasons.length > 0 && (
+                                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                            Seasons {card.seasons.map((season) => `S${season}`).join(", ")}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="grid gap-2 sm:grid-cols-2">
+                                        {card.sources.map((source) => {
+                                          const isFound = source.state === "found";
+                                          const stateLabel =
+                                            source.state === "found"
+                                              ? "Found"
+                                              : source.state === "pending"
+                                                ? "Pending"
+                                                : source.state === "rejected"
+                                                  ? "Rejected"
+                                                  : "Missing";
+                                          return (
+                                            <div
+                                              key={`person-link-source-${card.personId}-${source.key}`}
+                                              className={`rounded-md border px-2 py-2 ${
+                                                isFound
+                                                  ? "border-emerald-200 bg-emerald-50"
+                                                  : "border-red-200 bg-red-50"
+                                              }`}
+                                            >
+                                              <div className="mb-1 flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                  <PersonSourceLogo sourceKey={source.key} />
+                                                  <span className="text-xs font-semibold text-zinc-800">
+                                                    {source.label}
+                                                  </span>
+                                                </div>
+                                                <span
+                                                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                    isFound
+                                                      ? "bg-emerald-100 text-emerald-700"
+                                                      : "bg-red-100 text-red-700"
+                                                  }`}
+                                                >
+                                                  {stateLabel}
+                                                </span>
+                                              </div>
+
+                                              {isFound && source.url ? (
+                                                <a
+                                                  href={source.url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="block truncate text-xs font-medium text-emerald-700 hover:underline"
+                                                >
+                                                  {source.url}
+                                                </a>
+                                              ) : (
+                                                <p className="truncate text-xs text-red-700">
+                                                  {source.state === "pending"
+                                                    ? "Pending review or validation"
+                                                    : source.state === "rejected"
+                                                      ? "Rejected source URL"
+                                                      : "No source URL found"}
+                                                </p>
+                                              )}
+
+                                              {source.link && (
+                                                <div className="mt-2 flex flex-wrap gap-1">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => void setShowLinkStatus(source.link!.id, "approved")}
+                                                    className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"
+                                                  >
+                                                    Approve
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => void setShowLinkStatus(source.link!.id, "rejected")}
+                                                    className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                                                  >
+                                                    Reject
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => void editShowLink(source.link!)}
+                                                    className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-700"
+                                                  >
+                                                    Edit
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => void deleteShowLink(source.link!.id)}
+                                                    className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700"
+                                                  >
+                                                    Delete
+                                                  </button>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )
+                            ) : section.links.length === 0 ? (
                               <p className="text-sm text-zinc-500">No links in this category yet.</p>
                             ) : (
                               <div className="space-y-1">
@@ -6407,7 +7665,7 @@ export default function TrrShowDetailPage() {
         )}
 
         {/* Lightbox for gallery assets */}
-        {assetLightbox && (
+        {assetLightbox && lightboxAssetCapabilities && (
           <ImageLightbox
             src={getAssetDetailUrl(assetLightbox.asset)}
             fallbackSrc={assetLightbox.asset.original_url ?? assetLightbox.asset.hosted_url}
@@ -6415,27 +7673,41 @@ export default function TrrShowDetailPage() {
             isOpen={true}
             onClose={closeAssetLightbox}
             metadata={mapSeasonAssetToMetadata(assetLightbox.asset, selectedGallerySeason !== "all" ? selectedGallerySeason : undefined, show?.name)}
-            canManage={assetLightbox.asset.source?.toLowerCase?.().startsWith("web_scrape:")}
+            canManage={true}
+            metadataExtras={
+              <GalleryAssetEditTools
+                asset={assetLightbox.asset}
+                capabilities={lightboxAssetCapabilities}
+                getAuthHeaders={getAuthHeaders}
+                onAssetUpdated={(patch) => applyGalleryAssetPatch(assetLightbox.asset, patch)}
+                onReload={async () => {
+                  await loadGalleryAssets(selectedGallerySeason);
+                }}
+              />
+            }
             isStarred={Boolean((assetLightbox.asset.metadata as Record<string, unknown> | null)?.starred)}
+            actionDisabledReasons={{
+              refresh: lightboxAssetCapabilities.canEdit
+                ? undefined
+                : lightboxAssetCapabilities.reasons.edit,
+              archive: lightboxAssetCapabilities.canArchive
+                ? undefined
+                : lightboxAssetCapabilities.reasons.archive ?? "Archive is unavailable for this image.",
+              star: lightboxAssetCapabilities.canStar
+                ? undefined
+                : lightboxAssetCapabilities.reasons.star ?? "Star/Flag is unavailable for this image.",
+              delete:
+                assetLightbox.asset.origin_table === "media_assets"
+                  ? undefined
+                  : "Delete is only available for imported media assets.",
+            }}
+            onRefresh={() => refreshGalleryAssetPipeline(assetLightbox.asset)}
             onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
             onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
             onUpdateContentType={(contentType) =>
               updateGalleryAssetContentType(assetLightbox.asset, contentType)
             }
-            onDelete={async () => {
-              const asset = assetLightbox.asset;
-              const headers = await getAuthHeaders();
-              const response = await fetch(`/api/admin/trr-api/media-assets/${asset.id}`, {
-                method: "DELETE",
-                headers,
-              });
-              if (!response.ok) {
-                const data = await response.json().catch(() => ({}));
-                throw new Error(data?.detail || "Delete failed");
-              }
-              setGalleryAssets((prev) => prev.filter((a) => a.id !== asset.id));
-              closeAssetLightbox();
-            }}
+            onDelete={() => deleteGalleryAsset(assetLightbox.asset)}
             position={{
               current: assetLightbox.index + 1,
               total: assetLightbox.filteredAssets.length,
@@ -6522,6 +7794,7 @@ export default function TrrShowDetailPage() {
                   </p>
                   <div className="space-y-2">
                     {pipelineSteps.map((step) => {
+                      const latestParts = step.latest ? extractRefreshLogSubJob(step.latest) : null;
                       const statusPillClass =
                         step.status === "done"
                           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -6548,6 +7821,9 @@ export default function TrrShowDetailPage() {
                               {step.topic.label}
                             </p>
                             <p className="truncate text-[11px] text-zinc-500">{step.topic.description}</p>
+                            <p className="truncate text-[11px] text-zinc-600">
+                              {latestParts?.details ?? "No updates yet."}
+                            </p>
                           </div>
                           <div className="shrink-0 text-right">
                             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusPillClass}`}>

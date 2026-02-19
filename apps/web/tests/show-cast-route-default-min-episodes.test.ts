@@ -153,4 +153,52 @@ describe("show cast route default minEpisodes behavior", () => {
     expect(payload.cast_source).toBe("episode_evidence");
     expect(payload.eligibility_warning).toBeNull();
   });
+
+  it("supports imdb_show_membership roster mode and overlays episode evidence totals", async () => {
+    getShowCastWithStatsMock.mockResolvedValue([
+      {
+        id: "ev-1",
+        person_id: "p1",
+        total_episodes: 12,
+      },
+    ]);
+    getCastByShowIdMock.mockResolvedValue([
+      {
+        id: "base-1",
+        person_id: "p1",
+        full_name: "Roster Person",
+        cast_member_name: "Roster Person",
+        role: "Self",
+        billing_order: 1,
+        credit_category: "cast",
+        photo_url: null,
+        total_episodes: null,
+      },
+      {
+        id: "base-2",
+        person_id: "p2",
+        full_name: "Membership Only",
+        cast_member_name: "Membership Only",
+        role: "Friend",
+        billing_order: 2,
+        credit_category: "cast",
+        photo_url: null,
+        total_episodes: null,
+      },
+    ]);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/cast?limit=500&roster_mode=imdb_show_membership&minEpisodes=0"
+    );
+    const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(getCastByShowIdMock).toHaveBeenCalledWith("show-1", { limit: 500, offset: 0 });
+    expect(payload.cast_source).toBe("imdb_show_membership");
+    expect(payload.eligibility_warning).toBeNull();
+    expect(payload.cast).toHaveLength(2);
+    const merged = payload.cast.find((row: { person_id: string }) => row.person_id === "p1");
+    expect(merged?.total_episodes).toBe(12);
+  });
 });

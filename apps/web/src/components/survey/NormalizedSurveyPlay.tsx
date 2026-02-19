@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import { useNormalizedSurvey } from "@/hooks/useNormalizedSurvey";
 import QuestionRenderer from "./QuestionRenderer";
 import type { AnswerInput } from "@/lib/surveys/normalized-types";
-import { isQuestionComplete } from "./isQuestionComplete";
+import { getUiVariant, isQuestionComplete } from "./isQuestionComplete";
 import { resolveSingleChoiceOptionId } from "./answerMapping";
 import { groupBySection } from "@/lib/surveys/section-grouping";
+
+const FOCUSABLE_SELECTOR =
+  "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
 export interface NormalizedSurveyPlayProps {
   surveySlug: string;
@@ -43,6 +46,8 @@ export default function NormalizedSurveyPlay({
   const [answers, setAnswers] = React.useState<Record<string, unknown>>({});
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [submitted, setSubmitted] = React.useState(false);
+  const submitSectionRef = React.useRef<HTMLDivElement | null>(null);
+  const submitButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
   // Track which questions have been answered
   const answeredCount = React.useMemo(() => {
@@ -93,6 +98,65 @@ export default function NormalizedSurveyPlay({
   const handleAnswerChange = React.useCallback((questionId: string, value: unknown) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
   }, []);
+
+  const hasAnyAnswer = React.useCallback((value: unknown): boolean => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    if (typeof value === "number") return Number.isFinite(value);
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+    return false;
+  }, []);
+
+  const scrollToNextQuestion = React.useCallback((questionId: string) => {
+    if (typeof document === "undefined") return;
+    const escapedQuestionId = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(questionId)
+      : questionId.replace(/"/g, '\\"');
+    const currentCard = document.querySelector<HTMLElement>(
+      `[data-survey-question-card][data-survey-question-id="${escapedQuestionId}"]`,
+    );
+    const nextCard = currentCard?.nextElementSibling as HTMLElement | null;
+
+    if (nextCard?.hasAttribute("data-survey-question-card")) {
+      nextCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      const focusTarget = nextCard.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      focusTarget?.focus({ preventScroll: true });
+      return;
+    }
+
+    submitSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    submitButtonRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const scrollToPreviousQuestion = React.useCallback((questionId: string) => {
+    if (typeof document === "undefined") return;
+    const escapedQuestionId = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(questionId)
+      : questionId.replace(/"/g, '\\"');
+    const currentCard = document.querySelector<HTMLElement>(
+      `[data-survey-question-card][data-survey-question-id="${escapedQuestionId}"]`,
+    );
+    const previousCard = currentCard?.previousElementSibling as HTMLElement | null;
+    if (!previousCard?.hasAttribute("data-survey-question-card")) return;
+
+    previousCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    const focusTarget = previousCard.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+    focusTarget?.focus({ preventScroll: true });
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (event: Event) => {
+      const customEvent = event as CustomEvent<{ questionId?: string }>;
+      const questionId = customEvent.detail?.questionId;
+      if (typeof questionId === "string" && questionId.length > 0) {
+        scrollToNextQuestion(questionId);
+      }
+    };
+    window.addEventListener("survey-question-continue", handler);
+    return () => window.removeEventListener("survey-question-continue", handler);
+  }, [scrollToNextQuestion]);
 
   const handleSubmit = React.useCallback(async () => {
     if (!survey) return;
@@ -264,11 +328,35 @@ export default function NormalizedSurveyPlay({
           {questionsForRender.map(({ question, index, section, showSectionHeader }) => (
             <div
               key={question.id}
-              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6"
+              className="relative rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6"
               data-survey-question-card
               data-survey-question-id={question.id}
             >
-              <div className="mb-3 sm:mb-4">
+              <button
+                type="button"
+                onClick={() => scrollToPreviousQuestion(question.id)}
+                disabled={index === 0}
+                aria-label="Go to previous question"
+                className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm transition hover:border-gray-300 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40 sm:right-4 sm:top-4"
+                data-testid={`survey-question-back-${question.id}`}
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M12.5 4.16675L6.66667 10.0001L12.5 15.8334"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <div className="mb-3 pr-11 sm:mb-4 sm:pr-12">
                 {showSectionHeader && (
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500 sm:text-xs sm:tracking-[0.3em]">
                     {section}
@@ -288,12 +376,38 @@ export default function NormalizedSurveyPlay({
                 value={answers[question.id] ?? null}
                 onChange={(value) => handleAnswerChange(question.id, value)}
               />
+              {(() => {
+                const uiVariant = getUiVariant(question);
+                const hasInlineContinue =
+                  uiVariant === "agree-likert-scale" ||
+                  uiVariant === "cast-decision-card" ||
+                  uiVariant === "three-choice-slider";
+                const shouldShowContinue =
+                  !hasInlineContinue &&
+                  hasAnyAnswer(answers[question.id]) &&
+                  !submitting;
+
+                if (!shouldShowContinue) return null;
+
+                return (
+                  <div className="mt-4 flex justify-center sm:mt-5">
+                    <button
+                      type="button"
+                      onClick={() => scrollToNextQuestion(question.id)}
+                      className="inline-flex items-center justify-center rounded-full bg-[#121212] px-7 py-2.5 text-base font-semibold text-[#F8F8F8] transition hover:bg-black focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/30 sm:px-9 sm:py-3"
+                      data-testid={`survey-question-continue-${question.id}`}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           ))}
         </div>
 
         {/* Submit section */}
-        <div className="mt-8 border-t border-gray-200 pt-6 sm:mt-12 sm:pt-8">
+        <div ref={submitSectionRef} className="mt-8 border-t border-gray-200 pt-6 sm:mt-12 sm:pt-8">
           {submitError && (
             <div className="mb-4 rounded-lg bg-red-50 p-4 text-center text-sm text-red-600">
               {submitError}
@@ -302,6 +416,7 @@ export default function NormalizedSurveyPlay({
 
           <div className="flex flex-col items-center gap-3 sm:gap-4">
             <button
+              ref={submitButtonRef}
               type="button"
               onClick={handleSubmit}
               disabled={!requiredComplete || submitting}

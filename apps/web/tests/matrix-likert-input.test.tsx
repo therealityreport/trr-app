@@ -143,6 +143,28 @@ describe("MatrixLikertInput", () => {
     expect(updates).toContainEqual({ s1: "somewhat_agree", s2: "strongly_disagree" });
   });
 
+  it("toggles a selected option off when clicked again", () => {
+    function Harness() {
+      const [value, setValue] = React.useState<Record<string, string> | null>({});
+      return (
+        <MatrixLikertInput
+          question={makeQuestion() as never}
+          value={value}
+          onChange={setValue}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const rowOneAgree = screen.getByRole("button", { name: "Select Somewhat Agree for Statement one" });
+    fireEvent.click(rowOneAgree);
+    expect(screen.getByTestId("agree-likert-continue")).toBeInTheDocument();
+
+    fireEvent.click(rowOneAgree);
+    expect(screen.queryByTestId("agree-likert-continue")).not.toBeInTheDocument();
+  });
+
   it("orders and colors options in figma agree-to-disagree sequence", () => {
     const question = makeQuestion();
     question.options = [...question.options].reverse();

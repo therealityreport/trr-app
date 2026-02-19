@@ -61,6 +61,13 @@ function toTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function toColorString(value: unknown): string | null {
+  const trimmed = toTrimmedString(value);
+  if (!trimmed) return null;
+  if (trimmed.startsWith("#")) return normalizeHexColor(trimmed) ?? trimmed;
+  return trimmed;
+}
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -88,6 +95,19 @@ function readFontValue(record: UnknownRecord, path: string[]): string | null {
     toTrimmedString(nested.fontFamily) ??
     toTrimmedString(nested.font) ??
     toTrimmedString(nested.family) ??
+    null
+  );
+}
+
+function readColorValue(record: UnknownRecord, path: string[]): string | null {
+  const value = readPath(record, path);
+  const direct = toColorString(value);
+  if (direct) return direct;
+  const nested = toRecord(value);
+  if (!nested) return null;
+  return (
+    toColorString(nested.color) ??
+    toColorString(nested.value) ??
     null
   );
 }
@@ -322,8 +342,46 @@ export default function MatrixLikertInput({
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(390);
   const config = question.config as unknown as AgreeLikertScaleConfig;
+  const configRecord = config as unknown as UnknownRecord;
   const rows = React.useMemo(() => config.rows ?? [], [config.rows]);
   const fontOverrides = React.useMemo(() => collectFontOverrides(config), [config]);
+  const componentBackgroundColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["componentBackgroundColor"]) ??
+      readColorValue(configRecord, ["styles", "componentBackgroundColor"]) ??
+      "#D9D9D9",
+    [configRecord],
+  );
+  const promptTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["subTextHeadingColor"]) ??
+      readColorValue(configRecord, ["promptTextColor"]) ??
+      readColorValue(configRecord, ["styles", "subTextHeadingColor"]) ??
+      "#000000",
+    [configRecord],
+  );
+  const statementTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["questionTextColor"]) ??
+      readColorValue(configRecord, ["statementTextColor"]) ??
+      readColorValue(configRecord, ["styles", "questionTextColor"]) ??
+      "#000000",
+    [configRecord],
+  );
+  const continueButtonColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["continueButtonColor"]) ??
+      readColorValue(configRecord, ["styles", "continueButtonColor"]) ??
+      "#121212",
+    [configRecord],
+  );
+  const continueButtonTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["continueButtonTextColor"]) ??
+      readColorValue(configRecord, ["styles", "continueButtonTextColor"]) ??
+      "#F8F8F8",
+    [configRecord],
+  );
 
   const shapeScaleFactor = React.useMemo(
     () => normalizeScalePercent(config.shapeScale, 100) / 100,
@@ -463,7 +521,13 @@ export default function MatrixLikertInput({
   const handleCellSelect = React.useCallback(
     (rowId: string, optionKey: string) => {
       if (disabled) return;
-      const nextValue = { ...(value ?? {}), [rowId]: optionKey };
+      const currentValue = value?.[rowId];
+      const nextValue = { ...(value ?? {}) };
+      if (currentValue === optionKey) {
+        delete nextValue[rowId];
+      } else {
+        nextValue[rowId] = optionKey;
+      }
       onChange(nextValue);
     },
     [disabled, onChange, value],
@@ -502,7 +566,7 @@ export default function MatrixLikertInput({
     <div
       ref={containerRef}
       className="flex flex-col rounded-[18px] bg-[#D9D9D9] px-3 py-4 sm:px-6 sm:py-8"
-      style={{ gap: `${rootGap}px` }}
+      style={{ gap: `${rootGap}px`, backgroundColor: componentBackgroundColor }}
     >
       {fontOverrides.missingFonts.length > 0 && (
         <p
@@ -522,6 +586,7 @@ export default function MatrixLikertInput({
           fontSize: `${promptFontSize}px`,
           lineHeight: promptLineHeight.toFixed(2),
           letterSpacing: `${promptLetterSpacing}em`,
+          color: promptTextColor,
         }}
       >
         {promptText}
@@ -545,6 +610,7 @@ export default function MatrixLikertInput({
                 fontWeight: 800,
                 fontSize: `${statementFontSize}px`,
                 lineHeight: statementLineHeight.toFixed(2),
+                color: statementTextColor,
               }}
             >
               {row.label}
@@ -615,6 +681,8 @@ export default function MatrixLikertInput({
             fontWeight: 700,
             fontSize: `${continueButtonFontSize}px`,
             letterSpacing: "0.03em",
+            backgroundColor: continueButtonColor,
+            color: continueButtonTextColor,
           }}
           data-testid="agree-likert-continue"
         >

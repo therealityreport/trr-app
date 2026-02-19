@@ -11,6 +11,9 @@ export const resolveShowCastEpisodeCount = (
   if (hasSeasonFilters) {
     return typeof scopedTotalEpisodes === "number" ? scopedTotalEpisodes : castTotalEpisodes;
   }
+  if (typeof castTotalEpisodes === "number" && typeof scopedTotalEpisodes === "number") {
+    return Math.max(castTotalEpisodes, scopedTotalEpisodes);
+  }
   return typeof castTotalEpisodes === "number" ? castTotalEpisodes : scopedTotalEpisodes;
 };
 

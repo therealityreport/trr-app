@@ -1,6 +1,7 @@
 import "server-only";
 
 import { query } from "@/lib/server/postgres";
+import type { ThumbnailCrop } from "@/lib/thumbnail-crop";
 
 export interface MediaLinkRow {
   id: string;
@@ -121,6 +122,12 @@ export interface CreateMediaLinkResult {
   already_exists: boolean;
 }
 
+export interface MediaLinkContextPatch {
+  people_count?: number | null;
+  people_count_source?: "auto" | "manual" | null;
+  thumbnail_crop?: ThumbnailCrop | null;
+}
+
 /**
  * Create a media link between an existing media asset and an entity.
  * Returns the link (existing or new) and whether it already existed.
@@ -194,4 +201,42 @@ export async function getAllLinksForAsset(
     [mediaAssetId]
   );
   return result.rows;
+}
+
+/**
+ * Merge-patch safe context keys for a single media link.
+ * Returns updated link or null when link does not exist.
+ */
+export async function updateMediaLinkContextById(
+  linkId: string,
+  patch: MediaLinkContextPatch
+): Promise<MediaLinkRow | null> {
+  const existing = await getMediaLinkById(linkId);
+  if (!existing) return null;
+
+  const baseContext =
+    existing.context && typeof existing.context === "object"
+      ? (existing.context as Record<string, unknown>)
+      : {};
+  const nextContext: Record<string, unknown> = { ...baseContext };
+
+  if (Object.prototype.hasOwnProperty.call(patch, "people_count")) {
+    nextContext.people_count = patch.people_count ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "people_count_source")) {
+    nextContext.people_count_source = patch.people_count_source ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "thumbnail_crop")) {
+    nextContext.thumbnail_crop = patch.thumbnail_crop ?? null;
+  }
+
+  const result = await query<MediaLinkRow>(
+    `UPDATE core.media_links
+     SET context = $2::jsonb,
+         updated_at = NOW()
+     WHERE id = $1::uuid
+     RETURNING ${MEDIA_LINK_FIELDS}`,
+    [linkId, JSON.stringify(nextContext)]
+  );
+  return result.rows[0] ?? null;
 }

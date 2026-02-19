@@ -113,6 +113,24 @@ function generateSlug(showName: string, seasonNumber: number): string {
   return `${slug}-s${seasonNumber}`;
 }
 
+function isBravoOrHousewivesShow(showName: string): boolean {
+  const normalized = showName.trim().toLowerCase();
+  if (normalized.includes("real housewives")) return true;
+
+  return [
+    "vanderpump rules",
+    "summer house",
+    "winter house",
+    "southern charm",
+    "below deck",
+    "below deck mediterranean",
+    "below deck sailing yacht",
+    "married to medicine",
+    "shahs of sunset",
+    "family karma",
+  ].includes(normalized);
+}
+
 // ============================================================================
 // Main Function
 // ============================================================================
@@ -180,9 +198,9 @@ export async function createSurveyFromShow(
 
   // 6. Create questions based on template
   if (template === "cast_ranking") {
-    await createCastRankingQuestions(authContext, survey.id, trrShowId, seasonNumber);
+    await createCastRankingQuestions(authContext, survey.id, trrShowId, seasonNumber, show.name);
   } else if (template === "weekly_poll") {
-    await createWeeklyPollQuestions(authContext, survey.id, trrShowId, seasonNumber);
+    await createWeeklyPollQuestions(authContext, survey.id, trrShowId, seasonNumber, show.name);
   } else if (template === "episode_rating") {
     await createEpisodeRatingQuestions(authContext, survey.id);
   }
@@ -231,6 +249,7 @@ type EligibleSeasonCastMember = {
 async function getSurveyEligibleSeasonCast(
   trrShowId: string,
   seasonNumber: number,
+  showName?: string,
 ): Promise<EligibleSeasonCastMember[]> {
   const [cast, selectedRoles] = await Promise.all([
     getSeasonCastWithEpisodeCounts(trrShowId, seasonNumber, { limit: 500, offset: 0 }),
@@ -260,16 +279,17 @@ async function getSurveyEligibleSeasonCast(
   } else {
     const episodes = await getEpisodesByShowAndSeason(trrShowId, seasonNumber, { limit: 500, offset: 0 });
     const totalEpisodes = episodes.length;
+    const includeAllAsMainOrFriend =
+      typeof showName === "string" && isBravoOrHousewivesShow(showName);
 
     eligible = cast
       .map((m) => {
         let castRole: "main" | "friend_of" | null = null;
-        if (totalEpisodes > 0 && m.episodes_in_season > totalEpisodes / 2) {
+        if (includeAllAsMainOrFriend) {
+          castRole = totalEpisodes > 0 && m.episodes_in_season > totalEpisodes / 2 ? "main" : "friend_of";
+        } else if (totalEpisodes > 0 && m.episodes_in_season > totalEpisodes / 2) {
           castRole = "main";
-        } else if (
-          m.episodes_in_season >= 3 &&
-          (totalEpisodes === 0 || m.episodes_in_season < totalEpisodes / 2)
-        ) {
+        } else if (m.episodes_in_season >= 3 && (totalEpisodes === 0 || m.episodes_in_season < totalEpisodes / 2)) {
           castRole = "friend_of";
         }
 
@@ -307,8 +327,9 @@ async function createCastRankingQuestions(
   surveyId: string,
   trrShowId: string,
   seasonNumber: number,
+  showName: string,
 ): Promise<void> {
-  const cast = await getSurveyEligibleSeasonCast(trrShowId, seasonNumber);
+  const cast = await getSurveyEligibleSeasonCast(trrShowId, seasonNumber, showName);
 
   if (cast.length === 0) {
     console.warn(
@@ -325,7 +346,7 @@ async function createCastRankingQuestions(
     display_order: 1,
     is_required: true,
     config: {
-      uiVariant: "circle-ranking",
+      uiVariant: "person-rankings",
       lineLabelTop: "FAVORITE",
       lineLabelBottom: "LEAST FAVORITE",
       section: "Rankings",
@@ -361,6 +382,7 @@ async function createWeeklyPollQuestions(
   surveyId: string,
   trrShowId: string,
   seasonNumber: number,
+  showName: string,
 ): Promise<void> {
   // Episode rating question (star rating)
   await createQuestion(authContext, {
@@ -409,7 +431,7 @@ async function createWeeklyPollQuestions(
   });
 
   // Add cast options (if available)
-  const cast = await getSurveyEligibleSeasonCast(trrShowId, seasonNumber);
+  const cast = await getSurveyEligibleSeasonCast(trrShowId, seasonNumber, showName);
   for (const [index, member] of cast.entries()) {
     const optionMetadata: OptionMetadata = {
       imagePath: member.photo_url ?? undefined,

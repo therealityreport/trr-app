@@ -27,6 +27,8 @@ const GRID_CIRCLE_SIZE = 92;
 const GRID_TOKEN_SIZE = 68;
 const FIGMA_GRID_MAX_WIDTH = 708;
 const FIGMA_RECT_GRID_MAX_WIDTH = 690;
+const TWO_AXIS_BENCH_TOKEN_MOBILE = 48; // aligns with TwoAxisGridInput w-12
+const TWO_AXIS_BENCH_TOKEN_DESKTOP = 56; // aligns with TwoAxisGridInput sm:w-14
 
 type FlashbackRankerLayoutPreset = "legacy" | "figma-rank-circles" | "figma-rank-rectangles";
 type TokenVariant = "circle" | "season-card";
@@ -35,7 +37,7 @@ type SeasonCardSize = number | "fill";
 type FigmaCircleLayoutMetrics = {
   containerWidth: number;
   gridWidth: number;
-  columns: 2 | 4;
+  columns: 2 | 3 | 4;
   gapX: number;
   gapY: number;
   slotSize: number;
@@ -88,6 +90,17 @@ export interface FlashbackRankerFontOverrides {
   pickerItemFontFamily?: string;
 }
 
+export interface FlashbackRankerStyleOverrides {
+  circlePlaceholderFillColor?: string;
+  circlePlaceholderBorderColor?: string;
+  circlePlaceholderNumberColor?: string;
+  rectanglePlaceholderFillColor?: string;
+  unassignedContainerFillColor?: string;
+  unassignedContainerBorderColor?: string;
+  unassignedItemBorderColor?: string;
+  unassignedItemSizePercent?: number;
+}
+
 export interface FlashbackRankerProps {
   items: SurveyRankingItem[];
   initialRankingIds?: string[];
@@ -97,6 +110,7 @@ export interface FlashbackRankerProps {
   variant?: "classic" | "grid";
   layoutPreset?: FlashbackRankerLayoutPreset;
   fontOverrides?: FlashbackRankerFontOverrides;
+  styleOverrides?: FlashbackRankerStyleOverrides;
   shapeScalePercent?: number;
   buttonScalePercent?: number;
 }
@@ -131,6 +145,7 @@ export default function FlashbackRanker({
   variant = "classic",
   layoutPreset = "legacy",
   fontOverrides,
+  styleOverrides,
   shapeScalePercent = 100,
   buttonScalePercent = 100,
 }: FlashbackRankerProps) {
@@ -459,6 +474,34 @@ export default function FlashbackRanker({
     }),
     [fontOverrides],
   );
+  const resolvedStyleOverrides = React.useMemo<Required<FlashbackRankerStyleOverrides>>(
+    () => ({
+      circlePlaceholderFillColor: styleOverrides?.circlePlaceholderFillColor ?? "#000000",
+      circlePlaceholderBorderColor: styleOverrides?.circlePlaceholderBorderColor ?? "transparent",
+      circlePlaceholderNumberColor: styleOverrides?.circlePlaceholderNumberColor ?? "#000000",
+      rectanglePlaceholderFillColor: styleOverrides?.rectanglePlaceholderFillColor ?? "#D9D9D9",
+      unassignedContainerFillColor: styleOverrides?.unassignedContainerFillColor ?? "rgba(0,0,0,0.02)",
+      unassignedContainerBorderColor: styleOverrides?.unassignedContainerBorderColor ?? "rgba(0,0,0,0.1)",
+      unassignedItemBorderColor: styleOverrides?.unassignedItemBorderColor ?? "rgba(0,0,0,0.1)",
+      unassignedItemSizePercent: clampNumber(styleOverrides?.unassignedItemSizePercent ?? 100, 40, 220),
+    }),
+    [styleOverrides],
+  );
+  const unassignedSizeFactor = resolvedStyleOverrides.unassignedItemSizePercent / 100;
+  const circleBenchTokenSize = Math.round(
+    clampNumber(
+      circleLayout.benchTokenSize * unassignedSizeFactor,
+      28,
+      Math.max(28, circleLayout.slotSize - 2),
+    ),
+  );
+  const rectangleBenchCardSize = Math.round(
+    clampNumber(
+      rectangleLayout.trayCardWidth * unassignedSizeFactor,
+      56,
+      Math.max(56, rectangleLayout.slotWidth - 2),
+    ),
+  );
   const totalSlots = items.length;
   const slotItems = slots;
   const gridBench = React.useMemo(() => {
@@ -495,10 +538,15 @@ export default function FlashbackRanker({
               onRemoveItem={handleSlotClear}
               fontOverrides={resolvedFontOverrides}
               layout={circleLayout}
+              styleOverrides={resolvedStyleOverrides}
             />
             <FigmaCircleBench
               items={benchItems}
               layout={circleLayout}
+              tokenSize={circleBenchTokenSize}
+              containerFillColor={resolvedStyleOverrides.unassignedContainerFillColor}
+              containerBorderColor={resolvedStyleOverrides.unassignedContainerBorderColor}
+              tokenBorderColor={resolvedStyleOverrides.unassignedItemBorderColor}
             />
             <SelectionPicker
               open={pickerSlotIndex !== null}
@@ -530,11 +578,15 @@ export default function FlashbackRanker({
               onRemoveItem={handleSlotClear}
               fontOverrides={resolvedFontOverrides}
               layout={rectangleLayout}
+              styleOverrides={resolvedStyleOverrides}
             />
             <FigmaRectangleBench
               items={benchItems}
               fontOverrides={resolvedFontOverrides}
               layout={rectangleLayout}
+              cardSize={rectangleBenchCardSize}
+              containerFillColor={resolvedStyleOverrides.unassignedContainerFillColor}
+              containerBorderColor={resolvedStyleOverrides.unassignedContainerBorderColor}
             />
             <SelectionPicker
               open={pickerSlotIndex !== null}
@@ -624,10 +676,16 @@ function FigmaRectangleBench({
   items,
   fontOverrides,
   layout,
+  cardSize,
+  containerFillColor,
+  containerBorderColor,
 }: {
   items: SurveyRankingItem[];
   fontOverrides: Required<FlashbackRankerFontOverrides>;
   layout: FigmaRectangleLayoutMetrics;
+  cardSize: number;
+  containerFillColor: string;
+  containerBorderColor: string;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "bench" });
 
@@ -638,11 +696,11 @@ function FigmaRectangleBench({
     >
       <div
         ref={setNodeRef}
-        className={`rounded-[12px] border transition ${
-          isOver ? "border-white bg-white/20" : "border-white/20 bg-white/8"
-        }`}
+        className="rounded-[12px] border transition"
         style={{
           padding: `${layout.trayPaddingY}px ${layout.trayPaddingX}px`,
+          borderColor: isOver ? "#FFFFFF" : containerBorderColor,
+          backgroundColor: isOver ? "rgba(255,255,255,0.2)" : containerFillColor,
         }}
         aria-label="Unassigned seasons"
         data-testid="figma-rectangle-unranked-tray"
@@ -656,7 +714,7 @@ function FigmaRectangleBench({
               <Token
                 item={item}
                 variant="season-card"
-                size={layout.trayCardWidth}
+                size={cardSize}
                 seasonCardLabelFontFamily={fontOverrides.cardLabelFontFamily}
                 seasonCardLabelSize={layout.cardLabelFontSize}
               />
@@ -671,9 +729,17 @@ function FigmaRectangleBench({
 function FigmaCircleBench({
   items,
   layout,
+  tokenSize,
+  containerFillColor,
+  containerBorderColor,
+  tokenBorderColor,
 }: {
   items: SurveyRankingItem[];
   layout: FigmaCircleLayoutMetrics;
+  tokenSize: number;
+  containerFillColor: string;
+  containerBorderColor: string;
+  tokenBorderColor: string;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "bench" });
 
@@ -684,22 +750,26 @@ function FigmaCircleBench({
     >
       <div
         ref={setNodeRef}
-        className={`rounded-[12px] border transition ${
-          isOver ? "border-black/20 bg-black/5" : "border-black/10 bg-black/[0.02]"
-        }`}
+        className="rounded-[12px] border transition"
         style={{
           padding: `${layout.benchPaddingY}px ${layout.benchPaddingX}px`,
+          borderColor: isOver ? "rgba(0,0,0,0.2)" : containerBorderColor,
+          backgroundColor: isOver ? "rgba(0,0,0,0.05)" : containerFillColor,
         }}
         aria-label="Unassigned cast members"
         data-testid="figma-circle-unassigned-bank"
       >
         <div
-          className="flex overflow-x-auto pb-1 sm:flex-wrap sm:justify-center sm:overflow-visible"
+          className="flex snap-x snap-mandatory overflow-x-auto pb-1 sm:flex-wrap sm:justify-center sm:overflow-visible"
           style={{ gap: `${layout.benchGap}px` }}
         >
           {items.map((item) => (
-            <div key={item.id} className="shrink-0">
-              <Token item={item} size={layout.benchTokenSize} />
+            <div
+              key={item.id}
+              className="shrink-0 snap-start rounded-full border p-[1px]"
+              style={{ borderColor: tokenBorderColor }}
+            >
+              <Token item={item} size={tokenSize} />
             </div>
           ))}
         </div>
@@ -716,6 +786,7 @@ function FigmaRectangleRankingGrid({
   onRemoveItem,
   fontOverrides,
   layout,
+  styleOverrides,
 }: {
   totalSlots: number;
   slotItems: (SurveyRankingItem | null)[];
@@ -724,6 +795,7 @@ function FigmaRectangleRankingGrid({
   onRemoveItem?(item: SurveyRankingItem): void;
   fontOverrides: Required<FlashbackRankerFontOverrides>;
   layout: FigmaRectangleLayoutMetrics;
+  styleOverrides: Required<FlashbackRankerStyleOverrides>;
 }) {
   return (
     <section
@@ -753,6 +825,7 @@ function FigmaRectangleRankingGrid({
             preset="figma-rank-rectangles"
             fontOverrides={fontOverrides}
             rectangleLayout={layout}
+            styleOverrides={styleOverrides}
           />
         ))}
       </div>
@@ -768,6 +841,7 @@ function FigmaRankingGrid({
   onRemoveItem,
   fontOverrides,
   layout,
+  styleOverrides,
 }: {
   totalSlots: number;
   slotItems: (SurveyRankingItem | null)[];
@@ -776,6 +850,7 @@ function FigmaRankingGrid({
   onRemoveItem?(item: SurveyRankingItem): void;
   fontOverrides: Required<FlashbackRankerFontOverrides>;
   layout: FigmaCircleLayoutMetrics;
+  styleOverrides: Required<FlashbackRankerStyleOverrides>;
 }) {
   return (
     <section
@@ -805,6 +880,7 @@ function FigmaRankingGrid({
             preset="figma-rank-circles"
             fontOverrides={fontOverrides}
             circleLayout={layout}
+            styleOverrides={styleOverrides}
           />
         ))}
       </div>
@@ -1090,6 +1166,7 @@ function GridSlot({
   fontOverrides,
   circleLayout,
   rectangleLayout,
+  styleOverrides,
   shapeScaleFactor = 1,
   buttonScaleFactor = 1,
 }: {
@@ -1103,6 +1180,7 @@ function GridSlot({
   fontOverrides?: Required<FlashbackRankerFontOverrides>;
   circleLayout?: FigmaCircleLayoutMetrics;
   rectangleLayout?: FigmaRectangleLayoutMetrics;
+  styleOverrides?: Required<FlashbackRankerStyleOverrides>;
   shapeScaleFactor?: number;
   buttonScaleFactor?: number;
 }) {
@@ -1118,6 +1196,16 @@ function GridSlot({
   const legacyRemoveOffset = Math.round(clampNumber(4 * buttonScaleFactor, 2, 10));
   const legacyRemoveFontSize = Math.round(clampNumber(12 * buttonScaleFactor, 10, 20));
   const legacyNumberSize = Math.round(clampNumber(30 * buttonScaleFactor, 16, 50));
+  const resolvedStyleOverrides: Required<FlashbackRankerStyleOverrides> = {
+    circlePlaceholderFillColor: styleOverrides?.circlePlaceholderFillColor ?? "#000000",
+    circlePlaceholderBorderColor: styleOverrides?.circlePlaceholderBorderColor ?? "transparent",
+    circlePlaceholderNumberColor: styleOverrides?.circlePlaceholderNumberColor ?? "#000000",
+    rectanglePlaceholderFillColor: styleOverrides?.rectanglePlaceholderFillColor ?? "#D9D9D9",
+    unassignedContainerFillColor: styleOverrides?.unassignedContainerFillColor ?? "rgba(0,0,0,0.02)",
+    unassignedContainerBorderColor: styleOverrides?.unassignedContainerBorderColor ?? "rgba(0,0,0,0.1)",
+    unassignedItemBorderColor: styleOverrides?.unassignedItemBorderColor ?? "rgba(0,0,0,0.1)",
+    unassignedItemSizePercent: clampNumber(styleOverrides?.unassignedItemSizePercent ?? 100, 40, 220),
+  };
 
   if (isFigmaPreset) {
     return (
@@ -1127,21 +1215,26 @@ function GridSlot({
         style={{ width: `${resolvedCircleLayout.slotSize}px` }}
       >
         <span
-          className="font-bold leading-none text-black"
+          className="font-bold leading-none"
           style={{
             fontFamily: fontOverrides?.rankNumberFontFamily ?? DEFAULT_RANK_NUMBER_FONT,
             letterSpacing: "0.01em",
             fontSize: `${resolvedCircleLayout.rankNumberSize}px`,
             marginBottom: `${resolvedCircleLayout.rankNumberMarginBottom}px`,
+            color: resolvedStyleOverrides.circlePlaceholderNumberColor,
           }}
         >
           {number}
         </span>
         <div
-          className={`relative flex aspect-square w-full items-center justify-center rounded-full transition ${
+          className={`relative flex aspect-square w-full items-center justify-center rounded-full border transition ${
             isOver || isActive ? "ring-4 ring-black/20" : ""
-          } ${item ? "bg-black/5" : "bg-black"}`}
-          style={{ width: `${resolvedCircleLayout.slotSize}px` }}
+          }`}
+          style={{
+            width: `${resolvedCircleLayout.slotSize}px`,
+            borderColor: item ? "transparent" : resolvedStyleOverrides.circlePlaceholderBorderColor,
+            backgroundColor: item ? "rgba(0,0,0,0.05)" : resolvedStyleOverrides.circlePlaceholderFillColor,
+          }}
         >
           {item ? (
             <>
@@ -1191,7 +1284,8 @@ function GridSlot({
         <div
           className={`relative aspect-[205/257] w-full rounded-[9px] transition ${
             isOver || isActive ? "ring-4 ring-white/30" : ""
-          } ${item ? "bg-[#D9D9D9]" : "bg-[#D9D9D9]"}`}
+          }`}
+          style={{ backgroundColor: resolvedStyleOverrides.rectanglePlaceholderFillColor }}
         >
           {item ? (
             <>
@@ -1575,39 +1669,56 @@ function computeFigmaCircleLayoutMetrics(
   shapeScaleFactor = 1,
   buttonScaleFactor = 1,
 ): FigmaCircleLayoutMetrics {
-  const clampedContainerWidth = clampNumber(containerWidth, 280, FIGMA_GRID_MAX_WIDTH);
-  const columns: 2 | 4 = clampedContainerWidth < 560 ? 2 : 4;
-  const horizontalScale = clampNumber((clampedContainerWidth - 280) / 428, 0, 1);
+  const clampedContainerWidth = clampNumber(containerWidth, 280, 1200);
+  const columns: 2 | 3 | 4 = clampedContainerWidth < 640 ? 2 : clampedContainerWidth < 1024 ? 3 : 4;
+  const maxGridWidth = columns === 4 ? FIGMA_GRID_MAX_WIDTH : columns === 3 ? 552 : clampedContainerWidth;
+  const gridWidth = clampNumber(Math.min(clampedContainerWidth, maxGridWidth), 280, maxGridWidth);
+  const horizontalScale = clampNumber(
+    columns === 2
+      ? (gridWidth - 280) / 220
+      : columns === 3
+        ? (gridWidth - 420) / 132
+        : (gridWidth - 620) / 88,
+    0,
+    1,
+  );
   const gapX = Math.round(
     columns === 2
-      ? interpolate(8, 16, horizontalScale)
-      : interpolate(16, 26, horizontalScale),
+      ? interpolate(10, 16, horizontalScale)
+      : columns === 3
+        ? interpolate(14, 22, horizontalScale)
+        : interpolate(20, 26, horizontalScale),
   );
   const gapY = Math.round(
     columns === 2
-      ? interpolate(16, 34, horizontalScale)
-      : interpolate(28, 54, horizontalScale),
+      ? interpolate(18, 30, horizontalScale)
+      : columns === 3
+        ? interpolate(24, 42, horizontalScale)
+        : interpolate(46, 61, horizontalScale),
   );
-  const available = clampedContainerWidth - gapX * (columns - 1);
+  const available = gridWidth - gapX * (columns - 1);
   const baseSlotSize = clampNumber(
     available / columns,
-    columns === 2 ? 82 : 112,
-    columns === 2 ? 136 : 156,
+    columns === 2 ? 92 : columns === 3 ? 102 : 120,
+    columns === 2 ? 136 : columns === 3 ? 140 : 156,
   );
   const maxSlotByContainer = Math.max(52, Math.floor(available / columns));
   const slotSize = Math.round(clampNumber(
     baseSlotSize * shapeScaleFactor,
-    columns === 2 ? 56 : 80,
+    columns === 2 ? 56 : columns === 3 ? 62 : 84,
     maxSlotByContainer,
   ));
   const tokenInset = clampNumber(slotSize * 0.07, 6, 14);
   const tokenSize = Math.round(clampNumber(slotSize - tokenInset * 2, 48, 170));
-  const benchTokenSize = Math.round(clampNumber(tokenSize * 0.74, 36, Math.max(36, tokenSize - 8)));
-  const benchGap = Math.round(clampNumber(interpolate(8, 14, horizontalScale) * shapeScaleFactor, 6, 22));
-  const benchMarginTop = Math.round(interpolate(14, 22, horizontalScale));
-  const benchPaddingY = Math.round(interpolate(6, 10, horizontalScale));
-  const benchPaddingX = Math.round(interpolate(4, 8, horizontalScale));
-  const rankNumberSize = Math.round(clampNumber(slotSize * 0.16 * buttonScaleFactor, 12, 32));
+  const benchTokenTarget = columns === 2 ? TWO_AXIS_BENCH_TOKEN_MOBILE : columns === 3 ? 52 : TWO_AXIS_BENCH_TOKEN_DESKTOP;
+  const benchTokenSize = Math.round(
+    clampNumber(benchTokenTarget * shapeScaleFactor, 36, Math.max(36, tokenSize - 2)),
+  );
+  const benchGap = Math.round(clampNumber(interpolate(8, 14, horizontalScale) * shapeScaleFactor, 6, 24));
+  const benchMarginTop = Math.round(interpolate(18, 28, horizontalScale));
+  const benchPaddingY = Math.round(interpolate(8, 14, horizontalScale));
+  const benchPaddingX = Math.round(interpolate(8, 14, horizontalScale));
+  const rankNumberSize = Math.round(clampNumber(slotSize * 0.16 * buttonScaleFactor, 16, 32));
   const rankNumberMarginBottom = Math.round(clampNumber(slotSize * 0.08, 5, 12));
   const removeButtonSize = Math.round(clampNumber(slotSize * 0.27 * buttonScaleFactor, 18, 52));
   const removeButtonOffset = Math.round(clampNumber(removeButtonSize * 0.22, 3, 12));
@@ -1616,7 +1727,7 @@ function computeFigmaCircleLayoutMetrics(
 
   return {
     containerWidth: clampedContainerWidth,
-    gridWidth: clampedContainerWidth,
+    gridWidth,
     columns,
     gapX,
     gapY,

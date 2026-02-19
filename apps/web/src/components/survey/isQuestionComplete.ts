@@ -9,7 +9,7 @@ import type {
   TwoAxisGridConfig,
   UiVariant,
 } from "@/lib/surveys/question-config-types";
-import { inferUiVariant } from "@/lib/surveys/question-config-types";
+import { canonicalizeRankingVariant, inferUiVariant } from "@/lib/surveys/question-config-types";
 
 import { coercePlacements, getExtent, getSubjects } from "./twoAxisGridUtils";
 
@@ -33,7 +33,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 export function getUiVariant(question: QuestionWithOptions): UiVariant {
   const config = question.config as QuestionConfig;
-  return (config.uiVariant ?? inferUiVariant(question.question_type)) as UiVariant;
+  return canonicalizeRankingVariant(
+    config.uiVariant ?? inferUiVariant(question.question_type),
+  ) as UiVariant;
 }
 
 /**

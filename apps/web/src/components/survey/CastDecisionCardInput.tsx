@@ -104,6 +104,13 @@ function normalizeHexColor(value: string): string | null {
   return `#${match[1].toUpperCase()}`;
 }
 
+function toColorString(value: unknown): string | null {
+  const trimmed = toTrimmedString(value);
+  if (!trimmed) return null;
+  if (trimmed.startsWith("#")) return normalizeHexColor(trimmed) ?? trimmed;
+  return trimmed;
+}
+
 function pickTextColor(backgroundHex: string): string {
   const hex = backgroundHex.replace("#", "");
   const red = parseInt(hex.slice(0, 2), 16);
@@ -135,6 +142,15 @@ function readFontValue(record: UnknownRecord, path: string[]): string | null {
     toTrimmedString(nested.family) ??
     null
   );
+}
+
+function readColorValue(record: UnknownRecord, path: string[]): string | null {
+  const value = readPath(record, path);
+  const direct = toColorString(value);
+  if (direct) return direct;
+  const nested = toRecord(value);
+  if (!nested) return null;
+  return toColorString(nested.color) ?? toColorString(nested.value) ?? null;
 }
 
 function pushUnique(values: string[], next: string | null) {
@@ -365,6 +381,7 @@ export default function CastDecisionCardInput({
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(390);
   const config = question.config as unknown as CastDecisionCardConfig | ThreeChoiceSliderConfig;
+  const configRecord = config as unknown as UnknownRecord;
   const rows = config.rows ?? [];
   const fontOverrides = React.useMemo(() => collectFontOverrides(config), [config]);
   const [fontLoadFailures, setFontLoadFailures] = React.useState<string[]>([]);
@@ -381,6 +398,44 @@ export default function CastDecisionCardInput({
   const buttonScaleFactor = React.useMemo(
     () => normalizeScalePercent(config.buttonScale, 100) / 100,
     [config.buttonScale],
+  );
+  const componentBackgroundColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["componentBackgroundColor"]) ??
+      readColorValue(configRecord, ["styles", "componentBackgroundColor"]) ??
+      "#D9D9D9",
+    [configRecord],
+  );
+  const promptTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["subTextHeadingColor"]) ??
+      readColorValue(configRecord, ["promptTextColor"]) ??
+      readColorValue(configRecord, ["styles", "subTextHeadingColor"]) ??
+      "#000000",
+    [configRecord],
+  );
+  const questionTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["questionTextColor"]) ??
+      readColorValue(configRecord, ["styles", "questionTextColor"]) ??
+      "#000000",
+    [configRecord],
+  );
+  const nextButtonColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["continueButtonColor"]) ??
+      readColorValue(configRecord, ["nextButtonColor"]) ??
+      readColorValue(configRecord, ["styles", "continueButtonColor"]) ??
+      "#121212",
+    [configRecord],
+  );
+  const nextButtonTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["continueButtonTextColor"]) ??
+      readColorValue(configRecord, ["nextButtonTextColor"]) ??
+      readColorValue(configRecord, ["styles", "continueButtonTextColor"]) ??
+      "#F8F8F8",
+    [configRecord],
   );
 
   React.useEffect(() => {
@@ -422,10 +477,13 @@ export default function CastDecisionCardInput({
   const handleChoiceSelect = React.useCallback(
     (rowId: string, choiceKey: string) => {
       if (disabled) return;
-      onChange({
-        ...(value ?? {}),
-        [rowId]: choiceKey,
-      });
+      const nextValue = { ...(value ?? {}) };
+      if (nextValue[rowId] === choiceKey) {
+        delete nextValue[rowId];
+      } else {
+        nextValue[rowId] = choiceKey;
+      }
+      onChange(nextValue);
     },
     [disabled, onChange, value],
   );
@@ -525,6 +583,7 @@ export default function CastDecisionCardInput({
     <div
       ref={containerRef}
       className="rounded-[18px] bg-[#D9D9D9] px-3 py-5 sm:px-6 sm:py-8"
+      style={{ backgroundColor: componentBackgroundColor }}
       data-testid="cast-decision-card"
     >
       <div className="mx-auto w-full max-w-5xl text-center">
@@ -536,6 +595,7 @@ export default function CastDecisionCardInput({
             fontWeight: 500,
             fontSize: `${promptFontSize}px`,
             letterSpacing: `${promptLetterSpacing}em`,
+            color: promptTextColor,
           }}
         >
           {promptText}
@@ -547,6 +607,7 @@ export default function CastDecisionCardInput({
             fontFamily: fontOverrides.castNameFontFamily,
             fontWeight: 800,
             fontSize: `${nameFontSize}px`,
+            color: questionTextColor,
           }}
         >
           {currentRow.label}
@@ -655,17 +716,19 @@ export default function CastDecisionCardInput({
           <button
             type="button"
             onClick={handleNext}
-            className="mx-auto mt-5 inline-flex items-center justify-center bg-[#121212] px-6 text-[#F8F8F8] transition hover:bg-black"
-            style={{
-              minWidth: `${nextButtonWidth}px`,
-              height: `${nextButtonHeight}px`,
-              borderRadius: `${nextButtonRadius}px`,
-              fontFamily: fontOverrides.nextButtonFontFamily,
-              fontSize: `${nextButtonFontSize}px`,
-              fontWeight: 800,
-              letterSpacing: "0.033em",
-            }}
-          >
+          className="mx-auto mt-5 inline-flex items-center justify-center bg-[#121212] px-6 text-[#F8F8F8] transition hover:bg-black"
+          style={{
+            minWidth: `${nextButtonWidth}px`,
+            height: `${nextButtonHeight}px`,
+            borderRadius: `${nextButtonRadius}px`,
+            fontFamily: fontOverrides.nextButtonFontFamily,
+            fontSize: `${nextButtonFontSize}px`,
+            fontWeight: 800,
+            letterSpacing: "0.033em",
+            backgroundColor: nextButtonColor,
+            color: nextButtonTextColor,
+          }}
+        >
             Next
           </button>
         )}

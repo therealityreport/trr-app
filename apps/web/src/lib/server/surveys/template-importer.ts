@@ -95,7 +95,7 @@ function mapSpecQuestion(specQuestion: SpecQuestion): MappedQuestion {
       return {
         dbType: "ranking",
         config: {
-          uiVariant: "circle-ranking",
+          uiVariant: "person-rankings",
           lineLabelTop: specQuestion.lineLabelTop,
           lineLabelBottom: specQuestion.lineLabelBottom,
           description: specQuestion.description,
@@ -113,7 +113,7 @@ function mapSpecQuestion(specQuestion: SpecQuestion): MappedQuestion {
       return {
         dbType: "ranking",
         config: {
-          uiVariant: "rectangle-ranking",
+          uiVariant: "poster-rankings",
           lineLabelTop: specQuestion.lineLabelTop,
           lineLabelBottom: specQuestion.lineLabelBottom,
           description: specQuestion.description,

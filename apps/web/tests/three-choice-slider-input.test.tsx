@@ -121,6 +121,28 @@ describe("CastDecisionCardInput", () => {
     expect(screen.getByText("Lisa Barlow")).toBeInTheDocument();
   });
 
+  it("toggles off the current choice when the same circle is clicked again", () => {
+    function Harness() {
+      const [value, setValue] = React.useState<Record<string, string> | null>({});
+      return (
+        <CastDecisionCardInput
+          question={makeQuestion() as never}
+          value={value}
+          onChange={setValue}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const fireChoice = screen.getByTestId("three-choice-fire");
+    fireEvent.click(fireChoice);
+    expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
+
+    fireEvent.click(fireChoice);
+    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
+  });
+
   it("shrinks demote text by 1px when selected", () => {
     function Harness() {
       const [value, setValue] = React.useState<Record<string, string> | null>({});

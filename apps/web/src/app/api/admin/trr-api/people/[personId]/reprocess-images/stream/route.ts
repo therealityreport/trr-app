@@ -22,24 +22,33 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { personId } = await params;
     if (!personId) {
       return new Response(
-        `event: error\ndata: ${JSON.stringify({ error: "personId is required" })}\n\n`,
-        { status: 400, headers: { "Content-Type": "text/event-stream" } }
+        `event: error\ndata: ${JSON.stringify({
+          stage: "proxy",
+          error: "personId is required",
+        })}\n\n`,
+        { status: 200, headers: { "Content-Type": "text/event-stream" } }
       );
     }
 
     const backendUrl = getBackendApiUrl(`/admin/person/${personId}/reprocess-images/stream`);
     if (!backendUrl) {
       return new Response(
-        `event: error\ndata: ${JSON.stringify({ error: "Backend API not configured" })}\n\n`,
-        { status: 500, headers: { "Content-Type": "text/event-stream" } }
+        `event: error\ndata: ${JSON.stringify({
+          stage: "proxy",
+          error: "Backend API not configured",
+        })}\n\n`,
+        { status: 200, headers: { "Content-Type": "text/event-stream" } }
       );
     }
 
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
       return new Response(
-        `event: error\ndata: ${JSON.stringify({ error: "Backend auth not configured" })}\n\n`,
-        { status: 500, headers: { "Content-Type": "text/event-stream" } }
+        `event: error\ndata: ${JSON.stringify({
+          stage: "proxy",
+          error: "Backend auth not configured",
+        })}\n\n`,
+        { status: 200, headers: { "Content-Type": "text/event-stream" } }
       );
     }
 
@@ -56,17 +65,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       const errorText = await backendResponse.text();
       return new Response(
         `event: error\ndata: ${JSON.stringify({
+          stage: "backend",
           error: "Backend reprocess failed",
           detail: errorText,
         })}\n\n`,
-        { status: backendResponse.status, headers: { "Content-Type": "text/event-stream" } }
+        { status: 200, headers: { "Content-Type": "text/event-stream" } }
       );
     }
 
     if (!backendResponse.body) {
       return new Response(
-        `event: error\ndata: ${JSON.stringify({ error: "No response body from backend" })}\n\n`,
-        { status: 500, headers: { "Content-Type": "text/event-stream" } }
+        `event: error\ndata: ${JSON.stringify({
+          stage: "backend",
+          error: "No response body from backend",
+        })}\n\n`,
+        { status: 200, headers: { "Content-Type": "text/event-stream" } }
       );
     }
 
@@ -81,8 +94,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
     return new Response(
-      `event: error\ndata: ${JSON.stringify({ error: message })}\n\n`,
-      { status: 500, headers: { "Content-Type": "text/event-stream" } }
+      `event: error\ndata: ${JSON.stringify({
+        stage: "proxy",
+        error: "Reprocess stream request failed",
+        detail: message,
+      })}\n\n`,
+      { status: 200, headers: { "Content-Type": "text/event-stream" } }
     );
   }
 }

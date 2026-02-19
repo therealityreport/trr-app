@@ -219,6 +219,9 @@ interface ImageManagementProps {
   onUpdateContentType?: (contentType: string) => Promise<void>;
   onDelete?: () => Promise<void>;
   onReassign?: () => void;
+  actionDisabledReasons?: Partial<
+    Record<"refresh" | "archive" | "star" | "delete" | "edit", string>
+  >;
 }
 
 interface ImageLightboxProps extends ImageManagementProps {
@@ -268,8 +271,13 @@ interface MetadataPanelProps {
     onUpdateContentType?: (contentType: string) => Promise<void>;
     onDelete?: () => Promise<void>;
     onReassign?: () => void;
+    actionDisabledReasons?: Partial<
+      Record<"refresh" | "archive" | "star" | "delete" | "edit", string>
+    >;
   };
   extras?: ReactNode;
+  showExtras?: boolean;
+  onToggleExtras?: () => void;
 }
 
 function MetadataPanel({
@@ -278,6 +286,8 @@ function MetadataPanel({
   runtimeDimensions,
   management,
   extras,
+  showExtras = false,
+  onToggleExtras,
 }: MetadataPanelProps) {
   const [showFullCaption, setShowFullCaption] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -309,23 +319,32 @@ function MetadataPanel({
       : null;
   const canEditContentType = Boolean(management?.canManage && management?.onUpdateContentType);
   const formatDateLabel = (value: Date | null | undefined): string =>
-    value ? value.toLocaleDateString() : "Unknown";
+    value ? value.toLocaleDateString() : "—";
   const effectiveDimensions = metadata.dimensions ?? runtimeDimensions ?? null;
   const dimensionsLabel = effectiveDimensions
     ? `${effectiveDimensions.width} × ${effectiveDimensions.height}`
-    : "Unknown";
+    : "—";
   const metadataCoverageRows: Array<{ label: string; value: string }> = [
-    { label: "Source Page", value: sourcePageLabel ?? "Unknown" },
-    { label: "Source Logo", value: metadata.sourceLogo ?? "Unknown" },
-    { label: "Name", value: metadata.assetName ?? "Unknown" },
-    { label: "S3 Mirror File", value: mirrorFileName ?? "Unknown" },
+    { label: "Source", value: metadata.source || "—" },
+    { label: "Source Badge", value: sourceBadgeLabel || "—" },
+    { label: "Source Page", value: sourcePageLabel ?? "—" },
+    { label: "Source URL", value: metadata.sourceUrl ?? "—" },
+    { label: "Source Variant", value: metadata.sourceVariant ?? "—" },
+    { label: "Source Logo", value: metadata.sourceLogo ?? "—" },
+    { label: "Name", value: metadata.assetName ?? "—" },
+    { label: "S3 Mirror File", value: mirrorFileName ?? "—" },
+    { label: "Original URL", value: metadata.originalImageUrl ?? "—" },
     {
       label: "Content Type",
-      value: metadata.sectionTag ? formatContentTypeLabel(metadata.sectionTag) : "Unknown",
+      value: metadata.sectionTag ? formatContentTypeLabel(metadata.sectionTag) : "—",
     },
-    { label: "Section", value: metadata.sectionLabel ?? "Unknown" },
+    { label: "Section", value: metadata.sectionLabel ?? "—" },
+    { label: "Context Type", value: metadata.contextType ?? "—" },
+    { label: "IMDb Type", value: metadata.imdbType ?? "—" },
+    { label: "Episode", value: metadata.episodeLabel ?? "—" },
+    { label: "Season", value: metadata.season ? `Season ${metadata.season}` : "—" },
     { label: "Dimensions", value: dimensionsLabel },
-    { label: "File Type", value: metadata.fileType?.toUpperCase() ?? "Unknown" },
+    { label: "File Type", value: metadata.fileType?.toUpperCase() ?? "—" },
     { label: "Created", value: formatDateLabel(metadata.createdAt) },
     { label: "Added", value: formatDateLabel(metadata.addedAt) },
     {
@@ -335,16 +354,31 @@ function MetadataPanel({
           ? "YES"
           : metadata.hasTextOverlay === false
             ? "NO"
-            : "UNKNOWN",
+            : "—",
+    },
+    {
+      label: "People Count",
+      value:
+        typeof metadata.peopleCount === "number" && Number.isFinite(metadata.peopleCount)
+          ? String(metadata.peopleCount)
+          : "—",
+    },
+    {
+      label: "Face Boxes",
+      value:
+        Array.isArray(metadata.faceBoxes) && metadata.faceBoxes.length > 0
+          ? String(metadata.faceBoxes.length)
+          : "—",
     },
     {
       label: "People",
-      value: metadata.people.length > 0 ? metadata.people.join(", ") : "Unknown",
+      value: metadata.people.length > 0 ? metadata.people.join(", ") : "—",
     },
     {
       label: "Titles",
-      value: metadata.titles.length > 0 ? metadata.titles.join(", ") : "Unknown",
+      value: metadata.titles.length > 0 ? metadata.titles.join(", ") : "—",
     },
+    { label: "Caption", value: metadata.caption ?? "—" },
     { label: "Fetched", value: formatDateLabel(metadata.fetchedAt) },
   ];
 
@@ -364,12 +398,29 @@ function MetadataPanel({
     }
   };
 
+  const disabledReasons = management?.actionDisabledReasons ?? {};
   const canRefresh = Boolean(management?.onRefresh);
   const canArchive = Boolean(management?.onArchive) || Boolean(management?.onUnarchive);
   const canReassign = Boolean(management?.onReassign);
   const canDelete = Boolean(management?.onDelete);
   const canStar = Boolean(management?.onToggleStar);
-  const hasAnyActions = canRefresh || canArchive || canReassign || canDelete;
+  const canEditTools = Boolean(extras && onToggleExtras);
+  const hasAnyActions = true;
+  const refreshDisabledReason = !canRefresh
+    ? disabledReasons.refresh ?? "Refresh is unavailable for this image."
+    : disabledReasons.refresh ?? null;
+  const archiveDisabledReason = !canArchive
+    ? disabledReasons.archive ?? "Archive is unavailable for this image."
+    : disabledReasons.archive ?? null;
+  const starDisabledReason = !canStar
+    ? disabledReasons.star ?? "Star/Flag is unavailable for this image."
+    : disabledReasons.star ?? null;
+  const deleteDisabledReason = !canDelete
+    ? disabledReasons.delete ?? "Delete is unavailable for this image."
+    : disabledReasons.delete ?? null;
+  const editDisabledReason = !canEditTools
+    ? disabledReasons.edit ?? "Edit tools are unavailable for this image."
+    : disabledReasons.edit ?? null;
 
   useEffect(() => {
     setCopyMirrorFileNotice(null);
@@ -386,57 +437,69 @@ function MetadataPanel({
       className="h-full w-full overflow-y-auto bg-black/50 backdrop-blur-xl p-4"
     >
       {/* Quick Actions (requested placement: above Source) */}
-      {management?.canManage && (canRefresh || canArchive || canStar) && (
+      {management?.canManage && (
         <div className="mb-4 flex items-center gap-2">
-          {canRefresh && (
+          <button
+            type="button"
+            onClick={() => handleAction("refresh", management.onRefresh)}
+            disabled={actionLoading !== null || starLoading || Boolean(refreshDisabledReason)}
+            title={refreshDisabledReason ?? undefined}
+            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {actionLoading === "refresh" ? "Refreshing..." : "Refresh"}
+          </button>
+          {management.isArchived ? (
             <button
               type="button"
-              onClick={() => handleAction("refresh", management.onRefresh)}
-              disabled={actionLoading !== null || starLoading}
+              onClick={() => handleAction("unarchive", management.onUnarchive)}
+              disabled={actionLoading !== null || starLoading || Boolean(archiveDisabledReason)}
+              title={archiveDisabledReason ?? undefined}
               className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
             >
-              {actionLoading === "refresh" ? "Refreshing..." : "Refresh"}
+              {actionLoading === "unarchive" ? "Unarchiving..." : "Unarchive"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleAction("archive", management.onArchive)}
+              disabled={actionLoading !== null || starLoading || Boolean(archiveDisabledReason)}
+              title={archiveDisabledReason ?? undefined}
+              className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "archive" ? "Archiving..." : "Archive"}
             </button>
           )}
-          {canArchive &&
-            (management.isArchived ? (
-              <button
-                type="button"
-                onClick={() => handleAction("unarchive", management.onUnarchive)}
-                disabled={actionLoading !== null || starLoading}
-                className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
-              >
-                {actionLoading === "unarchive" ? "Unarchiving..." : "Unarchive"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => handleAction("archive", management.onArchive)}
-                disabled={actionLoading !== null || starLoading}
-                className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
-              >
-                {actionLoading === "archive" ? "Archiving..." : "Archive"}
-              </button>
-            ))}
 
-          {canStar && (
-            <button
-              type="button"
-              onClick={async () => {
-                if (!management.onToggleStar || starLoading || actionLoading) return;
-                setStarLoading(true);
-                try {
-                  await management.onToggleStar(!Boolean(management.isStarred));
-                } finally {
-                  setStarLoading(false);
-                }
-              }}
-              disabled={actionLoading !== null || starLoading}
-              className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
-            >
-              {starLoading ? "Saving..." : management.isStarred ? "Unstar" : "Star"}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={async () => {
+              if (!management?.onToggleStar || starLoading || actionLoading) return;
+              setStarLoading(true);
+              try {
+                await management.onToggleStar(!Boolean(management.isStarred));
+              } finally {
+                setStarLoading(false);
+              }
+            }}
+            disabled={actionLoading !== null || starLoading || Boolean(starDisabledReason)}
+            title={starDisabledReason ?? undefined}
+            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {starLoading
+              ? "Saving..."
+              : management.isStarred
+                ? "Unstar/Unflag"
+                : "Star/Flag"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleExtras?.()}
+            disabled={Boolean(editDisabledReason)}
+            title={editDisabledReason ?? undefined}
+            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {showExtras ? "Close Edit" : "Edit"}
+          </button>
         </div>
       )}
       {actionError && (
@@ -476,30 +539,31 @@ function MetadataPanel({
         </div>
       </div>
 
-        {mirrorFileName && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              S3 Mirror File
-            </span>
-            <div className="mt-1 flex items-center gap-2">
-              <code className="max-w-[70%] break-all rounded bg-white/10 px-2 py-1 text-xs text-white/90">
-                {mirrorFileName}
-              </code>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const copied = await copyTextToClipboard(mirrorFileName);
-                    setCopyMirrorFileNotice(copied ? "Copied." : "Copy failed.");
-                  } catch {
-                    setCopyMirrorFileNotice("Copy failed.");
-                  }
-                }}
-                className="rounded bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/20"
-              >
-                Copy
-              </button>
-            </div>
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            S3 Mirror File
+          </span>
+          <div className="mt-1 flex items-center gap-2">
+            <code className="max-w-[70%] break-all rounded bg-white/10 px-2 py-1 text-xs text-white/90">
+              {mirrorFileName ?? "—"}
+            </code>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!mirrorFileName) return;
+                try {
+                  const copied = await copyTextToClipboard(mirrorFileName);
+                  setCopyMirrorFileNotice(copied ? "Copied." : "Copy failed.");
+                } catch {
+                  setCopyMirrorFileNotice("Copy failed.");
+                }
+              }}
+              disabled={!mirrorFileName}
+              className="rounded bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              Copy
+            </button>
+          </div>
             {copyMirrorFileNotice && (
               <p
                 className={`mt-1 text-xs ${
@@ -537,127 +601,110 @@ function MetadataPanel({
               </div>
             </div>
           </div>
-        )}
 
-        {metadata.sourceVariant && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Source Variant
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {metadata.sourceVariant}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Source Variant
+          </span>
+          <p className="mt-1 text-sm text-white/90">{metadata.sourceVariant ?? "—"}</p>
+        </div>
 
-        {sourcePageLabel && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Source Page
-            </span>
-            {metadata.sourceUrl ? (
-              <a
-                href={metadata.sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1 block text-sm text-white/90 underline break-all"
-              >
-                {sourcePageLabel}
-              </a>
-            ) : (
-              <p className="mt-1 text-sm text-white/90 break-all">{sourcePageLabel}</p>
-            )}
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Source Page
+          </span>
+          {metadata.sourceUrl ? (
+            <a
+              href={metadata.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 block text-sm text-white/90 underline break-all"
+            >
+              {sourcePageLabel ?? metadata.sourceUrl}
+            </a>
+          ) : (
+            <p className="mt-1 text-sm text-white/90 break-all">{sourcePageLabel ?? "—"}</p>
+          )}
+        </div>
 
-        {metadata.sourceLogo && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Source Logo
-            </span>
-            <p className="mt-1 text-sm text-white/90">{metadata.sourceLogo}</p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Source Logo
+          </span>
+          <p className="mt-1 text-sm text-white/90">{metadata.sourceLogo ?? "—"}</p>
+        </div>
 
-        {metadata.assetName && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Name
-            </span>
-            <p className="mt-1 text-sm text-white/90 break-all">{metadata.assetName}</p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Name
+          </span>
+          <p className="mt-1 text-sm text-white/90 break-all">{metadata.assetName ?? "—"}</p>
+        </div>
 
-        {(metadata.sectionTag || canEditContentType) && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Content Type
-            </span>
-            {canEditContentType ? (
-              <div className="mt-2 space-y-2">
-                <div className="flex items-center gap-2">
-                  <select
-                    value={contentTypeValue}
-                    onChange={(event) => {
-                      setContentTypeValue(event.target.value);
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Content Type
+          </span>
+          {canEditContentType ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <select
+                  value={contentTypeValue}
+                  onChange={(event) => {
+                    setContentTypeValue(event.target.value);
+                    setContentTypeError(null);
+                  }}
+                  disabled={contentTypeSaving}
+                  className="rounded border border-white/20 bg-black/40 px-2 py-1 text-xs text-white focus:border-white/40 focus:outline-none"
+                >
+                  {CONTENT_TYPE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {formatContentTypeLabel(option)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={
+                    contentTypeSaving ||
+                    contentTypeValue === (metadata.sectionTag?.toUpperCase() ?? "OTHER")
+                  }
+                  onClick={async () => {
+                    if (!management?.onUpdateContentType) return;
+                    try {
+                      setContentTypeSaving(true);
                       setContentTypeError(null);
-                    }}
-                    disabled={contentTypeSaving}
-                    className="rounded border border-white/20 bg-black/40 px-2 py-1 text-xs text-white focus:border-white/40 focus:outline-none"
-                  >
-                    {CONTENT_TYPE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {formatContentTypeLabel(option)}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={
-                      contentTypeSaving ||
-                      contentTypeValue === (metadata.sectionTag?.toUpperCase() ?? "OTHER")
+                      await management.onUpdateContentType(contentTypeValue);
+                    } catch (error) {
+                      setContentTypeError(
+                        error instanceof Error ? error.message : "Failed to update content type"
+                      );
+                    } finally {
+                      setContentTypeSaving(false);
                     }
-                    onClick={async () => {
-                      if (!management?.onUpdateContentType) return;
-                      try {
-                        setContentTypeSaving(true);
-                        setContentTypeError(null);
-                        await management.onUpdateContentType(contentTypeValue);
-                      } catch (error) {
-                        setContentTypeError(
-                          error instanceof Error ? error.message : "Failed to update content type"
-                        );
-                      } finally {
-                        setContentTypeSaving(false);
-                      }
-                    }}
-                    className="rounded bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
-                  >
-                    {contentTypeSaving ? "Saving..." : "Save"}
-                  </button>
-                </div>
-                {contentTypeError && (
-                  <p className="text-xs text-red-300">{contentTypeError}</p>
-                )}
+                  }}
+                  className="rounded bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+                >
+                  {contentTypeSaving ? "Saving..." : "Save"}
+                </button>
               </div>
-            ) : (
-              <p className="mt-1 text-sm text-white/90">
-                {formatContentTypeLabel(metadata.sectionTag ?? "OTHER")}
-              </p>
-            )}
-          </div>
-        )}
-
-        {metadata.sectionLabel && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Section
-            </span>
+              {contentTypeError && (
+                <p className="text-xs text-red-300">{contentTypeError}</p>
+              )}
+            </div>
+          ) : (
             <p className="mt-1 text-sm text-white/90">
-              {metadata.sectionLabel}
+              {formatContentTypeLabel(metadata.sectionTag ?? "OTHER")}
             </p>
-          </div>
-        )}
+          )}
+        </div>
+
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Section
+          </span>
+          <p className="mt-1 text-sm text-white/90">{metadata.sectionLabel ?? "—"}</p>
+        </div>
 
         {/* Dimensions (always shown so missing values are explicit) */}
         <div className="mb-4">
@@ -667,38 +714,26 @@ function MetadataPanel({
           <p className="mt-1 text-sm text-white/90">{dimensionsLabel}</p>
         </div>
 
-        {metadata.fileType && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              File Type
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {metadata.fileType.toUpperCase()}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            File Type
+          </span>
+          <p className="mt-1 text-sm text-white/90">{metadata.fileType?.toUpperCase() ?? "—"}</p>
+        </div>
 
-        {metadata.createdAt && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              CREATED
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {metadata.createdAt.toLocaleDateString()}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Created
+          </span>
+          <p className="mt-1 text-sm text-white/90">{formatDateLabel(metadata.createdAt)}</p>
+        </div>
 
-        {!metadata.createdAt && metadata.addedAt && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Added
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {metadata.addedAt.toLocaleDateString()}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Added
+          </span>
+          <p className="mt-1 text-sm text-white/90">{formatDateLabel(metadata.addedAt)}</p>
+        </div>
 
         <div className="mb-4">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -714,87 +749,74 @@ function MetadataPanel({
         </div>
 
         {/* Season */}
-        {metadata.season && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Season
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              Season {metadata.season}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Season
+          </span>
+          <p className="mt-1 text-sm text-white/90">
+            {metadata.season ? `Season ${metadata.season}` : "—"}
+          </p>
+        </div>
 
-        {metadata.episodeLabel && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Episode
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {metadata.episodeLabel}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Episode
+          </span>
+          <p className="mt-1 text-sm text-white/90">{metadata.episodeLabel ?? "—"}</p>
+        </div>
 
-        {metadata.imdbType && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              IMDb Type
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {metadata.imdbType}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            IMDb Type
+          </span>
+          <p className="mt-1 text-sm text-white/90">{metadata.imdbType ?? "—"}</p>
+        </div>
 
         {/* Context Type */}
-        {showContextType && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Type
-            </span>
-            <p className="mt-1 text-sm text-white/90 capitalize">
-              {metadata.contextType}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Type
+          </span>
+          <p className="mt-1 text-sm text-white/90 capitalize">
+            {showContextType ? metadata.contextType : metadata.contextType ?? "—"}
+          </p>
+        </div>
 
         {/* Caption */}
-        {metadata.caption && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Caption
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {needsTruncation && !showFullCaption
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Caption
+          </span>
+          <p className="mt-1 text-sm text-white/90">
+            {metadata.caption
+              ? needsTruncation && !showFullCaption
                 ? `${metadata.caption.slice(0, captionTruncateLength)}...`
-                : metadata.caption}
-            </p>
-            {needsTruncation && (
-              <button
-                onClick={() => setShowFullCaption(!showFullCaption)}
-                className="mt-1 text-xs text-white/60 hover:text-white/90 flex items-center gap-1"
-              >
-                {showFullCaption ? (
-                  <>
-                    Show less <ChevronUpIcon className="h-3 w-3" />
-                  </>
-                ) : (
-                  <>
-                    Show more <ChevronDownIcon className="h-3 w-3" />
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-        )}
+                : metadata.caption
+              : "—"}
+          </p>
+          {metadata.caption && needsTruncation && (
+            <button
+              onClick={() => setShowFullCaption(!showFullCaption)}
+              className="mt-1 flex items-center gap-1 text-xs text-white/60 hover:text-white/90"
+            >
+              {showFullCaption ? (
+                <>
+                  Show less <ChevronUpIcon className="h-3 w-3" />
+                </>
+              ) : (
+                <>
+                  Show more <ChevronDownIcon className="h-3 w-3" />
+                </>
+              )}
+            </button>
+          )}
+        </div>
 
-        {/* People */}
-        {metadata.people.length > 0 && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              People
-            </span>
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            People
+          </span>
+          {metadata.people.length > 0 ? (
             <div className="mt-1 max-h-32 overflow-y-auto">
               {metadata.people.map((person, i) => (
                 <p key={i} className="text-sm text-white/90">
@@ -802,10 +824,12 @@ function MetadataPanel({
                 </p>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="mt-1 text-sm text-white/90">—</p>
+          )}
+        </div>
 
-        {extras && <div className="mb-4">{extras}</div>}
+        {extras && showExtras && <div className="mb-4">{extras}</div>}
 
         <div className="mb-4 rounded border border-white/10 bg-white/[0.03] p-3">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -824,12 +848,11 @@ function MetadataPanel({
           </div>
         </div>
 
-        {/* Titles */}
-        {metadata.titles.length > 0 && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Titles
-            </span>
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Titles
+          </span>
+          {metadata.titles.length > 0 ? (
             <div className="mt-1 max-h-32 overflow-y-auto">
               {metadata.titles.map((title, i) => (
                 <p key={i} className="text-sm text-white/90">
@@ -837,20 +860,17 @@ function MetadataPanel({
                 </p>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="mt-1 text-sm text-white/90">—</p>
+          )}
+        </div>
 
-        {/* Fetched Date */}
-        {metadata.fetchedAt && (
-          <div className="mb-4">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Fetched
-            </span>
-            <p className="mt-1 text-sm text-white/90">
-              {metadata.fetchedAt.toLocaleDateString()}
-            </p>
-          </div>
-        )}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Fetched
+          </span>
+          <p className="mt-1 text-sm text-white/90">{formatDateLabel(metadata.fetchedAt)}</p>
+        </div>
 
       {/* Management Actions */}
       {management?.canManage && hasAnyActions && (
@@ -859,59 +879,85 @@ function MetadataPanel({
             Actions
           </span>
           <div className="mt-2 space-y-2">
-            {canRefresh && (
+            <button
+              onClick={() => handleAction("refresh", management.onRefresh)}
+              disabled={actionLoading !== null || starLoading || Boolean(refreshDisabledReason)}
+              title={refreshDisabledReason ?? undefined}
+              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "refresh" ? "Refreshing..." : "Refresh Full Pipeline"}
+            </button>
+            {management.isArchived ? (
               <button
-                onClick={() => handleAction("refresh", management.onRefresh)}
-                disabled={actionLoading !== null || starLoading}
-                className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
+                onClick={() => handleAction("unarchive", management.onUnarchive)}
+                disabled={actionLoading !== null || Boolean(archiveDisabledReason)}
+                title={archiveDisabledReason ?? undefined}
+                className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
               >
-                {actionLoading === "refresh" ? "Refreshing..." : "Refresh Metadata Jobs"}
+                {actionLoading === "unarchive" ? "Unarchiving..." : "Unarchive"}
+              </button>
+            ) : (
+              <button
+                onClick={() => handleAction("archive", management.onArchive)}
+                disabled={actionLoading !== null || Boolean(archiveDisabledReason)}
+                title={archiveDisabledReason ?? undefined}
+                className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+              >
+                {actionLoading === "archive" ? "Archiving..." : "Archive"}
               </button>
             )}
-            {canArchive &&
-              (management.isArchived ? (
-                <button
-                  onClick={() => handleAction("unarchive", management.onUnarchive)}
-                  disabled={actionLoading !== null}
-                  className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
-                >
-                  {actionLoading === "unarchive" ? "Unarchiving..." : "📦 Unarchive"}
-                </button>
-              ) : (
-                <button
-                  onClick={() => handleAction("archive", management.onArchive)}
-                  disabled={actionLoading !== null}
-                  className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
-                >
-                  {actionLoading === "archive" ? "Archiving..." : "📦 Archive"}
-                </button>
-              ))}
-            {canReassign && (
-              <button
-                onClick={() => management.onReassign?.()}
-                disabled={actionLoading !== null}
-                className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20 text-left disabled:opacity-50"
-              >
-                📁 Re-assign
-              </button>
-            )}
-            {canDelete && (
-              <button
-                onClick={async () => {
-                  if (
-                    confirm(
-                      "Are you sure you want to permanently delete this image? This action cannot be undone."
-                    )
-                  ) {
-                    await handleAction("delete", management.onDelete);
-                  }
-                }}
-                disabled={actionLoading !== null}
-                className="w-full rounded bg-red-500/20 px-3 py-2 text-sm text-red-300 hover:bg-red-500/30 text-left disabled:opacity-50"
-              >
-                {actionLoading === "delete" ? "Deleting..." : "🗑️ Delete"}
-              </button>
-            )}
+            <button
+              onClick={async () => {
+                if (!management?.onToggleStar || starLoading || actionLoading) return;
+                setStarLoading(true);
+                try {
+                  await management.onToggleStar(!Boolean(management.isStarred));
+                } finally {
+                  setStarLoading(false);
+                }
+              }}
+              disabled={actionLoading !== null || starLoading || Boolean(starDisabledReason)}
+              title={starDisabledReason ?? undefined}
+              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {starLoading
+                ? "Saving..."
+                : management.isStarred
+                  ? "Unstar/Unflag"
+                  : "Star/Flag"}
+            </button>
+            <button
+              onClick={() => onToggleExtras?.()}
+              disabled={Boolean(editDisabledReason)}
+              title={editDisabledReason ?? undefined}
+              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {showExtras ? "Close Edit" : "Edit"}
+            </button>
+            <button
+              onClick={() => management.onReassign?.()}
+              disabled={actionLoading !== null || !canReassign}
+              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+              title={!canReassign ? "Re-assign is unavailable for this image." : undefined}
+            >
+              Re-assign
+            </button>
+            <button
+              onClick={async () => {
+                if (
+                  confirm(
+                    "Are you sure you want to permanently delete this image? This action cannot be undone."
+                  )
+                ) {
+                  await handleAction("delete", management.onDelete);
+                }
+              }}
+              disabled={actionLoading !== null || Boolean(deleteDisabledReason)}
+              title={deleteDisabledReason ?? undefined}
+              className="w-full rounded bg-red-500/20 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+            >
+              {actionLoading === "delete" ? "Deleting..." : "Delete"}
+            </button>
           </div>
         </div>
       )}
@@ -965,6 +1011,7 @@ export function ImageLightbox({
   onRefresh,
   onDelete,
   onReassign,
+  actionDisabledReasons,
 }: ImageLightboxProps) {
   const [currentSrc, setCurrentSrc] = useState(src);
   const [imageFailed, setImageFailed] = useState(false);
@@ -974,6 +1021,7 @@ export function ImageLightbox({
   } | null>(null);
   const triedFallbackRef = useRef(false);
   const [showMetadata, setShowMetadata] = useState(false);
+  const [showEditTools, setShowEditTools] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousTrigger = useRef<HTMLElement | null>(null);
@@ -984,6 +1032,7 @@ export function ImageLightbox({
     setImageFailed(false);
     triedFallbackRef.current = false;
     setPreviewImageSize(null);
+    setShowEditTools(false);
   }, [src, fallbackSrc]);
 
   const handleImageError = () => {
@@ -1581,10 +1630,13 @@ export function ImageLightbox({
                         onUpdateContentType,
                         onDelete,
                         onReassign,
+                        actionDisabledReasons,
                       }
                     : undefined
                 }
                 extras={metadataExtras}
+                showExtras={showEditTools}
+                onToggleExtras={() => setShowEditTools((prev) => !prev)}
               />
             </div>
           </div>

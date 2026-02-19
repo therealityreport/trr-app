@@ -20,6 +20,13 @@ const ADMIN_TOOLS = [
     badge: "API",
   },
   {
+    key: "networks-streaming",
+    title: "Networks & Streaming",
+    description: "View network/provider coverage counts and run sync/mirror enrichment workflows.",
+    href: "/admin/networks" as const,
+    badge: "Data",
+  },
+  {
     key: "users",
     title: "Users",
     description: "Manage users, roles, and admin access controls.",
@@ -71,7 +78,7 @@ export default function AdminDashboardPage() {
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
         <div className="text-center">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
-          <p className="text-sm text-zinc-600">Preparing admin dashboard…</p>
+          <p className="text-sm text-zinc-600">Preparing admin dashboard...</p>
         </div>
       </div>
     );
@@ -92,7 +99,7 @@ export default function AdminDashboardPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Admin Dashboard</p>
               <h1 className="text-3xl font-bold text-zinc-900">Welcome, {displayName}</h1>
               <p className="text-sm text-zinc-500">
-                Superfan tooling for The Reality Report — manage fonts, view survey analytics, and export data.
+                Superfan tooling for The Reality Report - manage fonts, view survey analytics, and export data.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">

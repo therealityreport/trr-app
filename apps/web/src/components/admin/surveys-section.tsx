@@ -53,9 +53,9 @@ const TEMPLATES: {
 }[] = [
   {
     id: "cast_ranking",
-    label: "Cast Ranking",
+    label: "Person Rankings",
     description: "Rank cast members from favorite to least favorite",
-    formats: ["circle-ranking"],
+    formats: ["person-rankings"],
   },
   {
     id: "weekly_poll",
@@ -78,19 +78,23 @@ const formatName = (format: TemplateUiFormat): string => {
     case "numeric-scale-slider":
       return "Numeric slider";
     case "two-axis-grid":
-      return "Two-axis grid";
+      return "Two Axis Grid";
+    case "person-rankings":
+      return "Person Rankings";
+    case "poster-rankings":
+      return "Poster Rankings";
     case "circle-ranking":
-      return "Circle ranking";
+      return "Person Rankings (Legacy)";
     case "rectangle-ranking":
-      return "List ranking";
+      return "Poster Rankings (Legacy)";
     case "cast-decision-card":
-      return "Cast decision card";
+      return "Cast Decision Card";
     case "three-choice-slider":
-      return "3-choice matrix";
+      return "Cast Decision Card (Legacy)";
     case "agree-likert-scale":
-      return "Likert matrix";
+      return "Agree Likert Scale";
     case "two-choice-slider":
-      return "2-choice slider";
+      return "Whose Side";
     case "multi-select-choice":
       return "Multi-select";
     case "text-multiple-choice":
@@ -141,6 +145,7 @@ function FormatThumbnail({ format }: { format: TemplateUiFormat }) {
           </div>
         </div>
       );
+    case "person-rankings":
     case "circle-ranking":
       return (
         <div className={`${base} flex items-center justify-center`}>
@@ -149,6 +154,20 @@ function FormatThumbnail({ format }: { format: TemplateUiFormat }) {
               <div
                 key={idx}
                 className={`h-3 w-3 rounded-full ${idx < 2 ? "bg-indigo-400" : "bg-zinc-200"}`}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    case "poster-rankings":
+    case "rectangle-ranking":
+      return (
+        <div className={`${base} flex items-center justify-center`}>
+          <div className="grid grid-cols-3 gap-1">
+            {Array.from({ length: 6 }, (_, idx) => (
+              <div
+                key={idx}
+                className={`h-3.5 w-2.5 rounded-sm ${idx < 2 ? "bg-indigo-300" : "bg-zinc-200"}`}
               />
             ))}
           </div>

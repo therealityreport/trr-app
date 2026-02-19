@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
+const BACKEND_TIMEOUT_MS = 20_000;
 
 interface RouteParams {
   params: Promise<{ showId: string }>;
@@ -22,11 +23,29 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
 
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: { Authorization: `Bearer ${serviceRoleKey}` },
-      cache: "no-store",
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Authorization: `Bearer ${serviceRoleKey}` },
+        cache: "no-store",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return NextResponse.json(
+          {
+            error: `Cast role members request timed out after ${Math.round(BACKEND_TIMEOUT_MS / 1000)}s`,
+          },
+          { status: 504 }
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {

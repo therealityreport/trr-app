@@ -6,7 +6,7 @@
  *
  * DB Type → UI Variant mappings:
  * - numeric → "numeric-ranking" | "numeric-scale-slider"
- * - ranking → "circle-ranking" | "rectangle-ranking"
+ * - ranking → "person-rankings" | "poster-rankings"
  * - single_choice → "two-choice-slider" | "text-multiple-choice" | "image-multiple-choice" | "dropdown"
  * - multi_choice → "multi-select-choice"
  * - likert → "cast-decision-card" | "three-choice-slider" | "agree-likert-scale" | "two-axis-grid"
@@ -21,8 +21,10 @@ export type UiVariant =
   | "numeric-ranking"        // Episode rating with stars (0-10)
   | "numeric-scale-slider"   // Cast member slider (Boring/Entertaining)
   | "two-axis-grid"          // 2D perceptual map (snap-to-grid cast placement)
-  | "circle-ranking"         // Cast power rankings - grid with circles
-  | "rectangle-ranking"      // Season/franchise rankings - classic list
+  | "person-rankings"        // Cast/person rankings - grid with circles
+  | "poster-rankings"        // Season/poster rankings - cards
+  | "circle-ranking"         // Legacy alias: cast power rankings
+  | "rectangle-ranking"      // Legacy alias: season/franchise rankings
   | "cast-decision-card"     // Cast decision cards (Keep/Fire/Demote, Bring Back/Keep Gone)
   | "three-choice-slider"    // Keep/Fire/Demote slider
   | "agree-likert-scale"     // Agree/Disagree statements
@@ -32,6 +34,14 @@ export type UiVariant =
   | "image-multiple-choice"  // Single select with images
   | "dropdown"               // Dropdown select
   | "text-entry";            // Free text input
+
+export function canonicalizeRankingVariant(
+  uiVariant: UiVariant | string | null | undefined,
+): UiVariant | string | null | undefined {
+  if (uiVariant === "circle-ranking") return "person-rankings";
+  if (uiVariant === "rectangle-ranking") return "poster-rankings";
+  return uiVariant;
+}
 
 // ============================================================================
 // Supporting Types
@@ -79,6 +89,19 @@ export interface BaseQuestionConfig {
   shapeScale?: number;
   /** Optional size multiplier (percent) for buttons/interactive controls in previews/components. */
   buttonScale?: number;
+  /** Optional color overrides used by advanced template editor controls. */
+  questionTextColor?: string;
+  subTextHeadingColor?: string;
+  optionTextColor?: string;
+  componentBackgroundColor?: string;
+  placeholderShapeColor?: string;
+  placeholderShapeBorderColor?: string;
+  placeholderTextColor?: string;
+  unassignedContainerColor?: string;
+  unassignedContainerBorderColor?: string;
+  unassignedCircleBorderColor?: string;
+  /** Optional size multiplier (percent) for unassigned cast/token circles. */
+  unassignedCircleSize?: number;
 }
 
 /**
@@ -132,8 +155,28 @@ export interface TwoAxisGridConfig extends BaseQuestionConfig {
 }
 
 /**
- * Circle Ranking Config (circle-ranking)
- * Drag-and-drop grid with circular cast member tokens
+ * Person Rankings Config (person-rankings)
+ * Drag-and-drop grid with circular cast member tokens.
+ */
+export interface PersonRankingsConfig extends BaseQuestionConfig {
+  uiVariant: "person-rankings";
+  lineLabelTop?: string;
+  lineLabelBottom?: string;
+}
+
+/**
+ * Poster Rankings Config (poster-rankings)
+ * Drag-and-drop ranking with rectangular season/poster cards.
+ */
+export interface PosterRankingsConfig extends BaseQuestionConfig {
+  uiVariant: "poster-rankings";
+  lineLabelTop?: string;
+  lineLabelBottom?: string;
+}
+
+/**
+ * Circle Ranking Config (legacy alias)
+ * Drag-and-drop grid with circular cast member tokens.
  */
 export interface CircleRankingConfig extends BaseQuestionConfig {
   uiVariant: "circle-ranking";
@@ -142,8 +185,8 @@ export interface CircleRankingConfig extends BaseQuestionConfig {
 }
 
 /**
- * Rectangle Ranking Config (rectangle-ranking)
- * Drag-and-drop list with rectangular items
+ * Rectangle Ranking Config (legacy alias)
+ * Drag-and-drop list with rectangular items.
  */
 export interface RectangleRankingConfig extends BaseQuestionConfig {
   uiVariant: "rectangle-ranking";
@@ -252,6 +295,8 @@ export type QuestionConfig =
   | NumericRankingConfig
   | NumericScaleSliderConfig
   | TwoAxisGridConfig
+  | PersonRankingsConfig
+  | PosterRankingsConfig
   | CircleRankingConfig
   | RectangleRankingConfig
   | CastDecisionCardConfig
@@ -279,6 +324,14 @@ export function isNumericScaleSliderConfig(config: QuestionConfig): config is Nu
 
 export function isTwoAxisGridConfig(config: QuestionConfig): config is TwoAxisGridConfig {
   return config.uiVariant === "two-axis-grid";
+}
+
+export function isPersonRankingsConfig(config: QuestionConfig): config is PersonRankingsConfig {
+  return config.uiVariant === "person-rankings";
+}
+
+export function isPosterRankingsConfig(config: QuestionConfig): config is PosterRankingsConfig {
+  return config.uiVariant === "poster-rankings";
 }
 
 export function isCircleRankingConfig(config: QuestionConfig): config is CircleRankingConfig {
@@ -340,7 +393,7 @@ export function inferUiVariant(questionType: QuestionType): UiVariant {
     case "numeric":
       return "numeric-scale-slider";
     case "ranking":
-      return "rectangle-ranking";
+      return "poster-rankings";
     case "single_choice":
       return "text-multiple-choice";
     case "multi_choice":

@@ -4,6 +4,7 @@ export const PERSON_REFRESH_PHASES = {
   counting: "COUNTING",
   findingText: "FINDING TEXT",
   centeringCropping: "CENTERING/CROPPING",
+  resizing: "RESIZING",
 } as const;
 
 export type PersonRefreshPhase =
@@ -35,6 +36,7 @@ export function mapPersonRefreshStage(rawStage: string | null | undefined): Pers
   if (normalized === "auto_count") return PERSON_REFRESH_PHASES.counting;
   if (normalized === "word_id") return PERSON_REFRESH_PHASES.findingText;
   if (normalized === "centering_cropping") return PERSON_REFRESH_PHASES.centeringCropping;
+  if (normalized === "resizing") return PERSON_REFRESH_PHASES.resizing;
   if (normalized.startsWith("sync_") || SYNC_STAGE_IDS.has(normalized)) {
     return PERSON_REFRESH_PHASES.syncing;
   }
