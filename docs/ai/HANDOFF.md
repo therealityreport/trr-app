@@ -3906,3 +3906,33 @@ Continuation (same session, 2026-02-19) — Sync by Fandom app wiring (person + 
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm vitest run tests/show-admin-routes.test.ts tests/person-fandom-route-proxy.test.ts tests/season-fandom-route-proxy.test.ts` (`13 passed`)
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm run lint` (pass; warnings only, no errors)
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec tsc --noEmit` (pass)
+
+Continuation (same session, 2026-02-19) — final issue sweep + suite stabilization:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- Fixes:
+  - Hardened covered-shows fetch lifecycle in shows admin page to avoid pre-auth fetch attempts/log noise:
+    - skip initial covered-shows fetch until `checking === false`, `user` exists, and admin guard state is resolved.
+    - suppress expected transient `Not authenticated` fetch errors from being logged as failures.
+  - Stabilized flaky integration tests under full-suite parallel load:
+    - `reddit-sources-manager` now waits for `Discover Threads` button availability before clicking and uses a per-test timeout.
+    - `season-social-analytics-section` canonical week-link test now uses explicit find timeout and per-test timeout.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/asset-sectioning.test.ts tests/reddit-sources-manager.test.tsx tests/season-social-analytics-section.test.tsx` (`32 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts` (`122 files, 456 passed`)
+  - Browser smoke (`Playwright`): `http://127.0.0.1:3000/admin/trr-shows` no longer emits `Failed to fetch covered shows: Not authenticated` console error in this session.
+
+Continuation (same session, 2026-02-19) — show media gallery allow-list hardening:
+- File:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Enforced a strict show gallery section allow-list for image media: `cast_photos` (displayed as "Cast Promos"), `profile_pictures`, `posters`, `backdrops`.
+  - Added `SHOW_GALLERY_ALLOWED_SECTIONS` and scoped gallery assets to this set before advanced filtering.
+  - Removed show-gallery "Other" expansion behavior (`showOtherAssets`/`hasHiddenOther`) so non-allowed sections cannot surface in show media view.
+  - Limited batch jobs selection and target derivation to the same allow-list (jobs only run on visible, allowed show gallery sections).
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/asset-sectioning.test.ts` (`5 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' src/lib/admin/asset-sectioning.ts tests/asset-sectioning.test.ts` (pass; existing `no-img-element` warnings only)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)

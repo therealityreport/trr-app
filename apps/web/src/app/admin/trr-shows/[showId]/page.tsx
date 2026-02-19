@@ -78,7 +78,6 @@ import {
 } from "@/lib/thumbnail-crop";
 import {
   ASSET_SECTION_LABELS,
-  ASSET_SECTION_ORDER,
   ASSET_SECTION_TO_BATCH_CONTENT_TYPE,
   classifySeasonAssetSection,
   groupSeasonAssetsBySection,
@@ -365,12 +364,13 @@ const BATCH_JOB_OPERATION_LABELS = {
 type BatchJobOperation = keyof typeof BATCH_JOB_OPERATION_LABELS;
 
 const DEFAULT_BATCH_JOB_OPERATIONS: BatchJobOperation[] = ["count"];
-const DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS: AssetSectionKey[] = [
+const SHOW_GALLERY_ALLOWED_SECTIONS: AssetSectionKey[] = [
   "cast_photos",
   "profile_pictures",
   "posters",
   "backdrops",
 ];
+const DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS: AssetSectionKey[] = [...SHOW_GALLERY_ALLOWED_SECTIONS];
 const DEFAULT_BATCH_JOB_CONTENT_SECTIONS: AssetSectionKey[] = [
   ...DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS,
 ];
@@ -1180,7 +1180,6 @@ export default function TrrShowDetailPage() {
   // Gallery state
   const [galleryAssets, setGalleryAssets] = useState<SeasonAsset[]>([]);
   const [galleryVisibleCount, setGalleryVisibleCount] = useState(120);
-  const [showOtherAssets, setShowOtherAssets] = useState(false);
   const [batchJobsOpen, setBatchJobsOpen] = useState(false);
   const [batchJobsRunning, setBatchJobsRunning] = useState(false);
   const [batchJobsError, setBatchJobsError] = useState<string | null>(null);
@@ -3994,8 +3993,22 @@ export default function TrrShowDetailPage() {
     return cards;
   }, [cast, showLinks]);
 
+  const showGalleryAllowedSectionSet = useMemo(
+    () => new Set<AssetSectionKey>(SHOW_GALLERY_ALLOWED_SECTIONS),
+    []
+  );
+
+  const showGalleryScopedAssets = useMemo(
+    () =>
+      galleryAssets.filter((asset) => {
+        const section = classifySeasonAssetSection(asset, { showName: show?.name ?? undefined });
+        return Boolean(section && showGalleryAllowedSectionSet.has(section));
+      }),
+    [galleryAssets, show?.name, showGalleryAllowedSectionSet]
+  );
+
   const filteredGalleryAssets = useMemo(() => {
-    return applyAdvancedFiltersToSeasonAssets(galleryAssets, advancedFilters, {
+    return applyAdvancedFiltersToSeasonAssets(showGalleryScopedAssets, advancedFilters, {
       showName: show?.name ?? undefined,
       getSeasonNumber: (asset) =>
         selectedGallerySeason === "all"
@@ -4004,11 +4017,9 @@ export default function TrrShowDetailPage() {
             : undefined
           : selectedGallerySeason,
     });
-  }, [galleryAssets, advancedFilters, selectedGallerySeason, show?.name]);
+  }, [showGalleryScopedAssets, advancedFilters, selectedGallerySeason, show?.name]);
 
   const gallerySectionAssets = useMemo(() => {
-    const hasExplicitContentTypeFilter = advancedFilters.contentTypes.length > 0;
-    const defaultVisibleSectionSet = new Set(DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS);
     const classifiedAssets = filteredGalleryAssets.map((asset) => {
       const section = classifySeasonAssetSection(asset, { showName: show?.name ?? undefined });
       return { asset, section };
@@ -4016,31 +4027,25 @@ export default function TrrShowDetailPage() {
 
     const displayAssets = classifiedAssets.filter((row) => {
       if (!row.section) return false;
-      if (!hasExplicitContentTypeFilter && !defaultVisibleSectionSet.has(row.section)) {
-        if (!(row.section === "other" && showOtherAssets)) return false;
-      }
-      if (!showOtherAssets && row.section === "other") return false;
-      return true;
+      return showGalleryAllowedSectionSet.has(row.section);
     });
     const grouped = groupSeasonAssetsBySection(
       displayAssets.slice(0, galleryVisibleCount).map((row) => row.asset),
       {
         showName: show?.name ?? undefined,
-        includeOther: true,
+        includeOther: false,
       }
     );
 
     return {
       ...grouped,
       hasMoreVisible: displayAssets.length > galleryVisibleCount,
-      hasHiddenOther: !showOtherAssets && classifiedAssets.some((row) => row.section === "other"),
     };
   }, [
-    advancedFilters.contentTypes.length,
     filteredGalleryAssets,
     galleryVisibleCount,
     show?.name,
-    showOtherAssets,
+    showGalleryAllowedSectionSet,
   ]);
 
   const brandLogoAssets = useMemo(
@@ -4316,7 +4321,6 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     setGalleryVisibleCount(120);
-    setShowOtherAssets(false);
   }, [selectedGallerySeason, advancedFilters]);
 
   // Load gallery assets for a season (or all seasons)
@@ -4418,7 +4422,7 @@ export default function TrrShowDetailPage() {
     }
 
     const selectedSections = new Set(batchJobContentSections);
-    const selectedVisibleAssets = ASSET_SECTION_ORDER.flatMap((section) =>
+    const selectedVisibleAssets = SHOW_GALLERY_ALLOWED_SECTIONS.flatMap((section) =>
       selectedSections.has(section) ? gallerySectionAssets[section] : []
     );
     const dedupeTargets = new Set<string>();
@@ -6806,7 +6810,7 @@ export default function TrrShowDetailPage() {
                       {gallerySectionAssets.cast_photos.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Cast Photos
+                            Cast Promos
                           </h4>
                           <div className="grid grid-cols-5 gap-4">
                             {gallerySectionAssets.cast_photos.map((asset, i, arr) => (
@@ -6912,56 +6916,14 @@ export default function TrrShowDetailPage() {
                         </section>
                       )}
 
-                      {/* Other */}
-                      {showOtherAssets && gallerySectionAssets.other.length > 0 && (
-                        <section>
-                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Other
-                          </h4>
-                          <div className="grid grid-cols-5 gap-4">
-                            {gallerySectionAssets.other.map((asset, i, arr) => (
-                              <button
-                                key={`${asset.id}-${i}`}
-                                onClick={(e) =>
-                                  openAssetLightbox(asset, i, arr, e.currentTarget)
-                                }
-                                className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              >
-                                <GalleryImage
-                                  src={getAssetDisplayUrl(asset)}
-                                  srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
-                                  diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
-                                  alt={asset.caption || "Gallery image"}
-                                  sizes="180px"
-                                />
-                                {asset.person_name && (
-                                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                                    <p className="truncate text-xs text-white">
-                                      {asset.person_name}
-                                    </p>
-                                  </div>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        </section>
-                      )}
-
-                      {(gallerySectionAssets.hasMoreVisible || gallerySectionAssets.hasHiddenOther) && (
+                      {gallerySectionAssets.hasMoreVisible && (
                         <div className="flex justify-center pt-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              setGalleryVisibleCount((prev) => prev + 120);
-                              if (!showOtherAssets && gallerySectionAssets.hasHiddenOther) {
-                                setShowOtherAssets(true);
-                              }
-                            }}
+                            onClick={() => setGalleryVisibleCount((prev) => prev + 120)}
                             className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                           >
-                            {gallerySectionAssets.hasHiddenOther && !showOtherAssets
-                              ? "Load More Images (Including Other)"
-                              : "Load More Images"}
+                            Load More Images
                           </button>
                         </div>
                       )}
@@ -9523,7 +9485,7 @@ export default function TrrShowDetailPage() {
                     Content Types
                   </p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {ASSET_SECTION_ORDER.map((section) => (
+                    {SHOW_GALLERY_ALLOWED_SECTIONS.map((section) => (
                       <label
                         key={section}
                         className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700"
