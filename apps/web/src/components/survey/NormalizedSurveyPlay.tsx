@@ -9,6 +9,9 @@ import { getUiVariant, isQuestionComplete } from "./isQuestionComplete";
 import { resolveSingleChoiceOptionId } from "./answerMapping";
 import { groupBySection } from "@/lib/surveys/section-grouping";
 
+const FOCUSABLE_SELECTOR =
+  "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
 export interface NormalizedSurveyPlayProps {
   surveySlug: string;
   /** URL to redirect to after successful submission */
@@ -117,15 +120,29 @@ export default function NormalizedSurveyPlay({
 
     if (nextCard?.hasAttribute("data-survey-question-card")) {
       nextCard.scrollIntoView({ behavior: "smooth", block: "start" });
-      const focusTarget = nextCard.querySelector<HTMLElement>(
-        "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
-      );
+      const focusTarget = nextCard.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
       focusTarget?.focus({ preventScroll: true });
       return;
     }
 
     submitSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     submitButtonRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const scrollToPreviousQuestion = React.useCallback((questionId: string) => {
+    if (typeof document === "undefined") return;
+    const escapedQuestionId = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(questionId)
+      : questionId.replace(/"/g, '\\"');
+    const currentCard = document.querySelector<HTMLElement>(
+      `[data-survey-question-card][data-survey-question-id="${escapedQuestionId}"]`,
+    );
+    const previousCard = currentCard?.previousElementSibling as HTMLElement | null;
+    if (!previousCard?.hasAttribute("data-survey-question-card")) return;
+
+    previousCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    const focusTarget = previousCard.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+    focusTarget?.focus({ preventScroll: true });
   }, []);
 
   React.useEffect(() => {
@@ -311,11 +328,35 @@ export default function NormalizedSurveyPlay({
           {questionsForRender.map(({ question, index, section, showSectionHeader }) => (
             <div
               key={question.id}
-              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6"
+              className="relative rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6"
               data-survey-question-card
               data-survey-question-id={question.id}
             >
-              <div className="mb-3 sm:mb-4">
+              <button
+                type="button"
+                onClick={() => scrollToPreviousQuestion(question.id)}
+                disabled={index === 0}
+                aria-label="Go to previous question"
+                className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm transition hover:border-gray-300 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40 sm:right-4 sm:top-4"
+                data-testid={`survey-question-back-${question.id}`}
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M12.5 4.16675L6.66667 10.0001L12.5 15.8334"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <div className="mb-3 pr-11 sm:mb-4 sm:pr-12">
                 {showSectionHeader && (
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500 sm:text-xs sm:tracking-[0.3em]">
                     {section}

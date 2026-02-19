@@ -5,6 +5,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 const push = vi.fn();
 const submit = vi.fn().mockResolvedValue(true);
 const useNormalizedSurveyMock = vi.fn();
+const scrollIntoViewMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
@@ -70,6 +71,7 @@ describe("NormalizedSurveyPlay continue button", () => {
   beforeEach(() => {
     push.mockReset();
     submit.mockClear();
+    scrollIntoViewMock.mockReset();
     useNormalizedSurveyMock.mockReturnValue({
       loading: false,
       survey: makeSurvey(),
@@ -81,7 +83,7 @@ describe("NormalizedSurveyPlay continue button", () => {
     });
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
-      value: vi.fn(),
+      value: scrollIntoViewMock,
     });
   });
 
@@ -97,5 +99,17 @@ describe("NormalizedSurveyPlay continue button", () => {
     fireEvent.click(optionA);
     expect(screen.queryByTestId("survey-question-continue-q1")).not.toBeInTheDocument();
   });
-});
 
+  it("shows back chevrons and navigates to previous question", () => {
+    render(<NormalizedSurveyPlay surveySlug="demo-survey" />);
+
+    const backQ1 = screen.getByTestId("survey-question-back-q1");
+    const backQ2 = screen.getByTestId("survey-question-back-q2");
+
+    expect(backQ1).toBeDisabled();
+    expect(backQ2).toBeEnabled();
+
+    fireEvent.click(backQ2);
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+});
