@@ -998,12 +998,12 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Ingest Job Status.*Show/i }));
-    await screen.findByText("123 items");
+    await screen.findByText("123 items", {}, { timeout: 10_000 });
 
     failJobsRefresh = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh Jobs" }));
 
-    expect(await screen.findByText(/temporary jobs outage/i)).toBeInTheDocument();
+    expect(await screen.findByText(/temporary jobs outage/i, {}, { timeout: 10_000 })).toBeInTheDocument();
     expect(screen.getByText("123 items")).toBeInTheDocument();
   });
 

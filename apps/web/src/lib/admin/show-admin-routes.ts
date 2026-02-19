@@ -14,6 +14,7 @@ export type SeasonAdminTab =
   | "episodes"
   | "assets"
   | "videos"
+  | "fandom"
   | "cast"
   | "surveys"
   | "social"
@@ -87,6 +88,7 @@ const SEASON_TAB_BY_PATH_SEGMENT: Record<string, SeasonAdminTab> = {
   episodes: "episodes",
   assets: "assets",
   videos: "videos",
+  fandom: "fandom",
   cast: "cast",
   surveys: "surveys",
   social: "social",
@@ -103,6 +105,7 @@ const SEASON_TAB_BY_QUERY_ALIAS: Record<string, SeasonAdminTab> = {
   episodes: "episodes",
   assets: "assets",
   videos: "videos",
+  fandom: "fandom",
   cast: "cast",
   surveys: "surveys",
   social: "social",

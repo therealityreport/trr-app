@@ -76,7 +76,14 @@ describe("show cast route default minEpisodes behavior", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getShowCastWithStatsMock).toHaveBeenCalledWith("show-1", { limit: 500, offset: 0 });
+    expect(getShowCastWithStatsMock).toHaveBeenCalledWith(
+      "show-1",
+      expect.objectContaining({
+        limit: 500,
+        offset: 0,
+        photoFallbackMode: "none",
+      })
+    );
     expect(payload.cast).toHaveLength(1);
     expect(payload.cast[0].person_id).toBe("p2");
     expect(payload.cast_source).toBe("episode_evidence");
@@ -104,7 +111,14 @@ describe("show cast route default minEpisodes behavior", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getCastByShowIdMock).toHaveBeenCalledWith("show-1", { limit: 500, offset: 0 });
+    expect(getCastByShowIdMock).toHaveBeenCalledWith(
+      "show-1",
+      expect.objectContaining({
+        limit: 500,
+        offset: 0,
+        photoFallbackMode: "none",
+      })
+    );
     expect(payload.cast).toHaveLength(1);
     expect(payload.cast[0].person_id).toBe("fallback-p1");
     expect(payload.cast_source).toBe("show_fallback");
@@ -194,11 +208,81 @@ describe("show cast route default minEpisodes behavior", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getCastByShowIdMock).toHaveBeenCalledWith("show-1", { limit: 500, offset: 0 });
+    expect(getCastByShowIdMock).toHaveBeenCalledWith(
+      "show-1",
+      expect.objectContaining({
+        limit: 500,
+        offset: 0,
+        photoFallbackMode: "none",
+      })
+    );
     expect(payload.cast_source).toBe("imdb_show_membership");
     expect(payload.eligibility_warning).toBeNull();
     expect(payload.cast).toHaveLength(2);
     const merged = payload.cast.find((row: { person_id: string }) => row.person_id === "p1");
     expect(merged?.total_episodes).toBe(12);
+  });
+
+  it("passes through photo_fallback=bravo only for that request", async () => {
+    getShowCastWithStatsMock.mockResolvedValue([]);
+    getCastByShowIdMock.mockResolvedValue([
+      {
+        id: "fallback-c1",
+        person_id: "fallback-p1",
+        full_name: "Fallback Person",
+        cast_member_name: "Fallback Person",
+        role: "Self",
+        billing_order: 1,
+        credit_category: "cast",
+        photo_url: null,
+        total_episodes: null,
+      },
+    ]);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/cast?photo_fallback=bravo"
+    );
+    const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
+
+    expect(response.status).toBe(200);
+    expect(getShowCastWithStatsMock).toHaveBeenCalledWith(
+      "show-1",
+      expect.objectContaining({ photoFallbackMode: "bravo" })
+    );
+    expect(getShowArchiveFootageCastMock).toHaveBeenCalledWith(
+      "show-1",
+      expect.objectContaining({ photoFallbackMode: "bravo" })
+    );
+    expect(getCastByShowIdMock).toHaveBeenCalledWith(
+      "show-1",
+      expect.objectContaining({ photoFallbackMode: "bravo" })
+    );
+  });
+
+  it("coerces invalid photo_fallback values to none", async () => {
+    getShowCastWithStatsMock.mockResolvedValue([
+      {
+        id: "c2",
+        person_id: "p2",
+        full_name: "Person Two",
+        cast_member_name: "Person Two",
+        role: null,
+        billing_order: 2,
+        credit_category: "cast",
+        photo_url: null,
+        total_episodes: 1,
+      },
+    ]);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/cast?photo_fallback=invalid"
+    );
+    const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
+
+    expect(response.status).toBe(200);
+    expect(getShowCastWithStatsMock).toHaveBeenCalledWith(
+      "show-1",
+      expect.objectContaining({ photoFallbackMode: "none" })
+    );
   });
 });

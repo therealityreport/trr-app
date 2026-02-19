@@ -258,10 +258,12 @@ type BravoImportImageKind =
   | "intro"
   | "reunion"
   | "other";
+type SyncBravoRunMode = "full" | "cast-only";
 
 type TabId = "seasons" | "assets" | "news" | "cast" | "surveys" | "social" | "details" | "settings";
 type ShowCastSource = "episode_evidence" | "show_fallback" | "imdb_show_membership";
 type ShowCastRosterMode = "episode_evidence" | "imdb_show_membership";
+type CastPhotoFallbackMode = "none" | "bravo";
 type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
 type ShowTab = { id: TabId; label: string };
 type RefreshProgressState = {
@@ -622,6 +624,18 @@ const inferBravoShowUrl = (showName: string | null | undefined): string | null =
     .replace(/(^-|-$)/g, "");
   if (!slug) return null;
   return `https://www.bravotv.com/${slug}`;
+};
+
+const inferBravoPersonUrl = (personName: string | null | undefined): string | null => {
+  if (typeof personName !== "string") return null;
+  const slug = personName
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  if (!slug) return null;
+  return `https://www.bravotv.com/people/${slug}`;
 };
 
 const BRAVO_IMPORT_IMAGE_KIND_OPTIONS: Array<{ value: BravoImportImageKind; label: string }> = [
@@ -1046,6 +1060,12 @@ export default function TrrShowDetailPage() {
   const [show, setShow] = useState<TrrShow | null>(null);
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
   const [cast, setCast] = useState<TrrCastMember[]>([]);
+  const [castLoadedOnce, setCastLoadedOnce] = useState(false);
+  const [castLoading, setCastLoading] = useState(false);
+  const [castLoadError, setCastLoadError] = useState<string | null>(null);
+  const [castPhotoEnriching, setCastPhotoEnriching] = useState(false);
+  const [castPhotoEnrichError, setCastPhotoEnrichError] = useState<string | null>(null);
+  const [castPhotoEnrichNotice, setCastPhotoEnrichNotice] = useState<string | null>(null);
   const [castSource, setCastSource] = useState<ShowCastSource>("episode_evidence");
   const [castEligibilityWarning, setCastEligibilityWarning] = useState<string | null>(null);
   const [castRoleMembers, setCastRoleMembers] = useState<CastRoleMember[]>([]);
@@ -1083,6 +1103,8 @@ export default function TrrShowDetailPage() {
   const newsAutoSyncAttemptedRef = useRef(false);
   const newsLoadedSortRef = useRef<"trending" | "latest" | null>(null);
   const [syncBravoOpen, setSyncBravoOpen] = useState(false);
+  const [syncBravoModePickerOpen, setSyncBravoModePickerOpen] = useState(false);
+  const [syncBravoRunMode, setSyncBravoRunMode] = useState<SyncBravoRunMode>("full");
   const [syncBravoUrl, setSyncBravoUrl] = useState("");
   const [syncBravoDescription, setSyncBravoDescription] = useState("");
   const [syncBravoAirs, setSyncBravoAirs] = useState("");
@@ -2127,72 +2149,132 @@ export default function TrrShowDetailPage() {
 
   // Fetch cast
   const fetchCast = useCallback(
-    async (options?: { rosterMode?: ShowCastRosterMode; minEpisodes?: number | null }): Promise<TrrCastMember[]> => {
-    const rosterMode = options?.rosterMode ?? "imdb_show_membership";
-    const minEpisodes =
-      typeof options?.minEpisodes === "number"
-        ? options.minEpisodes
-        : rosterMode === "imdb_show_membership"
-          ? 0
-          : null;
-    const requestShowId = showId;
-    if (!requestShowId) return [];
-    try {
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      params.set("limit", "500");
-      params.set("roster_mode", rosterMode);
-      if (typeof minEpisodes === "number" && Number.isFinite(minEpisodes)) {
-        params.set("minEpisodes", String(minEpisodes));
+    async (options?: {
+      rosterMode?: ShowCastRosterMode;
+      minEpisodes?: number | null;
+      photoFallbackMode?: CastPhotoFallbackMode;
+      mergeMissingPhotosOnly?: boolean;
+      throwOnError?: boolean;
+    }): Promise<TrrCastMember[]> => {
+      const rosterMode = options?.rosterMode ?? "imdb_show_membership";
+      const minEpisodes =
+        typeof options?.minEpisodes === "number"
+          ? options.minEpisodes
+          : rosterMode === "imdb_show_membership"
+            ? 0
+            : null;
+      const photoFallbackMode = options?.photoFallbackMode ?? "none";
+      const mergeMissingPhotosOnly = options?.mergeMissingPhotosOnly === true;
+      const requestShowId = showId;
+      if (!requestShowId) return [];
+
+      const mergeMissingPhotoFields = (
+        existingMembers: TrrCastMember[],
+        incomingMembers: TrrCastMember[]
+      ): TrrCastMember[] => {
+        if (existingMembers.length === 0) return incomingMembers;
+        const incomingByPersonId = new Map(
+          incomingMembers.map((member) => [member.person_id, member] as const)
+        );
+        return existingMembers.map((member) => {
+          const incoming = incomingByPersonId.get(member.person_id);
+          if (!incoming) return member;
+          return {
+            ...member,
+            photo_url: member.photo_url ?? incoming.photo_url ?? null,
+            thumbnail_focus_x: member.thumbnail_focus_x ?? incoming.thumbnail_focus_x ?? null,
+            thumbnail_focus_y: member.thumbnail_focus_y ?? incoming.thumbnail_focus_y ?? null,
+            thumbnail_zoom: member.thumbnail_zoom ?? incoming.thumbnail_zoom ?? null,
+            thumbnail_crop_mode:
+              member.thumbnail_crop_mode ?? incoming.thumbnail_crop_mode ?? null,
+          };
+        });
+      };
+
+      setCastLoading(true);
+      setCastLoadError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const params = new URLSearchParams();
+        params.set("limit", "500");
+        params.set("roster_mode", rosterMode);
+        params.set("photo_fallback", photoFallbackMode);
+        if (typeof minEpisodes === "number" && Number.isFinite(minEpisodes)) {
+          params.set("minEpisodes", String(minEpisodes));
+        }
+        // Fetch all cast without filters - photo filtering done client-side if needed.
+        const response = await fetch(
+          `/api/admin/trr-api/shows/${requestShowId}/cast?${params.toString()}`,
+          { headers }
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message =
+            typeof (data as { error?: unknown }).error === "string"
+              ? (data as { error: string }).error
+              : `Failed to fetch cast (HTTP ${response.status})`;
+          throw new Error(message);
+        }
+        const castRaw = (data as { cast?: unknown }).cast;
+        const archiveCastRaw = (data as { archive_footage_cast?: unknown }).archive_footage_cast;
+        const castSourceRaw = (data as { cast_source?: unknown }).cast_source;
+        const eligibilityWarningRaw = (data as { eligibility_warning?: unknown }).eligibility_warning;
+        const nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
+        const nextArchiveCast = Array.isArray(archiveCastRaw)
+          ? (archiveCastRaw as TrrCastMember[])
+          : [];
+        if (!isCurrentShowId(requestShowId)) return nextCast;
+
+        let appliedCast = nextCast;
+        if (mergeMissingPhotosOnly) {
+          setCast((prev) => {
+            const merged = mergeMissingPhotoFields(prev, nextCast);
+            appliedCast = merged;
+            return merged;
+          });
+          setArchiveFootageCast((prev) => mergeMissingPhotoFields(prev, nextArchiveCast));
+        } else {
+          setCast(nextCast);
+          setArchiveFootageCast(nextArchiveCast);
+        }
+
+        setCastSource(
+          castSourceRaw === "show_fallback"
+            ? "show_fallback"
+            : castSourceRaw === "imdb_show_membership"
+              ? "imdb_show_membership"
+              : "episode_evidence"
+        );
+        setCastEligibilityWarning(
+          typeof eligibilityWarningRaw === "string" && eligibilityWarningRaw.trim()
+            ? eligibilityWarningRaw
+            : null
+        );
+        setCastLoadedOnce(true);
+        return appliedCast;
+      } catch (err) {
+        if (!isCurrentShowId(requestShowId)) return [];
+        const message = err instanceof Error ? err.message : "Failed to fetch cast";
+        console.warn("Failed to fetch cast:", message);
+        setCastLoadError(message);
+        if (!castLoadedOnce) {
+          setCast([]);
+          setArchiveFootageCast([]);
+          setCastSource(rosterMode === "imdb_show_membership" ? "imdb_show_membership" : "episode_evidence");
+          setCastEligibilityWarning(null);
+        }
+        if (options?.throwOnError) {
+          throw (err instanceof Error ? err : new Error(message));
+        }
+        return [];
+      } finally {
+        if (isCurrentShowId(requestShowId)) {
+          setCastLoading(false);
+        }
       }
-      // Fetch all cast without filters - photo filtering done client-side if needed.
-      const response = await fetch(
-        `/api/admin/trr-api/shows/${requestShowId}/cast?${params.toString()}`,
-        { headers }
-      );
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message =
-          typeof (data as { error?: unknown }).error === "string"
-            ? (data as { error: string }).error
-            : `Failed to fetch cast (HTTP ${response.status})`;
-        throw new Error(message);
-      }
-      const castRaw = (data as { cast?: unknown }).cast;
-      const archiveCastRaw = (data as { archive_footage_cast?: unknown }).archive_footage_cast;
-      const castSourceRaw = (data as { cast_source?: unknown }).cast_source;
-      const eligibilityWarningRaw = (data as { eligibility_warning?: unknown }).eligibility_warning;
-      const nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
-      const nextArchiveCast = Array.isArray(archiveCastRaw)
-        ? (archiveCastRaw as TrrCastMember[])
-        : [];
-      if (!isCurrentShowId(requestShowId)) return nextCast;
-      setCast(nextCast);
-      setArchiveFootageCast(nextArchiveCast);
-      setCastSource(
-        castSourceRaw === "show_fallback"
-          ? "show_fallback"
-          : castSourceRaw === "imdb_show_membership"
-            ? "imdb_show_membership"
-            : "episode_evidence"
-      );
-      setCastEligibilityWarning(
-        typeof eligibilityWarningRaw === "string" && eligibilityWarningRaw.trim()
-          ? eligibilityWarningRaw
-          : null
-      );
-      return nextCast;
-    } catch (err) {
-      if (!isCurrentShowId(requestShowId)) return [];
-      const message = err instanceof Error ? err.message : "Failed to fetch cast";
-      console.warn("Failed to fetch cast:", message);
-      setError(message);
-      setArchiveFootageCast([]);
-      setCastSource(rosterMode === "imdb_show_membership" ? "imdb_show_membership" : "episode_evidence");
-      setCastEligibilityWarning(null);
-      return [];
-    }
-  }, [getAuthHeaders, isCurrentShowId, showId]);
+    },
+    [castLoadedOnce, getAuthHeaders, isCurrentShowId, showId]
+  );
 
   const fetchShowLinks = useCallback(async () => {
     if (!showId) return;
@@ -2903,6 +2985,21 @@ export default function TrrShowDetailPage() {
     [getAuthHeaders, isCurrentShowId, newsLoaded, newsSort, showId, syncGoogleNews]
   );
 
+  const syncBravoCastUrlCandidates = useMemo(() => {
+    const urls = new Set<string>();
+    for (const member of cast) {
+      const name = String(member.full_name || member.cast_member_name || "").trim();
+      const inferred = inferBravoPersonUrl(name);
+      if (inferred) {
+        urls.add(inferred);
+      }
+    }
+    return Array.from(urls).sort((a, b) => a.localeCompare(b));
+  }, [cast]);
+
+  const hasExistingBravoSnapshot =
+    bravoLoaded || newsLoaded || bravoVideos.length > 0 || unifiedNews.length > 0;
+
   const syncBravoSeasonOptions = useMemo(() => {
     const numbers = seasons
       .filter((season) => {
@@ -2938,7 +3035,9 @@ export default function TrrShowDetailPage() {
     });
   }, [defaultSyncBravoSeasonNumber, syncBravoSeasonOptions]);
 
-  const previewSyncByBravo = useCallback(async (urlOverride?: string) => {
+  const previewSyncByBravo = useCallback(async (options?: { urlOverride?: string; mode?: SyncBravoRunMode }) => {
+    const selectedMode = options?.mode ?? syncBravoRunMode;
+    const includeFullShowContent = selectedMode !== "cast-only";
     const hasEpisodeEvidence =
       (show?.show_total_episodes ?? 0) > 0 ||
       Object.values(seasonEpisodeSummaries).some((summary) => (summary?.count ?? 0) > 0);
@@ -2960,7 +3059,8 @@ export default function TrrShowDetailPage() {
       });
       return;
     }
-    const targetUrl = (typeof urlOverride === "string" ? urlOverride : syncBravoUrl).trim();
+    const targetUrl =
+      (typeof options?.urlOverride === "string" ? options.urlOverride : syncBravoUrl).trim();
     if (!targetUrl) {
       setSyncBravoError("Show URL is required.");
       return;
@@ -2973,7 +3073,8 @@ export default function TrrShowDetailPage() {
     setSyncBravoNotice(null);
     appendRefreshLog({
       category: "BravoTV",
-      message: "Loading Bravo preview...",
+      message:
+        selectedMode === "cast-only" ? "Loading Bravo cast-only preview..." : "Loading Bravo preview...",
     });
     try {
       const headers = await getAuthHeaders();
@@ -2983,8 +3084,9 @@ export default function TrrShowDetailPage() {
         body: JSON.stringify({
           show_url: targetUrl,
           include_people: true,
-          include_videos: true,
-          include_news: true,
+          include_videos: includeFullShowContent,
+          include_news: includeFullShowContent,
+          person_url_candidates: syncBravoCastUrlCandidates,
           season_number: syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? undefined,
         }),
       });
@@ -3081,18 +3183,27 @@ export default function TrrShowDetailPage() {
 
       setSyncBravoDescription(nextDescription);
       setSyncBravoAirs(nextAirs);
-      setSyncBravoImages(filteredShowImages);
-      setSyncBravoImageKinds(nextImageKinds);
+      setSyncBravoImages(selectedMode === "cast-only" ? [] : filteredShowImages);
+      setSyncBravoImageKinds(selectedMode === "cast-only" ? {} : nextImageKinds);
       setSyncBravoPreviewPeople(nextPeople);
       setSyncBravoDiscoveredPersonUrls(nextDiscoveredUrls);
       setSyncBravoPreviewVideos(nextVideos);
       setSyncBravoPreviewNews(nextNews);
       setSyncBravoPreviewSeasonFilter(defaultPreviewSeason);
-      setSyncBravoSelectedImages(new Set(filteredShowImages.map((image) => image.url)));
-      setSyncBravoNotice("Preview loaded from persisted Bravo parse output.");
+      setSyncBravoSelectedImages(
+        selectedMode === "cast-only" ? new Set() : new Set(filteredShowImages.map((image) => image.url))
+      );
+      setSyncBravoNotice(
+        selectedMode === "cast-only"
+          ? "Cast-only preview loaded from Bravo."
+          : "Preview loaded from persisted Bravo parse output."
+      );
       appendRefreshLog({
         category: "BravoTV",
-        message: `Preview ready: ${nextPeople.length} cast URLs, ${nextVideos.length} videos, ${nextNews.length} news, ${filteredShowImages.length} show images.`,
+        message:
+          selectedMode === "cast-only"
+            ? `Cast-only preview ready: ${nextPeople.length} cast URLs.`
+            : `Preview ready: ${nextPeople.length} cast URLs, ${nextVideos.length} videos, ${nextNews.length} news, ${filteredShowImages.length} show images.`,
       });
     } catch (err) {
       appendRefreshLog({
@@ -3114,7 +3225,9 @@ export default function TrrShowDetailPage() {
     show?.show_total_episodes,
     syncBravoSeasonEligibilityError,
     syncBravoSeasonOptions.length,
+    syncBravoCastUrlCandidates,
     syncBravoTargetSeasonNumber,
+    syncBravoRunMode,
     syncBravoUrl,
   ]);
 
@@ -3137,7 +3250,8 @@ export default function TrrShowDetailPage() {
     setSyncBravoNotice(null);
     appendRefreshLog({
       category: "BravoTV",
-      message: "Committing Bravo sync...",
+      message:
+        syncBravoRunMode === "cast-only" ? "Committing Bravo cast-only sync..." : "Committing Bravo sync...",
     });
 
     try {
@@ -3154,6 +3268,8 @@ export default function TrrShowDetailPage() {
           selected_show_image_urls: Array.from(syncBravoSelectedImages),
           description_override: syncBravoDescription.trim() || undefined,
           airs_override: syncBravoAirs.trim() || undefined,
+          cast_only: syncBravoRunMode === "cast-only",
+          person_url_candidates: syncBravoCastUrlCandidates,
           season_number:
             syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? undefined,
         }),
@@ -3169,11 +3285,11 @@ export default function TrrShowDetailPage() {
       }
 
       setSyncBravoNotice(
-        `Synced Bravo data${typeof data.counts?.people_updated === "number" ? `; people updated: ${data.counts.people_updated}` : ""}${typeof data.counts?.imported_show_images === "number" ? `; images imported: ${data.counts.imported_show_images}` : ""}.`
+        `${syncBravoRunMode === "cast-only" ? "Synced Bravo cast members" : "Synced Bravo data"}${typeof data.counts?.people_updated === "number" ? `; people updated: ${data.counts.people_updated}` : ""}${typeof data.counts?.imported_show_images === "number" ? `; images imported: ${data.counts.imported_show_images}` : ""}.`
       );
       appendRefreshLog({
         category: "BravoTV",
-        message: `Bravo sync complete: ${data.counts?.people_updated ?? 0} people updated, ${data.counts?.imported_show_images ?? 0} show images imported.`,
+        message: `${syncBravoRunMode === "cast-only" ? "Bravo cast-only sync complete" : "Bravo sync complete"}: ${data.counts?.people_updated ?? 0} people updated, ${data.counts?.imported_show_images ?? 0} show images imported.`,
       });
 
       await Promise.all([fetchShow(), fetchCast()]);
@@ -3204,7 +3320,9 @@ export default function TrrShowDetailPage() {
     syncBravoSeasonEligibilityError,
     syncBravoSeasonOptions.length,
     syncBravoSelectedImages,
+    syncBravoCastUrlCandidates,
     syncBravoAirs,
+    syncBravoRunMode,
     syncBravoTargetSeasonNumber,
     syncBravoUrl,
     setNewsLoaded,
@@ -3280,7 +3398,7 @@ export default function TrrShowDetailPage() {
       try {
         await fetchShow();
         // Keep initial render fast: load core show data first.
-        await Promise.all([fetchSeasons(), fetchCast(), checkCoverage()]);
+        await Promise.all([fetchSeasons(), checkCoverage()]);
       } finally {
         if (!isCurrentShowId(requestShowId)) return;
         setLoading(false);
@@ -3291,7 +3409,7 @@ export default function TrrShowDetailPage() {
     };
 
     void loadData();
-  }, [hasAccess, showId, fetchShow, fetchSeasons, fetchCast, checkCoverage, isCurrentShowId, loadBravoData]);
+  }, [hasAccess, showId, fetchShow, fetchSeasons, checkCoverage, isCurrentShowId, loadBravoData]);
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "settings") return;
@@ -3333,10 +3451,29 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "cast") return;
+    if (castLoadedOnce || castLoading) return;
+    void fetchCast();
+  }, [activeTab, castLoadedOnce, castLoading, fetchCast, hasAccess, showId]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId || activeTab !== "cast") return;
     void fetchCastRoleMembers();
   }, [activeTab, fetchCastRoleMembers, hasAccess, showId]);
 
   useEffect(() => {
+    setSyncBravoModePickerOpen(false);
+    setSyncBravoOpen(false);
+    setSyncBravoRunMode("full");
+    setSyncBravoStep("preview");
+    setSyncBravoError(null);
+    setSyncBravoNotice(null);
+    setSyncBravoPreviewPeople([]);
+    setSyncBravoDiscoveredPersonUrls([]);
+    setSyncBravoPreviewVideos([]);
+    setSyncBravoPreviewNews([]);
+    setSyncBravoImages([]);
+    setSyncBravoSelectedImages(new Set());
+    setSyncBravoImageKinds({});
     setBravoVideos([]);
     setBravoError(null);
     setBravoLoaded(false);
@@ -3356,6 +3493,14 @@ export default function TrrShowDetailPage() {
     newsAutoSyncAttemptedRef.current = false;
     newsLoadedSortRef.current = null;
     setShowLinks([]);
+    setCast([]);
+    setArchiveFootageCast([]);
+    setCastLoadedOnce(false);
+    setCastLoading(false);
+    setCastLoadError(null);
+    setCastPhotoEnriching(false);
+    setCastPhotoEnrichError(null);
+    setCastPhotoEnrichNotice(null);
     setShowRoles([]);
     setShowRolesLoadedOnce(false);
     setCastRoleMembers([]);
@@ -4053,6 +4198,23 @@ export default function TrrShowDetailPage() {
       });
   }, [syncBravoImageKinds, syncBravoImages, syncBravoSelectedImages]);
 
+  const syncedSeasonCount = seasons.length;
+  const syncedEpisodeCount = Object.values(seasonEpisodeSummaries).reduce(
+    (sum, summary) => sum + (summary?.count ?? 0),
+    0
+  );
+  const syncedCastCount = cast.length;
+  const syncBravoReadinessIssues: string[] = [];
+  if (syncedSeasonCount <= 0) syncBravoReadinessIssues.push("seasons");
+  if (syncedEpisodeCount <= 0 && (show?.show_total_episodes ?? 0) <= 0) {
+    syncBravoReadinessIssues.push("episodes");
+  }
+  if (syncedCastCount <= 0) syncBravoReadinessIssues.push("cast");
+  const canSyncByBravo = syncBravoReadinessIssues.length === 0;
+  const syncBravoReadinessMessage = canSyncByBravo
+    ? null
+    : `Sync seasons, episodes, and cast first (missing: ${syncBravoReadinessIssues.join(", ")}).`;
+
   const openSyncBravoConfirmStep = useCallback(() => {
     const missing: string[] = [];
     const hasEpisodeEvidence =
@@ -4093,6 +4255,40 @@ export default function TrrShowDetailPage() {
     seasons.length,
     show?.show_total_episodes,
   ]);
+
+  const startSyncBravoFlow = useCallback(
+    (mode: SyncBravoRunMode) => {
+      if (!canSyncByBravo) {
+        setSyncBravoError(syncBravoReadinessMessage || "Sync seasons, episodes, and cast first.");
+        return;
+      }
+      const inferredBravoUrl = inferBravoShowUrl(show?.name) || syncBravoUrl.trim();
+      const initialSeason = syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? null;
+      setSyncBravoRunMode(mode);
+      setSyncBravoTargetSeasonNumber(initialSeason);
+      setSyncBravoModePickerOpen(false);
+      setSyncBravoOpen(true);
+      setSyncBravoStep("preview");
+      setSyncBravoError(null);
+      setSyncBravoNotice(null);
+      if (mode === "cast-only") {
+        setSyncBravoImages([]);
+        setSyncBravoSelectedImages(new Set());
+        setSyncBravoImageKinds({});
+      }
+      setSyncBravoUrl(inferredBravoUrl);
+      void previewSyncByBravo({ urlOverride: inferredBravoUrl, mode });
+    },
+    [
+      canSyncByBravo,
+      defaultSyncBravoSeasonNumber,
+      previewSyncByBravo,
+      show?.name,
+      syncBravoReadinessMessage,
+      syncBravoTargetSeasonNumber,
+      syncBravoUrl,
+    ]
+  );
 
   useEffect(() => {
     if (visibleSeasons.length === 0) return;
@@ -5019,6 +5215,42 @@ export default function TrrShowDetailPage() {
     await syncCastMatrixRoles();
   }, [castMatrixSyncLoading, refreshShow, refreshingShowAll, refreshingTargets, syncCastMatrixRoles]);
 
+  const missingCastPhotoCount = useMemo(() => {
+    const countMissing = (members: TrrCastMember[]) =>
+      members.filter((member) => !member.photo_url).length;
+    return countMissing(cast) + countMissing(archiveFootageCast);
+  }, [archiveFootageCast, cast]);
+
+  const enrichMissingCastPhotos = useCallback(async () => {
+    if (!showId) return;
+    if (castLoading || castPhotoEnriching) return;
+    if (missingCastPhotoCount <= 0) {
+      setCastPhotoEnrichError(null);
+      setCastPhotoEnrichNotice("No missing cast photos to enrich.");
+      return;
+    }
+
+    setCastPhotoEnriching(true);
+    setCastPhotoEnrichError(null);
+    setCastPhotoEnrichNotice(null);
+    try {
+      await fetchCast({
+        rosterMode: "imdb_show_membership",
+        minEpisodes: 0,
+        photoFallbackMode: "bravo",
+        mergeMissingPhotosOnly: true,
+        throwOnError: true,
+      });
+      setCastPhotoEnrichNotice(
+        `Bravo enrichment complete. Requested fallback photos for ${missingCastPhotoCount} cast entries.`
+      );
+    } catch (err) {
+      setCastPhotoEnrichError(err instanceof Error ? err.message : "Failed to enrich cast photos");
+    } finally {
+      setCastPhotoEnriching(false);
+    }
+  }, [castLoading, castPhotoEnriching, fetchCast, missingCastPhotoCount, showId]);
+
   const detectTextOverlayForUnknown = useCallback(async () => {
     const targets = galleryAssets
       .filter((a) => looksLikeUuid(a.id) && inferHasTextOverlay(a.metadata ?? null) === null)
@@ -5600,22 +5832,6 @@ export default function TrrShowDetailPage() {
   const showCastTabProgress =
     isShowRefreshBusy &&
     Boolean(castTabProgress?.message || castTabProgress?.stage || castTabProgress?.total !== null);
-  const syncedSeasonCount = seasons.length;
-  const syncedEpisodeCount = Object.values(seasonEpisodeSummaries).reduce(
-    (sum, summary) => sum + (summary?.count ?? 0),
-    0
-  );
-  const syncedCastCount = cast.length;
-  const syncBravoReadinessIssues: string[] = [];
-  if (syncedSeasonCount <= 0) syncBravoReadinessIssues.push("seasons");
-  if (syncedEpisodeCount <= 0 && (show.show_total_episodes ?? 0) <= 0) {
-    syncBravoReadinessIssues.push("episodes");
-  }
-  if (syncedCastCount <= 0) syncBravoReadinessIssues.push("cast");
-  const canSyncByBravo = syncBravoReadinessIssues.length === 0;
-  const syncBravoReadinessMessage = canSyncByBravo
-    ? null
-    : `Sync seasons, episodes, and cast first (missing: ${syncBravoReadinessIssues.join(", ")}).`;
   const autoGeneratedBravoUrl = inferBravoShowUrl(show?.name) || syncBravoUrl.trim() || "";
 
   const pipelineSteps = buildPipelineRows(REFRESH_LOG_TOPIC_DEFINITIONS, refreshLogTopicGroups);
@@ -5873,17 +6089,15 @@ export default function TrrShowDetailPage() {
                       );
                       return;
                     }
-                    const inferredBravoUrl =
-                      inferBravoShowUrl(show?.name) || syncBravoUrl.trim();
-                    const initialSeason =
-                      syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? null;
-                    setSyncBravoTargetSeasonNumber(initialSeason);
-                    setSyncBravoOpen(true);
-                    setSyncBravoStep("preview");
-                    setSyncBravoError(null);
-                    setSyncBravoNotice(null);
-                    setSyncBravoUrl(inferredBravoUrl);
-                    void previewSyncByBravo(inferredBravoUrl);
+                    if (hasExistingBravoSnapshot) {
+                      setSyncBravoModePickerOpen(true);
+                      setSyncBravoOpen(false);
+                      setSyncBravoStep("preview");
+                      setSyncBravoError(null);
+                      setSyncBravoNotice(null);
+                      return;
+                    }
+                    startSyncBravoFlow("full");
                   }}
                   disabled={!canSyncByBravo || syncBravoLoading}
                   title={syncBravoReadinessMessage || undefined}
@@ -7097,6 +7311,16 @@ export default function TrrShowDetailPage() {
                   </span>
                   <button
                     type="button"
+                    onClick={() => void enrichMissingCastPhotos()}
+                    disabled={castPhotoEnriching || castLoading || missingCastPhotoCount <= 0}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {castPhotoEnriching
+                      ? "Enriching..."
+                      : `Enrich Missing Cast Photos${missingCastPhotoCount > 0 ? ` (${missingCastPhotoCount})` : ""}`}
+                  </button>
+                  <button
+                    type="button"
                     onClick={refreshShowCast}
                     disabled={isCastRefreshBusy}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
@@ -7127,6 +7351,14 @@ export default function TrrShowDetailPage() {
                 <p className={`mb-4 text-sm ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
                   {refreshError || refreshNotice}
                 </p>
+              )}
+              {(castPhotoEnrichNotice || castPhotoEnrichError) && (
+                <p className={`mb-4 text-sm ${castPhotoEnrichError ? "text-red-600" : "text-zinc-500"}`}>
+                  {castPhotoEnrichError || castPhotoEnrichNotice}
+                </p>
+              )}
+              {castLoadError && (
+                <p className="mb-4 text-sm text-red-600">{castLoadError}</p>
               )}
               {(castRoleMembersError || rolesError) && (
                 <p className="mb-4 text-sm text-red-600">
@@ -7273,6 +7505,9 @@ export default function TrrShowDetailPage() {
               </div>
               {castRoleMembersLoading && (
                 <p className="mb-4 text-sm text-zinc-500">Refreshing cast intelligence...</p>
+              )}
+              {castLoading && !castLoadedOnce && (
+                <p className="mb-4 text-sm text-zinc-500">Loading cast members...</p>
               )}
               <div className="space-y-8">
                 <section>
@@ -7552,7 +7787,7 @@ export default function TrrShowDetailPage() {
                   <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                 )}
 
-                {cast.length === 0 && archiveFootageCast.length === 0 && (
+                {castLoadedOnce && !castLoading && cast.length === 0 && archiveFootageCast.length === 0 && (
                   <p className="text-sm text-zinc-500">
                     No cast members found for this show.
                   </p>
@@ -8697,12 +8932,48 @@ export default function TrrShowDetailPage() {
           </div>
         )}
 
+        {syncBravoModePickerOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl">
+              <h3 className="text-lg font-bold text-zinc-900">Sync by Bravo</h3>
+              <p className="mt-1 text-sm text-zinc-600">
+                This show already has Bravo sync data. Choose how you want to run this sync.
+              </p>
+              <div className="mt-4 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => startSyncBravoFlow("cast-only")}
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                >
+                  Cast Only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startSyncBravoFlow("full")}
+                  className="w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+                >
+                  Re-Run Show URL
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSyncBravoModePickerOpen(false)}
+                className="mt-4 w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {syncBravoOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
             <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl">
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-lg font-bold text-zinc-900">Import by Bravo</h3>
+                  <h3 className="text-lg font-bold text-zinc-900">
+                    Import by Bravo {syncBravoRunMode === "cast-only" ? "(Cast Only)" : ""}
+                  </h3>
                   <p className="text-sm text-zinc-500">Preview and commit persisted Bravo snapshots for this show.</p>
                   <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
                     Step {syncBravoStep === "preview" ? "1" : "2"} of 2
@@ -8782,7 +9053,11 @@ export default function TrrShowDetailPage() {
                   disabled={syncBravoLoading}
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
                 >
-                  {syncBravoPreviewLoading ? "Refreshing..." : "Refresh Preview"}
+                  {syncBravoPreviewLoading
+                    ? "Refreshing..."
+                    : syncBravoRunMode === "cast-only"
+                      ? "Refresh Cast Preview"
+                      : "Refresh Preview"}
                 </button>
               </div>
 
@@ -8792,90 +9067,101 @@ export default function TrrShowDetailPage() {
                 </p>
               )}
 
-              <div className="mb-4 grid gap-4 md:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Description
-                  </span>
-                  <textarea
-                    value={syncBravoDescription}
-                    onChange={(event) => setSyncBravoDescription(event.target.value)}
-                    rows={4}
-                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Airs / Tune-In
-                  </span>
-                  <textarea
-                    value={syncBravoAirs}
-                    onChange={(event) => setSyncBravoAirs(event.target.value)}
-                    rows={4}
-                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
-                  />
-                </label>
-              </div>
-
-              <div className="mb-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Show Images
+              {syncBravoRunMode === "cast-only" && (
+                <p className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
+                  Cast-only mode probes canonical Bravo cast profile URLs and keeps only valid person pages.
                 </p>
-                {syncBravoImages.length === 0 ? (
-                  <p className="text-sm text-zinc-500">Run preview to load image candidates.</p>
-                ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {syncBravoImages.map((image) => {
-                      const checked = syncBravoSelectedImages.has(image.url);
-                      const selectedKind = syncBravoImageKinds[image.url] ?? inferBravoImportImageKind(image);
-                      return (
-                        <div key={image.url} className="flex items-start gap-3 rounded-lg border border-zinc-200 p-3">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(event) =>
-                              setSyncBravoSelectedImages((prev) => {
-                                const next = new Set(prev);
-                                if (event.target.checked) next.add(image.url);
-                                else next.delete(image.url);
-                                return next;
-                              })
-                            }
-                            className="mt-1"
-                          />
-                          <div className="relative h-16 w-28 overflow-hidden rounded bg-zinc-100">
-                            <GalleryImage src={image.url} alt={image.alt || "Bravo image"} sizes="120px" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <span className="line-clamp-2 text-xs text-zinc-600">{image.alt || image.url}</span>
-                            <div className="mt-2 flex items-center gap-2">
-                              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                                Type
-                              </span>
-                              <select
-                                value={selectedKind}
-                                onChange={(event) =>
-                                  setSyncBravoImageKinds((prev) => ({
-                                    ...prev,
-                                    [image.url]: event.target.value as BravoImportImageKind,
-                                  }))
-                                }
-                                className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
-                              >
-                                {BRAVO_IMPORT_IMAGE_KIND_OPTIONS.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+              )}
+
+              {syncBravoRunMode !== "cast-only" && (
+                <>
+                  <div className="mb-4 grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Description
+                      </span>
+                      <textarea
+                        value={syncBravoDescription}
+                        onChange={(event) => setSyncBravoDescription(event.target.value)}
+                        rows={4}
+                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Airs / Tune-In
+                      </span>
+                      <textarea
+                        value={syncBravoAirs}
+                        onChange={(event) => setSyncBravoAirs(event.target.value)}
+                        rows={4}
+                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                      />
+                    </label>
                   </div>
-                )}
-              </div>
+
+                  <div className="mb-4">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Show Images
+                    </p>
+                    {syncBravoImages.length === 0 ? (
+                      <p className="text-sm text-zinc-500">Run preview to load image candidates.</p>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {syncBravoImages.map((image) => {
+                          const checked = syncBravoSelectedImages.has(image.url);
+                          const selectedKind =
+                            syncBravoImageKinds[image.url] ?? inferBravoImportImageKind(image);
+                          return (
+                            <div key={image.url} className="flex items-start gap-3 rounded-lg border border-zinc-200 p-3">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) =>
+                                  setSyncBravoSelectedImages((prev) => {
+                                    const next = new Set(prev);
+                                    if (event.target.checked) next.add(image.url);
+                                    else next.delete(image.url);
+                                    return next;
+                                  })
+                                }
+                                className="mt-1"
+                              />
+                              <div className="relative h-16 w-28 overflow-hidden rounded bg-zinc-100">
+                                <GalleryImage src={image.url} alt={image.alt || "Bravo image"} sizes="120px" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <span className="line-clamp-2 text-xs text-zinc-600">{image.alt || image.url}</span>
+                                <div className="mt-2 flex items-center gap-2">
+                                  <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                    Type
+                                  </span>
+                                  <select
+                                    value={selectedKind}
+                                    onChange={(event) =>
+                                      setSyncBravoImageKinds((prev) => ({
+                                        ...prev,
+                                        [image.url]: event.target.value as BravoImportImageKind,
+                                      }))
+                                    }
+                                    className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                                  >
+                                    {BRAVO_IMPORT_IMAGE_KIND_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
 
               <div className="mb-4">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
@@ -8907,131 +9193,135 @@ export default function TrrShowDetailPage() {
                 )}
               </div>
 
-              <div className="mb-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  News
-                </p>
-                {syncBravoPreviewNews.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No news items found in this preview.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {syncBravoPreviewNews.map((item, index) => (
-                      <article
-                        key={`${item.article_url}-${index}`}
-                        className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                      >
-                        <div className="flex gap-3">
-                          <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
-                            {item.image_url ? (
-                              <GalleryImage
-                                src={item.image_url}
-                                alt={item.headline || "Bravo news"}
-                                sizes="120px"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-xs text-zinc-400">
-                                No image
+              {syncBravoRunMode !== "cast-only" && (
+                <>
+                  <div className="mb-4">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      News
+                    </p>
+                    {syncBravoPreviewNews.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No news items found in this preview.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {syncBravoPreviewNews.map((item, index) => (
+                          <article
+                            key={`${item.article_url}-${index}`}
+                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                          >
+                            <div className="flex gap-3">
+                              <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
+                                {item.image_url ? (
+                                  <GalleryImage
+                                    src={item.image_url}
+                                    alt={item.headline || "Bravo news"}
+                                    sizes="120px"
+                                  />
+                                ) : (
+                                  <div className="flex h-full items-center justify-center text-xs text-zinc-400">
+                                    No image
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <a
-                              href={item.article_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:text-blue-700"
-                            >
-                              {item.headline || "Untitled story"}
-                            </a>
-                            {formatBravoPublishedDate(item.published_at) && (
-                              <p className="mt-1 text-xs text-zinc-500">
-                                Posted {formatBravoPublishedDate(item.published_at)}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="mb-4">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Videos
-                  </p>
-                  {syncBravoPreviewSeasonOptions.length > 0 && (
-                    <label className="flex items-center gap-2 text-xs text-zinc-600">
-                      <span>Season</span>
-                      <select
-                        value={syncBravoPreviewSeasonFilter}
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          setSyncBravoPreviewSeasonFilter(
-                            nextValue === "all" ? "all" : Number.parseInt(nextValue, 10)
-                          );
-                        }}
-                        className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
-                      >
-                        <option value="all">All</option>
-                        {syncBravoPreviewSeasonOptions.map((season) => (
-                          <option key={season} value={season}>
-                            Season {season}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                </div>
-                {syncBravoFilteredPreviewVideos.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No videos found for this preview/season filter.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {syncBravoFilteredPreviewVideos.map((video, index) => (
-                      <article
-                        key={`${video.clip_url}-${index}`}
-                        className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                      >
-                        <div className="flex gap-3">
-                          <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
-                            {video.image_url ? (
-                              <GalleryImage
-                                src={video.image_url}
-                                alt={video.title || "Bravo video"}
-                                sizes="120px"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-xs text-zinc-400">
-                                No image
+                              <div className="min-w-0 flex-1">
+                                <a
+                                  href={item.article_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:text-blue-700"
+                                >
+                                  {item.headline || "Untitled story"}
+                                </a>
+                                {formatBravoPublishedDate(item.published_at) && (
+                                  <p className="mt-1 text-xs text-zinc-500">
+                                    Posted {formatBravoPublishedDate(item.published_at)}
+                                  </p>
+                                )}
                               </div>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <a
-                              href={video.clip_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:text-blue-700"
-                            >
-                              {video.title || "Untitled video"}
-                            </a>
-                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                              {video.runtime && <span>{video.runtime}</span>}
-                              {typeof video.season_number === "number" && (
-                                <span>Season {video.season_number}</span>
-                              )}
-                              {formatBravoPublishedDate(video.published_at) && (
-                                <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
-                              )}
                             </div>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
+                          </article>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+
+                  <div className="mb-4">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Videos
+                      </p>
+                      {syncBravoPreviewSeasonOptions.length > 0 && (
+                        <label className="flex items-center gap-2 text-xs text-zinc-600">
+                          <span>Season</span>
+                          <select
+                            value={syncBravoPreviewSeasonFilter}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setSyncBravoPreviewSeasonFilter(
+                                nextValue === "all" ? "all" : Number.parseInt(nextValue, 10)
+                              );
+                            }}
+                            className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                          >
+                            <option value="all">All</option>
+                            {syncBravoPreviewSeasonOptions.map((season) => (
+                              <option key={season} value={season}>
+                                Season {season}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                    </div>
+                    {syncBravoFilteredPreviewVideos.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No videos found for this preview/season filter.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {syncBravoFilteredPreviewVideos.map((video, index) => (
+                          <article
+                            key={`${video.clip_url}-${index}`}
+                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                          >
+                            <div className="flex gap-3">
+                              <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
+                                {video.image_url ? (
+                                  <GalleryImage
+                                    src={video.image_url}
+                                    alt={video.title || "Bravo video"}
+                                    sizes="120px"
+                                  />
+                                ) : (
+                                  <div className="flex h-full items-center justify-center text-xs text-zinc-400">
+                                    No image
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <a
+                                  href={video.clip_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:text-blue-700"
+                                >
+                                  {video.title || "Untitled video"}
+                                </a>
+                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                                  {video.runtime && <span>{video.runtime}</span>}
+                                  {typeof video.season_number === "number" && (
+                                    <span>Season {video.season_number}</span>
+                                  )}
+                                  {formatBravoPublishedDate(video.published_at) && (
+                                    <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
                 </>
               ) : (
                 <div className="space-y-4">
@@ -9055,7 +9345,7 @@ export default function TrrShowDetailPage() {
                     ) : (
                       <p className="mt-1 text-xs text-zinc-500">Could not infer URL yet.</p>
                     )}
-                    {syncBravoDescription.trim() && (
+                    {syncBravoRunMode !== "cast-only" && syncBravoDescription.trim() && (
                       <>
                         <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Description
@@ -9063,7 +9353,7 @@ export default function TrrShowDetailPage() {
                         <p className="mt-1 text-sm text-zinc-700">{syncBravoDescription.trim()}</p>
                       </>
                     )}
-                    {syncBravoAirs.trim() && (
+                    {syncBravoRunMode !== "cast-only" && syncBravoAirs.trim() && (
                       <>
                         <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Airs / Tune-In
@@ -9096,36 +9386,38 @@ export default function TrrShowDetailPage() {
                     )}
                   </div>
 
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Show Images Being Synced ({syncBravoSelectedImageSummaries.length})
-                    </p>
-                    {syncBravoSelectedImageSummaries.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No show images selected for sync.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {syncBravoSelectedImageSummaries.map((image) => (
-                          <article
-                            key={image.url}
-                            className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                          >
-                            <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
-                              <GalleryImage src={image.url} alt={image.alt || "Selected show image"} sizes="120px" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="line-clamp-2 text-sm font-semibold text-zinc-900">
-                                {image.alt || "Show image"}
-                              </p>
-                              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-zinc-500">
-                                Type: {image.kind}
-                              </p>
-                              <p className="mt-1 break-all text-xs text-zinc-600">{image.url}</p>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {syncBravoRunMode !== "cast-only" && (
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Show Images Being Synced ({syncBravoSelectedImageSummaries.length})
+                      </p>
+                      {syncBravoSelectedImageSummaries.length === 0 ? (
+                        <p className="text-sm text-zinc-500">No show images selected for sync.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {syncBravoSelectedImageSummaries.map((image) => (
+                            <article
+                              key={image.url}
+                              className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                            >
+                              <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
+                                <GalleryImage src={image.url} alt={image.alt || "Selected show image"} sizes="120px" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="line-clamp-2 text-sm font-semibold text-zinc-900">
+                                  {image.alt || "Show image"}
+                                </p>
+                                <p className="mt-1 text-xs uppercase tracking-[0.16em] text-zinc-500">
+                                  Type: {image.kind}
+                                </p>
+                                <p className="mt-1 break-all text-xs text-zinc-600">{image.url}</p>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -9160,7 +9452,9 @@ export default function TrrShowDetailPage() {
                   {syncBravoStep === "confirm"
                     ? syncBravoCommitLoading
                       ? "Syncing..."
-                      : "Sync by Bravo"
+                      : syncBravoRunMode === "cast-only"
+                        ? "Sync Cast URLs"
+                        : "Sync by Bravo"
                     : "Next"}
                 </button>
               </div>

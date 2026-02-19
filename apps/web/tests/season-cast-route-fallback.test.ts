@@ -51,7 +51,23 @@ describe("season cast route fallback behavior", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getCastByShowIdMock).toHaveBeenCalledWith("show-1", { limit: 500, offset: 0 });
+    expect(getSeasonCastWithEpisodeCountsMock).toHaveBeenCalledWith(
+      "show-1",
+      1,
+      expect.objectContaining({
+        limit: 500,
+        offset: 0,
+        photoFallbackMode: "none",
+      })
+    );
+    expect(getCastByShowIdMock).toHaveBeenCalledWith(
+      "show-1",
+      expect.objectContaining({
+        limit: 500,
+        offset: 0,
+        photoFallbackMode: "none",
+      })
+    );
     expect(payload.cast_source).toBe("show_fallback");
     expect(typeof payload.eligibility_warning).toBe("string");
     expect(payload.cast).toHaveLength(1);
@@ -80,5 +96,49 @@ describe("season cast route fallback behavior", () => {
     expect(payload.cast).toHaveLength(0);
     expect(payload.cast_source).toBe("season_evidence");
     expect(payload.eligibility_warning).toBeNull();
+  });
+
+  it("passes through photo_fallback=bravo", async () => {
+    getSeasonCastWithEpisodeCountsMock.mockResolvedValue([
+      {
+        person_id: "p1",
+        person_name: "Person One",
+        episodes_in_season: 1,
+        total_episodes: 3,
+        photo_url: null,
+      },
+    ]);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/seasons/1/cast?photo_fallback=bravo"
+    );
+    const response = await GET(request, {
+      params: Promise.resolve({ showId: "show-1", seasonNumber: "1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(getSeasonCastWithEpisodeCountsMock).toHaveBeenCalledWith(
+      "show-1",
+      1,
+      expect.objectContaining({ photoFallbackMode: "bravo" })
+    );
+  });
+
+  it("coerces invalid photo_fallback values to none", async () => {
+    getSeasonCastWithEpisodeCountsMock.mockResolvedValue([]);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/seasons/1/cast?photo_fallback=bad-value"
+    );
+    const response = await GET(request, {
+      params: Promise.resolve({ showId: "show-1", seasonNumber: "1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(getSeasonCastWithEpisodeCountsMock).toHaveBeenCalledWith(
+      "show-1",
+      1,
+      expect.objectContaining({ photoFallbackMode: "none" })
+    );
   });
 });

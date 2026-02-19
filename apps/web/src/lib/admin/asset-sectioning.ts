@@ -150,12 +150,28 @@ export function classifySeasonAssetSection(
   const contentType = normalizeContentTypeToken(mapped.contentType ?? mapped.sectionTag ?? null, "OTHER");
   const isOfficialSeasonAnnouncement = isOfficialSeasonAnnouncementAsset(asset, metadata);
   const byContentType = mapContentTypeToSection(contentType, { isOfficialSeasonAnnouncement });
+  const isCastPromoKind =
+    kind === "cast" || kind === "promo" || kind === "profile" || kind === "profile picture" || kind === "profile_picture";
+  if (isOfficialSeasonAnnouncement && isCastPromoKind) {
+    return "cast_photos";
+  }
+  if (byContentType === "profile_pictures" && isOfficialSeasonAnnouncement && isCastPromoKind) {
+    return "cast_photos";
+  }
   if (byContentType === "profile_pictures") {
     // Prevent false positives from loose text inference (e.g., caption text containing "profile").
     return hasProfileSignal ? "profile_pictures" : "other";
   }
   if (byContentType !== "other") return byContentType;
   if (byContentType === "other" && contentType !== "OTHER") return byContentType;
+
+  // OSA cast promos are frequently stored with "profile" kinds in upstream sources.
+  if (
+    isOfficialSeasonAnnouncement &&
+    isCastPromoKind
+  ) {
+    return "cast_photos";
+  }
 
   if (hasProfileSignal) return "profile_pictures";
   if (asset.type === "episode") return "episode_stills";

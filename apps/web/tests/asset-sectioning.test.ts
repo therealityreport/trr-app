@@ -40,6 +40,18 @@ describe("asset-sectioning", () => {
     expect(classifySeasonAssetSection(nonOsaCast)).toBe("other");
   });
 
+  it("classifies OSA profile-kind promos as cast photos", () => {
+    const osaProfileKind = makeAsset({
+      kind: "profile",
+      context_section: "official_season_announcement",
+      metadata: {
+        fandom_section_tag: "official season announcement",
+      },
+    });
+
+    expect(classifySeasonAssetSection(osaProfileKind)).toBe("cast_photos");
+  });
+
   it("classifies dedicated section buckets", () => {
     expect(
       classifySeasonAssetSection(

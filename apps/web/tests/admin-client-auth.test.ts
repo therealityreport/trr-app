@@ -52,8 +52,10 @@ describe("admin client auth helper", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("waits for auth readiness before reading token", async () => {
@@ -73,6 +75,35 @@ describe("admin client auth helper", () => {
 
     resolveReady?.();
     await expect(pending).resolves.toEqual({ Authorization: "Bearer ready-token" });
+  });
+
+  it("continues after auth readiness timeout when token is available", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS", "10");
+    const getIdToken = vi.fn().mockResolvedValue("timeout-token");
+    mocks.setCurrentUser({ getIdToken });
+    mocks.authStateReady.mockImplementationOnce(() => new Promise<void>(() => undefined));
+
+    const pending = getClientAuthHeaders({ tokenRetryDelaysMs: [0], forceRefreshOnFinalAttempt: false });
+    await vi.advanceTimersByTimeAsync(9);
+    expect(getIdToken).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toEqual({ Authorization: "Bearer timeout-token" });
+  });
+
+  it("returns Not authenticated quickly when auth readiness times out with no user", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS", "5");
+    mocks.authStateReady.mockImplementationOnce(() => new Promise<void>(() => undefined));
+
+    const pending = getClientAuthHeaders({
+      tokenRetryDelaysMs: [1, 1],
+      forceRefreshOnFinalAttempt: false,
+    });
+    const rejection = expect(pending).rejects.toThrow("Not authenticated");
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
   });
 
   it("retries token acquisition and recovers", async () => {

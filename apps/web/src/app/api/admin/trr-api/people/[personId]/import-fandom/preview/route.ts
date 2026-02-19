@@ -8,46 +8,31 @@ interface RouteParams {
   params: Promise<{ personId: string }>;
 }
 
-/**
- * GET /api/admin/trr-api/people/[personId]/fandom
- *
- * Get Fandom/Wikia biographical data for a person.
- */
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     await requireAdmin(request);
-
     const { personId } = await params;
-    const showId = request.nextUrl.searchParams.get("showId")?.trim() ?? "";
-
     if (!personId) {
-      return NextResponse.json(
-        { error: "personId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "personId is required" }, { status: 400 });
     }
 
-    const backendUrl = getBackendApiUrl(`/admin/person/${personId}/fandom`);
+    const backendUrl = getBackendApiUrl(`/admin/person/${personId}/import-fandom/preview`);
     if (!backendUrl) {
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
-
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }
 
-    const backendRequestUrl = new URL(backendUrl);
-    if (showId) {
-      backendRequestUrl.searchParams.set("showId", showId);
-    }
-
-    const response = await fetch(backendRequestUrl.toString(), {
-      method: "GET",
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const response = await fetch(backendUrl, {
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Bearer ${serviceRoleKey}`,
       },
-      cache: "no-store",
+      body: JSON.stringify(body),
     });
     const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (!response.ok) {
@@ -56,19 +41,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           ? data.error
           : typeof data.detail === "string"
             ? data.detail
-            : "Fandom fetch failed";
+            : "Fandom preview failed";
       return NextResponse.json({ error }, { status: response.status });
     }
-
-    return NextResponse.json({
-      fandomData: Array.isArray(data.fandomData) ? data.fandomData : [],
-      count: typeof data.count === "number" ? data.count : 0,
-    });
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("[api] Failed to get TRR person fandom data", error);
+    console.error("[api] Failed to preview fandom import", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

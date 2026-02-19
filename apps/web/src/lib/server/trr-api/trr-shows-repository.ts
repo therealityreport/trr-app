@@ -175,6 +175,34 @@ export interface TrrCastFandom {
   taglines: Record<string, unknown> | null;
   reunion_seating: Record<string, unknown> | null;
   trivia: Record<string, unknown> | null;
+  dynamic_sections?: unknown[] | null;
+  bio_card?: Record<string, unknown> | null;
+  casting_summary?: string | null;
+  citations?: unknown[] | null;
+  conflicts?: unknown[] | null;
+  source_variants?: Record<string, unknown> | null;
+  ai_model?: string | null;
+  ai_generated_at?: string | null;
+}
+
+export interface TrrSeasonFandom {
+  id: string;
+  season_id: string;
+  show_id: string;
+  season_number: number;
+  source: string;
+  source_url: string;
+  page_title: string | null;
+  page_revision_id: number | null;
+  scraped_at: string;
+  summary: string | null;
+  dynamic_sections?: unknown[] | null;
+  citations?: unknown[] | null;
+  conflicts?: unknown[] | null;
+  source_variants?: unknown;
+  ai_model?: string | null;
+  ai_generated_at?: string | null;
+  raw_html_sha256?: string | null;
 }
 
 // ============================================================================
@@ -742,10 +770,30 @@ type PreferredCastPhoto = CastThumbnailFields & {
   url: string;
 };
 
+export type CastPhotoFallbackMode = "none" | "bravo";
+
+export interface CastPhotoLookupDiagnostics {
+  media_links_query_ms: number;
+  cast_photos_query_ms: number;
+  people_query_ms: number;
+  bravo_links_query_ms: number;
+  bravo_profile_fetch_ms: number;
+  bravo_profiles_attempted: number;
+  bravo_profiles_resolved: number;
+}
+
+export interface CastQueryOptions extends PaginationOptions {
+  photoFallbackMode?: CastPhotoFallbackMode;
+  photoLookupDiagnostics?: CastPhotoLookupDiagnostics;
+}
+
 type PreferredCastPhotoOptions = {
   seasonNumber?: number | null;
-  enableBravoProfileFallback?: boolean;
+  photoFallbackMode?: CastPhotoFallbackMode;
+  diagnostics?: CastPhotoLookupDiagnostics;
 };
+
+const DEFAULT_CAST_PHOTO_FALLBACK_MODE: CastPhotoFallbackMode = "none";
 
 const EMPTY_CAST_THUMBNAIL_FIELDS: CastThumbnailFields = {
   thumbnail_focus_x: null,
@@ -924,6 +972,9 @@ async function getPreferredCastPhotoMap(
     typeof options?.seasonNumber === "number" && Number.isFinite(options.seasonNumber)
       ? Math.trunc(options.seasonNumber)
       : null;
+  const photoFallbackMode = options?.photoFallbackMode ?? DEFAULT_CAST_PHOTO_FALLBACK_MODE;
+  const diagnostics = options?.diagnostics;
+  const mediaLinksQueryStart = Date.now();
 
   try {
     const personLinksResult = await pgQuery<{
@@ -1011,11 +1062,17 @@ async function getPreferredCastPhotoMap(
     }
   } catch (error) {
     console.warn("[trr-shows-repository] getPreferredCastPhotoMap media_links lookup failed", error);
+  } finally {
+    if (diagnostics) {
+      diagnostics.media_links_query_ms =
+        (diagnostics.media_links_query_ms ?? 0) + (Date.now() - mediaLinksQueryStart);
+    }
   }
 
   const remainingPersonIds = personIds.filter((personId) => !map.has(personId));
   if (remainingPersonIds.length === 0) return map;
 
+  const castPhotosQueryStart = Date.now();
   try {
     const castPhotosResult = await pgQuery<{
       person_id: string;
@@ -1076,12 +1133,18 @@ async function getPreferredCastPhotoMap(
     }
   } catch (error) {
     console.warn("[trr-shows-repository] getPreferredCastPhotoMap cast_photos lookup failed", error);
+  } finally {
+    if (diagnostics) {
+      diagnostics.cast_photos_query_ms =
+        (diagnostics.cast_photos_query_ms ?? 0) + (Date.now() - castPhotosQueryStart);
+    }
   }
 
-  if (options?.enableBravoProfileFallback) {
+  if (photoFallbackMode === "bravo") {
     const unresolvedPersonIds = personIds.filter((personId) => !map.has(personId));
     if (unresolvedPersonIds.length > 0) {
       const profileLinksByPerson = new Map<string, string>();
+      const bravoLinksQueryStart = Date.now();
       try {
         const bravoLinksResult = await pgQuery<{ person_id: string; url: string | null }>(
           `SELECT entity_id::text AS person_id, url
@@ -1111,9 +1174,15 @@ async function getPreferredCastPhotoMap(
           "[trr-shows-repository] getPreferredCastPhotoMap bravo links lookup failed",
           error
         );
+      } finally {
+        if (diagnostics) {
+          diagnostics.bravo_links_query_ms =
+            (diagnostics.bravo_links_query_ms ?? 0) + (Date.now() - bravoLinksQueryStart);
+        }
       }
 
       const pendingProfileLookups: Array<{ person_id: string; profile_url: string }> = [];
+      const peopleQueryStart = Date.now();
       try {
         const peopleResult = await pgQuery<{
           id: string;
@@ -1147,6 +1216,11 @@ async function getPreferredCastPhotoMap(
         }
       } catch (error) {
         console.warn("[trr-shows-repository] getPreferredCastPhotoMap people lookup failed", error);
+      } finally {
+        if (diagnostics) {
+          diagnostics.people_query_ms =
+            (diagnostics.people_query_ms ?? 0) + (Date.now() - peopleQueryStart);
+        }
       }
 
       for (
@@ -1158,14 +1232,26 @@ async function getPreferredCastPhotoMap(
           batchStart,
           batchStart + BRAVO_PROFILE_FETCH_CONCURRENCY
         );
+        if (diagnostics) {
+          diagnostics.bravo_profiles_attempted =
+            (diagnostics.bravo_profiles_attempted ?? 0) + batch.length;
+        }
+        const profileFetchStart = Date.now();
         const results = await Promise.all(
           batch.map(async (entry) => ({
             person_id: entry.person_id,
             image_url: await fetchBravoProfileImageUrl(entry.profile_url),
           }))
         );
+        if (diagnostics) {
+          diagnostics.bravo_profile_fetch_ms =
+            (diagnostics.bravo_profile_fetch_ms ?? 0) + (Date.now() - profileFetchStart);
+        }
         for (const result of results) {
           if (!result.image_url || map.has(result.person_id)) continue;
+          if (diagnostics) {
+            diagnostics.bravo_profiles_resolved = (diagnostics.bravo_profiles_resolved ?? 0) + 1;
+          }
           map.set(result.person_id, {
             url: result.image_url,
             ...EMPTY_CAST_THUMBNAIL_FIELDS,
@@ -1184,7 +1270,7 @@ async function getPreferredCastPhotoMap(
  */
 export async function getCastByShowId(
   showId: string,
-  options?: PaginationOptions
+  options?: CastQueryOptions
 ): Promise<TrrCastMember[]> {
   const { limit, offset } = normalizePagination(options);
   const castResult = await pgQuery<
@@ -1216,7 +1302,8 @@ export async function getCastByShowId(
   }
 
   const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
-    enableBravoProfileFallback: true,
+    photoFallbackMode: options?.photoFallbackMode ?? DEFAULT_CAST_PHOTO_FALLBACK_MODE,
+    diagnostics: options?.photoLookupDiagnostics,
   });
 
   return castResult.rows.map((cast) => {
@@ -1241,7 +1328,7 @@ export async function getCastByShowId(
  */
 export async function getShowCastWithStats(
   showId: string,
-  options?: PaginationOptions
+  options?: CastQueryOptions
 ): Promise<TrrCastMember[]> {
   const { limit, offset } = normalizePagination(options);
   type ShowCastWithEligibleCountRow = Omit<
@@ -1328,7 +1415,8 @@ export async function getShowCastWithStats(
   }
 
   const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
-    enableBravoProfileFallback: true,
+    photoFallbackMode: options?.photoFallbackMode ?? DEFAULT_CAST_PHOTO_FALLBACK_MODE,
+    diagnostics: options?.photoLookupDiagnostics,
   });
 
   return castResult.rows.map((cast) => {
@@ -1356,7 +1444,7 @@ export async function getShowCastWithStats(
  */
 export async function getShowArchiveFootageCast(
   showId: string,
-  options?: PaginationOptions
+  options?: CastQueryOptions
 ): Promise<TrrCastMember[]> {
   const { limit, offset } = normalizePagination(options);
   const castResult = await pgQuery<
@@ -1436,7 +1524,8 @@ export async function getShowArchiveFootageCast(
   }
 
   const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
-    enableBravoProfileFallback: true,
+    photoFallbackMode: options?.photoFallbackMode ?? DEFAULT_CAST_PHOTO_FALLBACK_MODE,
+    diagnostics: options?.photoLookupDiagnostics,
   });
 
   return castResult.rows.map((cast) => {
@@ -2805,7 +2894,7 @@ export interface SeasonCastEpisodeCount {
 export async function getCastByShowSeason(
   showId: string,
   seasonNumber: number,
-  options?: PaginationOptions
+  options?: CastQueryOptions
 ): Promise<SeasonCastMember[]> {
   const { limit, offset } = normalizePagination(options);
   const castResult = await pgQuery<{
@@ -2832,7 +2921,8 @@ export async function getCastByShowSeason(
 
   const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
     seasonNumber,
-    enableBravoProfileFallback: true,
+    photoFallbackMode: options?.photoFallbackMode ?? DEFAULT_CAST_PHOTO_FALLBACK_MODE,
+    diagnostics: options?.photoLookupDiagnostics,
   });
 
   return typedCastData.map((cast) => ({
@@ -2855,7 +2945,7 @@ export async function getCastByShowSeason(
 export async function getSeasonCastWithEpisodeCounts(
   showId: string,
   seasonNumber: number,
-  options?: PaginationOptions & { includeArchiveOnly?: boolean }
+  options?: CastQueryOptions & { includeArchiveOnly?: boolean }
 ): Promise<SeasonCastEpisodeCount[]> {
   const { limit, offset } = normalizePagination(options);
   const includeArchiveOnly =
@@ -3055,7 +3145,8 @@ export async function getSeasonCastWithEpisodeCounts(
 
   const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
     seasonNumber,
-    enableBravoProfileFallback: true,
+    photoFallbackMode: options?.photoFallbackMode ?? DEFAULT_CAST_PHOTO_FALLBACK_MODE,
+    diagnostics: options?.photoLookupDiagnostics,
   });
 
   return filteredCounts.map((member) => {

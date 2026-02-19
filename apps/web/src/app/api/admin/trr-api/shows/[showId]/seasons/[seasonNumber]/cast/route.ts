@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
+  type CastPhotoFallbackMode,
+  type CastPhotoLookupDiagnostics,
   type SeasonCastEpisodeCount,
   getCastByShowId,
   getSeasonCastWithEpisodeCounts,
@@ -17,6 +19,21 @@ interface RouteParams {
   params: Promise<{ showId: string; seasonNumber: string }>;
 }
 
+const CAST_PERF_LOGS_ENABLED = /^(1|true)$/i.test(process.env.TRR_CAST_PERF_LOGS ?? "");
+
+const createPhotoLookupDiagnostics = (): CastPhotoLookupDiagnostics => ({
+  media_links_query_ms: 0,
+  cast_photos_query_ms: 0,
+  people_query_ms: 0,
+  bravo_links_query_ms: 0,
+  bravo_profile_fetch_ms: 0,
+  bravo_profiles_attempted: 0,
+  bravo_profiles_resolved: 0,
+});
+
+const parsePhotoFallbackMode = (value: string | null): CastPhotoFallbackMode =>
+  value?.trim().toLowerCase() === "bravo" ? "bravo" : "none";
+
 /**
  * GET /api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast
  *
@@ -25,8 +42,10 @@ interface RouteParams {
  * - limit: max results (default 500, max 500)
  * - offset: pagination offset (default 0)
  * - include_archive_only: when true, include archive-footage-only cast rows
+ * - photo_fallback: none|bravo (default none)
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
+  const requestStartedAt = Date.now();
   try {
     await requireAdmin(request);
 
@@ -48,17 +67,35 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const offset = Number.isFinite(offsetParam) ? Math.max(offsetParam, 0) : 0;
     const includeArchiveOnly =
       (searchParams.get("include_archive_only") ?? "").toLowerCase() === "true";
+    const photoFallbackMode = parsePhotoFallbackMode(searchParams.get("photo_fallback"));
+
+    const seasonEvidenceDiagnostics = createPhotoLookupDiagnostics();
+    const fallbackDiagnostics = createPhotoLookupDiagnostics();
+
+    const seasonEvidenceStartedAt = Date.now();
+    let seasonEvidenceQueryMs = 0;
+    let fallbackQueryMs = 0;
 
     let cast: SeasonCastEpisodeCount[] = await getSeasonCastWithEpisodeCounts(showId, seasonNum, {
       limit,
       offset,
       includeArchiveOnly,
+      photoFallbackMode,
+      photoLookupDiagnostics: seasonEvidenceDiagnostics,
     });
+    seasonEvidenceQueryMs = Date.now() - seasonEvidenceStartedAt;
     let castSource: SeasonCastSource = "season_evidence";
     let eligibilityWarning: string | null = null;
 
     if (!includeArchiveOnly && cast.length === 0) {
-      const fallbackCast = await getCastByShowId(showId, { limit, offset });
+      const fallbackStartedAt = Date.now();
+      const fallbackCast = await getCastByShowId(showId, {
+        limit,
+        offset,
+        photoFallbackMode,
+        photoLookupDiagnostics: fallbackDiagnostics,
+      });
+      fallbackQueryMs = Date.now() - fallbackStartedAt;
       if (fallbackCast.length > 0) {
         cast = fallbackCast.map((member) => ({
           person_id: member.person_id,
@@ -75,6 +112,53 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         castSource = "show_fallback";
         eligibilityWarning = SEASON_FALLBACK_WARNING;
       }
+    }
+
+    if (CAST_PERF_LOGS_ENABLED) {
+      const diagnostics = [seasonEvidenceDiagnostics, fallbackDiagnostics];
+      const dbQueriesMs = diagnostics.reduce(
+        (sum, metric) =>
+          sum +
+          metric.media_links_query_ms +
+          metric.cast_photos_query_ms +
+          metric.people_query_ms +
+          metric.bravo_links_query_ms,
+        0
+      );
+      const externalFetchMs = diagnostics.reduce(
+        (sum, metric) => sum + metric.bravo_profile_fetch_ms,
+        0
+      );
+      const externalFetchAttempted = diagnostics.reduce(
+        (sum, metric) => sum + metric.bravo_profiles_attempted,
+        0
+      );
+      const externalFetchResolved = diagnostics.reduce(
+        (sum, metric) => sum + metric.bravo_profiles_resolved,
+        0
+      );
+
+      console.info(
+        "[season_cast_api_timing]",
+        JSON.stringify({
+          show_id: showId,
+          season_number: seasonNum,
+          include_archive_only: includeArchiveOnly,
+          photo_fallback: photoFallbackMode,
+          cast_source: castSource,
+          total_ms: Date.now() - requestStartedAt,
+          repo_call_ms: {
+            season_evidence: seasonEvidenceQueryMs,
+            fallback_cast: fallbackQueryMs,
+          },
+          db_queries_ms: dbQueriesMs,
+          photo_map_stage_ms: dbQueriesMs + externalFetchMs,
+          external_fetch_ms: externalFetchMs,
+          external_fetch_attempted: externalFetchAttempted,
+          external_fetch_resolved: externalFetchResolved,
+          cast_count: cast.length,
+        })
+      );
     }
 
     return NextResponse.json({

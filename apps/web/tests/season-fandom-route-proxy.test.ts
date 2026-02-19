@@ -15,37 +15,32 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
-import { GET } from "@/app/api/admin/trr-api/people/[personId]/fandom/route";
+import { GET } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/fandom/route";
 
-describe("person fandom route", () => {
+describe("season fandom proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
     fetchMock.mockReset();
     requireAdminMock.mockResolvedValue(undefined);
-    getBackendApiUrlMock.mockReturnValue("http://backend/api/v1/admin/person/person-1/fandom");
+    getBackendApiUrlMock.mockReturnValue("http://backend/api/v1/admin/shows/show-1/seasons/1/fandom");
     vi.stubGlobal("fetch", fetchMock);
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role";
   });
 
-  it("forwards showId query param to repository for show-scoped relationship fallback", async () => {
+  it("returns backend season fandom payload", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => ({ fandomData: [{ id: "f1" }], count: 1 }),
+      json: async () => ({ fandomData: [{ id: "sf1" }], count: 1 }),
     });
 
-    const request = new NextRequest(
-      "http://localhost/api/admin/trr-api/people/person-1/fandom?showId=show-123"
-    );
-
+    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/seasons/1/fandom");
     const response = await GET(request, {
-      params: Promise.resolve({ personId: "person-1" }),
+      params: Promise.resolve({ showId: "show-1", seasonNumber: "1" }),
     });
+    const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://backend/api/v1/admin/person/person-1/fandom?showId=show-123",
-      expect.objectContaining({ method: "GET" }),
-    );
+    expect(payload.count).toBe(1);
   });
 });

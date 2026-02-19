@@ -30,6 +30,9 @@ interface CoveredShow {
   id: string;
   trr_show_id: string;
   show_name: string;
+  canonical_slug?: string | null;
+  show_total_episodes?: number | null;
+  poster_url?: string | null;
   created_at: string;
   created_by_firebase_uid: string;
 }
@@ -161,16 +164,6 @@ export default function TrrShowsPage() {
   const [loadingCovered, setLoadingCovered] = useState(true);
   const [addingShowId, setAddingShowId] = useState<string | null>(null);
   const [removingShowId, setRemovingShowId] = useState<string | null>(null);
-  const [coveredShowPosterById, setCoveredShowPosterById] = useState<
-    Record<string, string | null>
-  >({});
-  const [coveredShowCanonicalSlugById, setCoveredShowCanonicalSlugById] = useState<
-    Record<string, string | null>
-  >({});
-  const [coveredShowTotalEpisodesById, setCoveredShowTotalEpisodesById] = useState<
-    Record<string, number | null>
-  >({});
-  const posterLookupRequestedIdsRef = useRef<Set<string>>(new Set());
 
   const fetchWithAuth = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
@@ -192,6 +185,9 @@ export default function TrrShowsPage() {
       setCoveredShows(data.shows ?? []);
       setCoveredShowIds(new Set((data.shows ?? []).map((s: CoveredShow) => s.trr_show_id)));
     } catch (err) {
+      if (err instanceof Error && err.message === "Not authenticated") {
+        return;
+      }
       console.error("Failed to fetch covered shows:", err);
     } finally {
       setLoadingCovered(false);
@@ -200,155 +196,11 @@ export default function TrrShowsPage() {
 
   // Load covered shows on mount
   useEffect(() => {
-    if (hasAccess && userKey) {
-      fetchCoveredShows();
+    if (checking || !user || !hasAccess || !userKey) {
+      return;
     }
-  }, [hasAccess, userKey, fetchCoveredShows]);
-
-  // Fetch latest season poster thumbnails for covered shows (best-effort).
-  useEffect(() => {
-    if (!hasAccess || !userKey) return;
-    if (loadingCovered) return;
-
-    const coveredIds = coveredShows.map((s) => s.trr_show_id);
-    const coveredIdSet = new Set(coveredIds);
-
-    // Keep only currently visible covered-show IDs in the request tracker.
-    for (const trackedId of posterLookupRequestedIdsRef.current) {
-      if (!coveredIdSet.has(trackedId)) {
-        posterLookupRequestedIdsRef.current.delete(trackedId);
-      }
-    }
-
-    const missing = coveredIds.filter((id) => !posterLookupRequestedIdsRef.current.has(id));
-
-    if (missing.length === 0) return;
-
-    for (const id of missing) {
-      posterLookupRequestedIdsRef.current.add(id);
-    }
-
-    // Mark as "in progress" (null) so we don't refetch in a loop.
-    setCoveredShowPosterById((prev) => {
-      const next = { ...prev };
-      for (const id of missing) {
-        next[id] = null;
-      }
-      return next;
-    });
-    setCoveredShowTotalEpisodesById((prev) => {
-      const next = { ...prev };
-      for (const id of missing) {
-        next[id] = null;
-      }
-      return next;
-    });
-
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const queue = [...missing];
-        const concurrency = Math.min(4, queue.length);
-
-        const worker = async () => {
-          while (queue.length > 0) {
-            const trrShowId = queue.shift();
-            if (!trrShowId) return;
-
-            try {
-              const response = await fetchWithAuth(
-                `/api/admin/trr-api/shows/${trrShowId}/seasons?limit=50`,
-              );
-              const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-
-              const seasonsRaw = response.ok ? (data as { seasons?: unknown }).seasons : [];
-              const seasons = Array.isArray(seasonsRaw)
-                ? (seasonsRaw as Array<Record<string, unknown>>)
-                : [];
-
-              const seasonsSorted = seasons
-                .map((season) => ({
-                  season,
-                  seasonNumber: toFiniteNumber((season as Record<string, unknown>).season_number),
-                }))
-                .filter(
-                  (
-                    entry
-                  ): entry is { season: Record<string, unknown>; seasonNumber: number } =>
-                    typeof entry.seasonNumber === "number" && entry.seasonNumber > 0
-                )
-                .sort((a, b) => b.seasonNumber - a.seasonNumber);
-
-              let posterUrl: string | null = null;
-              for (const { season } of seasonsSorted) {
-                posterUrl =
-                  normalizePosterUrl(season.url_original_poster) ||
-                  normalizePosterUrl(season.poster_url) ||
-                  normalizePosterUrl(season.poster_path);
-                if (posterUrl) break;
-              }
-
-              const showResponse = await fetchWithAuth(`/api/admin/trr-api/shows/${trrShowId}`);
-              const showData = (await showResponse.json().catch(() => ({}))) as Record<
-                string,
-                unknown
-              >;
-
-              let totalEpisodes: number | null = null;
-              let canonicalSlug: string | null = null;
-              if (showResponse.ok) {
-                const showRaw = (showData as { show?: Record<string, unknown> }).show;
-                totalEpisodes = toFiniteNumber(showRaw?.show_total_episodes);
-                const canonicalCandidate =
-                  typeof showRaw?.canonical_slug === "string"
-                    ? showRaw.canonical_slug.trim()
-                    : "";
-                const slugCandidate =
-                  typeof showRaw?.slug === "string" ? showRaw.slug.trim() : "";
-                canonicalSlug = canonicalCandidate || slugCandidate || null;
-                if (!posterUrl) {
-                  posterUrl =
-                    normalizePosterUrl(showRaw?.poster_url) ||
-                    normalizePosterUrl(showRaw?.url_original_poster) ||
-                    normalizePosterUrl(showRaw?.poster_path);
-                }
-              }
-
-              if (cancelled) return;
-              if (posterUrl) {
-                setCoveredShowPosterById((prev) => ({ ...prev, [trrShowId]: posterUrl }));
-              }
-              setCoveredShowCanonicalSlugById((prev) => ({
-                ...prev,
-                [trrShowId]: canonicalSlug,
-              }));
-              setCoveredShowTotalEpisodesById((prev) => ({
-                ...prev,
-                [trrShowId]: totalEpisodes,
-              }));
-            } catch {
-              // Leave as null (no poster).
-            }
-          }
-        };
-
-        await Promise.all(Array.from({ length: concurrency }, worker));
-      } catch (err) {
-        console.error("Failed to load covered show posters:", err);
-      }
-    };
-
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    hasAccess,
-    userKey,
-    loadingCovered,
-    coveredShows,
-    fetchWithAuth,
-  ]);
+    fetchCoveredShows();
+  }, [checking, user, hasAccess, userKey, fetchCoveredShows]);
 
   // Add show to covered list
   const addToCoveredShows = useCallback(
@@ -725,8 +577,12 @@ export default function TrrShowsPage() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {coveredShows.map((show) => {
                   const label = getCoveredShowDisplayName(show.show_name);
-                  const posterUrl = coveredShowPosterById[show.trr_show_id] ?? null;
-                  const totalEpisodes = coveredShowTotalEpisodesById[show.trr_show_id] ?? null;
+                  const posterUrl = normalizePosterUrl(show.poster_url);
+                  const totalEpisodes = toFiniteNumber(show.show_total_episodes);
+                  const canonicalSlug =
+                    typeof show.canonical_slug === "string" && show.canonical_slug.trim()
+                      ? show.canonical_slug.trim()
+                      : show.trr_show_id;
                   return (
                     <div
                       key={show.id}
@@ -734,8 +590,7 @@ export default function TrrShowsPage() {
                     >
                       <Link
                         href={buildShowAdminUrl({
-                          showSlug:
-                            coveredShowCanonicalSlugById[show.trr_show_id] || show.trr_show_id,
+                          showSlug: canonicalSlug,
                         }) as "/admin/trr-shows"}
                         className="group flex min-w-0 flex-1 items-start gap-3"
                       >

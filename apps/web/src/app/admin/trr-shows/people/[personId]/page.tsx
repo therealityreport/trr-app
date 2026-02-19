@@ -17,6 +17,10 @@ import {
 } from "@/lib/admin/show-admin-routes";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
+import FandomSyncModal, {
+  type FandomSyncOptions,
+  type FandomSyncPreviewResponse,
+} from "@/components/admin/FandomSyncModal";
 import ReassignImageModal from "@/components/admin/ReassignImageModal";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
@@ -308,6 +312,12 @@ interface TrrCastFandom {
   taglines: Record<string, unknown> | null;
   reunion_seating: Record<string, unknown> | null;
   trivia: Record<string, unknown> | null;
+  dynamic_sections?: unknown[] | null;
+  bio_card?: Record<string, unknown> | null;
+  casting_summary?: string | null;
+  citations?: unknown[] | null;
+  conflicts?: unknown[] | null;
+  source_variants?: Record<string, unknown> | null;
 }
 
 interface BravoPersonTag {
@@ -2026,6 +2036,11 @@ export default function PersonProfilePage() {
   const [photosVisibleCount, setPhotosVisibleCount] = useState(120);
   const [credits, setCredits] = useState<TrrPersonCredit[]>([]);
   const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
+  const [fandomSyncOpen, setFandomSyncOpen] = useState(false);
+  const [fandomSyncPreview, setFandomSyncPreview] = useState<FandomSyncPreviewResponse | null>(null);
+  const [fandomSyncPreviewLoading, setFandomSyncPreviewLoading] = useState(false);
+  const [fandomSyncCommitLoading, setFandomSyncCommitLoading] = useState(false);
+  const [fandomSyncError, setFandomSyncError] = useState<string | null>(null);
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
   const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
   const [bravoContentLoading, setBravoContentLoading] = useState(false);
@@ -2933,6 +2948,73 @@ export default function PersonProfilePage() {
       console.error("Failed to fetch fandom data:", err);
     }
   }, [personId, getAuthHeaders, showIdForApi]);
+
+  const previewSyncByFandom = useCallback(
+    async (options: FandomSyncOptions) => {
+      if (!personId) return;
+      try {
+        setFandomSyncPreviewLoading(true);
+        setFandomSyncError(null);
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/people/${personId}/import-fandom/preview`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(options),
+          }
+        );
+        const data = (await response.json().catch(() => ({}))) as FandomSyncPreviewResponse & {
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(data.error || "Fandom preview failed");
+        }
+        setFandomSyncPreview(data);
+      } catch (err) {
+        setFandomSyncError(err instanceof Error ? err.message : "Fandom preview failed");
+      } finally {
+        setFandomSyncPreviewLoading(false);
+      }
+    },
+    [personId, getAuthHeaders]
+  );
+
+  const commitSyncByFandom = useCallback(
+    async (options: FandomSyncOptions) => {
+      if (!personId) return;
+      try {
+        setFandomSyncCommitLoading(true);
+        setFandomSyncError(null);
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/people/${personId}/import-fandom/commit`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(options),
+          }
+        );
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Fandom save failed");
+        }
+        await fetchFandomData();
+        setFandomSyncOpen(false);
+      } catch (err) {
+        setFandomSyncError(err instanceof Error ? err.message : "Fandom save failed");
+      } finally {
+        setFandomSyncCommitLoading(false);
+      }
+    },
+    [personId, getAuthHeaders, fetchFandomData]
+  );
 
   const fetchBravoContent = useCallback(async () => {
     if (!personId || !showIdForApi) {
@@ -5390,6 +5472,25 @@ export default function PersonProfilePage() {
           {/* Fandom Tab */}
           {activeTab === "fandom" && (
             <div className="space-y-6">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Fandom Sync</p>
+                    <p className="text-sm text-zinc-600">
+                      Preview and save structured Fandom data from allowlisted communities.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFandomSyncOpen(true)}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                  >
+                    Sync by Fandom
+                  </button>
+                </div>
+                {fandomSyncError && <p className="mt-3 text-sm text-red-600">{fandomSyncError}</p>}
+              </div>
+
               {fandomData.length === 0 ? (
                 <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                   <p className="text-sm text-zinc-500">
@@ -5426,6 +5527,13 @@ export default function PersonProfilePage() {
                       <div className="mb-6">
                         <h4 className="text-sm font-semibold text-zinc-700 mb-2">Summary</h4>
                         <p className="text-sm text-zinc-600 leading-relaxed">{fandom.summary}</p>
+                      </div>
+                    )}
+
+                    {fandom.casting_summary && (
+                      <div className="mb-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                        <h4 className="text-sm font-semibold text-zinc-700 mb-2">Casting</h4>
+                        <p className="text-sm text-zinc-700 leading-relaxed">{fandom.casting_summary}</p>
                       </div>
                     )}
 
@@ -5484,6 +5592,39 @@ export default function PersonProfilePage() {
                     {/* Reunion Seating */}
                     {fandom.reunion_seating && Object.keys(fandom.reunion_seating).length > 0 && (
                       <FandomReunionSeating seating={fandom.reunion_seating} />
+                    )}
+
+                    {fandom.bio_card && (
+                      <div className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                        <h4 className="text-sm font-semibold text-zinc-700 mb-2">Bio Card</h4>
+                        <pre className="overflow-auto text-xs text-zinc-700">{JSON.stringify(fandom.bio_card, null, 2)}</pre>
+                      </div>
+                    )}
+
+                    {Array.isArray(fandom.dynamic_sections) && fandom.dynamic_sections.length > 0 && (
+                      <div className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                        <h4 className="text-sm font-semibold text-zinc-700 mb-2">Dynamic Sections</h4>
+                        <pre className="overflow-auto text-xs text-zinc-700">
+                          {JSON.stringify(fandom.dynamic_sections, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+
+                    {(Array.isArray(fandom.citations) || Array.isArray(fandom.conflicts)) && (
+                      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                        {Array.isArray(fandom.citations) && (
+                          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                            <h4 className="text-sm font-semibold text-zinc-700 mb-2">Citations</h4>
+                            <pre className="overflow-auto text-xs text-zinc-700">{JSON.stringify(fandom.citations, null, 2)}</pre>
+                          </div>
+                        )}
+                        {Array.isArray(fandom.conflicts) && (
+                          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                            <h4 className="text-sm font-semibold text-zinc-700 mb-2">Conflicts</h4>
+                            <pre className="overflow-auto text-xs text-zinc-700">{JSON.stringify(fandom.conflicts, null, 2)}</pre>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {/* Scraped timestamp */}
@@ -5606,6 +5747,17 @@ export default function PersonProfilePage() {
           unknownTextCount={isTextFilterActive ? unknownTextCount : undefined}
           onDetectTextForVisible={isTextFilterActive ? detectTextOverlayForUnknown : undefined}
           textOverlayDetectError={textOverlayDetectError}
+        />
+
+        <FandomSyncModal
+          isOpen={fandomSyncOpen}
+          onClose={() => setFandomSyncOpen(false)}
+          onPreview={previewSyncByFandom}
+          onCommit={commitSyncByFandom}
+          previewData={fandomSyncPreview}
+          previewLoading={fandomSyncPreviewLoading}
+          commitLoading={fandomSyncCommitLoading}
+          entityLabel={person?.full_name ?? "Person"}
         />
       </div>
     </ClientOnly>
