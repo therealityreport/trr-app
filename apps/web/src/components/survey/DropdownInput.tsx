@@ -26,9 +26,7 @@ export default function DropdownInput({
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       if (disabled) return;
       const selectedValue = event.target.value;
-      if (selectedValue) {
-        onChange(selectedValue);
-      }
+      onChange(selectedValue);
     },
     [disabled, onChange]
   );
@@ -55,7 +53,7 @@ export default function DropdownInput({
           paddingRight: "44px",
         }}
       >
-        <option value="" disabled>
+        <option value="">
           {placeholder}
         </option>
         {sortedOptions.map((option) => (

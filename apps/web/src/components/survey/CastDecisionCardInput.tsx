@@ -477,10 +477,13 @@ export default function CastDecisionCardInput({
   const handleChoiceSelect = React.useCallback(
     (rowId: string, choiceKey: string) => {
       if (disabled) return;
-      onChange({
-        ...(value ?? {}),
-        [rowId]: choiceKey,
-      });
+      const nextValue = { ...(value ?? {}) };
+      if (nextValue[rowId] === choiceKey) {
+        delete nextValue[rowId];
+      } else {
+        nextValue[rowId] = choiceKey;
+      }
+      onChange(nextValue);
     },
     [disabled, onChange, value],
   );

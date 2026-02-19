@@ -3074,3 +3074,38 @@ Continuation (same session, 2026-02-19) — reprocess images stream proxy error 
 - Validation:
   - `pnpm -C apps/web run lint` (fails due existing ESLint config circular-structure error in current branch)
   - `pnpm -C apps/web exec tsc --noEmit` (pass)
+
+Continuation (same session, 2026-02-19) — RHOSLC Google News sync + unified News tab validation:
+- Files (already present on current branch; validated in-session):
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/google-news/sync/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/news/route.ts`
+  - `apps/web/tests/show-google-news-sync-proxy-route.test.ts`
+  - `apps/web/tests/show-news-proxy-route.test.ts`
+  - `apps/web/tests/show-news-tab-google-wiring.test.ts`
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/show-news-tab-google-wiring.test.ts tests/show-google-news-sync-proxy-route.test.ts tests/show-news-proxy-route.test.ts tests/show-bravo-videos-proxy-route.test.ts` (`5 passed`)
+  - `pnpm -C apps/web exec eslint ...` (fails due existing ESLint circular-structure config error in this branch)
+  - `pnpm -C apps/web exec tsc --noEmit` (fails due existing tracked merge-conflict markers in unrelated files, e.g. `src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx` and `src/lib/admin/cast-episode-scope.ts`)
+
+Continuation (same session, 2026-02-19) — CI lint unblock + survey input test batch:
+- Files:
+  - `apps/web/eslint.config.mjs`
+  - `apps/web/src/components/survey/CastDecisionCardInput.tsx`
+  - `apps/web/src/components/survey/DropdownInput.tsx`
+  - `apps/web/src/components/survey/MatrixLikertInput.tsx`
+  - `apps/web/src/components/survey/NormalizedSurveyPlay.tsx`
+  - `apps/web/src/components/survey/SingleSelectInput.tsx`
+  - `apps/web/src/components/survey/WhoseSideInput.tsx`
+  - `apps/web/tests/matrix-likert-input.test.tsx`
+  - `apps/web/tests/three-choice-slider-input.test.tsx`
+  - `apps/web/tests/normalized-survey-play-continue.test.tsx`
+  - `apps/web/tests/single-select-input.test.tsx`
+- Changes:
+  - Replaced `FlatCompat`-based ESLint setup with Next.js native flat config imports to avoid ESLint 9 circular-config crash in CI.
+  - Added explicit overrides for strict `react-hooks/*` compiler rules to preserve existing lint contract for this branch.
+  - Included pending survey input/play refinements and associated regression tests.
+- Validation:
+  - `pnpm -C apps/web run lint` (pass; warnings only)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx tests/normalized-survey-play-continue.test.tsx tests/single-select-input.test.tsx` (`16 passed`)

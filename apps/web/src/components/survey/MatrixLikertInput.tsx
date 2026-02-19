@@ -521,7 +521,13 @@ export default function MatrixLikertInput({
   const handleCellSelect = React.useCallback(
     (rowId: string, optionKey: string) => {
       if (disabled) return;
-      const nextValue = { ...(value ?? {}), [rowId]: optionKey };
+      const currentValue = value?.[rowId];
+      const nextValue = { ...(value ?? {}) };
+      if (currentValue === optionKey) {
+        delete nextValue[rowId];
+      } else {
+        nextValue[rowId] = optionKey;
+      }
       onChange(nextValue);
     },
     [disabled, onChange, value],

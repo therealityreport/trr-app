@@ -238,9 +238,9 @@ export default function WhoseSideInput({
   const handleSelect = React.useCallback(
     (optionKey: string) => {
       if (disabled) return;
-      onChange(optionKey);
+      onChange(value === optionKey ? "" : optionKey);
     },
-    [disabled, onChange]
+    [disabled, onChange, value]
   );
 
   const getImagePath = (option: QuestionOption): string | undefined => {
