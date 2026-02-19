@@ -4,6 +4,7 @@ import {
   fetchSeasonBackendJson,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
+import { isValidPositiveIntegerString, isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!showId || !runId) {
       return NextResponse.json(
         { error: "showId and runId are required", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    if (!isValidUuid(showId)) {
+      return NextResponse.json(
+        { error: "showId must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    if (!isValidPositiveIntegerString(seasonNumber)) {
+      return NextResponse.json(
+        { error: "seasonNumber must be a valid positive integer", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    if (!isValidUuid(runId)) {
+      return NextResponse.json(
+        { error: "runId must be a valid UUID", code: "BAD_REQUEST", retryable: false },
         { status: 400 },
       );
     }

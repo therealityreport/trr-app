@@ -342,7 +342,6 @@ export default function AdminNetworksPage() {
       setSavingOverrideKey(mapKey);
       setSyncError(null);
       try {
-        const headers = await getAuthHeaders();
         const payload = {
           entity_type: item.type,
           entity_key: normalizeEntityKey(item.name),
@@ -355,11 +354,10 @@ export default function AdminNetworksPage() {
           notes: draft.notes || null,
           is_active: true,
         };
-        const response = await fetch("/api/admin/networks-streaming/overrides", {
+        const response = await fetchWithAuth("/api/admin/networks-streaming/overrides", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...headers,
           },
           body: JSON.stringify(payload),
         });
@@ -375,7 +373,7 @@ export default function AdminNetworksPage() {
         setSavingOverrideKey(null);
       }
     },
-    [draftFor, getAuthHeaders, loadOverrides],
+    [draftFor, fetchWithAuth, loadOverrides],
   );
 
   const onExportUnresolvedCsv = useCallback(() => {

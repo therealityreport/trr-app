@@ -23,7 +23,8 @@ const parseSortModes = (input: string | null): RedditListingSort[] => {
     .split(",")
     .map((value) => value.trim().toLowerCase())
     .filter((value): value is RedditListingSort => SORTS.includes(value as RedditListingSort));
-  return values.length > 0 ? values : SORTS;
+  const deduped = [...new Set(values)];
+  return deduped.length > 0 ? deduped : SORTS;
 };
 
 const parseLimit = (value: string | null): number => {

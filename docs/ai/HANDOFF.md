@@ -3675,3 +3675,40 @@ Continuation (same session, 2026-02-19) — Instagram metadata UX + period leade
 - Validation:
   - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'tests/season-social-analytics-section.test.tsx' 'tests/week-social-thumbnails.test.tsx'` (pass)
   - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/week-social-thumbnails.test.tsx` (`25 passed`; existing non-blocking React `act(...)` warnings from prior async polling tests)
+
+Continuation (same session, 2026-02-19) — social/reddit hardening pass (20 additional fixes request):
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/export/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/runs/[runId]/cancel/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/threads/[threadId]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/threads/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/bravo-content/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/creator-content/page.tsx`
+- Changes:
+  - Hardened season-social proxy routes with deterministic identifier/path validation (`showId` UUID, `seasonNumber` positive int, `weekIndex` non-negative int, `runId` UUID where applicable).
+  - Added post detail route guards for allowed social platform enum and safe `sourceId` format.
+  - Added stricter `PUT /social/targets` payload shape validation before backend passthrough.
+  - Hardened Reddit thread detail route:
+    - UUID validation for `threadId`.
+    - UUID validation for `community_id` and `trr_season_id` in PATCH.
+    - Season ownership enforcement when reassigning/setting `trr_season_id`.
+  - Hardened Reddit thread create route with `trr_season_id` ownership enforcement against selected community show.
+  - Prevented silent cross-community thread reassignment via upsert conflict path:
+    - Upsert now only updates on matching `community_id`.
+    - Conflicts across communities now return explicit conflict error path.
+  - Deduped discovery sort modes in community discovery route to avoid duplicate fetches and unnecessary Reddit rate pressure.
+  - Replaced unauthorized `return null` fallbacks on social admin pages with explicit access-required UI blocks.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with existing warnings)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-threads-route.test.ts tests/social-admin-proxy.test.ts tests/reddit-discovery-service.test.ts` (`10 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` failed on unrelated pre-existing error in `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/scrape-images/page.tsx:995` (`Cannot find name 'getAuthHeaders'`).

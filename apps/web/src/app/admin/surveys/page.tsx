@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
@@ -33,6 +33,11 @@ export default function AdminSurveysPage() {
   const [surveys, setSurveys] = useState<SurveyConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const preferredUserRef = useRef(user);
+
+  useEffect(() => {
+    preferredUserRef.current = user;
+  }, [user]);
 
   const fetchSurveys = useCallback(async () => {
     if (!userKey) return;
@@ -46,7 +51,7 @@ export default function AdminSurveysPage() {
           "Content-Type": "application/json",
         },
       }, {
-        preferredUser: user,
+        preferredUser: preferredUserRef.current,
       });
 
       if (!response.ok) {
@@ -62,7 +67,7 @@ export default function AdminSurveysPage() {
     } finally {
       setLoading(false);
     }
-  }, [user, userKey]);
+  }, [userKey]);
 
   useEffect(() => {
     if (hasAccess && userKey) {

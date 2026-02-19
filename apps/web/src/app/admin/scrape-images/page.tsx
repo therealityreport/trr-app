@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
-import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
 import {
@@ -183,6 +183,14 @@ export default function ScrapeImagesPage() {
   const fetchWithAuth = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
       fetchAdminWithAuth(input, init, {
+        preferredUser: user,
+      }),
+    [user],
+  );
+
+  const getAuthHeaders = useCallback(
+    () =>
+      getClientAuthHeaders({
         preferredUser: user,
       }),
     [user],

@@ -6,6 +6,7 @@ import {
   getRedditCommunityById,
   listRedditThreads,
 } from "@/lib/server/admin/reddit-sources-repository";
+import { getSeasonById } from "@/lib/server/trr-api/trr-shows-repository";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -165,6 +166,15 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    if (typeof body.trr_season_id === "string") {
+      const season = await getSeasonById(body.trr_season_id);
+      if (!season || season.show_id !== community.trr_show_id) {
+        return NextResponse.json(
+          { error: "trr_season_id must belong to trr_show_id" },
+          { status: 400 },
+        );
+      }
+    }
 
     let normalizedPermalink: string | null = null;
     if (typeof body.permalink === "string") {
@@ -195,8 +205,13 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("[api] Failed to create reddit thread", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    const status = message === "unauthorized"
+      ? 401
+      : message === "forbidden"
+        ? 403
+        : message === "Thread already exists in another community for this show"
+          ? 409
+          : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

@@ -496,7 +496,7 @@ export default function ShowBrandEditor({
     } finally {
       setShowMediaLoading(false);
     }
-  }, [getAuthHeaders, trrShowId]);
+  }, [fetchWithAuth, getAuthHeaders, trrShowId]);
 
   const fetchBrand = useCallback(async () => {
     setLoading(true);
@@ -550,7 +550,7 @@ export default function ShowBrandEditor({
     } finally {
       setLoading(false);
     }
-  }, [getAuthHeaders, trrShowId]);
+  }, [fetchWithAuth, getAuthHeaders, trrShowId]);
 
   useEffect(() => {
     fetchBrand();

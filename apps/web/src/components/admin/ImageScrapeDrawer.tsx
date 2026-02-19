@@ -319,7 +319,7 @@ export function ImageScrapeDrawer({
     } catch {
       return null;
     }
-  }, [entityContext, getAuthHeaders, resolveTargetSeasonNumber]);
+  }, [entityContext, fetchWithAuth, getAuthHeaders, resolveTargetSeasonNumber]);
 
   const loadCastOptions = useCallback(async () => {
     if (entityContext.type === "person") {
@@ -461,7 +461,7 @@ export function ImageScrapeDrawer({
     } finally {
       setCastOptionsLoading(false);
     }
-  }, [entityContext, getAuthHeaders, isFriendRole, resolveTargetSeasonId, resolveTargetSeasonNumber]);
+  }, [entityContext, fetchWithAuth, getAuthHeaders, isFriendRole, resolveTargetSeasonId, resolveTargetSeasonNumber]);
 
   const autoFillCastFromContext = useCallback(
     (imageIds: Iterable<string>) => {
@@ -631,7 +631,7 @@ export function ImageScrapeDrawer({
         );
       }
     },
-    [entityContext, getAuthHeaders, selectedShowSeason, url]
+    [entityContext, fetchWithAuth, getAuthHeaders, selectedShowSeason, url]
   );
 
   // Link all unlinked duplicates

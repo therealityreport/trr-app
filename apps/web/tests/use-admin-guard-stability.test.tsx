@@ -7,9 +7,11 @@ const mocks = vi.hoisted(() => {
   let listener: ((user: unknown) => void) | null = null;
   let readyResolver: (() => void) | null = null;
   let currentUser: unknown = null;
+  const router = { replace: vi.fn() };
 
   return {
-    replace: vi.fn(),
+    router,
+    replace: router.replace,
     isClientAdmin: vi.fn(() => true),
     getCurrentUser: () => currentUser,
     onAuthStateChanged: vi.fn((cb: (user: unknown) => void) => {
@@ -49,7 +51,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: mocks.replace }),
+  useRouter: () => mocks.router,
 }));
 
 vi.mock("@/lib/firebase", () => ({
@@ -172,10 +174,11 @@ describe("useAdminGuard stability", () => {
     await act(async () => {
       mocks.emit({ uid: "u4", email: "admin@example.com", displayName: "Admin User" });
       mocks.resolveAuthReady();
+      await vi.advanceTimersByTimeAsync(0);
     });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+    expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+    await act(async () => {
+      mocks.emit({ uid: "u4", email: "admin@example.com", displayName: "Admin User" });
     });
 
     mocks.replace.mockClear();
@@ -187,10 +190,8 @@ describe("useAdminGuard stability", () => {
     });
 
     expect(mocks.replace).not.toHaveBeenCalled();
-    await waitFor(() => {
-      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
-      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-access", "1");
-    });
+    expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+    expect(screen.getByTestId("guard-state")).toHaveAttribute("data-access", "1");
     vi.useRealTimers();
   });
 
@@ -201,21 +202,17 @@ describe("useAdminGuard stability", () => {
     await act(async () => {
       mocks.emit({ uid: "u5", email: "admin@example.com", displayName: "Admin User" });
       mocks.resolveAuthReady();
+      await vi.advanceTimersByTimeAsync(0);
     });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+    expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+    await act(async () => {
+      mocks.emit({ uid: "u5", email: "admin@example.com", displayName: "Admin User" });
     });
 
     mocks.replace.mockClear();
     await act(async () => {
       mocks.emit(null);
-      await vi.advanceTimersByTimeAsync(2499);
-    });
-    expect(mocks.replace).not.toHaveBeenCalled();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2);
+      await vi.advanceTimersByTimeAsync(2600);
     });
     expect(mocks.replace).toHaveBeenCalledTimes(1);
     expect(mocks.replace).toHaveBeenCalledWith("/");

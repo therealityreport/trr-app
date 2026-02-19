@@ -2,7 +2,10 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import AdminSurveysPage from "@/app/admin/surveys/page";
-import { auth } from "@/lib/firebase";
+
+const authMocks = vi.hoisted(() => ({
+  fetchAdminWithAuth: vi.fn(),
+}));
 
 const guardState = {
   user: { uid: "u1", email: "admin@example.com", displayName: "Admin User" },
@@ -18,6 +21,11 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/ClientOnly", () => ({
   __esModule: true,
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("@/lib/admin/client-auth", () => ({
+  fetchAdminWithAuth: (...args: unknown[]) =>
+    (authMocks.fetchAdminWithAuth as (...inner: unknown[]) => unknown)(...args),
 }));
 
 vi.mock("@/lib/admin/useAdminGuard", () => ({
@@ -41,25 +49,22 @@ describe("Admin surveys fetch stability", () => {
     guardState.userKey = "u1|admin@example.com|Admin User";
     guardState.checking = false;
     guardState.hasAccess = true;
-    (auth as unknown as { currentUser?: { getIdToken: () => Promise<string> } }).currentUser = {
-      getIdToken: vi.fn().mockResolvedValue("test-token"),
-    };
+    authMocks.fetchAdminWithAuth.mockReset();
   });
 
   it("does not refetch when user object identity changes but userKey is unchanged", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    authMocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/admin/surveys?full=true")) {
         return jsonResponse({ items: [] });
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
-    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
     const { rerender } = render(<AdminSurveysPage />);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(authMocks.fetchAdminWithAuth).toHaveBeenCalledTimes(1);
     });
 
     // Simulate equivalent auth re-emission with a new user object reference.
@@ -67,6 +72,6 @@ describe("Admin surveys fetch stability", () => {
     rerender(<AdminSurveysPage />);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(authMocks.fetchAdminWithAuth).toHaveBeenCalledTimes(1);
   });
 });

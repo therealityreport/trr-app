@@ -7,8 +7,8 @@ describe("show news tab google wiring", () => {
     const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{showId\}\/google-news\/sync/);
-    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{showId\}\/news\?/);
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{(?:showId|requestShowId)\}\/google-news\/sync/);
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{(?:showId|requestShowId)\}\/news\?/);
     expect(contents).toMatch(/setNewsSort\("trending"\)/);
     expect(contents).toMatch(/setNewsSort\("latest"\)/);
     expect(contents).toMatch(/setNewsSourceFilter/);
@@ -27,4 +27,3 @@ describe("show news tab google wiring", () => {
     expect(contents).toMatch(/season_number:\s*0/);
   });
 });
-

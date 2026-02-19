@@ -7,6 +7,8 @@ import {
   getRedditThreadById,
   updateRedditThread,
 } from "@/lib/server/admin/reddit-sources-repository";
+import { getSeasonById } from "@/lib/server/trr-api/trr-shows-repository";
+import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!threadId) {
       return NextResponse.json({ error: "threadId is required" }, { status: 400 });
     }
+    if (!isValidUuid(threadId)) {
+      return NextResponse.json({ error: "threadId must be a valid UUID" }, { status: 400 });
+    }
 
     const thread = await getRedditThreadById(threadId);
     if (!thread) {
@@ -70,6 +75,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (!threadId) {
       return NextResponse.json({ error: "threadId is required" }, { status: 400 });
     }
+    if (!isValidUuid(threadId)) {
+      return NextResponse.json({ error: "threadId must be a valid UUID" }, { status: 400 });
+    }
 
     const body = (await request.json()) as {
       community_id?: unknown;
@@ -84,6 +92,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       notes?: unknown;
     };
 
+    if (body.community_id !== undefined && typeof body.community_id !== "string") {
+      return NextResponse.json({ error: "community_id must be a valid UUID" }, { status: 400 });
+    }
+    if (typeof body.community_id === "string" && !isValidUuid(body.community_id)) {
+      return NextResponse.json({ error: "community_id must be a valid UUID" }, { status: 400 });
+    }
+    if (
+      body.trr_season_id !== undefined &&
+      body.trr_season_id !== null &&
+      (typeof body.trr_season_id !== "string" || !isValidUuid(body.trr_season_id))
+    ) {
+      return NextResponse.json({ error: "trr_season_id must be a valid UUID" }, { status: 400 });
+    }
     if (body.url !== undefined && typeof body.url !== "string") {
       return NextResponse.json({ error: "url must be a string" }, { status: 400 });
     }
@@ -106,15 +127,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Enforce show consistency: if reassigning community, verify it belongs to the same show
+    const existingThread = await getRedditThreadById(threadId);
+    if (!existingThread) {
+      return NextResponse.json({ error: "Thread not found" }, { status: 404 });
+    }
+
+    // Enforce show consistency: if reassigning community, verify it belongs to the same show.
     const newCommunityId = typeof body.community_id === "string" ? body.community_id : undefined;
     let syncedShowId: string | undefined;
     let syncedShowName: string | undefined;
     if (newCommunityId) {
-      const existingThread = await getRedditThreadById(threadId);
-      if (!existingThread) {
-        return NextResponse.json({ error: "Thread not found" }, { status: 404 });
-      }
       const targetCommunity = await getRedditCommunityById(newCommunityId);
       if (!targetCommunity) {
         return NextResponse.json({ error: "Target community not found" }, { status: 404 });
@@ -128,17 +150,27 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       syncedShowId = targetCommunity.trr_show_id;
       syncedShowName = targetCommunity.trr_show_name;
     }
+    const nextSeasonId = body.trr_season_id === null
+      ? null
+      : typeof body.trr_season_id === "string"
+        ? body.trr_season_id
+        : undefined;
+    if (typeof nextSeasonId === "string") {
+      const season = await getSeasonById(nextSeasonId);
+      const nextShowId = syncedShowId ?? existingThread.trr_show_id;
+      if (!season || season.show_id !== nextShowId) {
+        return NextResponse.json(
+          { error: "trr_season_id must belong to the thread show" },
+          { status: 400 },
+        );
+      }
+    }
 
     const thread = await updateRedditThread(authContext, threadId, {
       communityId: newCommunityId,
       trrShowId: syncedShowId,
       trrShowName: syncedShowName,
-      trrSeasonId:
-        body.trr_season_id === null
-          ? null
-          : typeof body.trr_season_id === "string"
-            ? body.trr_season_id
-            : undefined,
+      trrSeasonId: nextSeasonId,
       title: typeof body.title === "string" ? body.title.trim() : undefined,
       url: typeof body.url === "string" ? toValidRedditUrl(body.url) : undefined,
       permalink: normalizedPermalink,
@@ -177,6 +209,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const { threadId } = await params;
     if (!threadId) {
       return NextResponse.json({ error: "threadId is required" }, { status: 400 });
+    }
+    if (!isValidUuid(threadId)) {
+      return NextResponse.json({ error: "threadId must be a valid UUID" }, { status: 400 });
     }
 
     const deleted = await deleteRedditThread(authContext, threadId);

@@ -437,6 +437,7 @@ export async function createRedditThread(
         num_comments = EXCLUDED.num_comments,
         posted_at = EXCLUDED.posted_at,
         notes = EXCLUDED.notes
+      WHERE ${THREADS_TABLE}.community_id = EXCLUDED.community_id
       RETURNING *`,
       [
         input.communityId,
@@ -455,7 +456,23 @@ export async function createRedditThread(
         authContext.firebaseUid,
       ],
     );
-    return result.rows[0];
+    const row = result.rows[0];
+    if (row) {
+      return row;
+    }
+
+    const conflictLookup = await client.query<Pick<RedditThreadRow, "id">>(
+      `SELECT id
+         FROM ${THREADS_TABLE}
+        WHERE trr_show_id = $1
+          AND reddit_post_id = $2
+        LIMIT 1`,
+      [input.trrShowId, input.redditPostId],
+    );
+    if (conflictLookup.rowCount && conflictLookup.rowCount > 0) {
+      throw new Error("Thread already exists in another community for this show");
+    }
+    throw new Error("Failed to create reddit thread");
   });
 }
 
