@@ -4,6 +4,36 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-19)
 
+- February 19, 2026: Implemented admin multi-tab auth stabilization across shared auth primitives, guard redirect behavior, and admin surfaces.
+  - Files:
+    - `apps/web/src/lib/admin/client-auth.ts`
+    - `apps/web/src/lib/admin/useAdminGuard.ts`
+    - `apps/web/src/app/admin/networks/page.tsx`
+    - `apps/web/src/app/admin/surveys/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/src/components/admin/ImageScrapeDrawer.tsx`
+    - `apps/web/src/components/admin/ShowBrandEditor.tsx`
+    - `apps/web/src/components/admin/SurveyQuestionsEditor.tsx`
+    - `apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/admin-client-auth.test.ts` (new)
+    - `apps/web/tests/use-admin-guard-stability.test.tsx`
+    - `apps/web/tests/admin-networks-page-auth.test.tsx`
+    - `apps/web/tests/admin-surveys-userkey-fetch-stability.test.tsx`
+  - Changes:
+    - Added resilient client auth token retrieval with retry/backoff and preferred-user support.
+    - Added shared authenticated admin fetch wrapper behavior for retry-on-`401/403` plus forced-refresh retry path.
+    - Stabilized `useAdminGuard` against transient post-auth null emissions via 2500ms grace window and single redirect behavior.
+    - Removed direct `auth.currentUser?.getIdToken()` usage in targeted admin routes/components and routed through shared auth helpers.
+    - Preserved dev admin bypass behavior for TRR show/season/person admin flows.
+    - Stabilized surveys page fetch identity behavior by keying on `userKey` and storing preferred user in a ref (prevents unnecessary refetches on equivalent auth emissions).
+    - Updated admin tests for recovery-first auth behavior and added dedicated helper coverage.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/admin-client-auth.test.ts tests/use-admin-guard-stability.test.tsx tests/admin-networks-page-auth.test.tsx tests/admin-surveys-userkey-fetch-stability.test.tsx` (`15 passed`)
+    - `pnpm -C apps/web run lint` (pass; warnings only, no errors)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+    - `pnpm -C apps/web run test:ci` (`115 files, 434 tests passed`)
+
 - February 19, 2026: Fixed show gallery default media sections, batch-job target scoping, and profile-picture false positives.
   - Files:
     - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
