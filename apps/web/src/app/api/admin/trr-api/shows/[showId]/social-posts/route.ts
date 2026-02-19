@@ -7,6 +7,8 @@ import {
   createPost,
   type SocialPlatform,
 } from "@/lib/server/admin/social-posts-repository";
+import { getSeasonById } from "@/lib/server/trr-api/trr-shows-repository";
+import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -40,9 +42,32 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         { status: 400 }
       );
     }
+    if (!isValidUuid(showId)) {
+      return NextResponse.json(
+        { error: "showId must be a valid UUID" },
+        { status: 400 }
+      );
+    }
 
     const { searchParams } = new URL(request.url);
     const trrSeasonId = searchParams.get("trr_season_id");
+    if (trrSeasonId && !isValidUuid(trrSeasonId)) {
+      return NextResponse.json(
+        { error: "trr_season_id must be a valid UUID" },
+        { status: 400 }
+      );
+    }
+
+    if (trrSeasonId) {
+      const season = await getSeasonById(trrSeasonId);
+      if (!season || season.show_id !== showId) {
+        return NextResponse.json(
+          { error: "trr_season_id must belong to the showId route" },
+          { status: 400 }
+        );
+      }
+    }
+
     const posts = trrSeasonId ? await getPostsBySeasonId(trrSeasonId) : await getPostsByShowId(showId);
 
     return NextResponse.json({ posts });
@@ -80,6 +105,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         { status: 400 }
       );
     }
+    if (!isValidUuid(showId)) {
+      return NextResponse.json(
+        { error: "showId must be a valid UUID" },
+        { status: 400 }
+      );
+    }
 
     const body = await request.json();
     const { platform, url, trr_season_id, title, notes } = body;
@@ -107,6 +138,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         { error: "url must be a valid URL" },
         { status: 400 }
       );
+    }
+
+    if (trr_season_id !== undefined && trr_season_id !== null) {
+      if (typeof trr_season_id !== "string" || !isValidUuid(trr_season_id)) {
+        return NextResponse.json(
+          { error: "trr_season_id must be a valid UUID when provided" },
+          { status: 400 }
+        );
+      }
+      const season = await getSeasonById(trr_season_id);
+      if (!season || season.show_id !== showId) {
+        return NextResponse.json(
+          { error: "trr_season_id must belong to the showId route" },
+          { status: 400 }
+        );
+      }
     }
 
     const post = await createPost(authContext, {

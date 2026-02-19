@@ -71,4 +71,27 @@ describe("person refresh-images stream proxy route", () => {
     expect(payload).toContain("event: progress");
     expect(payload).toContain("\"sync_imdb\"");
   });
+
+  it("retries once on transient backend fetch failure", async () => {
+    const transientError = new Error("fetch failed");
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(transientError)
+      .mockResolvedValueOnce(
+        new Response("event: progress\ndata: {\"stage\":\"sync_tmdb\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest(), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(payload).toContain("\"sync_tmdb\"");
+  });
 });

@@ -108,4 +108,47 @@ describe("isQuestionComplete", () => {
     expect(isQuestionComplete(question, { a: { x: 0, y: 0 } })).toBe(false);
     expect(isQuestionComplete(question, { a: { x: 0, y: 0 }, b: { x: 5, y: -5 } })).toBe(true);
   });
+
+  it("respects minSelections for multi-select-choice", () => {
+    const question = {
+      id: "q-multi",
+      survey_id: "s1",
+      question_key: "multi",
+      question_text: "Pick two",
+      question_type: "multi_choice",
+      display_order: 0,
+      is_required: true,
+      config: {
+        uiVariant: "multi-select-choice",
+        minSelections: 2,
+      },
+      created_at: "",
+      updated_at: "",
+      options: [],
+    } as any;
+
+    expect(isQuestionComplete(question, ["a"])).toBe(false);
+    expect(isQuestionComplete(question, ["a", "b"])).toBe(true);
+  });
+
+  it("defaults cast-multi-select to requiring two selections", () => {
+    const question = {
+      id: "q-cast-multi",
+      survey_id: "s1",
+      question_key: "cast_multi",
+      question_text: "Which feud did you enjoy most?",
+      question_type: "multi_choice",
+      display_order: 0,
+      is_required: true,
+      config: {
+        uiVariant: "cast-multi-select",
+      },
+      created_at: "",
+      updated_at: "",
+      options: [],
+    } as any;
+
+    expect(isQuestionComplete(question, ["lisa"])).toBe(false);
+    expect(isQuestionComplete(question, ["lisa", "meredith"])).toBe(true);
+  });
 });

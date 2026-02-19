@@ -1,4 +1,8 @@
 import type { TrrPersonPhoto, SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  normalizeContentTypeToken,
+  resolveCanonicalContentType,
+} from "@/lib/media/content-type";
 
 export interface PhotoFaceBox {
   index: number;
@@ -23,6 +27,7 @@ export interface PhotoMetadata {
   createdAt?: Date | null;
   addedAt?: Date | null;
   hasTextOverlay?: boolean | null;
+  contentType?: string | null;
   sectionTag?: string | null;
   sectionLabel?: string | null;
   sourceLogo?: string | null;
@@ -605,7 +610,7 @@ export function mapPhotoToMetadata(
       ? metadata.imdb_image_type
       : null;
   const imdbType = imdbTypeRaw ?? (isImdb ? photo.context_type ?? null : null);
-  const sectionTagOut = resolveSectionTag({
+  const inferredSectionTag = resolveSectionTag({
     sourceLower,
     sectionTagRaw,
     sectionLabel,
@@ -613,6 +618,23 @@ export function mapPhotoToMetadata(
     caption: photo.caption,
     imdbType,
   });
+  const explicitContentType = getMetadataString(metadata, "content_type", "contentType");
+  const resolvedContentType = resolveCanonicalContentType({
+    explicitContentType,
+    fandomSectionTag: sectionTagRaw,
+    sectionLabel,
+    imdbType,
+    contextType: photo.context_type,
+    caption: photo.caption,
+  });
+  const inferredContentType = inferredSectionTag
+    ? normalizeContentTypeToken(inferredSectionTag)
+    : null;
+  const contentType =
+    resolvedContentType === "OTHER" && inferredContentType && inferredContentType !== "OTHER"
+      ? inferredContentType
+      : resolvedContentType ?? inferredContentType;
+  const sectionTagOut = contentType ?? inferredSectionTag;
 
   const episodeNumber =
     typeof metadata.episode_number === "number"
@@ -723,6 +745,7 @@ export function mapPhotoToMetadata(
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
     hasTextOverlay: inferHasTextOverlay(metadata),
+    contentType,
     sectionTag: sectionTagOut,
     sectionLabel,
     sourceLogo,
@@ -783,7 +806,7 @@ export function mapSeasonAssetToMetadata(
       ? metadata.imdb_image_type
       : null;
   const imdbType = imdbTypeRaw ?? (isImdb ? asset.context_type ?? null : null);
-  let sectionTagOut = resolveSectionTag({
+  const inferredSectionTag = resolveSectionTag({
     sourceLower,
     sectionTagRaw,
     sectionLabel,
@@ -791,6 +814,24 @@ export function mapSeasonAssetToMetadata(
     caption: asset.caption ?? null,
     imdbType,
   });
+  const explicitContentType = getMetadataString(metadata, "content_type", "contentType");
+  const resolvedContentType = resolveCanonicalContentType({
+    explicitContentType,
+    fandomSectionTag: sectionTagRaw,
+    sectionLabel,
+    imdbType,
+    contextType: asset.context_type ?? null,
+    caption: asset.caption ?? null,
+    kind: asset.kind ?? null,
+  });
+  const inferredContentType = inferredSectionTag
+    ? normalizeContentTypeToken(inferredSectionTag)
+    : null;
+  const contentType =
+    resolvedContentType === "OTHER" && inferredContentType && inferredContentType !== "OTHER"
+      ? inferredContentType
+      : resolvedContentType ?? inferredContentType;
+  let sectionTagOut = contentType ?? inferredSectionTag;
   const kindLower = (asset.kind ?? "").toLowerCase().trim();
   if (kindLower === "promo" && !sectionTagOut) sectionTagOut = "PROMO";
   if (kindLower === "intro" && !sectionTagOut) sectionTagOut = "INTRO";
@@ -958,6 +999,7 @@ export function mapSeasonAssetToMetadata(
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
     hasTextOverlay: inferHasTextOverlay(metadata),
+    contentType,
     sectionTag: sectionTagOut,
     sectionLabel,
     sourceLogo,

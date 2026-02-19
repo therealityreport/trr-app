@@ -6,6 +6,8 @@ import {
   getRedditCommunityById,
   listRedditThreads,
 } from "@/lib/server/admin/reddit-sources-repository";
+import { getSeasonById } from "@/lib/server/trr-api/trr-shows-repository";
+import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +52,15 @@ export async function GET(request: NextRequest) {
     const communityId = request.nextUrl.searchParams.get("community_id") ?? undefined;
     const trrShowId = request.nextUrl.searchParams.get("trr_show_id") ?? undefined;
     const trrSeasonId = request.nextUrl.searchParams.get("trr_season_id");
+    if (communityId && !isValidUuid(communityId)) {
+      return NextResponse.json({ error: "community_id must be a valid UUID" }, { status: 400 });
+    }
+    if (trrShowId && !isValidUuid(trrShowId)) {
+      return NextResponse.json({ error: "trr_show_id must be a valid UUID" }, { status: 400 });
+    }
+    if (trrSeasonId && !isValidUuid(trrSeasonId)) {
+      return NextResponse.json({ error: "trr_season_id must be a valid UUID" }, { status: 400 });
+    }
     const includeGlobalThreadsForSeason = parseBoolean(
       request.nextUrl.searchParams.get("include_global_threads_for_season"),
       true,
@@ -99,11 +110,20 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    if (!isValidUuid(body.community_id)) {
+      return NextResponse.json({ error: "community_id must be a valid UUID" }, { status: 400 });
+    }
     if (!body.trr_show_id || typeof body.trr_show_id !== "string") {
       return NextResponse.json(
         { error: "trr_show_id is required and must be a string" },
         { status: 400 },
       );
+    }
+    if (!isValidUuid(body.trr_show_id)) {
+      return NextResponse.json({ error: "trr_show_id must be a valid UUID" }, { status: 400 });
+    }
+    if (typeof body.trr_season_id === "string" && !isValidUuid(body.trr_season_id)) {
+      return NextResponse.json({ error: "trr_season_id must be a valid UUID" }, { status: 400 });
     }
     if (!body.trr_show_name || typeof body.trr_show_name !== "string") {
       return NextResponse.json(
@@ -146,6 +166,15 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    if (typeof body.trr_season_id === "string") {
+      const season = await getSeasonById(body.trr_season_id);
+      if (!season || season.show_id !== community.trr_show_id) {
+        return NextResponse.json(
+          { error: "trr_season_id must belong to trr_show_id" },
+          { status: 400 },
+        );
+      }
+    }
 
     let normalizedPermalink: string | null = null;
     if (typeof body.permalink === "string") {
@@ -176,8 +205,13 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("[api] Failed to create reddit thread", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    const status = message === "unauthorized"
+      ? 401
+      : message === "forbidden"
+        ? 403
+        : message === "Thread already exists in another community for this show"
+          ? 409
+          : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

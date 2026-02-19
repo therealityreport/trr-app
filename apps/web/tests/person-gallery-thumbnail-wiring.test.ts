@@ -17,7 +17,7 @@ describe("person gallery thumbnail wiring", () => {
     expect(contents).toMatch(/transform:\s*presentation\.zoom/);
   });
 
-  it("prefers hosted url before external original url fallback", () => {
+  it("prefers original/source before hosted fallback", () => {
     const filePath = path.resolve(
       __dirname,
       "../src/app/admin/trr-shows/people/[personId]/page.tsx",
@@ -25,7 +25,7 @@ describe("person gallery thumbnail wiring", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(
-      /getPersonPhotoOriginalUrl[\s\S]*pickNonEmptyUrl\(photo\.hosted_url,\s*photo\.original_url,\s*photo\.url\)/,
+      /getPersonPhotoOriginalUrl[\s\S]*firstImageUrlCandidate\(getPersonPhotoOriginalUrlCandidates\(photo\)\)/,
     );
   });
 });

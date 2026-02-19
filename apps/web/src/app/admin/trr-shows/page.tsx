@@ -4,9 +4,9 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
-import { auth } from "@/lib/firebase";
 
 interface TrrShow {
   id: string;
@@ -142,7 +142,7 @@ const normalizePosterUrl = (value: unknown): string | null => {
 };
 
 export default function TrrShowsPage() {
-  const { user, checking, hasAccess } = useAdminGuard();
+  const { user, userKey, checking, hasAccess } = useAdminGuard();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -172,18 +172,18 @@ export default function TrrShowsPage() {
   >({});
   const posterLookupRequestedIdsRef = useRef<Set<string>>(new Set());
 
-  // Get auth headers helper
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      fetchAdminWithAuth(input, init, {
+        preferredUser: user,
+      }),
+    [user],
+  );
 
   // Fetch covered shows
   const fetchCoveredShows = useCallback(async () => {
     try {
-      const headers = await getAuthHeaders();
-      const response = await fetch("/api/admin/covered-shows", { headers });
+      const response = await fetchWithAuth("/api/admin/covered-shows");
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || "Failed to fetch covered shows");
@@ -196,18 +196,18 @@ export default function TrrShowsPage() {
     } finally {
       setLoadingCovered(false);
     }
-  }, [getAuthHeaders]);
+  }, [fetchWithAuth]);
 
   // Load covered shows on mount
   useEffect(() => {
-    if (hasAccess && user) {
+    if (hasAccess && userKey) {
       fetchCoveredShows();
     }
-  }, [hasAccess, user, fetchCoveredShows]);
+  }, [hasAccess, userKey, fetchCoveredShows]);
 
   // Fetch latest season poster thumbnails for covered shows (best-effort).
   useEffect(() => {
-    if (!hasAccess || !user) return;
+    if (!hasAccess || !userKey) return;
     if (loadingCovered) return;
 
     const coveredIds = coveredShows.map((s) => s.trr_show_id);
@@ -247,7 +247,6 @@ export default function TrrShowsPage() {
     let cancelled = false;
     const run = async () => {
       try {
-        const headers = await getAuthHeaders();
         const queue = [...missing];
         const concurrency = Math.min(4, queue.length);
 
@@ -257,9 +256,8 @@ export default function TrrShowsPage() {
             if (!trrShowId) return;
 
             try {
-              const response = await fetch(
+              const response = await fetchWithAuth(
                 `/api/admin/trr-api/shows/${trrShowId}/seasons?limit=50`,
-                { headers }
               );
               const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
@@ -290,9 +288,7 @@ export default function TrrShowsPage() {
                 if (posterUrl) break;
               }
 
-              const showResponse = await fetch(`/api/admin/trr-api/shows/${trrShowId}`, {
-                headers,
-              });
+              const showResponse = await fetchWithAuth(`/api/admin/trr-api/shows/${trrShowId}`);
               const showData = (await showResponse.json().catch(() => ({}))) as Record<
                 string,
                 unknown
@@ -348,10 +344,10 @@ export default function TrrShowsPage() {
     };
   }, [
     hasAccess,
-    user,
+    userKey,
     loadingCovered,
     coveredShows,
-    getAuthHeaders,
+    fetchWithAuth,
   ]);
 
   // Add show to covered list
@@ -359,10 +355,9 @@ export default function TrrShowsPage() {
     async (show: TrrShow) => {
       try {
         setAddingShowId(show.id);
-        const headers = await getAuthHeaders();
-        const response = await fetch("/api/admin/covered-shows", {
+        const response = await fetchWithAuth("/api/admin/covered-shows", {
           method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             trr_show_id: show.id,
             show_name: show.name,
@@ -382,7 +377,7 @@ export default function TrrShowsPage() {
         setAddingShowId(null);
       }
     },
-    [getAuthHeaders, fetchCoveredShows]
+    [fetchCoveredShows, fetchWithAuth]
   );
 
   // Remove show from covered list
@@ -390,10 +385,8 @@ export default function TrrShowsPage() {
     async (showId: string) => {
       try {
         setRemovingShowId(showId);
-        const headers = await getAuthHeaders();
-        const response = await fetch(`/api/admin/covered-shows/${showId}`, {
+        const response = await fetchWithAuth(`/api/admin/covered-shows/${showId}`, {
           method: "DELETE",
-          headers,
         });
 
         if (!response.ok) {
@@ -409,7 +402,7 @@ export default function TrrShowsPage() {
         setRemovingShowId(null);
       }
     },
-    [getAuthHeaders, fetchCoveredShows]
+    [fetchCoveredShows, fetchWithAuth]
   );
 
   const searchShows = useCallback(async (searchQuery: string) => {
@@ -426,18 +419,8 @@ export default function TrrShowsPage() {
     setSearchError(null);
 
     try {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) {
-        throw new Error("Not authenticated");
-      }
-
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `/api/admin/trr-api/shows?q=${encodeURIComponent(searchQuery)}&limit=20`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
       );
 
       if (!response.ok) {
@@ -456,10 +439,10 @@ export default function TrrShowsPage() {
       if (requestId !== latestSearchRequestRef.current) return;
       setLoading(false);
     }
-  }, []);
+  }, [fetchWithAuth]);
 
   useEffect(() => {
-    if (!hasAccess || !user) return;
+    if (!hasAccess || !userKey) return;
     const q = query.trim();
 
     if (!q) {
@@ -474,7 +457,7 @@ export default function TrrShowsPage() {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [hasAccess, user, query, searchShows]);
+  }, [hasAccess, userKey, query, searchShows]);
 
   const syncFromLists = useCallback(async () => {
     if (syncingLists) return;
@@ -484,10 +467,9 @@ export default function TrrShowsPage() {
     setSyncListsError(null);
 
     try {
-      const headers = await getAuthHeaders();
-      const response = await fetch("/api/admin/trr-api/shows/sync-from-lists", {
+      const response = await fetchWithAuth("/api/admin/trr-api/shows/sync-from-lists", {
         method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
       const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
@@ -522,7 +504,7 @@ export default function TrrShowsPage() {
     } finally {
       setSyncingLists(false);
     }
-  }, [getAuthHeaders, query, searchShows, syncingLists]);
+  }, [fetchWithAuth, query, searchShows, syncingLists]);
 
   if (checking) {
     return (

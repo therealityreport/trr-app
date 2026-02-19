@@ -7,9 +7,9 @@
  * DB Type → UI Variant mappings:
  * - numeric → "numeric-ranking" | "numeric-scale-slider"
  * - ranking → "person-rankings" | "poster-rankings"
- * - single_choice → "two-choice-slider" | "text-multiple-choice" | "image-multiple-choice" | "dropdown"
- * - multi_choice → "multi-select-choice"
- * - likert → "cast-decision-card" | "three-choice-slider" | "agree-likert-scale" | "two-axis-grid"
+ * - single_choice → "two-choice-slider" | "text-multiple-choice" | "rank-text-fields" | "image-multiple-choice" | "poster-single-select" | "cast-single-select" | "dropdown"
+ * - multi_choice → "multi-select-choice" | "cast-multi-select"
+ * - likert → "cast-decision-card" | "three-choice-slider" | "agree-likert-scale" | "two-axis-grid" | "reunion-seating-prediction"
  * - free_text → "text-entry"
  */
 
@@ -28,10 +28,15 @@ export type UiVariant =
   | "cast-decision-card"     // Cast decision cards (Keep/Fire/Demote, Bring Back/Keep Gone)
   | "three-choice-slider"    // Keep/Fire/Demote slider
   | "agree-likert-scale"     // Agree/Disagree statements
+  | "reunion-seating-prediction" // Reunion seating chart prediction
   | "two-choice-slider"      // Whose side feuds
   | "multi-select-choice"    // Multi-select checkboxes
+  | "cast-multi-select"      // Cast-card multi-select (select two)
   | "text-multiple-choice"   // Single select radio buttons
+  | "rank-text-fields"       // Figma taglines text-field style single select
   | "image-multiple-choice"  // Single select with images
+  | "poster-single-select"   // Single select poster grid (season choice)
+  | "cast-single-select"     // Single select cast circles for superlatives
   | "dropdown"               // Dropdown select
   | "text-entry";            // Free text input
 
@@ -93,6 +98,14 @@ export interface BaseQuestionConfig {
   questionTextColor?: string;
   subTextHeadingColor?: string;
   optionTextColor?: string;
+  questionTextLineHeight?: number;
+  questionTextLetterSpacing?: number;
+  optionTextLineHeight?: number;
+  optionTextLetterSpacing?: number;
+  optionBackgroundColor?: string;
+  selectedOptionBackgroundColor?: string;
+  selectedOptionTextColor?: string;
+  selectedOptionBorderColor?: string;
   componentBackgroundColor?: string;
   placeholderShapeColor?: string;
   placeholderShapeBorderColor?: string;
@@ -100,6 +113,14 @@ export interface BaseQuestionConfig {
   unassignedContainerColor?: string;
   unassignedContainerBorderColor?: string;
   unassignedCircleBorderColor?: string;
+  questionTextFontFamily?: string;
+  headingFontFamily?: string;
+  titleFontFamily?: string;
+  subTextHeadingFontFamily?: string;
+  optionTextFontFamily?: string;
+  choiceFontFamily?: string;
+  continueButtonFontFamily?: string;
+  nextButtonFontFamily?: string;
   /** Optional size multiplier (percent) for unassigned cast/token circles. */
   unassignedCircleSize?: number;
 }
@@ -226,6 +247,20 @@ export interface AgreeLikertScaleConfig extends BaseQuestionConfig {
 }
 
 /**
+ * Reunion Seating Prediction Config (reunion-seating-prediction)
+ * Places cast members around a reunion couch arc centered around host.
+ */
+export interface ReunionSeatingPredictionConfig extends BaseQuestionConfig {
+  uiVariant: "reunion-seating-prediction";
+  /** Optional host metadata */
+  hostName?: string;
+  hostImagePath?: string;
+  /** Optional labels for staged flow */
+  fullTimePrompt?: string;
+  friendPrompt?: string;
+}
+
+/**
  * Two Choice Slider Config (two-choice-slider)
  * Whose side feuds - slider between two cast members
  * Options A and B come from the options table with metadata.imagePath
@@ -247,6 +282,18 @@ export interface MultiSelectChoiceConfig extends BaseQuestionConfig {
 }
 
 /**
+ * Cast Multi Select Config (cast-multi-select)
+ * Cast-card multi-select with optional min/max constraints.
+ */
+export interface CastMultiSelectConfig extends BaseQuestionConfig {
+  uiVariant: "cast-multi-select";
+  minSelections?: number;
+  maxSelections?: number;
+  /** Optional subtitle shown above cast cards (defaults to SELECT TWO). */
+  subTextHeading?: string;
+}
+
+/**
  * Text Multiple Choice Config (text-multiple-choice)
  * Standard radio button group with text options
  */
@@ -255,11 +302,37 @@ export interface TextMultipleChoiceConfig extends BaseQuestionConfig {
 }
 
 /**
+ * Rank Text Fields Config (rank-text-fields)
+ * Figma tagline rank text buttons (single select)
+ */
+export interface RankTextFieldsConfig extends BaseQuestionConfig {
+  uiVariant: "rank-text-fields";
+}
+
+/**
  * Image Multiple Choice Config (image-multiple-choice)
  * Single select with image options
  */
 export interface ImageMultipleChoiceConfig extends BaseQuestionConfig {
   uiVariant: "image-multiple-choice";
+  columns?: number;
+}
+
+/**
+ * Poster Single Select Config (poster-single-select)
+ * Single select poster-card grid (season pick)
+ */
+export interface PosterSingleSelectConfig extends BaseQuestionConfig {
+  uiVariant: "poster-single-select";
+  columns?: number;
+}
+
+/**
+ * Cast Single Select Config (cast-single-select)
+ * Single select cast circles (superlatives)
+ */
+export interface CastSingleSelectConfig extends BaseQuestionConfig {
+  uiVariant: "cast-single-select";
   columns?: number;
 }
 
@@ -302,10 +375,15 @@ export type QuestionConfig =
   | CastDecisionCardConfig
   | ThreeChoiceSliderConfig
   | AgreeLikertScaleConfig
+  | ReunionSeatingPredictionConfig
   | TwoChoiceSliderConfig
   | MultiSelectChoiceConfig
+  | CastMultiSelectConfig
   | TextMultipleChoiceConfig
+  | RankTextFieldsConfig
   | ImageMultipleChoiceConfig
+  | PosterSingleSelectConfig
+  | CastSingleSelectConfig
   | DropdownConfig
   | TextEntryConfig
   | BaseQuestionConfig;
@@ -354,6 +432,10 @@ export function isAgreeLikertScaleConfig(config: QuestionConfig): config is Agre
   return config.uiVariant === "agree-likert-scale";
 }
 
+export function isReunionSeatingPredictionConfig(config: QuestionConfig): config is ReunionSeatingPredictionConfig {
+  return config.uiVariant === "reunion-seating-prediction";
+}
+
 export function isTwoChoiceSliderConfig(config: QuestionConfig): config is TwoChoiceSliderConfig {
   return config.uiVariant === "two-choice-slider";
 }
@@ -362,12 +444,28 @@ export function isMultiSelectChoiceConfig(config: QuestionConfig): config is Mul
   return config.uiVariant === "multi-select-choice";
 }
 
+export function isCastMultiSelectConfig(config: QuestionConfig): config is CastMultiSelectConfig {
+  return config.uiVariant === "cast-multi-select";
+}
+
 export function isTextMultipleChoiceConfig(config: QuestionConfig): config is TextMultipleChoiceConfig {
   return config.uiVariant === "text-multiple-choice";
 }
 
+export function isRankTextFieldsConfig(config: QuestionConfig): config is RankTextFieldsConfig {
+  return config.uiVariant === "rank-text-fields";
+}
+
 export function isImageMultipleChoiceConfig(config: QuestionConfig): config is ImageMultipleChoiceConfig {
   return config.uiVariant === "image-multiple-choice";
+}
+
+export function isPosterSingleSelectConfig(config: QuestionConfig): config is PosterSingleSelectConfig {
+  return config.uiVariant === "poster-single-select";
+}
+
+export function isCastSingleSelectConfig(config: QuestionConfig): config is CastSingleSelectConfig {
+  return config.uiVariant === "cast-single-select";
 }
 
 export function isDropdownConfig(config: QuestionConfig): config is DropdownConfig {

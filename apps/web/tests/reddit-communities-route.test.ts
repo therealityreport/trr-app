@@ -28,6 +28,9 @@ vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
 
 import { GET, POST } from "@/app/api/admin/reddit/communities/route";
 
+const SHOW_ID = "11111111-1111-4111-8111-111111111111";
+const SEASON_ID = "22222222-2222-4222-8222-222222222222";
+
 describe("/api/admin/reddit/communities route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
@@ -51,7 +54,7 @@ describe("/api/admin/reddit/communities route", () => {
     ]);
 
     const request = new NextRequest(
-      "http://localhost/api/admin/reddit/communities?trr_show_id=show-1&trr_season_id=season-1",
+      `http://localhost/api/admin/reddit/communities?trr_show_id=${SHOW_ID}&trr_season_id=${SEASON_ID}`,
       { method: "GET" },
     );
 
@@ -65,11 +68,25 @@ describe("/api/admin/reddit/communities route", () => {
       post_flares_updated_at: "2026-02-17T00:00:00.000Z",
     });
     expect(listRedditCommunitiesWithThreadsMock).toHaveBeenCalledWith({
-      trrShowId: "show-1",
-      trrSeasonId: "season-1",
+      trrShowId: SHOW_ID,
+      trrSeasonId: SEASON_ID,
       includeInactive: false,
       includeGlobalThreadsForSeason: true,
     });
+  });
+
+  it("returns 400 for invalid UUID query filters", async () => {
+    const request = new NextRequest(
+      "http://localhost/api/admin/reddit/communities?trr_show_id=not-a-uuid",
+      { method: "GET" },
+    );
+
+    const response = await GET(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("trr_show_id");
+    expect(listRedditCommunitiesWithThreadsMock).not.toHaveBeenCalled();
   });
 
   it("validates required POST fields", async () => {
@@ -90,7 +107,7 @@ describe("/api/admin/reddit/communities route", () => {
   it("creates a community when payload is valid", async () => {
     createRedditCommunityMock.mockResolvedValue({
       id: "community-1",
-      trr_show_id: "show-1",
+      trr_show_id: SHOW_ID,
       trr_show_name: "The Real Housewives of Salt Lake City",
       subreddit: "BravoRealHousewives",
       post_flares: [],
@@ -100,7 +117,7 @@ describe("/api/admin/reddit/communities route", () => {
     const request = new NextRequest("http://localhost/api/admin/reddit/communities", {
       method: "POST",
       body: JSON.stringify({
-        trr_show_id: "show-1",
+        trr_show_id: SHOW_ID,
         trr_show_name: "The Real Housewives of Salt Lake City",
         subreddit: "r/BravoRealHousewives",
       }),
@@ -116,7 +133,7 @@ describe("/api/admin/reddit/communities route", () => {
     expect(createRedditCommunityMock).toHaveBeenCalledWith(
       { firebaseUid: "admin-uid", isAdmin: true },
       expect.objectContaining({
-        trrShowId: "show-1",
+        trrShowId: SHOW_ID,
         trrShowName: "The Real Housewives of Salt Lake City",
         subreddit: "BravoRealHousewives",
       }),

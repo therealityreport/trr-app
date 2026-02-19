@@ -12,6 +12,9 @@ export interface NetworkStreamingSummaryRow {
   hosted_logo_white_url: string | null;
   wikidata_id: string | null;
   wikipedia_url: string | null;
+  resolution_status: "resolved" | "manual_required" | "failed" | null;
+  resolution_reason: string | null;
+  last_attempt_at: string | null;
   has_logo: boolean;
   has_bw_variants: boolean;
   has_links: boolean;
@@ -43,6 +46,9 @@ type SummaryRow = {
   hosted_logo_white_url: string | null;
   wikidata_id: string | null;
   wikipedia_url: string | null;
+  resolution_status: "resolved" | "manual_required" | "failed" | null;
+  resolution_reason: string | null;
+  last_attempt_at: string | null;
 };
 
 const toInt = (value: unknown): number => {
@@ -58,21 +64,9 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
   const totalsResult = await query<TotalsRow>(
     `
       WITH added AS (
-        SELECT DISTINCT btrim(
-          COALESCE(
-            to_jsonb(cs) ->> 'trr_show_id',
-            to_jsonb(cs) ->> 'show_id',
-            ''
-          )
-        ) AS show_id
+        SELECT DISTINCT btrim(cs.trr_show_id::text) AS show_id
         FROM admin.covered_shows cs
-        WHERE btrim(
-          COALESCE(
-            to_jsonb(cs) ->> 'trr_show_id',
-            to_jsonb(cs) ->> 'show_id',
-            ''
-          )
-        ) <> ''
+        WHERE btrim(cs.trr_show_id::text) <> ''
       )
       SELECT
         (SELECT COUNT(*)::int FROM core.shows) AS total_available_shows,
@@ -87,21 +81,9 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
   const rowsResult = await query<SummaryRow>(
     `
       WITH added AS (
-        SELECT DISTINCT btrim(
-          COALESCE(
-            to_jsonb(cs) ->> 'trr_show_id',
-            to_jsonb(cs) ->> 'show_id',
-            ''
-          )
-        ) AS show_id
+        SELECT DISTINCT btrim(cs.trr_show_id::text) AS show_id
         FROM admin.covered_shows cs
-        WHERE btrim(
-          COALESCE(
-            to_jsonb(cs) ->> 'trr_show_id',
-            to_jsonb(cs) ->> 'show_id',
-            ''
-          )
-        ) <> ''
+        WHERE btrim(cs.trr_show_id::text) <> ''
       ),
       network_source AS (
         SELECT
@@ -132,20 +114,34 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
           meta.hosted_logo_black_url,
           meta.hosted_logo_white_url,
           meta.wikidata_id,
-          meta.wikipedia_url
+          meta.wikipedia_url,
+          comp.resolution_status,
+          comp.resolution_reason,
+          comp.last_attempt_at
         FROM network_grouped ng
         LEFT JOIN LATERAL (
           SELECT
-            to_jsonb(n) ->> 'hosted_logo_url' AS hosted_logo_url,
-            to_jsonb(n) ->> 'hosted_logo_black_url' AS hosted_logo_black_url,
-            to_jsonb(n) ->> 'hosted_logo_white_url' AS hosted_logo_white_url,
-            to_jsonb(n) ->> 'wikidata_id' AS wikidata_id,
-            to_jsonb(n) ->> 'wikipedia_url' AS wikipedia_url
+            n.hosted_logo_url AS hosted_logo_url,
+            n.hosted_logo_black_url AS hosted_logo_black_url,
+            n.hosted_logo_white_url AS hosted_logo_white_url,
+            n.wikidata_id AS wikidata_id,
+            n.wikipedia_url AS wikipedia_url
           FROM core.networks n
           WHERE lower(btrim(n.name)) = ng.name_key
           ORDER BY n.id ASC
           LIMIT 1
         ) meta ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            c.resolution_status AS resolution_status,
+            c.resolution_reason AS resolution_reason,
+            c.last_attempt_at AS last_attempt_at
+          FROM admin.network_streaming_completion c
+          WHERE c.entity_type = 'network'
+            AND c.entity_key = ng.name_key
+          ORDER BY c.updated_at DESC
+          LIMIT 1
+        ) comp ON true
       ),
       provider_primary AS (
         SELECT
@@ -154,9 +150,7 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
           lower(btrim(wp.provider_name)) AS name_key
         FROM core.show_watch_providers swp
         JOIN core.watch_providers wp ON wp.provider_id = swp.provider_id
-        WHERE upper(COALESCE(swp.region, '')) = 'US'
-          AND lower(COALESCE(swp.offer_type, '')) IN ('flatrate', 'ads')
-          AND btrim(COALESCE(wp.provider_name, '')) <> ''
+        WHERE btrim(COALESCE(wp.provider_name, '')) <> ''
       ),
       provider_primary_grouped AS (
         SELECT
@@ -204,20 +198,34 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
           meta.hosted_logo_black_url,
           meta.hosted_logo_white_url,
           meta.wikidata_id,
-          meta.wikipedia_url
+          meta.wikipedia_url,
+          comp.resolution_status,
+          comp.resolution_reason,
+          comp.last_attempt_at
         FROM provider_grouped pg
         LEFT JOIN LATERAL (
           SELECT
-            to_jsonb(wp) ->> 'hosted_logo_url' AS hosted_logo_url,
-            to_jsonb(wp) ->> 'hosted_logo_black_url' AS hosted_logo_black_url,
-            to_jsonb(wp) ->> 'hosted_logo_white_url' AS hosted_logo_white_url,
-            to_jsonb(wp) ->> 'wikidata_id' AS wikidata_id,
-            to_jsonb(wp) ->> 'wikipedia_url' AS wikipedia_url
+            wp.hosted_logo_url AS hosted_logo_url,
+            wp.hosted_logo_black_url AS hosted_logo_black_url,
+            wp.hosted_logo_white_url AS hosted_logo_white_url,
+            wp.wikidata_id AS wikidata_id,
+            wp.wikipedia_url AS wikipedia_url
           FROM core.watch_providers wp
           WHERE lower(btrim(wp.provider_name)) = pg.name_key
           ORDER BY wp.provider_id ASC
           LIMIT 1
         ) meta ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            c.resolution_status AS resolution_status,
+            c.resolution_reason AS resolution_reason,
+            c.last_attempt_at AS last_attempt_at
+          FROM admin.network_streaming_completion c
+          WHERE c.entity_type = 'streaming'
+            AND c.entity_key = pg.name_key
+          ORDER BY c.updated_at DESC
+          LIMIT 1
+        ) comp ON true
       )
       SELECT *
       FROM (
@@ -236,6 +244,12 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
     const hostedLogoWhiteUrl = typeof row.hosted_logo_white_url === "string" ? row.hosted_logo_white_url : null;
     const wikidataId = typeof row.wikidata_id === "string" ? row.wikidata_id : null;
     const wikipediaUrl = typeof row.wikipedia_url === "string" ? row.wikipedia_url : null;
+    const resolutionStatus =
+      row.resolution_status === "resolved" || row.resolution_status === "manual_required" || row.resolution_status === "failed"
+        ? row.resolution_status
+        : null;
+    const resolutionReason = typeof row.resolution_reason === "string" ? row.resolution_reason : null;
+    const lastAttemptAt = typeof row.last_attempt_at === "string" ? row.last_attempt_at : null;
     return {
       type: row.type,
       name: row.name,
@@ -246,6 +260,9 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
       hosted_logo_white_url: hostedLogoWhiteUrl,
       wikidata_id: wikidataId,
       wikipedia_url: wikipediaUrl,
+      resolution_status: resolutionStatus,
+      resolution_reason: resolutionReason,
+      last_attempt_at: lastAttemptAt,
       has_logo: Boolean(hostedLogoUrl),
       has_bw_variants: Boolean(hostedLogoBlackUrl && hostedLogoWhiteUrl),
       has_links: Boolean(wikidataId && wikipediaUrl),

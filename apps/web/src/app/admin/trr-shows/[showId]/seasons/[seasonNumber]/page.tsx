@@ -7,7 +7,6 @@ import Image from "next/image";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { auth } from "@/lib/firebase";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
@@ -30,8 +29,12 @@ import {
 } from "@/lib/admin/advanced-filters";
 import {
   inferHasTextOverlay,
-  matchesContentTypesForSeasonAsset,
 } from "@/lib/gallery-filter-utils";
+import {
+  contentTypeToAssetKind,
+  contentTypeToContextType,
+  normalizeContentTypeToken,
+} from "@/lib/media/content-type";
 import {
   buildMissingVariantBreakdown,
   getMissingVariantKeys,
@@ -43,6 +46,28 @@ import {
   resolveThumbnailPresentation,
 } from "@/lib/thumbnail-crop";
 import {
+  ASSET_SECTION_LABELS,
+  ASSET_SECTION_ORDER,
+  ASSET_SECTION_TO_BATCH_CONTENT_TYPE,
+  classifySeasonAssetSection,
+  groupSeasonAssetsBySection,
+  type AssetSectionKey,
+} from "@/lib/admin/asset-sectioning";
+import {
+  firstImageUrlCandidate,
+  getSeasonAssetCardUrlCandidates,
+  getSeasonAssetDetailUrlCandidates,
+} from "@/lib/admin/image-url-candidates";
+import {
+  appendLiveCountsToMessage,
+  formatJobLiveCounts,
+  resolveJobLiveCounts,
+  type JobLiveCounts,
+} from "@/lib/admin/job-live-counts";
+import { getClientAuthHeaders } from "@/lib/admin/client-auth";
+import {
+  buildPersonAdminUrl,
+  buildPersonRouteSlug,
   buildShowAdminUrl,
   buildSeasonAdminUrl,
   cleanLegacyRoutingQuery,
@@ -140,6 +165,20 @@ type RefreshProgressState = {
   current: number | null;
   total: number | null;
 };
+type SeasonRefreshLogLevel = "info" | "success" | "error";
+type SeasonRefreshLogScope = "assets" | "cast" | "image";
+type SeasonRefreshLogEntry = {
+  id: number;
+  ts: number;
+  scope: SeasonRefreshLogScope;
+  stage: string;
+  message: string;
+  detail?: string | null;
+  response?: string | null;
+  level: SeasonRefreshLogLevel;
+  current?: number | null;
+  total?: number | null;
+};
 
 type EpisodeCoverageRow = {
   episodeId: string;
@@ -173,6 +212,30 @@ const SEASON_REFRESH_STAGE_LABELS: Record<string, string> = {
   cast_credits_show_cast: "Cast Credits",
   cast_credits_episode_appearances: "Episode Credits",
 };
+const SEASON_STREAM_IDLE_TIMEOUT_MS = 600_000;
+const SEASON_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
+const SEASON_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+const SEASON_ASSET_LOAD_TIMEOUT_MS = 60_000;
+const SEASON_CAST_LOAD_TIMEOUT_MS = 60_000;
+const SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS = 90_000;
+const SEASON_PERSON_STREAM_MAX_DURATION_MS = 6 * 60 * 1000;
+const SEASON_PERSON_FALLBACK_TIMEOUT_MS = 4 * 60 * 1000;
+const SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
+const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
+
+const BATCH_JOB_OPERATION_LABELS = {
+  count: "Count",
+  crop: "Crop",
+  id_text: "ID Text",
+  resize: "Resize",
+} as const;
+
+type BatchJobOperation = keyof typeof BATCH_JOB_OPERATION_LABELS;
+
+const DEFAULT_BATCH_JOB_OPERATIONS: BatchJobOperation[] = ["count"];
+const DEFAULT_BATCH_JOB_CONTENT_SECTIONS: AssetSectionKey[] = ASSET_SECTION_ORDER.filter(
+  (section) => section !== "other"
+);
 
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -201,6 +264,70 @@ const parseProgressNumber = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const summarizeRefreshTargetResult = (
+  payload: unknown,
+  target: "photos" | "cast_credits"
+): string | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const resultsRaw = (payload as { results?: unknown }).results;
+  if (!resultsRaw || typeof resultsRaw !== "object") return null;
+  const stepRaw = (resultsRaw as Record<string, unknown>)[target];
+  if (!stepRaw || typeof stepRaw !== "object") return null;
+  const status = typeof (stepRaw as { status?: unknown }).status === "string"
+    ? (stepRaw as { status: string }).status
+    : "ok";
+  const durationMs = toFiniteNumber((stepRaw as { duration_ms?: unknown }).duration_ms);
+  const errorText = typeof (stepRaw as { error?: unknown }).error === "string"
+    ? (stepRaw as { error: string }).error
+    : null;
+  const parts: string[] = [`status: ${status}`];
+  if (durationMs !== null) parts.push(`duration: ${Math.round(durationMs)}ms`);
+  if (errorText) parts.push(`error: ${errorText}`);
+  return parts.join(" · ");
+};
+
+const summarizePhotoStreamCompletion = (payload: unknown): string | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const readMetric = (key: string): number | null =>
+    toFiniteNumber((payload as Record<string, unknown>)[key]);
+  const fetched = readMetric("cast_photos_fetched");
+  const upserted = readMetric("cast_photos_upserted");
+  const mirrored = readMetric("cast_photos_mirrored");
+  const failed = readMetric("cast_photos_failed");
+  const sourcesSkipped = readMetric("sources_skipped");
+  const durationMs = readMetric("duration_ms");
+  const parts: string[] = [];
+  if (fetched !== null) parts.push(`fetched: ${Math.round(fetched)}`);
+  if (upserted !== null) parts.push(`upserted: ${Math.round(upserted)}`);
+  if (mirrored !== null) parts.push(`mirrored: ${Math.round(mirrored)}`);
+  if (failed !== null && failed > 0) parts.push(`failed: ${Math.round(failed)}`);
+  if (sourcesSkipped !== null && sourcesSkipped > 0) {
+    parts.push(`sources skipped: ${Math.round(sourcesSkipped)}`);
+  }
+  if (durationMs !== null) parts.push(`duration: ${Math.round(durationMs)}ms`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+};
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError";
+
+const isTransientNotAuthenticatedError = (error: unknown): boolean =>
+  error instanceof Error && error.message.toLowerCase().includes("not authenticated");
+
+const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 const humanizeStage = (value: string): string => {
@@ -237,18 +364,58 @@ const buildProgressMessage = (
 
 function GalleryImage({
   src,
+  srcCandidates,
+  diagnosticKey,
   alt,
   sizes = "200px",
   className = "object-cover",
   style,
 }: {
   src: string;
+  srcCandidates?: string[];
+  diagnosticKey?: string;
   alt: string;
   sizes?: string;
   className?: string;
   style?: React.CSSProperties;
 }) {
+  const fallbackCandidates = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const value of srcCandidates ?? []) {
+      if (typeof value !== "string") continue;
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === src || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      out.push(trimmed);
+    }
+    return out;
+  }, [src, srcCandidates]);
   const [hasError, setHasError] = useState(false);
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [fallbackIndex, setFallbackIndex] = useState(0);
+
+  useEffect(() => {
+    setHasError(false);
+    setCurrentSrc(src);
+    setFallbackIndex(0);
+  }, [src, fallbackCandidates]);
+
+  const handleError = () => {
+    const nextCandidate = fallbackCandidates[fallbackIndex] ?? null;
+    if (nextCandidate && nextCandidate !== currentSrc) {
+      setCurrentSrc(nextCandidate);
+      setFallbackIndex((prev) => prev + 1);
+      return;
+    }
+    if (diagnosticKey) {
+      console.warn("[season-gallery] all image URL candidates failed", {
+        asset: diagnosticKey,
+        attempted: fallbackCandidates.length + 1,
+      });
+    }
+    setHasError(true);
+  };
 
   if (hasError) {
     return (
@@ -264,14 +431,14 @@ function GalleryImage({
 
   return (
     <Image
-      src={src}
+      src={currentSrc}
       alt={alt}
       fill
       className={className}
       style={style}
       sizes={sizes}
       unoptimized
-      onError={() => setHasError(true)}
+      onError={handleError}
     />
   );
 }
@@ -328,74 +495,11 @@ function CastPhoto({
   );
 }
 
-const getAssetDisplayUrl = (asset: SeasonAsset): string => {
-  const cropDisplay =
-    typeof asset.crop_display_url === "string" && asset.crop_display_url.trim().length > 0
-      ? asset.crop_display_url.trim()
-      : null;
-  const thumb =
-    typeof asset.thumb_url === "string" && asset.thumb_url.trim().length > 0
-      ? asset.thumb_url.trim()
-      : null;
-  const display =
-    typeof asset.display_url === "string" && asset.display_url.trim().length > 0
-      ? asset.display_url.trim()
-      : null;
-  return cropDisplay ?? thumb ?? display ?? asset.hosted_url;
-};
+const getAssetDisplayUrl = (asset: SeasonAsset): string =>
+  firstImageUrlCandidate(getSeasonAssetCardUrlCandidates(asset)) ?? asset.hosted_url;
 
-const getAssetDetailUrl = (asset: SeasonAsset): string => {
-  const cropDetail =
-    typeof asset.crop_detail_url === "string" && asset.crop_detail_url.trim().length > 0
-      ? asset.crop_detail_url.trim()
-      : null;
-  const detail =
-    typeof asset.detail_url === "string" && asset.detail_url.trim().length > 0
-      ? asset.detail_url.trim()
-      : null;
-  return cropDetail ?? detail ?? asset.hosted_url;
-};
-
-const normalizeContentTypeToken = (contentType: string): string =>
-  contentType.trim().toUpperCase().replace(/[_-]+/g, " ");
-
-const contentTypeToAssetKind = (contentType: string): string => {
-  const normalized = normalizeContentTypeToken(contentType);
-  switch (normalized) {
-    case "PROMO":
-      return "promo";
-    case "CONFESSIONAL":
-      return "confessional";
-    case "REUNION":
-      return "reunion";
-    case "INTRO":
-      return "intro";
-    case "EPISODE STILL":
-      return "episode_still";
-    case "CAST PHOTOS":
-      return "cast";
-    case "BACKDROP":
-      return "backdrop";
-    case "POSTER":
-      return "poster";
-    case "LOGO":
-      return "logo";
-    default:
-      return "other";
-  }
-};
-
-const contentTypeToContextType = (contentType: string): string => {
-  const normalized = normalizeContentTypeToken(contentType);
-  switch (normalized) {
-    case "EPISODE STILL":
-      return "episode still";
-    case "CAST PHOTOS":
-      return "cast photos";
-    default:
-      return normalized.toLowerCase();
-  }
-};
+const getAssetDetailUrl = (asset: SeasonAsset): string =>
+  firstImageUrlCandidate(getSeasonAssetDetailUrlCandidates(asset)) ?? asset.hosted_url;
 
 const isCrewCreditCategory = (value: string | null | undefined): boolean => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -475,6 +579,75 @@ function RefreshProgressBar({
   );
 }
 
+function RefreshActivityLog({
+  title,
+  entries,
+  scopes,
+  open,
+  onToggle,
+}: {
+  title: string;
+  entries: SeasonRefreshLogEntry[];
+  scopes: SeasonRefreshLogScope[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const filtered = entries.filter((entry) => scopes.includes(entry.scope));
+  return (
+    <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between text-left"
+      >
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-600">
+          {title} ({filtered.length})
+        </p>
+        <span className="text-xs font-semibold text-zinc-500">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && (
+        <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+          {filtered.length === 0 ? (
+            <p className="text-xs text-zinc-500">No refresh activity yet.</p>
+          ) : (
+            filtered.map((entry) => {
+              const toneClass =
+                entry.level === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : entry.level === "error"
+                    ? "border-red-200 bg-red-50 text-red-800"
+                    : "border-zinc-200 bg-white text-zinc-800";
+              return (
+                <div key={entry.id} className={`rounded-md border px-2 py-2 text-xs ${toneClass}`}>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="font-semibold uppercase tracking-[0.14em]">
+                      {entry.stage.replace(/[_-]+/g, " ")}
+                    </span>
+                    <span className="tabular-nums opacity-80">
+                      {new Date(entry.ts).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <p>{entry.message}</p>
+                  {typeof entry.current === "number" &&
+                    typeof entry.total === "number" &&
+                    Number.isFinite(entry.current) &&
+                    Number.isFinite(entry.total) && (
+                      <p className="mt-1 opacity-80">
+                        Progress: {entry.current}/{entry.total}
+                      </p>
+                    )}
+                  {entry.response && <p className="mt-1 opacity-80">Response: {entry.response}</p>}
+                  {entry.detail && <p className="mt-1 opacity-80">Detail: {entry.detail}</p>}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function mapEpisodeToMetadata(episode: TrrEpisode, showName?: string): PhotoMetadata {
   const fileTypeMatch = episode.url_original_still?.match(/\.([a-z0-9]+)$/i);
   const fileType = fileTypeMatch ? fileTypeMatch[1].toLowerCase() : null;
@@ -509,6 +682,18 @@ export default function SeasonDetailPage() {
   const seasonNumberParam = params.seasonNumber as string;
   const seasonNumber = Number.parseInt(seasonNumberParam, 10);
   const { user, checking, hasAccess } = useAdminGuard();
+  const activeSeasonRequestKeyRef = useRef(`${showId}:${seasonNumber}`);
+  const seasonLoadRequestIdRef = useRef(0);
+  const isCurrentSeasonRequest = useCallback(
+    (requestKey: string, requestId?: number) =>
+      activeSeasonRequestKeyRef.current === requestKey &&
+      (typeof requestId !== "number" || seasonLoadRequestIdRef.current === requestId),
+    []
+  );
+
+  useEffect(() => {
+    activeSeasonRequestKeyRef.current = `${showId}:${seasonNumber}`;
+  }, [seasonNumber, showId]);
 
   const [show, setShow] = useState<TrrShow | null>(null);
   const [season, setSeason] = useState<TrrSeason | null>(null);
@@ -537,12 +722,29 @@ export default function SeasonDetailPage() {
   const [assetsRefreshProgress, setAssetsRefreshProgress] = useState<RefreshProgressState | null>(
     null
   );
+  const [assetsRefreshLiveCounts, setAssetsRefreshLiveCounts] = useState<JobLiveCounts | null>(null);
+  const [batchJobsOpen, setBatchJobsOpen] = useState(false);
+  const [batchJobsRunning, setBatchJobsRunning] = useState(false);
+  const [batchJobsError, setBatchJobsError] = useState<string | null>(null);
+  const [batchJobsNotice, setBatchJobsNotice] = useState<string | null>(null);
+  const [batchJobsProgress, setBatchJobsProgress] = useState<RefreshProgressState | null>(null);
+  const [batchJobsLiveCounts, setBatchJobsLiveCounts] = useState<JobLiveCounts | null>(null);
+  const [batchJobOperations, setBatchJobOperations] = useState<BatchJobOperation[]>(
+    DEFAULT_BATCH_JOB_OPERATIONS
+  );
+  const [batchJobContentSections, setBatchJobContentSections] = useState<AssetSectionKey[]>(
+    DEFAULT_BATCH_JOB_CONTENT_SECTIONS
+  );
+  const [assetsRefreshLogOpen, setAssetsRefreshLogOpen] = useState(false);
   const [refreshingCast, setRefreshingCast] = useState(false);
   const [castRefreshNotice, setCastRefreshNotice] = useState<string | null>(null);
   const [castRefreshError, setCastRefreshError] = useState<string | null>(null);
   const [castRefreshProgress, setCastRefreshProgress] = useState<RefreshProgressState | null>(
     null
   );
+  const [castRefreshLogOpen, setCastRefreshLogOpen] = useState(false);
+  const [refreshLogEntries, setRefreshLogEntries] = useState<SeasonRefreshLogEntry[]>([]);
+  const refreshLogCounterRef = useRef(0);
   const [trrShowCast, setTrrShowCast] = useState<TrrShowCastMember[]>([]);
   const [trrShowCastLoading, setTrrShowCastLoading] = useState(false);
   const [trrShowCastError, setTrrShowCastError] = useState<string | null>(null);
@@ -555,6 +757,20 @@ export default function SeasonDetailPage() {
   const [castCreditFilters, setCastCreditFilters] = useState<string[]>([]);
   const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
   const showCastFetchAttemptedRef = useRef(false);
+  const appendRefreshLog = useCallback(
+    (
+      entry: Omit<SeasonRefreshLogEntry, "id" | "ts"> & {
+        ts?: number;
+      }
+    ) => {
+      const id = ++refreshLogCounterRef.current;
+      const ts = typeof entry.ts === "number" ? entry.ts : Date.now();
+      setRefreshLogEntries((prev) =>
+        [{ ...entry, id, ts }, ...prev].slice(0, MAX_SEASON_REFRESH_LOG_ENTRIES)
+      );
+    },
+    []
+  );
 
   const [episodeLightbox, setEpisodeLightbox] = useState<{
     episode: TrrEpisode;
@@ -669,9 +885,7 @@ export default function SeasonDetailPage() {
   const [assigningBackdrops, setAssigningBackdrops] = useState(false);
 
   const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
+    return getClientAuthHeaders({ allowDevAdminBypass: true });
   }, []);
 
   useEffect(() => {
@@ -695,25 +909,41 @@ export default function SeasonDetailPage() {
       setSlugResolutionLoading(true);
       setSlugResolutionError(null);
       try {
-        const headers = await getAuthHeaders();
-        const response = await fetch(
-          `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
-          { headers, cache: "no-store" }
-        );
-        const data = (await response.json().catch(() => ({}))) as {
-          error?: string;
-          resolved?: { show_id?: string | null };
-        };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to resolve show slug");
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          try {
+            const headers = await getAuthHeaders();
+            const response = await fetch(
+              `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
+              { headers, cache: "no-store" }
+            );
+            const data = (await response.json().catch(() => ({}))) as {
+              error?: string;
+              resolved?: { show_id?: string | null };
+            };
+            if (!response.ok) {
+              throw new Error(data.error || "Failed to resolve show slug");
+            }
+            const nextShowId =
+              typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
+                ? data.resolved.show_id
+                : null;
+            if (!nextShowId) throw new Error("Resolved show slug did not return a valid show id.");
+            if (cancelled) return;
+            setResolvedShowId(nextShowId);
+            return;
+          } catch (err) {
+            if (cancelled) return;
+            if (isTransientNotAuthenticatedError(err) && attempt < 3) {
+              await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 250));
+              continue;
+            }
+            setResolvedShowId(null);
+            setSlugResolutionError(
+              err instanceof Error ? err.message : "Could not resolve show URL slug."
+            );
+            return;
+          }
         }
-        const nextShowId =
-          typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
-            ? data.resolved.show_id
-            : null;
-        if (!nextShowId) throw new Error("Resolved show slug did not return a valid show id.");
-        if (cancelled) return;
-        setResolvedShowId(nextShowId);
       } catch (err) {
         if (cancelled) return;
         setResolvedShowId(null);
@@ -729,7 +959,7 @@ export default function SeasonDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [checking, getAuthHeaders, hasAccess, showRouteParam]);
+  }, [checking, getAuthHeaders, hasAccess, showRouteParam, user]);
 
   useEffect(() => {
     const canonicalSlug = show?.canonical_slug?.trim() || show?.slug?.trim();
@@ -863,14 +1093,18 @@ export default function SeasonDetailPage() {
   }, [getAuthHeaders, seasonNumber, showId]);
 
   const fetchSeasonBravoVideos = useCallback(async () => {
-    if (!showId) return;
-    if (!Number.isFinite(seasonNumber)) return;
+    const requestShowId = showId;
+    const requestSeasonNumber = seasonNumber;
+    const requestKey = `${requestShowId}:${requestSeasonNumber}`;
+    if (!requestShowId) return;
+    if (!Number.isFinite(requestSeasonNumber)) return;
+    if (!isCurrentSeasonRequest(requestKey)) return;
     setBravoVideosLoading(true);
     setBravoVideosError(null);
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/bravo/videos?season_number=${seasonNumber}&merge_person_sources=true`,
+        `/api/admin/trr-api/shows/${requestShowId}/bravo/videos?season_number=${requestSeasonNumber}&merge_person_sources=true`,
         {
           headers,
           cache: "no-store",
@@ -883,29 +1117,38 @@ export default function SeasonDetailPage() {
       if (!response.ok) {
         throw new Error(data.error || "Failed to fetch season videos");
       }
+      if (!isCurrentSeasonRequest(requestKey)) return;
       setBravoVideos(Array.isArray(data.videos) ? data.videos : []);
     } catch (err) {
+      if (!isCurrentSeasonRequest(requestKey)) return;
       setBravoVideosError(err instanceof Error ? err.message : "Failed to fetch season videos");
     } finally {
+      if (!isCurrentSeasonRequest(requestKey)) return;
       setBravoVideosLoading(false);
     }
-  }, [getAuthHeaders, seasonNumber, showId]);
+  }, [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
 
   const loadSeasonData = useCallback(async () => {
-    if (!showId) return;
-    if (!Number.isFinite(seasonNumber)) {
+    const requestShowId = showId;
+    const requestSeasonNumber = seasonNumber;
+    const requestKey = `${requestShowId}:${requestSeasonNumber}`;
+    const requestId = ++seasonLoadRequestIdRef.current;
+    if (!requestShowId) return;
+    if (!Number.isFinite(requestSeasonNumber)) {
+      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setError("Invalid season number");
       setLoading(false);
       return;
     }
 
     try {
+      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setLoading(true);
       const headers = await getAuthHeaders();
 
       const [showResponse, seasonsResponse] = await Promise.all([
-        fetch(`/api/admin/trr-api/shows/${showId}`, { headers }),
-        fetch(`/api/admin/trr-api/shows/${showId}/seasons?limit=50`, { headers }),
+        fetch(`/api/admin/trr-api/shows/${requestShowId}`, { headers }),
+        fetch(`/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50`, { headers }),
       ]);
 
       if (!showResponse.ok) throw new Error("Failed to fetch show");
@@ -913,18 +1156,21 @@ export default function SeasonDetailPage() {
 
       const showData = await showResponse.json();
       const seasonsData = await seasonsResponse.json();
+      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setShow(showData.show);
 
       const seasonList = Array.isArray(seasonsData.seasons)
         ? (seasonsData.seasons as TrrSeason[])
         : [];
+      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setShowSeasons(seasonList);
 
       const foundSeason = seasonList.find(
-        (s) => s.season_number === seasonNumber
+        (s) => s.season_number === requestSeasonNumber
       );
 
       if (!foundSeason) {
+        if (!isCurrentSeasonRequest(requestKey, requestId)) return;
         setError("Season not found");
         setSeason(null);
         setEpisodes([]);
@@ -938,31 +1184,25 @@ export default function SeasonDetailPage() {
       }
 
       setSeason(foundSeason);
-      const [episodesResponse, assetsResponse, castResponse, castWithArchiveResponse] = await Promise.all([
+      const [episodesResponse, castResponse, castWithArchiveResponse] = await Promise.all([
         fetch(`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`, { headers }),
+        fetch(`/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500`, { headers }),
         fetch(
-          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0`,
-          { headers }
-        ),
-        fetch(`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500`, { headers }),
-        fetch(
-          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
+          `/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500&include_archive_only=true`,
           { headers }
         ),
       ]);
 
       if (!episodesResponse.ok) throw new Error("Failed to fetch episodes");
-      if (!assetsResponse.ok) throw new Error("Failed to fetch season media");
       if (!castResponse.ok) throw new Error("Failed to fetch season cast");
       if (!castWithArchiveResponse.ok) throw new Error("Failed to fetch season archive cast");
 
       const episodesData = await episodesResponse.json();
-      const assetsData = await assetsResponse.json();
       const castData = await castResponse.json();
       const castWithArchiveData = await castWithArchiveResponse.json();
+      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
 
       setEpisodes(episodesData.episodes ?? []);
-      setAssets(assetsData.assets ?? []);
       setCast(castData.cast ?? []);
       setSeasonCastSource(
         castData.cast_source === "show_fallback" ? "show_fallback" : "season_evidence"
@@ -983,15 +1223,23 @@ export default function SeasonDetailPage() {
         )
       );
       await fetchSeasonBravoVideos();
+      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setError(null);
     } catch (err) {
+      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setError(err instanceof Error ? err.message : "Failed to load season");
+      setSeason(null);
+      setEpisodes([]);
+      setAssets([]);
+      setCast([]);
+      setArchiveCast([]);
       setSeasonCastSource("season_evidence");
       setSeasonCastEligibilityWarning(null);
     } finally {
+      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setLoading(false);
     }
-  }, [fetchSeasonBravoVideos, getAuthHeaders, seasonNumber, showId]);
+  }, [fetchSeasonBravoVideos, getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -1009,7 +1257,18 @@ export default function SeasonDetailPage() {
     setCastHasImageFilter("all");
     setCastRoleMembers([]);
     setCastRoleMembersError(null);
+    setRefreshLogEntries([]);
+    setAssetsRefreshLogOpen(false);
+    setCastRefreshLogOpen(false);
+    refreshLogCounterRef.current = 0;
   }, [season?.id]);
+
+  useEffect(() => {
+    showCastFetchAttemptedRef.current = false;
+    setTrrShowCast([]);
+    setTrrShowCastError(null);
+    setTrrShowCastLoading(false);
+  }, [showId, season?.id]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -1033,10 +1292,23 @@ export default function SeasonDetailPage() {
     const sourcesParam = advancedFilters.sources.length
       ? `&sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
       : "";
-    const response = await fetch(
-      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0${sourcesParam}`,
-      { headers }
-    );
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0${sourcesParam}`,
+        { headers },
+        SEASON_ASSET_LOAD_TIMEOUT_MS
+      );
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw new Error(
+          `Timed out loading season assets after ${Math.round(
+            SEASON_ASSET_LOAD_TIMEOUT_MS / 1000
+          )}s.`
+        );
+      }
+      throw error;
+    }
     if (!response.ok) throw new Error("Failed to fetch season media");
     const data = await response.json();
     setAssets(data.assets ?? []);
@@ -1050,161 +1322,484 @@ export default function SeasonDetailPage() {
     });
   }, [hasAccess, showId, activeTab, assetsView, fetchAssets]);
 
+  const toggleBatchJobOperation = useCallback((operation: BatchJobOperation) => {
+    setBatchJobOperations((prev) =>
+      prev.includes(operation) ? prev.filter((item) => item !== operation) : [...prev, operation]
+    );
+  }, []);
+
+  const toggleBatchJobContentSection = useCallback((section: AssetSectionKey) => {
+    setBatchJobContentSections((prev) =>
+      prev.includes(section) ? prev.filter((item) => item !== section) : [...prev, section]
+    );
+  }, []);
+
+  const runBatchJobs = useCallback(async () => {
+    if (!showId || !seasonNumber) return;
+    if (batchJobsRunning) return;
+
+    if (batchJobOperations.length === 0) {
+      setBatchJobsError("Select at least one operation.");
+      return;
+    }
+    if (batchJobContentSections.length === 0) {
+      setBatchJobsError("Select at least one content type.");
+      return;
+    }
+
+    const selectedSections = new Set(batchJobContentSections);
+    const dedupeTargets = new Set<string>();
+    const targets = assets
+      .map((asset) => {
+        const section = classifySeasonAssetSection(asset, {
+          seasonNumber,
+          showName: show?.name ?? undefined,
+        });
+        if (!section || !selectedSections.has(section)) return null;
+        const origin = asset.origin_table ?? "unknown";
+        const rawId = origin === "media_assets" ? asset.media_asset_id ?? asset.id : asset.id;
+        if (!rawId) return null;
+        const key = `${origin}:${rawId}`;
+        if (dedupeTargets.has(key)) return null;
+        dedupeTargets.add(key);
+        return {
+          origin,
+          id: rawId,
+          content_type: ASSET_SECTION_TO_BATCH_CONTENT_TYPE[section],
+        };
+      })
+      .filter((item): item is { origin: string; id: string; content_type: string } => item !== null);
+
+    if (targets.length === 0) {
+      setBatchJobsError("No matching season assets found for the selected content types.");
+      return;
+    }
+
+    setBatchJobsError(null);
+    setBatchJobsNotice(null);
+    setBatchJobsRunning(true);
+    setBatchJobsLiveCounts(null);
+    setBatchJobsProgress({
+      stage: "Batch Jobs",
+      message: "Starting batch jobs...",
+      current: 0,
+      total: targets.length * batchJobOperations.length,
+    });
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets/batch-jobs/stream`,
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operations: batchJobOperations,
+            content_types: batchJobContentSections.map(
+              (section) => ASSET_SECTION_TO_BATCH_CONTENT_TYPE[section]
+            ),
+            targets,
+            force: true,
+          }),
+        }
+      );
+      if (!response.ok || !response.body) {
+        throw new Error("Batch jobs stream unavailable.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completePayload: Record<string, unknown> | null = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n");
+
+        let boundaryIndex = buffer.indexOf("\n\n");
+        while (boundaryIndex !== -1) {
+          const rawEvent = buffer.slice(0, boundaryIndex);
+          buffer = buffer.slice(boundaryIndex + 2);
+
+          const lines = rawEvent.split("\n").filter(Boolean);
+          let eventType = "message";
+          const dataLines: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).trim());
+            }
+          }
+
+          const dataStr = dataLines.join("\n");
+          let payload: Record<string, unknown> | null = null;
+          try {
+            payload = JSON.parse(dataStr) as Record<string, unknown>;
+          } catch {
+            payload = null;
+          }
+
+          if (eventType === "progress" && payload) {
+            const current = parseProgressNumber(payload.current);
+            const total = parseProgressNumber(payload.total);
+            const stage = typeof payload.stage === "string" ? payload.stage : "Batch Jobs";
+            const baseMessage =
+              typeof payload.message === "string" && payload.message.trim()
+                ? payload.message
+                : "Running batch jobs...";
+            const nextLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, payload);
+            setBatchJobsLiveCounts(nextLiveCounts);
+            setBatchJobsProgress({
+              stage,
+              message: appendLiveCountsToMessage(baseMessage, nextLiveCounts),
+              current,
+              total,
+            });
+          } else if (eventType === "error") {
+            const errorText =
+              payload && typeof payload.error === "string" ? payload.error : "Batch jobs failed.";
+            const detailText =
+              payload && typeof payload.detail === "string" ? payload.detail : null;
+            throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+          } else if (eventType === "complete" && payload) {
+            completePayload = payload;
+          }
+
+          boundaryIndex = buffer.indexOf("\n\n");
+        }
+      }
+
+      const attempted = parseProgressNumber(completePayload?.attempted ?? null) ?? 0;
+      const succeeded = parseProgressNumber(completePayload?.succeeded ?? null) ?? 0;
+      const failed = parseProgressNumber(completePayload?.failed ?? null) ?? 0;
+      const skipped = parseProgressNumber(completePayload?.skipped ?? null) ?? 0;
+      const completeLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, completePayload);
+      setBatchJobsLiveCounts(completeLiveCounts);
+      const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+      setBatchJobsNotice(
+        `Batch jobs complete. Attempted ${attempted}, succeeded ${succeeded}, failed ${failed}, skipped ${skipped}${
+          liveCountSuffix ? `. ${liveCountSuffix}` : "."
+        }`
+      );
+      setBatchJobsOpen(false);
+      await fetchAssets();
+    } catch (error) {
+      setBatchJobsError(error instanceof Error ? error.message : "Batch jobs failed.");
+    } finally {
+      setBatchJobsRunning(false);
+      setBatchJobsProgress(null);
+      setBatchJobsLiveCounts(null);
+    }
+  }, [
+    assets,
+    batchJobsLiveCounts,
+    batchJobContentSections,
+    batchJobOperations,
+    batchJobsRunning,
+    fetchAssets,
+    getAuthHeaders,
+    seasonNumber,
+    show?.name,
+    showId,
+  ]);
+
   const handleRefreshImages = useCallback(async () => {
     if (!showId) return;
     if (refreshingAssets) return;
     setRefreshingAssets(true);
     setAssetsRefreshError(null);
     setAssetsRefreshNotice(null);
+    setAssetsRefreshLiveCounts(null);
+    setAssetsRefreshLogOpen(true);
     setAssetsRefreshProgress({
       stage: "Initializing",
       message: "Refreshing show/season/episode media...",
       current: 0,
       total: null,
     });
+    appendRefreshLog({
+      scope: "assets",
+      stage: "start",
+      message: "Refresh Images started",
+      level: "info",
+    });
     try {
       const headers = await getAuthHeaders();
       let sawComplete = false;
-      let streamFailed = false;
+      let completionSummary: string | null = null;
+      let completionLiveCounts: JobLiveCounts | null = null;
+      let lastProgressLogSignature: string | null = null;
 
       try {
-        const streamResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh-photos/stream`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ skip_mirror: false }),
-        });
+        const streamController = new AbortController();
+        const streamTimeout = setTimeout(
+          () => streamController.abort(),
+          SEASON_STREAM_MAX_DURATION_MS
+        );
+        let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+        const bumpStreamIdleTimeout = () => {
+          if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+          streamIdleTimeout = setTimeout(
+            () => streamController.abort(),
+            SEASON_STREAM_IDLE_TIMEOUT_MS
+          );
+        };
+        const clearStreamIdleTimeout = () => {
+          if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+          streamIdleTimeout = null;
+        };
+        bumpStreamIdleTimeout();
+        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+        let shouldStopReading = false;
+        try {
+          const streamResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh-photos/stream`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ skip_mirror: false, season_number: seasonNumber }),
+            signal: streamController.signal,
+          });
 
-        if (!streamResponse.ok || !streamResponse.body) {
-          throw new Error("Media refresh stream unavailable");
-        }
+          if (!streamResponse.ok || !streamResponse.body) {
+            throw new Error("Media refresh stream unavailable");
+          }
 
-        const reader = streamResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
+          reader = streamResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          buffer = buffer.replace(/\r\n/g, "\n");
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            bumpStreamIdleTimeout();
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
 
-          let boundaryIndex = buffer.indexOf("\n\n");
-          while (boundaryIndex !== -1) {
-            const rawEvent = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + 2);
+            let boundaryIndex = buffer.indexOf("\n\n");
+            while (boundaryIndex !== -1) {
+              const rawEvent = buffer.slice(0, boundaryIndex);
+              buffer = buffer.slice(boundaryIndex + 2);
 
-            const lines = rawEvent.split("\n").filter(Boolean);
-            let eventType = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
+              const lines = rawEvent.split("\n").filter(Boolean);
+              let eventType = "message";
+              const dataLines: string[] = [];
+              for (const line of lines) {
+                if (line.startsWith("event:")) {
+                  eventType = line.slice(6).trim();
+                } else if (line.startsWith("data:")) {
+                  dataLines.push(line.slice(5).trim());
+                }
               }
-            }
 
-            const dataStr = dataLines.join("\n");
-            let payload: Record<string, unknown> | string = dataStr;
-            try {
-              payload = JSON.parse(dataStr) as Record<string, unknown>;
-            } catch {
-              payload = dataStr;
-            }
+              const dataStr = dataLines.join("\n");
+              let payload: Record<string, unknown> | string = dataStr;
+              try {
+                payload = JSON.parse(dataStr) as Record<string, unknown>;
+              } catch {
+                payload = dataStr;
+              }
 
-            if (eventType === "progress" && payload && typeof payload === "object") {
-              const stageLabel = resolveStageLabel(
-                (payload as { stage?: unknown; step?: unknown }).stage ??
-                  (payload as { stage?: unknown; step?: unknown }).step,
-                SEASON_REFRESH_STAGE_LABELS
-              );
-              const stageCurrent = parseProgressNumber(
-                (payload as { stage_current?: unknown }).stage_current
-              );
-              const stageTotal = parseProgressNumber(
-                (payload as { stage_total?: unknown }).stage_total
-              );
-              const current = parseProgressNumber(
-                (payload as { current?: unknown }).current
-              );
-              const total = parseProgressNumber(
-                (payload as { total?: unknown }).total
-              );
-
-              setAssetsRefreshProgress({
-                stage: stageLabel,
-                message: buildProgressMessage(
+              if (eventType === "progress" && payload && typeof payload === "object") {
+                const stageLabel = resolveStageLabel(
+                  (payload as { stage?: unknown; step?: unknown }).stage ??
+                    (payload as { stage?: unknown; step?: unknown }).step,
+                  SEASON_REFRESH_STAGE_LABELS
+                );
+                const stageCurrent = parseProgressNumber(
+                  (payload as { stage_current?: unknown }).stage_current
+                );
+                const stageTotal = parseProgressNumber(
+                  (payload as { stage_total?: unknown }).stage_total
+                );
+                const current = parseProgressNumber(
+                  (payload as { current?: unknown }).current
+                );
+                const total = parseProgressNumber(
+                  (payload as { total?: unknown }).total
+                );
+                const heartbeat = (payload as { heartbeat?: unknown }).heartbeat === true;
+                const elapsedMs = parseProgressNumber((payload as { elapsed_ms?: unknown }).elapsed_ms);
+                const source = typeof (payload as { source?: unknown }).source === "string"
+                  ? (payload as { source: string }).source
+                  : null;
+                const sourceTotal = parseProgressNumber((payload as { source_total?: unknown }).source_total);
+                const mirroredCount = parseProgressNumber((payload as { mirrored_count?: unknown }).mirrored_count);
+                const resolvedCurrent = stageCurrent ?? current;
+                const resolvedTotal = stageTotal ?? total;
+                let progressMessage = buildProgressMessage(
                   stageLabel,
                   (payload as { message?: unknown }).message,
                   "Refreshing media..."
-                ),
-                current: stageCurrent ?? current,
-                total: stageTotal ?? total,
-              });
-            } else if (eventType === "complete") {
-              sawComplete = true;
-            } else if (eventType === "error") {
-              const errorPayload =
-                payload && typeof payload === "object"
-                  ? (payload as { error?: unknown; detail?: unknown })
-                  : null;
-              const errorText =
-                typeof errorPayload?.error === "string" && errorPayload.error
-                  ? errorPayload.error
-                  : "Failed to refresh media";
-              const detailText =
-                typeof errorPayload?.detail === "string" && errorPayload.detail
-                  ? errorPayload.detail
-                  : null;
-              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+                );
+                if (heartbeat && elapsedMs !== null && elapsedMs >= 0) {
+                  progressMessage = `${progressMessage} · ${Math.round(elapsedMs / 1000)}s elapsed`;
+                }
+                if (
+                  (payload as { skip_reason?: unknown }).skip_reason === "already_mirrored" &&
+                  sourceTotal !== null &&
+                  mirroredCount !== null
+                ) {
+                  progressMessage = `${progressMessage} (${mirroredCount}/${sourceTotal})`;
+                }
+                const nextLiveCounts = resolveJobLiveCounts(assetsRefreshLiveCounts, payload);
+                setAssetsRefreshLiveCounts(nextLiveCounts);
+                const enrichedProgressMessage = appendLiveCountsToMessage(
+                  progressMessage,
+                  nextLiveCounts
+                );
+
+                setAssetsRefreshProgress({
+                  stage: stageLabel,
+                  message: enrichedProgressMessage,
+                  current: resolvedCurrent,
+                  total: resolvedTotal,
+                });
+                const signature = [
+                  stageLabel ?? "",
+                  enrichedProgressMessage ?? "",
+                  resolvedCurrent ?? "",
+                  resolvedTotal ?? "",
+                ].join("|");
+                if (signature !== lastProgressLogSignature) {
+                  appendRefreshLog({
+                    scope: "assets",
+                    stage: stageLabel ?? "progress",
+                    message: source
+                      ? `${source.toUpperCase()}: ${enrichedProgressMessage}`
+                      : enrichedProgressMessage ?? "Refresh progress update",
+                    level: "info",
+                    current: resolvedCurrent,
+                    total: resolvedTotal,
+                  });
+                  lastProgressLogSignature = signature;
+                }
+              } else if (eventType === "complete") {
+                sawComplete = true;
+                const completeLiveCounts = resolveJobLiveCounts(assetsRefreshLiveCounts, payload);
+                setAssetsRefreshLiveCounts(completeLiveCounts);
+                completionLiveCounts = completeLiveCounts;
+                const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+                completionSummary =
+                  summarizePhotoStreamCompletion(payload) ??
+                  summarizeRefreshTargetResult(payload, "photos");
+                appendRefreshLog({
+                  scope: "assets",
+                  stage: "complete",
+                  message: "Media refresh stream complete.",
+                  response: [completionSummary, liveCountSuffix].filter(Boolean).join(" | "),
+                  level: "success",
+                });
+                shouldStopReading = true;
+              } else if (eventType === "error") {
+                const errorPayload =
+                  payload && typeof payload === "object"
+                    ? (payload as { error?: unknown; detail?: unknown })
+                    : null;
+                const errorText =
+                  typeof errorPayload?.error === "string" && errorPayload.error
+                    ? errorPayload.error
+                    : "Failed to refresh media";
+                const detailText =
+                  typeof errorPayload?.detail === "string" && errorPayload.detail
+                    ? errorPayload.detail
+                    : null;
+                appendRefreshLog({
+                  scope: "assets",
+                  stage: "error",
+                  message: errorText,
+                  detail: detailText,
+                  level: "error",
+                });
+                throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+              }
+
+              if (shouldStopReading) {
+                break;
+              }
+              boundaryIndex = buffer.indexOf("\n\n");
             }
 
-            boundaryIndex = buffer.indexOf("\n\n");
+            if (shouldStopReading) {
+              break;
+            }
+          }
+        } finally {
+          clearStreamIdleTimeout();
+          clearTimeout(streamTimeout);
+          if (reader && shouldStopReading) {
+            try {
+              await reader.cancel();
+            } catch {
+              // no-op
+            }
           }
         }
-      } catch (streamErr) {
-        streamFailed = true;
-        console.warn("Season media refresh stream failed, falling back to non-stream.", streamErr);
-      }
-
-      if (streamFailed) {
-        setAssetsRefreshProgress({
-          stage: "Fallback",
-          message: "Refreshing media...",
-          current: null,
-          total: null,
-        });
-        const fallbackResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ targets: ["photos"] }),
-        });
-        const fallbackData = await fallbackResponse.json().catch(() => ({}));
-        if (!fallbackResponse.ok) {
-          const message =
-            typeof (fallbackData as { error?: unknown }).error === "string"
-              ? (fallbackData as { error: string }).error
-              : "Failed to refresh media";
-          throw new Error(message);
+        if (!sawComplete) {
+          appendRefreshLog({
+            scope: "assets",
+            stage: "stream_incomplete",
+            message: "Refresh stream ended before completion.",
+            level: "error",
+          });
+          throw new Error("Refresh stream ended before completion.");
         }
+      } catch (streamErr) {
+        console.warn("Season media refresh stream failed.", streamErr);
+        appendRefreshLog({
+          scope: "assets",
+          stage: "stream_failed",
+          message: "Live stream unavailable.",
+          detail: streamErr instanceof Error ? streamErr.message : String(streamErr),
+          level: "error",
+        });
+        throw streamErr;
       }
 
       await fetchAssets();
-      setAssetsRefreshNotice(
-        streamFailed
-          ? "Refreshed media."
-          : sawComplete
+      const finalNotice = completionSummary
+        ? `Refreshed media. ${completionSummary}${
+            formatJobLiveCounts(completionLiveCounts)
+              ? ` (${formatJobLiveCounts(completionLiveCounts)})`
+              : ""
+          }`
+        : sawComplete
           ? "Refreshed show, season, episode, and cast media."
-          : "Refreshed media."
-      );
+          : "Refreshed media.";
+      setAssetsRefreshNotice(finalNotice);
+      appendRefreshLog({
+        scope: "assets",
+        stage: "done",
+        message: "Refresh Images completed.",
+        response: completionSummary,
+        level: "success",
+      });
     } catch (err) {
       console.error("Failed to refresh media:", err);
-      setAssetsRefreshError(err instanceof Error ? err.message : "Failed to refresh media");
+      const errorMessage = err instanceof Error ? err.message : "Failed to refresh media";
+      setAssetsRefreshError(errorMessage);
+      appendRefreshLog({
+        scope: "assets",
+        stage: "error",
+        message: "Refresh Images failed.",
+        detail: errorMessage,
+        level: "error",
+      });
     } finally {
       setRefreshingAssets(false);
       setAssetsRefreshProgress(null);
+      setAssetsRefreshLiveCounts(null);
     }
-  }, [refreshingAssets, fetchAssets, getAuthHeaders, showId]);
+  }, [
+    appendRefreshLog,
+    assetsRefreshLiveCounts,
+    refreshingAssets,
+    fetchAssets,
+    getAuthHeaders,
+    seasonNumber,
+    showId,
+  ]);
 
   const refreshSeasonCast = useCallback(async () => {
     if (!showId) return;
@@ -1213,104 +1808,207 @@ export default function SeasonDetailPage() {
     setRefreshingCast(true);
     setCastRefreshError(null);
     setCastRefreshNotice(null);
+    setCastRefreshLogOpen(true);
     setCastRefreshProgress({
       stage: "Initializing",
       message: "Refreshing cast credits and cast media...",
       current: 0,
       total: null,
     });
+    appendRefreshLog({
+      scope: "cast",
+      stage: "start",
+      message: "Season cast refresh started.",
+      level: "info",
+    });
 
     try {
       const headers = await getAuthHeaders();
       let streamFailed = false;
+      let sawComplete = false;
+      let completionSummary: string | null = null;
+      let lastProgressLogSignature: string | null = null;
 
       try {
-        const refreshResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh/stream`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ targets: ["cast_credits"] }),
-        });
+        const streamController = new AbortController();
+        const streamTimeout = setTimeout(
+          () => streamController.abort(),
+          SEASON_STREAM_MAX_DURATION_MS
+        );
+        let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+        const bumpStreamIdleTimeout = () => {
+          if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+          streamIdleTimeout = setTimeout(
+            () => streamController.abort(),
+            SEASON_STREAM_IDLE_TIMEOUT_MS
+          );
+        };
+        const clearStreamIdleTimeout = () => {
+          if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+          streamIdleTimeout = null;
+        };
+        bumpStreamIdleTimeout();
+        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+        let shouldStopReading = false;
+        try {
+          const refreshResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh/stream`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ targets: ["cast_credits"] }),
+            signal: streamController.signal,
+          });
 
-        if (!refreshResponse.ok || !refreshResponse.body) {
-          throw new Error("Cast refresh stream unavailable");
-        }
+          if (!refreshResponse.ok || !refreshResponse.body) {
+            throw new Error("Cast refresh stream unavailable");
+          }
 
-        const reader = refreshResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
+          reader = refreshResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          buffer = buffer.replace(/\r\n/g, "\n");
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            bumpStreamIdleTimeout();
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
 
-          let boundaryIndex = buffer.indexOf("\n\n");
-          while (boundaryIndex !== -1) {
-            const rawEvent = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + 2);
+            let boundaryIndex = buffer.indexOf("\n\n");
+            while (boundaryIndex !== -1) {
+              const rawEvent = buffer.slice(0, boundaryIndex);
+              buffer = buffer.slice(boundaryIndex + 2);
 
-            const lines = rawEvent.split("\n").filter(Boolean);
-            let eventType = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
+              const lines = rawEvent.split("\n").filter(Boolean);
+              let eventType = "message";
+              const dataLines: string[] = [];
+              for (const line of lines) {
+                if (line.startsWith("event:")) {
+                  eventType = line.slice(6).trim();
+                } else if (line.startsWith("data:")) {
+                  dataLines.push(line.slice(5).trim());
+                }
               }
-            }
 
-            const dataStr = dataLines.join("\n");
-            let payload: Record<string, unknown> | string = dataStr;
-            try {
-              payload = JSON.parse(dataStr) as Record<string, unknown>;
-            } catch {
-              payload = dataStr;
-            }
+              const dataStr = dataLines.join("\n");
+              let payload: Record<string, unknown> | string = dataStr;
+              try {
+                payload = JSON.parse(dataStr) as Record<string, unknown>;
+              } catch {
+                payload = dataStr;
+              }
 
-            if (eventType === "progress" && payload && typeof payload === "object") {
-              const stageLabel = resolveStageLabel(
-                (payload as { step?: unknown; stage?: unknown }).step ??
-                  (payload as { step?: unknown; stage?: unknown }).stage,
-                SEASON_REFRESH_STAGE_LABELS
-              );
-              const current = parseProgressNumber(
-                (payload as { current?: unknown }).current
-              );
-              const total = parseProgressNumber((payload as { total?: unknown }).total);
-              setCastRefreshProgress({
-                stage: stageLabel,
-                message: buildProgressMessage(
+              if (eventType === "progress" && payload && typeof payload === "object") {
+                const stageLabel = resolveStageLabel(
+                  (payload as { step?: unknown; stage?: unknown }).step ??
+                    (payload as { step?: unknown; stage?: unknown }).stage,
+                  SEASON_REFRESH_STAGE_LABELS
+                );
+                const current = parseProgressNumber(
+                  (payload as { current?: unknown }).current
+                );
+                const total = parseProgressNumber((payload as { total?: unknown }).total);
+                const heartbeat = (payload as { heartbeat?: unknown }).heartbeat === true;
+                const elapsedMs = parseProgressNumber((payload as { elapsed_ms?: unknown }).elapsed_ms);
+                let progressMessage = buildProgressMessage(
                   stageLabel,
                   (payload as { message?: unknown }).message,
                   "Refreshing cast..."
-                ),
-                current,
-                total,
-              });
-            } else if (eventType === "error") {
-              const errorPayload =
-                payload && typeof payload === "object"
-                  ? (payload as { error?: unknown; detail?: unknown })
-                  : null;
-              const errorText =
-                typeof errorPayload?.error === "string" && errorPayload.error
-                  ? errorPayload.error
-                  : "Failed to refresh cast credits";
-              const detailText =
-                typeof errorPayload?.detail === "string" && errorPayload.detail
-                  ? errorPayload.detail
-                  : null;
-              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+                );
+                if (heartbeat && elapsedMs !== null && elapsedMs >= 0) {
+                  progressMessage = `${progressMessage} · ${Math.round(elapsedMs / 1000)}s elapsed`;
+                }
+                setCastRefreshProgress({
+                  stage: stageLabel,
+                  message: progressMessage,
+                  current,
+                  total,
+                });
+                const signature = [stageLabel ?? "", progressMessage ?? "", current ?? "", total ?? ""].join("|");
+                if (signature !== lastProgressLogSignature) {
+                  appendRefreshLog({
+                    scope: "cast",
+                    stage: stageLabel ?? "progress",
+                    message: progressMessage ?? "Refresh progress update",
+                    level: "info",
+                    current,
+                    total,
+                  });
+                  lastProgressLogSignature = signature;
+                }
+              } else if (eventType === "complete") {
+                sawComplete = true;
+                completionSummary = summarizeRefreshTargetResult(payload, "cast_credits");
+                appendRefreshLog({
+                  scope: "cast",
+                  stage: "complete",
+                  message: "Cast refresh stream complete.",
+                  response: completionSummary,
+                  level: "success",
+                });
+                shouldStopReading = true;
+              } else if (eventType === "error") {
+                const errorPayload =
+                  payload && typeof payload === "object"
+                    ? (payload as { error?: unknown; detail?: unknown })
+                    : null;
+                const errorText =
+                  typeof errorPayload?.error === "string" && errorPayload.error
+                    ? errorPayload.error
+                    : "Failed to refresh cast credits";
+                const detailText =
+                  typeof errorPayload?.detail === "string" && errorPayload.detail
+                    ? errorPayload.detail
+                    : null;
+                appendRefreshLog({
+                  scope: "cast",
+                  stage: "error",
+                  message: errorText,
+                  detail: detailText,
+                  level: "error",
+                });
+                throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+              }
+
+              if (shouldStopReading) {
+                break;
+              }
+              boundaryIndex = buffer.indexOf("\n\n");
             }
 
-            boundaryIndex = buffer.indexOf("\n\n");
+            if (shouldStopReading) {
+              break;
+            }
           }
+        } finally {
+          clearStreamIdleTimeout();
+          clearTimeout(streamTimeout);
+          if (reader && shouldStopReading) {
+            try {
+              await reader.cancel();
+            } catch {
+              // no-op
+            }
+          }
+        }
+        if (!sawComplete) {
+          streamFailed = true;
+          appendRefreshLog({
+            scope: "cast",
+            stage: "stream_incomplete",
+            message: "Cast refresh stream ended before completion; switching to fallback.",
+            level: "info",
+          });
         }
       } catch (streamErr) {
         streamFailed = true;
         console.warn("Season cast refresh stream failed, falling back to non-stream.", streamErr);
+        appendRefreshLog({
+          scope: "cast",
+          stage: "stream_failed",
+          message: "Live cast stream unavailable; running fallback refresh.",
+          detail: streamErr instanceof Error ? streamErr.message : String(streamErr),
+          level: "info",
+        });
       }
 
       if (streamFailed) {
@@ -1320,25 +2018,82 @@ export default function SeasonDetailPage() {
           current: null,
           total: null,
         });
-        const fallbackResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ targets: ["cast_credits"] }),
+        appendRefreshLog({
+          scope: "cast",
+          stage: "fallback",
+          message: "Fallback cast refresh started.",
+          level: "info",
         });
+        let fallbackResponse: Response;
+        try {
+          fallbackResponse = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showId}/refresh`,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({ targets: ["cast_credits"] }),
+            },
+            SEASON_REFRESH_FALLBACK_TIMEOUT_MS
+          );
+        } catch (error) {
+          if (isAbortError(error)) {
+            appendRefreshLog({
+              scope: "cast",
+              stage: "fallback_timeout",
+              message: "Fallback cast refresh timed out.",
+              detail: `Timed out after ${Math.round(SEASON_REFRESH_FALLBACK_TIMEOUT_MS / 1000)}s`,
+              level: "error",
+            });
+            throw new Error(
+              `Timed out refreshing cast credits after ${Math.round(
+                SEASON_REFRESH_FALLBACK_TIMEOUT_MS / 1000
+              )}s.`
+            );
+          }
+          throw error;
+        }
         const fallbackData = await fallbackResponse.json().catch(() => ({}));
         if (!fallbackResponse.ok) {
           const message =
             typeof (fallbackData as { error?: unknown }).error === "string"
               ? (fallbackData as { error: string }).error
               : "Failed to refresh cast credits";
+          appendRefreshLog({
+            scope: "cast",
+            stage: "fallback_failed",
+            message,
+            level: "error",
+          });
           throw new Error(message);
         }
+        completionSummary =
+          summarizeRefreshTargetResult(fallbackData, "cast_credits") ?? completionSummary;
+        appendRefreshLog({
+          scope: "cast",
+          stage: "fallback_complete",
+          message: "Fallback cast refresh completed.",
+          response: completionSummary,
+          level: "success",
+        });
       }
 
-      const castResponse = await fetch(
-        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500`,
-        { headers }
-      );
+      let castResponse: Response;
+      try {
+        castResponse = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500`,
+          { headers },
+          SEASON_CAST_LOAD_TIMEOUT_MS
+        );
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw new Error(
+            `Timed out loading refreshed season cast after ${Math.round(
+              SEASON_CAST_LOAD_TIMEOUT_MS / 1000
+            )}s.`
+          );
+        }
+        throw error;
+      }
       const castData = await castResponse.json().catch(() => ({}));
       if (!castResponse.ok) {
         const message =
@@ -1364,10 +2119,23 @@ export default function SeasonDetailPage() {
           : null
       );
 
-      const archiveCastResponse = await fetch(
-        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
-        { headers }
-      );
+      let archiveCastResponse: Response;
+      try {
+        archiveCastResponse = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
+          { headers },
+          SEASON_CAST_LOAD_TIMEOUT_MS
+        );
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw new Error(
+            `Timed out loading archive cast after ${Math.round(
+              SEASON_CAST_LOAD_TIMEOUT_MS / 1000
+            )}s.`
+          );
+        }
+        throw error;
+      }
       const archiveCastData = await archiveCastResponse.json().catch(() => ({}));
       if (!archiveCastResponse.ok) {
         const message =
@@ -1402,6 +2170,14 @@ export default function SeasonDetailPage() {
 
       for (const [index, member] of castMembersToSync.entries()) {
         const displayName = member.person_name || `Cast member ${index + 1}`;
+        appendRefreshLog({
+          scope: "cast",
+          stage: "cast_profile_sync",
+          message: `Syncing ${displayName} (${index + 1}/${castProfilesTotal})`,
+          level: "info",
+          current: index,
+          total: castProfilesTotal,
+        });
         setCastRefreshProgress({
           stage: "Cast Profiles & Media",
           message: `Syncing ${displayName} from TMDb/IMDb/Fandom (${index + 1}/${castProfilesTotal})...`,
@@ -1418,112 +2194,194 @@ export default function SeasonDetailPage() {
         try {
           let personStreamFailed = false;
           try {
-            const personStreamResponse = await fetch(
-              `/api/admin/trr-api/people/${member.person_id}/refresh-images/stream`,
-              {
-                method: "POST",
-                headers: { ...headers, "Content-Type": "application/json" },
-                body: JSON.stringify(requestBody),
-              }
+            const personStreamController = new AbortController();
+            const personStreamTimeout = setTimeout(
+              () => personStreamController.abort(),
+              SEASON_PERSON_STREAM_MAX_DURATION_MS
             );
+            let personStreamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+            const bumpPersonStreamIdleTimeout = () => {
+              if (personStreamIdleTimeout) clearTimeout(personStreamIdleTimeout);
+              personStreamIdleTimeout = setTimeout(
+                () => personStreamController.abort(),
+                SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS
+              );
+            };
+            const clearPersonStreamIdleTimeout = () => {
+              if (personStreamIdleTimeout) clearTimeout(personStreamIdleTimeout);
+              personStreamIdleTimeout = null;
+            };
+            bumpPersonStreamIdleTimeout();
+            let personReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+            let shouldStopPersonStream = false;
+            try {
+              const personStreamResponse = await fetch(
+                `/api/admin/trr-api/people/${member.person_id}/refresh-images/stream`,
+                {
+                  method: "POST",
+                  headers: { ...headers, "Content-Type": "application/json" },
+                  body: JSON.stringify(requestBody),
+                  signal: personStreamController.signal,
+                }
+              );
 
-            if (!personStreamResponse.ok || !personStreamResponse.body) {
-              throw new Error("Person refresh stream unavailable");
-            }
+              if (!personStreamResponse.ok || !personStreamResponse.body) {
+                throw new Error("Person refresh stream unavailable");
+              }
 
-            const personReader = personStreamResponse.body.getReader();
-            const personDecoder = new TextDecoder();
-            let personBuffer = "";
+              personReader = personStreamResponse.body.getReader();
+              const personDecoder = new TextDecoder();
+              let personBuffer = "";
 
-            while (true) {
-              const { value, done } = await personReader.read();
-              if (done) break;
-              personBuffer += personDecoder.decode(value, { stream: true });
-              personBuffer = personBuffer.replace(/\r\n/g, "\n");
+              while (true) {
+                const { value, done } = await personReader.read();
+                if (done) break;
+                bumpPersonStreamIdleTimeout();
+                personBuffer += personDecoder.decode(value, { stream: true });
+                personBuffer = personBuffer.replace(/\r\n/g, "\n");
 
-              let boundaryIndex = personBuffer.indexOf("\n\n");
-              while (boundaryIndex !== -1) {
-                const rawEvent = personBuffer.slice(0, boundaryIndex);
-                personBuffer = personBuffer.slice(boundaryIndex + 2);
+                let boundaryIndex = personBuffer.indexOf("\n\n");
+                while (boundaryIndex !== -1) {
+                  const rawEvent = personBuffer.slice(0, boundaryIndex);
+                  personBuffer = personBuffer.slice(boundaryIndex + 2);
 
-                const lines = rawEvent.split("\n").filter(Boolean);
-                let eventType = "message";
-                const dataLines: string[] = [];
-                for (const line of lines) {
-                  if (line.startsWith("event:")) {
-                    eventType = line.slice(6).trim();
-                  } else if (line.startsWith("data:")) {
-                    dataLines.push(line.slice(5).trim());
+                  const lines = rawEvent.split("\n").filter(Boolean);
+                  let eventType = "message";
+                  const dataLines: string[] = [];
+                  for (const line of lines) {
+                    if (line.startsWith("event:")) {
+                      eventType = line.slice(6).trim();
+                    } else if (line.startsWith("data:")) {
+                      dataLines.push(line.slice(5).trim());
+                    }
                   }
+
+                  const dataStr = dataLines.join("\n");
+                  let payload: Record<string, unknown> | string = dataStr;
+                  try {
+                    payload = JSON.parse(dataStr) as Record<string, unknown>;
+                  } catch {
+                    payload = dataStr;
+                  }
+
+                  if (eventType === "progress" && payload && typeof payload === "object") {
+                    const stageLabel = resolveStageLabel(
+                      (payload as { stage?: unknown; step?: unknown }).stage ??
+                        (payload as { stage?: unknown; step?: unknown }).step,
+                      SEASON_REFRESH_STAGE_LABELS
+                    );
+                    setCastRefreshProgress({
+                      stage: stageLabel ?? "Cast Profiles & Media",
+                      message: buildProgressMessage(
+                        stageLabel,
+                        (payload as { message?: unknown }).message,
+                        `Syncing ${displayName}...`
+                      ),
+                      current: index,
+                      total: castProfilesTotal,
+                    });
+                  } else if (eventType === "complete") {
+                    shouldStopPersonStream = true;
+                  } else if (eventType === "error") {
+                    throw new Error("Failed to sync cast member profile/media");
+                  }
+
+                  if (shouldStopPersonStream) {
+                    break;
+                  }
+                  boundaryIndex = personBuffer.indexOf("\n\n");
                 }
 
-                const dataStr = dataLines.join("\n");
-                let payload: Record<string, unknown> | string = dataStr;
+                if (shouldStopPersonStream) {
+                  break;
+                }
+              }
+            } finally {
+              clearPersonStreamIdleTimeout();
+              clearTimeout(personStreamTimeout);
+              if (personReader && shouldStopPersonStream) {
                 try {
-                  payload = JSON.parse(dataStr) as Record<string, unknown>;
+                  await personReader.cancel();
                 } catch {
-                  payload = dataStr;
+                  // no-op
                 }
-
-                if (eventType === "progress" && payload && typeof payload === "object") {
-                  const stageLabel = resolveStageLabel(
-                    (payload as { stage?: unknown; step?: unknown }).stage ??
-                      (payload as { stage?: unknown; step?: unknown }).step,
-                    SEASON_REFRESH_STAGE_LABELS
-                  );
-                  setCastRefreshProgress({
-                    stage: stageLabel ?? "Cast Profiles & Media",
-                    message: buildProgressMessage(
-                      stageLabel,
-                      (payload as { message?: unknown }).message,
-                      `Syncing ${displayName}...`
-                    ),
-                    current: index,
-                    total: castProfilesTotal,
-                  });
-                } else if (eventType === "error") {
-                  throw new Error("Failed to sync cast member profile/media");
-                }
-
-                boundaryIndex = personBuffer.indexOf("\n\n");
               }
             }
           } catch (personStreamErr) {
-            personStreamFailed = true;
-            console.warn(
-              `Season cast member stream refresh failed for ${displayName}; using non-stream fallback.`,
-              personStreamErr
-            );
-          }
-
-          if (personStreamFailed) {
-            const personFallbackResponse = await fetch(
-              `/api/admin/trr-api/people/${member.person_id}/refresh-images`,
-              {
-                method: "POST",
-                headers: { ...headers, "Content-Type": "application/json" },
-                body: JSON.stringify(requestBody),
-              }
-            );
-            const personFallbackData = await personFallbackResponse.json().catch(() => ({}));
-            if (!personFallbackResponse.ok) {
-              const message =
-                typeof (personFallbackData as { error?: unknown }).error === "string"
-                  ? (personFallbackData as { error: string }).error
-                  : "Failed to sync cast member profile/media";
-              throw new Error(message);
+              personStreamFailed = true;
+              console.warn(
+                `Season cast member stream refresh failed for ${displayName}; using non-stream fallback.`,
+                personStreamErr
+              );
+              appendRefreshLog({
+                scope: "cast",
+                stage: "cast_profile_stream_failed",
+                message: `Stream failed for ${displayName}; running fallback.`,
+                detail: personStreamErr instanceof Error ? personStreamErr.message : String(personStreamErr),
+                level: "info",
+                current: index,
+                total: castProfilesTotal,
+              });
             }
-          }
-        } catch (castProfileErr) {
-          console.warn(
-            `Failed syncing season cast profile/media for ${displayName}:`,
-            castProfileErr
-          );
-          castProfilesFailed += 1;
-        } finally {
-          setCastRefreshProgress({
-            stage: "Cast Profiles & Media",
-            message: `Synced ${index + 1}/${castProfilesTotal} cast profiles/media...`,
+
+            if (personStreamFailed) {
+              let personFallbackResponse: Response;
+              try {
+              personFallbackResponse = await fetchWithTimeout(
+                `/api/admin/trr-api/people/${member.person_id}/refresh-images`,
+                {
+                  method: "POST",
+                  headers: { ...headers, "Content-Type": "application/json" },
+                  body: JSON.stringify(requestBody),
+                },
+                SEASON_PERSON_FALLBACK_TIMEOUT_MS
+              );
+            } catch (error) {
+                if (isAbortError(error)) {
+                  throw new Error(
+                    `Timed out syncing cast member profile/media after ${Math.round(
+                      SEASON_PERSON_FALLBACK_TIMEOUT_MS / 1000
+                    )}s.`
+                  );
+                }
+                throw error;
+              }
+            const personFallbackData = await personFallbackResponse.json().catch(() => ({}));
+              if (!personFallbackResponse.ok) {
+                const message =
+                  typeof (personFallbackData as { error?: unknown }).error === "string"
+                    ? (personFallbackData as { error: string }).error
+                    : "Failed to sync cast member profile/media";
+                throw new Error(message);
+              }
+            }
+            appendRefreshLog({
+              scope: "cast",
+              stage: "cast_profile_complete",
+              message: `Synced ${displayName}.`,
+              level: "success",
+              current: index + 1,
+              total: castProfilesTotal,
+            });
+          } catch (castProfileErr) {
+            console.warn(
+              `Failed syncing season cast profile/media for ${displayName}:`,
+              castProfileErr
+            );
+            castProfilesFailed += 1;
+            appendRefreshLog({
+              scope: "cast",
+              stage: "cast_profile_failed",
+              message: `Failed syncing ${displayName}.`,
+              detail: castProfileErr instanceof Error ? castProfileErr.message : String(castProfileErr),
+              level: "error",
+              current: index + 1,
+              total: castProfilesTotal,
+            });
+          } finally {
+            setCastRefreshProgress({
+              stage: "Cast Profiles & Media",
+              message: `Synced ${index + 1}/${castProfilesTotal} cast profiles/media...`,
             current: index + 1,
             total: castProfilesTotal,
           });
@@ -1532,18 +2390,50 @@ export default function SeasonDetailPage() {
 
       await Promise.all([fetchCastRoleMembers(), fetchShowCastForBrand()]);
 
+      const castProfileSummary =
+        castProfilesTotal > 0
+          ? `cast profiles/media: ${castProfilesTotal - castProfilesFailed}/${castProfilesTotal}${
+              castProfilesFailed > 0 ? ` (${castProfilesFailed} failed)` : ""
+            }`
+          : null;
+      const finalNotice = [
+        "Refreshed season cast.",
+        completionSummary,
+        castProfileSummary,
+      ]
+        .filter(Boolean)
+        .join(" ");
       setCastRefreshNotice(
         castProfilesTotal > 0
-          ? `Refreshed season cast, then synced cast profiles/media from TMDb/IMDb/Fandom (${castProfilesTotal - castProfilesFailed}/${castProfilesTotal}${castProfilesFailed > 0 ? `, ${castProfilesFailed} failed` : ""}).`
-          : "Refreshed season cast."
+          ? finalNotice
+          : completionSummary
+            ? `Refreshed season cast. ${completionSummary}`
+            : "Refreshed season cast."
       );
+      appendRefreshLog({
+        scope: "cast",
+        stage: "done",
+        message: "Season cast refresh complete.",
+        response: [completionSummary, castProfileSummary].filter(Boolean).join(" · ") || null,
+        level: "success",
+      });
     } catch (err) {
-      setCastRefreshError(err instanceof Error ? err.message : "Failed to refresh season cast");
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to refresh season cast";
+      setCastRefreshError(errorMessage);
+      appendRefreshLog({
+        scope: "cast",
+        stage: "error",
+        message: "Season cast refresh failed.",
+        detail: errorMessage,
+        level: "error",
+      });
     } finally {
       setRefreshingCast(false);
       setCastRefreshProgress(null);
     }
   }, [
+    appendRefreshLog,
     refreshingCast,
     getAuthHeaders,
     showId,
@@ -1718,6 +2608,9 @@ export default function SeasonDetailPage() {
 
   const refreshAssetPipeline = useCallback(
     async (asset: SeasonAsset) => {
+      setAssetsRefreshLogOpen(true);
+      setAssetsRefreshNotice(null);
+      setAssetsRefreshError(null);
       const headers = await getAuthHeaders();
       const base =
         asset.origin_table === "media_assets"
@@ -1730,20 +2623,74 @@ export default function SeasonDetailPage() {
         throw new Error("Full pipeline refresh is only available for media assets and cast photos.");
       }
 
-      const callStep = async (endpoint: string, payload: Record<string, unknown>) => {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+      appendRefreshLog({
+        scope: "image",
+        stage: "pipeline_start",
+        message: `Image pipeline refresh started (${base.kind}:${base.id}).`,
+        level: "info",
+      });
+
+      const callStep = async (
+        label: string,
+        endpoint: string,
+        payload: Record<string, unknown>
+      ) => {
+        appendRefreshLog({
+          scope: "image",
+          stage: "pipeline_step",
+          message: `${label} started.`,
+          level: "info",
         });
+        let response: Response;
+        try {
+          response = await fetchWithTimeout(
+            endpoint,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            },
+            SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS
+          );
+        } catch (error) {
+          if (isAbortError(error)) {
+            appendRefreshLog({
+              scope: "image",
+              stage: "pipeline_step_timeout",
+              message: `${label} timed out.`,
+              detail: `Pipeline step timed out (${Math.round(SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS / 1000)}s)`,
+              level: "error",
+            });
+            throw new Error(
+              `Pipeline step timed out (${Math.round(SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS / 1000)}s)`
+            );
+          }
+          throw error;
+        }
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const message =
             data?.error && data?.detail
               ? `${data.error}: ${data.detail}`
               : data?.error || data?.detail || "Pipeline step failed";
+          appendRefreshLog({
+            scope: "image",
+            stage: "pipeline_step_failed",
+            message: `${label} failed.`,
+            detail: message,
+            level: "error",
+          });
           throw new Error(message);
         }
+        appendRefreshLog({
+          scope: "image",
+          stage: "pipeline_step_complete",
+          message: `${label} completed.`,
+          response:
+            summarizeRefreshTargetResult(data, "photos") ??
+            summarizeRefreshTargetResult(data, "cast_credits"),
+          level: "success",
+        });
         return data as Record<string, unknown>;
       };
 
@@ -1752,10 +2699,14 @@ export default function SeasonDetailPage() {
           ? `/api/admin/trr-api/media-assets/${base.id}`
           : `/api/admin/trr-api/cast-photos/${base.id}`;
 
-      await callStep(`${prefix}/mirror`, { force: true });
-      const countPayload = await callStep(`${prefix}/auto-count`, { force: true });
-      const textPayload = await callStep(`${prefix}/detect-text-overlay`, { force: true });
-      await callStep(`${prefix}/variants`, { force: true });
+      await callStep("Mirror", `${prefix}/mirror`, { force: true });
+      const countPayload = await callStep("People Count", `${prefix}/auto-count`, { force: true });
+      const textPayload = await callStep(
+        "Text Overlay",
+        `${prefix}/detect-text-overlay`,
+        { force: true }
+      );
+      await callStep("Variants", `${prefix}/variants`, { force: true });
       const hasTextOverlay =
         typeof textPayload.has_text_overlay === "boolean"
           ? textPayload.has_text_overlay
@@ -1769,7 +2720,7 @@ export default function SeasonDetailPage() {
         typeof asset.thumbnail_focus_y === "number" &&
         typeof asset.thumbnail_zoom === "number";
       if (hasManualCrop) {
-        await callStep(`${prefix}/variants`, {
+        await callStep("Variants (Manual Crop)", `${prefix}/variants`, {
           force: true,
           crop: {
             x: asset.thumbnail_focus_x,
@@ -1797,8 +2748,25 @@ export default function SeasonDetailPage() {
       });
 
       await fetchAssets();
+      const pipelineSummaryParts: string[] = [];
+      if (typeof countPayload.people_count === "number") {
+        pipelineSummaryParts.push(`people_count: ${countPayload.people_count}`);
+      }
+      pipelineSummaryParts.push(
+        hasTextOverlay === null
+          ? "text_overlay: unchanged"
+          : `text_overlay: ${hasTextOverlay ? "yes" : "no"}`
+      );
+      setAssetsRefreshNotice(`Image pipeline refreshed. ${pipelineSummaryParts.join(" · ")}`);
+      appendRefreshLog({
+        scope: "image",
+        stage: "pipeline_done",
+        message: `Image pipeline refresh completed (${base.kind}:${base.id}).`,
+        response: pipelineSummaryParts.join(" · "),
+        level: "success",
+      });
     },
-    [applyAssetPatch, fetchAssets, getAuthHeaders]
+    [appendRefreshLog, applyAssetPatch, fetchAssets, getAuthHeaders]
   );
 
   const deleteMediaAsset = useCallback(
@@ -1898,7 +2866,7 @@ export default function SeasonDetailPage() {
 
       const normalizedContentType =
         typeof data.content_type === "string" && data.content_type.trim().length > 0
-          ? data.content_type.trim().toUpperCase()
+          ? normalizeContentTypeToken(data.content_type)
           : normalizeContentTypeToken(contentType);
       const nextKind =
         typeof data.kind === "string" && data.kind.trim().length > 0
@@ -2038,16 +3006,10 @@ export default function SeasonDetailPage() {
           const canonical = canonicalizeCastRoleName(role);
           if (canonical) values.add(canonical);
         }
-        continue;
-      }
-      const showRole = showCastByPersonId.get(member.person_id)?.role;
-      const canonical = canonicalizeCastRoleName(showRole);
-      if (canonical) {
-        values.add(canonical);
       }
     }
     return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [cast, castRoleMemberByPersonId, showCastByPersonId]);
+  }, [cast, castRoleMemberByPersonId]);
 
   const availableCastCreditCategories = useMemo(() => {
     const values = new Set<string>();
@@ -2064,15 +3026,9 @@ export default function SeasonDetailPage() {
     const merged = cast.map((member) => {
       const scoped = castRoleMemberByPersonId.get(member.person_id);
       const showCastMember = showCastByPersonId.get(member.person_id);
-      const fallbackRole =
-        typeof showCastMember?.role === "string" && showCastMember.role.trim().length > 0
-          ? showCastMember.role.trim()
-          : null;
       const roles = scoped?.roles.length
         ? normalizeCastRoleList(scoped.roles)
-        : fallbackRole
-          ? normalizeCastRoleList([fallbackRole])
-          : [];
+        : [];
       const creditCategory =
         typeof showCastMember?.credit_category === "string" &&
         showCastMember.credit_category.trim().length > 0
@@ -2088,12 +3044,6 @@ export default function SeasonDetailPage() {
           showCastMember?.photo_url ||
           showCastMember?.cover_photo_url ||
           null,
-        merged_total_episodes:
-          typeof member.total_episodes === "number"
-            ? member.total_episodes
-            : typeof scoped?.total_episodes === "number"
-              ? scoped.total_episodes
-              : null,
         credit_category: creditCategory,
       };
     });
@@ -2174,12 +3124,6 @@ export default function SeasonDetailPage() {
     return parsed.toLocaleDateString();
   };
 
-  const isSeasonBackdrop = useCallback((asset: SeasonAsset) => {
-    // Only trust the normalized "kind" field. Some historical metadata flags were incorrect
-    // (e.g. season posters tagged as backdrops). Kind is the source-of-truth for grouping.
-    return (asset.kind ?? "").toLowerCase().trim() === "backdrop";
-  }, []);
-
   const advancedFilteredMediaAssets = useMemo(() => {
     return applyAdvancedFiltersToSeasonAssets(assets, advancedFilters, {
       showName: show?.name ?? undefined,
@@ -2250,63 +3194,12 @@ export default function SeasonDetailPage() {
   }, [advancedFilters, galleryDiagnosticFilter]);
 
   const mediaSections = useMemo(() => {
-    const backdrops: SeasonAsset[] = [];
-    const posters: SeasonAsset[] = [];
-    const episodeStills: SeasonAsset[] = [];
-    const profilePictures: SeasonAsset[] = [];
-    const castPhotos: SeasonAsset[] = [];
-
-    for (const asset of filteredMediaAssets.slice(0, assetsVisibleCount)) {
-      const normalizedKind = (asset.kind ?? "").toLowerCase().trim();
-      const normalizedContextSection = (asset.context_section ?? "").toLowerCase().trim();
-      const normalizedContextType = (asset.context_type ?? "").toLowerCase().trim();
-      const isProfilePicture =
-        normalizedContextType === "profile_picture" ||
-        normalizedContextType === "profile" ||
-        normalizedContextSection === "bravo_profile";
-      const isCastLike =
-        asset.type === "cast" || normalizedKind === "cast" || normalizedKind === "promo";
-
-      if (isProfilePicture) {
-        profilePictures.push(asset);
-        continue;
-      }
-
-      if (isCastLike) {
-        castPhotos.push(asset);
-        continue;
-      }
-
-      if (asset.type === "episode") {
-        episodeStills.push(asset);
-        continue;
-      }
-
-      if (asset.type !== "season") continue;
-
-      if (isSeasonBackdrop(asset)) {
-        backdrops.push(asset);
-        continue;
-      }
-
-      const isEpisodeStill = matchesContentTypesForSeasonAsset(
-        asset,
-        ["episode_still"],
-        seasonNumber,
-        show?.name ?? undefined
-      );
-      if (isEpisodeStill) {
-        episodeStills.push(asset);
-        continue;
-      }
-
-      if (normalizedKind === "poster") {
-        posters.push(asset);
-      }
-    }
-
-    return { backdrops, posters, episodeStills, profilePictures, castPhotos };
-  }, [filteredMediaAssets, assetsVisibleCount, isSeasonBackdrop, seasonNumber, show?.name]);
+    return groupSeasonAssetsBySection(filteredMediaAssets.slice(0, assetsVisibleCount), {
+      seasonNumber,
+      showName: show?.name ?? undefined,
+      includeOther: true,
+    });
+  }, [filteredMediaAssets, assetsVisibleCount, seasonNumber, show?.name]);
 
   const isTextFilterActive = useMemo(() => {
     const wantsText = advancedFilters.text.includes("text");
@@ -2367,7 +3260,19 @@ export default function SeasonDetailPage() {
   }
 
   if (!user || !hasAccess) {
-    return null;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-zinc-900">Admin access required</p>
+          <Link
+            href="/admin/trr-shows"
+            className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
+          >
+            ← Back to Shows
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   if (slugResolutionLoading || (!showId && !slugResolutionError)) {
@@ -2736,6 +3641,17 @@ export default function SeasonDetailPage() {
                         Filters
                       </button>
                       <button
+                        type="button"
+                        onClick={() => {
+                          setBatchJobsError(null);
+                          setBatchJobsNotice(null);
+                          setBatchJobsOpen(true);
+                        }}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Batch Jobs
+                      </button>
+                      <button
                         onClick={openAddBackdrops}
                         disabled={!seasonEligibleForMedia && !allowPlaceholderMediaOverride}
                         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
@@ -2775,6 +3691,25 @@ export default function SeasonDetailPage() {
                 message={assetsRefreshProgress?.message}
                 current={assetsRefreshProgress?.current}
                 total={assetsRefreshProgress?.total}
+              />
+              {(batchJobsNotice || batchJobsError) && (
+                <p className={`mb-4 text-sm ${batchJobsError ? "text-red-600" : "text-zinc-500"}`}>
+                  {batchJobsError || batchJobsNotice}
+                </p>
+              )}
+              <RefreshProgressBar
+                show={batchJobsRunning}
+                stage={batchJobsProgress?.stage}
+                message={batchJobsProgress?.message}
+                current={batchJobsProgress?.current}
+                total={batchJobsProgress?.total}
+              />
+              <RefreshActivityLog
+                title="Refresh Activity"
+                entries={refreshLogEntries}
+                scopes={["assets", "image"]}
+                open={assetsRefreshLogOpen}
+                onToggle={() => setAssetsRefreshLogOpen((prev) => !prev)}
               />
 
               {!seasonEligibleForMedia && (
@@ -2908,6 +3843,8 @@ export default function SeasonDetailPage() {
                           >
                             <GalleryImage
                               src={getAssetDisplayUrl(asset)}
+                              srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                              diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                               alt={asset.caption || "Season backdrop"}
                               sizes="300px"
                               className="object-cover"
@@ -2930,6 +3867,8 @@ export default function SeasonDetailPage() {
                           >
                             <GalleryImage
                               src={getAssetDisplayUrl(asset)}
+                              srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                              diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                               alt={asset.caption || "Poster"}
                               sizes="180px"
                             />
@@ -2939,11 +3878,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {mediaSections.episodeStills.length > 0 && (
+                {mediaSections.episode_stills.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Episode Stills</h4>
                     <div className="grid grid-cols-6 gap-3">
-                      {mediaSections.episodeStills.map((asset, i, arr) => (
+                      {mediaSections.episode_stills.map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
@@ -2951,6 +3890,8 @@ export default function SeasonDetailPage() {
                           >
                             <GalleryImage
                               src={getAssetDisplayUrl(asset)}
+                              srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                              diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                               alt={asset.caption || "Episode still"}
                               sizes="150px"
                             />
@@ -2960,11 +3901,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {mediaSections.profilePictures.length > 0 && (
+                {mediaSections.profile_pictures.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Profile Pictures</h4>
                     <div className="grid grid-cols-5 gap-4">
-                      {mediaSections.profilePictures.map((asset, i, arr) => (
+                      {mediaSections.profile_pictures.map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
@@ -2972,6 +3913,8 @@ export default function SeasonDetailPage() {
                           >
                             <GalleryImage
                               src={getAssetDisplayUrl(asset)}
+                              srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                              diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                               alt={asset.caption || "Profile picture"}
                               sizes="180px"
                             />
@@ -2986,11 +3929,11 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {mediaSections.castPhotos.length > 0 && (
+                {mediaSections.cast_photos.length > 0 && (
                   <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Cast Photos</h4>
                     <div className="grid grid-cols-5 gap-4">
-                      {mediaSections.castPhotos.map((asset, i, arr) => (
+                      {mediaSections.cast_photos.map((asset, i, arr) => (
                           <button
                             key={`${asset.id}-${i}`}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
@@ -2998,6 +3941,8 @@ export default function SeasonDetailPage() {
                           >
                             <GalleryImage
                               src={getAssetDisplayUrl(asset)}
+                              srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                              diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                               alt={asset.caption || "Cast photo"}
                               sizes="180px"
                             />
@@ -3008,6 +3953,103 @@ export default function SeasonDetailPage() {
                             )}
                           </button>
                         ))}
+                    </div>
+                  </section>
+                )}
+
+                {mediaSections.confessionals.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Confessionals</h4>
+                    <div className="grid grid-cols-5 gap-4">
+                      {mediaSections.confessionals.map((asset, i, arr) => (
+                        <button
+                          key={`${asset.id}-${i}`}
+                          onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                          className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <GalleryImage
+                            src={getAssetDisplayUrl(asset)}
+                            srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                            diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                            alt={asset.caption || "Confessional"}
+                            sizes="180px"
+                          />
+                          {asset.person_name && (
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                              <p className="truncate text-xs text-white">{asset.person_name}</p>
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {mediaSections.reunion.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Reunion</h4>
+                    <div className="grid grid-cols-5 gap-4">
+                      {mediaSections.reunion.map((asset, i, arr) => (
+                        <button
+                          key={`${asset.id}-${i}`}
+                          onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                          className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <GalleryImage
+                            src={getAssetDisplayUrl(asset)}
+                            srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                            diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                            alt={asset.caption || "Reunion"}
+                            sizes="180px"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {mediaSections.intro_card.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Intro Card</h4>
+                    <div className="grid grid-cols-5 gap-4">
+                      {mediaSections.intro_card.map((asset, i, arr) => (
+                        <button
+                          key={`${asset.id}-${i}`}
+                          onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                          className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <GalleryImage
+                            src={getAssetDisplayUrl(asset)}
+                            srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                            diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                            alt={asset.caption || "Intro Card"}
+                            sizes="180px"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {mediaSections.other.length > 0 && (
+                  <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Other</h4>
+                    <div className="grid grid-cols-5 gap-4">
+                      {mediaSections.other.map((asset, i, arr) => (
+                        <button
+                          key={`${asset.id}-${i}`}
+                          onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                          className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <GalleryImage
+                            src={getAssetDisplayUrl(asset)}
+                            srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                            diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                            alt={asset.caption || "Other media"}
+                            sizes="180px"
+                          />
+                        </button>
+                      ))}
                     </div>
                   </section>
                 )}
@@ -3164,6 +4206,13 @@ export default function SeasonDetailPage() {
                 current={castRefreshProgress?.current}
                 total={castRefreshProgress?.total}
               />
+              <RefreshActivityLog
+                title="Refresh Activity"
+                entries={refreshLogEntries}
+                scopes={["cast"]}
+                open={castRefreshLogOpen}
+                onToggle={() => setCastRefreshLogOpen((prev) => !prev)}
+              />
 
               {(castRoleMembersError || trrShowCastError) && (
                 <p className="mb-4 text-sm text-red-600">{castRoleMembersError || trrShowCastError}</p>
@@ -3312,7 +4361,17 @@ export default function SeasonDetailPage() {
                       {castSeasonMembers.map((member) => (
                         <Link
                           key={member.person_id}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}&seasonNumber=${seasonNumber}`}
+                          href={buildPersonAdminUrl({
+                            showSlug: showSlugForRouting,
+                            personSlug: buildPersonRouteSlug({
+                              personName: member.person_name,
+                              personId: member.person_id,
+                            }),
+                            tab: "overview",
+                            query: new URLSearchParams({
+                              seasonNumber: String(seasonNumber),
+                            }),
+                          }) as Route}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
                           <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -3338,16 +4397,11 @@ export default function SeasonDetailPage() {
                           <p className="text-sm text-zinc-600">
                             {formatEpisodesLabel(member.episodes_in_season)}
                           </p>
-                          {typeof member.merged_total_episodes === "number" && (
-                            <p className="text-xs text-zinc-500">
-                              {member.merged_total_episodes} total episodes
-                            </p>
-                          )}
+                          <p className="text-xs text-zinc-500">
+                            Role: {member.roles.length > 0 ? member.roles.join(", ") : "Unspecified for season"}
+                          </p>
                           {member.latest_season && (
                             <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
-                          )}
-                          {member.credit_category && (
-                            <p className="text-xs text-zinc-500">Credit: {member.credit_category}</p>
                           )}
                           {member.roles.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1">
@@ -3376,7 +4430,17 @@ export default function SeasonDetailPage() {
                       {crewSeasonMembers.map((member) => (
                         <Link
                           key={`crew-${member.person_id}`}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}&seasonNumber=${seasonNumber}`}
+                          href={buildPersonAdminUrl({
+                            showSlug: showSlugForRouting,
+                            personSlug: buildPersonRouteSlug({
+                              personName: member.person_name,
+                              personId: member.person_id,
+                            }),
+                            tab: "overview",
+                            query: new URLSearchParams({
+                              seasonNumber: String(seasonNumber),
+                            }),
+                          }) as Route}
                           className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
                         >
                           <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -3404,6 +4468,9 @@ export default function SeasonDetailPage() {
                           )}
                           <p className="text-xs text-zinc-600">
                             {formatEpisodesLabel(member.episodes_in_season)}
+                          </p>
+                          <p className="text-xs text-zinc-500">
+                            Role: {member.roles.length > 0 ? member.roles.join(", ") : "Unspecified for season"}
                           </p>
                           {member.roles.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1">
@@ -3435,7 +4502,17 @@ export default function SeasonDetailPage() {
                       {archiveCast.map((member) => (
                         <Link
                           key={`archive-${member.person_id}`}
-                          href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}&seasonNumber=${seasonNumber}`}
+                          href={buildPersonAdminUrl({
+                            showSlug: showSlugForRouting,
+                            personSlug: buildPersonRouteSlug({
+                              personName: member.person_name,
+                              personId: member.person_id,
+                            }),
+                            tab: "overview",
+                            query: new URLSearchParams({
+                              seasonNumber: String(seasonNumber),
+                            }),
+                          }) as Route}
                           className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 transition hover:border-amber-300 hover:bg-amber-100/50"
                         >
                           <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -3461,13 +4538,37 @@ export default function SeasonDetailPage() {
                             {member.person_name || "Unknown"}
                           </p>
                           <p className="text-sm text-amber-800">
-                            {((member.archive_episodes_in_season as number | null | undefined) ?? 0)} archive credits
+                            {((member.archive_episodes_in_season as number | null | undefined) ?? 0)} archived episodes this season
                           </p>
-                          {typeof member.total_episodes === "number" && (
-                            <p className="text-xs text-zinc-500">
-                              {member.total_episodes} total episodes
-                            </p>
-                          )}
+                          {(() => {
+                            const scoped = castRoleMemberByPersonId.get(member.person_id);
+                            const scopedRoles =
+                              scoped?.roles && scoped.roles.length > 0
+                                ? normalizeCastRoleList(scoped.roles)
+                                : [];
+                            if (scopedRoles.length === 0) {
+                              return (
+                                <p className="mt-1 text-xs text-zinc-500">
+                                  Role: Unspecified for season
+                                </p>
+                              );
+                            }
+                            return (
+                              <div className="mt-2 space-y-2">
+                                <p className="text-xs text-zinc-500">Role: {scopedRoles.join(", ")}</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {scopedRoles.map((role) => (
+                                    <span
+                                      key={`${member.person_id}-season-archive-role-${role}`}
+                                      className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                                    >
+                                      {role}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </Link>
                       ))}
                     </div>
@@ -3605,7 +4706,7 @@ export default function SeasonDetailPage() {
         {assetLightbox && lightboxAssetCapabilities && (
           <ImageLightbox
             src={getAssetDetailUrl(assetLightbox.asset)}
-            fallbackSrc={assetLightbox.asset.original_url ?? assetLightbox.asset.hosted_url}
+            fallbackSrcs={getSeasonAssetDetailUrlCandidates(assetLightbox.asset)}
             alt={assetLightbox.asset.caption || "Gallery image"}
             isOpen={true}
             onClose={closeAssetLightbox}
@@ -3659,6 +4760,107 @@ export default function SeasonDetailPage() {
             hasNext={assetLightbox.index < assetLightbox.filteredAssets.length - 1}
             triggerRef={assetTriggerRef as React.RefObject<HTMLElement | null>}
           />
+        )}
+
+        {batchJobsOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"
+            onClick={() => {
+              if (!batchJobsRunning) setBatchJobsOpen(false);
+            }}
+          >
+            <div
+              className="w-full max-w-2xl rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Batch Jobs
+                  </p>
+                  <h4 className="text-lg font-semibold text-zinc-900">Run Image Jobs</h4>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Select one or more operations and content types. Jobs run on currently loaded assets.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!batchJobsRunning) setBatchJobsOpen(false);
+                  }}
+                  className="rounded-lg border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
+                  disabled={batchJobsRunning}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Operations
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(Object.keys(BATCH_JOB_OPERATION_LABELS) as BatchJobOperation[]).map((operation) => (
+                      <label
+                        key={operation}
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={batchJobOperations.includes(operation)}
+                          onChange={() => toggleBatchJobOperation(operation)}
+                          disabled={batchJobsRunning}
+                        />
+                        {BATCH_JOB_OPERATION_LABELS[operation]}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Content Types
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {ASSET_SECTION_ORDER.map((section) => (
+                      <label
+                        key={section}
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={batchJobContentSections.includes(section)}
+                          onChange={() => toggleBatchJobContentSection(section)}
+                          disabled={batchJobsRunning}
+                        />
+                        {ASSET_SECTION_LABELS[section]}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBatchJobsOpen(false)}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                  disabled={batchJobsRunning}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={runBatchJobs}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                  disabled={batchJobsRunning}
+                >
+                  {batchJobsRunning ? "Running..." : "Run Batch Jobs"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         <ImageScrapeDrawer

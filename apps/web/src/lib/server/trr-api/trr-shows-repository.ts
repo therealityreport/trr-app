@@ -343,11 +343,27 @@ export const toShowSlug = (value: string): string => {
     .replace(/(^-|-$)/g, "");
 };
 
+export const toPersonSlug = (value: string): string => {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+};
+
 export interface ResolvedShowSlug {
   show_id: string;
   slug: string;
   canonical_slug: string;
   show_name: string;
+}
+
+export interface ResolvedPersonSlug {
+  person_id: string;
+  slug: string;
+  canonical_slug: string;
+  full_name: string;
 }
 
 /**
@@ -423,6 +439,86 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
     slug: baseSlug,
     canonical_slug: canonicalSlug,
     show_name: candidate.name,
+  };
+}
+
+/**
+ * Resolve a human-readable person slug to a person_id.
+ * Supports collision-safe slugs with optional `--{personIdPrefix}` suffix.
+ * When `showId` is provided, people linked to that show are preferred.
+ */
+export async function resolvePersonSlug(
+  slug: string,
+  options?: { showId?: string | null }
+): Promise<ResolvedPersonSlug | null> {
+  const rawSuffix = slug.match(/--([0-9a-f]{8})$/i);
+  const requestedPrefix = rawSuffix?.[1]?.toLowerCase() || null;
+  const rawBase = rawSuffix ? slug.slice(0, -rawSuffix[0].length) : slug;
+
+  const normalizedInput = toPersonSlug(rawBase);
+  if (!normalizedInput) return null;
+  const baseSlug = normalizedInput;
+
+  const resolvedShowId = options?.showId?.trim() || null;
+
+  const rows = await pgQuery<{ id: string; full_name: string | null; on_show: boolean }>(
+    `SELECT
+       p.id::text AS id,
+       p.full_name,
+       CASE
+         WHEN $2::uuid IS NOT NULL AND EXISTS (
+           SELECT 1
+           FROM core.show_cast AS sc
+           WHERE sc.person_id = p.id
+             AND sc.show_id = $2::uuid
+         )
+           THEN true
+         ELSE false
+       END AS on_show
+     FROM core.people AS p
+     WHERE lower(
+       trim(
+         both '-' FROM regexp_replace(
+           regexp_replace(COALESCE(p.full_name, ''), '&', ' and ', 'gi'),
+           '[^a-z0-9]+',
+           '-',
+           'gi'
+         )
+       )
+     ) = $1
+     ORDER BY on_show DESC, p.id ASC`,
+    [baseSlug, resolvedShowId]
+  );
+
+  if (rows.rows.length === 0) return null;
+
+  const preferredRows =
+    resolvedShowId && rows.rows.some((row) => row.on_show) ? rows.rows.filter((row) => row.on_show) : rows.rows;
+
+  let selected: { id: string; full_name: string | null; on_show: boolean } | undefined;
+  if (requestedPrefix) {
+    selected = preferredRows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix));
+    if (!selected) {
+      selected = rows.rows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix));
+    }
+  } else {
+    selected = preferredRows[0];
+  }
+  if (!selected) return null;
+
+  const fullName = selected.full_name?.trim();
+  if (!fullName) return null;
+
+  const hasCollision = rows.rows.length > 1;
+  const canonicalSlug = hasCollision
+    ? `${baseSlug}--${selected.id.slice(0, 8).toLowerCase()}`
+    : baseSlug;
+
+  return {
+    person_id: selected.id,
+    slug: baseSlug,
+    canonical_slug: canonicalSlug,
+    full_name: fullName,
   };
 }
 
@@ -646,12 +742,22 @@ type PreferredCastPhoto = CastThumbnailFields & {
   url: string;
 };
 
+type PreferredCastPhotoOptions = {
+  seasonNumber?: number | null;
+  enableBravoProfileFallback?: boolean;
+};
+
 const EMPTY_CAST_THUMBNAIL_FIELDS: CastThumbnailFields = {
   thumbnail_focus_x: null,
   thumbnail_focus_y: null,
   thumbnail_zoom: null,
   thumbnail_crop_mode: null,
 };
+
+const BRAVO_PROFILE_BASE_URL = "https://www.bravotv.com/people";
+const BRAVO_PROFILE_FETCH_TIMEOUT_MS = 6_000;
+const BRAVO_PROFILE_FETCH_CONCURRENCY = 4;
+const BRAVO_PROFILE_IMAGE_CACHE = new Map<string, string | null>();
 
 const toCastThumbnailFields = (value: unknown): CastThumbnailFields => {
   const parsed = parseThumbnailCrop(value, { clamp: true });
@@ -688,9 +794,128 @@ const pickVariantUrlFromMetadata = (
   return null;
 };
 
+const normalizeBravoProfileUrl = (value: string | null | undefined): string | null => {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (host !== "bravotv.com" && host !== "www.bravotv.com") return null;
+    const parts = parsed.pathname
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const peopleIndex = parts.findIndex((part) => part.toLowerCase() === "people");
+    if (peopleIndex === -1 || peopleIndex + 1 >= parts.length) return null;
+    const slug = parts[peopleIndex + 1].toLowerCase().trim();
+    if (!slug) return null;
+    return `${BRAVO_PROFILE_BASE_URL}/${slug}`;
+  } catch {
+    return null;
+  }
+};
+
+const buildBravoProfileUrlFromName = (name: string | null | undefined): string | null => {
+  const trimmed = typeof name === "string" ? name.trim().toLowerCase() : "";
+  if (!trimmed) return null;
+  const slug = trimmed.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!slug) return null;
+  return `${BRAVO_PROFILE_BASE_URL}/${slug}`;
+};
+
+const readSourceMappedUrl = (field: unknown, source: string): string | null => {
+  if (!field) return null;
+  if (typeof field === "string") {
+    const trimmed = field.trim();
+    return trimmed || null;
+  }
+  if (typeof field !== "object") return null;
+  const sourceValue = (field as Record<string, unknown>)[source];
+  return typeof sourceValue === "string" && sourceValue.trim().length > 0
+    ? sourceValue.trim()
+    : null;
+};
+
+const BRAVO_META_TAG_RE = /<meta\s+[^>]*>/gi;
+const BRAVO_META_ATTR_RE = /([a-zA-Z_:.-]+)\s*=\s*["']([^"']*)["']/g;
+
+const extractBravoImageFromHtml = (html: string): string | null => {
+  const tags = html.match(BRAVO_META_TAG_RE) ?? [];
+  for (const tag of tags) {
+    const attrs: Record<string, string> = {};
+    BRAVO_META_ATTR_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = BRAVO_META_ATTR_RE.exec(tag)) !== null) {
+      const key = match[1]?.toLowerCase();
+      const value = match[2]?.trim();
+      if (!key || !value) continue;
+      attrs[key] = value;
+    }
+    const marker = (attrs.property ?? attrs.name ?? "").toLowerCase();
+    if (marker !== "og:image" && marker !== "twitter:image" && marker !== "twitter:image:src") {
+      continue;
+    }
+    const content = attrs.content?.trim();
+    if (content) return content;
+  }
+  return null;
+};
+
+const fetchBravoProfileImageUrl = async (profileUrl: string): Promise<string | null> => {
+  const normalizedProfileUrl = normalizeBravoProfileUrl(profileUrl);
+  if (!normalizedProfileUrl) return null;
+  if (BRAVO_PROFILE_IMAGE_CACHE.has(normalizedProfileUrl)) {
+    return BRAVO_PROFILE_IMAGE_CACHE.get(normalizedProfileUrl) ?? null;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), BRAVO_PROFILE_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(normalizedProfileUrl, {
+      method: "GET",
+      headers: {
+        "user-agent": "Mozilla/5.0",
+        "accept-language": "en-US,en;q=0.9",
+      },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      BRAVO_PROFILE_IMAGE_CACHE.set(normalizedProfileUrl, null);
+      return null;
+    }
+
+    const html = await response.text();
+    if (!html.trim()) {
+      BRAVO_PROFILE_IMAGE_CACHE.set(normalizedProfileUrl, null);
+      return null;
+    }
+
+    const candidate = extractBravoImageFromHtml(html);
+    if (!candidate) {
+      BRAVO_PROFILE_IMAGE_CACHE.set(normalizedProfileUrl, null);
+      return null;
+    }
+
+    const imageUrl = new URL(candidate, normalizedProfileUrl).toString();
+    if (!isLikelyImage(null, imageUrl)) {
+      BRAVO_PROFILE_IMAGE_CACHE.set(normalizedProfileUrl, null);
+      return null;
+    }
+
+    BRAVO_PROFILE_IMAGE_CACHE.set(normalizedProfileUrl, imageUrl);
+    return imageUrl;
+  } catch {
+    BRAVO_PROFILE_IMAGE_CACHE.set(normalizedProfileUrl, null);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 async function getPreferredCastPhotoMap(
   personIds: string[],
-  options?: { seasonNumber?: number | null }
+  options?: PreferredCastPhotoOptions
 ): Promise<Map<string, PreferredCastPhoto>> {
   const map = new Map<string, PreferredCastPhoto>();
   if (personIds.length === 0) return map;
@@ -853,6 +1078,103 @@ async function getPreferredCastPhotoMap(
     console.warn("[trr-shows-repository] getPreferredCastPhotoMap cast_photos lookup failed", error);
   }
 
+  if (options?.enableBravoProfileFallback) {
+    const unresolvedPersonIds = personIds.filter((personId) => !map.has(personId));
+    if (unresolvedPersonIds.length > 0) {
+      const profileLinksByPerson = new Map<string, string>();
+      try {
+        const bravoLinksResult = await pgQuery<{ person_id: string; url: string | null }>(
+          `SELECT entity_id::text AS person_id, url
+           FROM core.entity_links
+           WHERE entity_type = 'person'
+             AND link_kind = 'bravo_profile'
+             AND status <> 'rejected'
+             AND entity_id = ANY($1::uuid[])
+           ORDER BY
+             entity_id,
+             CASE
+               WHEN status = 'approved' THEN 0
+               WHEN status = 'pending' THEN 1
+               ELSE 2
+             END,
+             COALESCE(confidence, 0) DESC,
+             updated_at DESC`,
+          [unresolvedPersonIds]
+        );
+        for (const row of bravoLinksResult.rows) {
+          if (profileLinksByPerson.has(row.person_id)) continue;
+          const normalized = normalizeBravoProfileUrl(row.url);
+          if (normalized) profileLinksByPerson.set(row.person_id, normalized);
+        }
+      } catch (error) {
+        console.warn(
+          "[trr-shows-repository] getPreferredCastPhotoMap bravo links lookup failed",
+          error
+        );
+      }
+
+      const pendingProfileLookups: Array<{ person_id: string; profile_url: string }> = [];
+      try {
+        const peopleResult = await pgQuery<{
+          id: string;
+          full_name: string | null;
+          profile_image_url: Record<string, unknown> | null;
+          homepage: Record<string, unknown> | null;
+        }>(
+          `SELECT id, full_name, profile_image_url, homepage
+           FROM core.people
+           WHERE id = ANY($1::uuid[])`,
+          [unresolvedPersonIds]
+        );
+        for (const row of peopleResult.rows) {
+          if (map.has(row.id)) continue;
+
+          const bravoProfileImageUrl = readSourceMappedUrl(row.profile_image_url, "bravo");
+          if (bravoProfileImageUrl && isLikelyImage(null, bravoProfileImageUrl)) {
+            map.set(row.id, {
+              url: bravoProfileImageUrl,
+              ...EMPTY_CAST_THUMBNAIL_FIELDS,
+            });
+            continue;
+          }
+
+          const profileUrl =
+            profileLinksByPerson.get(row.id) ??
+            normalizeBravoProfileUrl(readSourceMappedUrl(row.homepage, "bravo")) ??
+            buildBravoProfileUrlFromName(row.full_name);
+          if (!profileUrl) continue;
+          pendingProfileLookups.push({ person_id: row.id, profile_url: profileUrl });
+        }
+      } catch (error) {
+        console.warn("[trr-shows-repository] getPreferredCastPhotoMap people lookup failed", error);
+      }
+
+      for (
+        let batchStart = 0;
+        batchStart < pendingProfileLookups.length;
+        batchStart += BRAVO_PROFILE_FETCH_CONCURRENCY
+      ) {
+        const batch = pendingProfileLookups.slice(
+          batchStart,
+          batchStart + BRAVO_PROFILE_FETCH_CONCURRENCY
+        );
+        const results = await Promise.all(
+          batch.map(async (entry) => ({
+            person_id: entry.person_id,
+            image_url: await fetchBravoProfileImageUrl(entry.profile_url),
+          }))
+        );
+        for (const result of results) {
+          if (!result.image_url || map.has(result.person_id)) continue;
+          map.set(result.person_id, {
+            url: result.image_url,
+            ...EMPTY_CAST_THUMBNAIL_FIELDS,
+          });
+        }
+      }
+    }
+  }
+
   return map;
 }
 
@@ -893,7 +1215,9 @@ export async function getCastByShowId(
     console.warn("[trr-shows-repository] getCastByShowId people lookup failed", error);
   }
 
-  const preferredPhotos = await getPreferredCastPhotoMap(personIds);
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
+    enableBravoProfileFallback: true,
+  });
 
   return castResult.rows.map((cast) => {
     const person = peopleMap.get(cast.person_id);
@@ -1003,7 +1327,9 @@ export async function getShowCastWithStats(
     console.warn("[trr-shows-repository] getShowCastWithStats totals lookup failed", error);
   }
 
-  const preferredPhotos = await getPreferredCastPhotoMap(personIds);
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
+    enableBravoProfileFallback: true,
+  });
 
   return castResult.rows.map((cast) => {
     const { eligible_total_episodes, ...castRow } = cast;
@@ -1109,7 +1435,9 @@ export async function getShowArchiveFootageCast(
     console.warn("[trr-shows-repository] getShowArchiveFootageCast totals lookup failed", error);
   }
 
-  const preferredPhotos = await getPreferredCastPhotoMap(personIds);
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
+    enableBravoProfileFallback: true,
+  });
 
   return castResult.rows.map((cast) => {
     const person = peopleMap.get(cast.person_id);
@@ -1209,6 +1537,33 @@ const getMetadataString = (
   const value = metadata[key];
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 };
+
+const pickUrlCandidate = (...values: Array<string | null | undefined>): string | null => {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    return trimmed;
+  }
+  return null;
+};
+
+const readMetadataOriginalUrl = (
+  metadata: Record<string, unknown> | null | undefined
+): string | null =>
+  pickUrlCandidate(
+    getMetadataString(metadata, "original_url"),
+    getMetadataString(metadata, "url_original")
+  );
+
+const readMetadataSourceUrl = (
+  metadata: Record<string, unknown> | null | undefined
+): string | null =>
+  pickUrlCandidate(
+    getMetadataString(metadata, "source_url"),
+    getMetadataString(metadata, "sourceUrl"),
+    getMetadataString(metadata, "url")
+  );
 
 const normalizeScrapeSource = (
   source: string | null | undefined,
@@ -1712,13 +2067,35 @@ const pickPersonPhotoVariantUrl = (
 
 const resolvePersonPhotoVariantUrls = (
   metadata: Record<string, unknown> | null | undefined,
-  hostedUrl: string | null | undefined
+  fallback?: {
+    hostedUrl?: string | null;
+    originalUrl?: string | null;
+    sourceUrl?: string | null;
+  }
 ): PersonPhotoVariantUrls => {
-  const fallbackUrl = hostedUrl ?? null;
+  const fallbackHostedUrl = pickUrlCandidate(fallback?.hostedUrl);
+  const fallbackOriginalUrl = pickUrlCandidate(fallback?.originalUrl);
+  const fallbackSourceUrl = pickUrlCandidate(fallback?.sourceUrl);
   const md = metadata && typeof metadata === "object" ? metadata : null;
+  const metadataOriginalUrl = readMetadataOriginalUrl(md);
+  const metadataSourceUrl = readMetadataSourceUrl(md);
+  const fallbackUrl = pickUrlCandidate(
+    fallbackHostedUrl,
+    fallbackOriginalUrl,
+    fallbackSourceUrl,
+    metadataOriginalUrl,
+    metadataSourceUrl
+  );
+  const canonicalOriginalUrl = pickUrlCandidate(
+    metadataOriginalUrl,
+    fallbackOriginalUrl,
+    metadataSourceUrl,
+    fallbackSourceUrl,
+    fallbackHostedUrl
+  );
   if (!md) {
     return {
-      original_url: fallbackUrl,
+      original_url: canonicalOriginalUrl ?? fallbackUrl,
       thumb_url: fallbackUrl,
       display_url: fallbackUrl,
       detail_url: fallbackUrl,
@@ -1758,10 +2135,10 @@ const resolvePersonPhotoVariantUrls = (
     directCropDetail;
 
   return {
-    original_url: fallbackUrl,
+    original_url: canonicalOriginalUrl ?? fallbackUrl,
     thumb_url: variantThumb ?? variantDisplay ?? fallbackUrl,
-    display_url: variantDisplay ?? fallbackUrl,
-    detail_url: variantDetail ?? fallbackUrl,
+    display_url: variantDisplay ?? fallbackUrl ?? canonicalOriginalUrl,
+    detail_url: variantDetail ?? fallbackUrl ?? canonicalOriginalUrl,
     crop_display_url: variantCropDisplay,
     crop_detail_url: variantCropDetail,
   };
@@ -1990,7 +2367,11 @@ export async function getPhotosByPersonId(
     const thumbnailCropFields = toThumbnailCropFields(md.thumbnail_crop);
     const variantUrls = resolvePersonPhotoVariantUrls(
       normalizedFandom.metadata,
-      photo.hosted_url ?? photo.url
+      {
+        hostedUrl: photo.hosted_url,
+        originalUrl: readMetadataOriginalUrl(normalizedFandom.metadata),
+        sourceUrl: photo.url,
+      }
     );
     return {
       ...photo,
@@ -2154,7 +2535,11 @@ export async function getPhotosByPersonId(
         );
         const variantUrls = resolvePersonPhotoVariantUrls(
           normalizedFandom.metadata,
-          row.hosted_url,
+          {
+            hostedUrl: row.hosted_url,
+            originalUrl: readMetadataOriginalUrl(normalizedFandom.metadata),
+            sourceUrl: row.source_url,
+          }
         );
         const sourcePageUrl =
           getMetadataString(normalizedFandom.metadata, "source_page_url") ??
@@ -2445,7 +2830,10 @@ export async function getCastByShowSeason(
   // Get person IDs for photo lookup
   const personIds = typedCastData.map((c) => c.person_id);
 
-  const preferredPhotos = await getPreferredCastPhotoMap(personIds, { seasonNumber });
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
+    seasonNumber,
+    enableBravoProfileFallback: true,
+  });
 
   return typedCastData.map((cast) => ({
     person_id: cast.person_id,
@@ -2665,7 +3053,10 @@ export async function getSeasonCastWithEpisodeCounts(
     // Optional - fallback names will be used.
   }
 
-  const preferredPhotos = await getPreferredCastPhotoMap(personIds, { seasonNumber });
+  const preferredPhotos = await getPreferredCastPhotoMap(personIds, {
+    seasonNumber,
+    enableBravoProfileFallback: true,
+  });
 
   return filteredCounts.map((member) => {
     const evidence = evidenceByPerson.get(member.person_id);
@@ -2676,7 +3067,7 @@ export async function getSeasonCastWithEpisodeCounts(
     person_id: member.person_id,
     person_name: peopleMap.get(member.person_id) ?? fallbackNames.get(member.person_id) ?? null,
     episodes_in_season: regularEpisodes,
-    total_episodes: totalsMap.get(member.person_id) ?? null,
+    total_episodes: regularEpisodes,
     photo_url: preferredPhotos.get(member.person_id)?.url ?? null,
     thumbnail_focus_x: preferredPhotos.get(member.person_id)?.thumbnail_focus_x ?? null,
     thumbnail_focus_y: preferredPhotos.get(member.person_id)?.thumbnail_focus_y ?? null,
@@ -2700,7 +3091,7 @@ export interface SeasonAsset {
   source_url?: string | null;
   kind: string;
   hosted_url: string;
-  original_url?: string;
+  original_url?: string | null;
   thumb_url?: string | null;
   display_url?: string | null;
   detail_url?: string | null;
@@ -2767,9 +3158,32 @@ const pickVariantUrlFromSignature = (
 
 const resolveSeasonAssetVariantUrls = (
   metadata: Record<string, unknown> | null | undefined,
-  hostedUrl: string
+  fallback: {
+    hostedUrl?: string | null;
+    originalUrl?: string | null;
+    sourceUrl?: string | null;
+  }
 ): SeasonAssetVariantUrls => {
   const md = metadata && typeof metadata === "object" ? metadata : null;
+  const fallbackHostedUrl = pickUrlCandidate(fallback.hostedUrl);
+  const fallbackOriginalUrl = pickUrlCandidate(fallback.originalUrl);
+  const fallbackSourceUrl = pickUrlCandidate(fallback.sourceUrl);
+  const metadataOriginalUrl = readMetadataOriginalUrl(md);
+  const metadataSourceUrl = readMetadataSourceUrl(md);
+  const fallbackUrl = pickUrlCandidate(
+    fallbackHostedUrl,
+    fallbackOriginalUrl,
+    fallbackSourceUrl,
+    metadataOriginalUrl,
+    metadataSourceUrl
+  );
+  const canonicalOriginalUrl = pickUrlCandidate(
+    metadataOriginalUrl,
+    fallbackOriginalUrl,
+    metadataSourceUrl,
+    fallbackSourceUrl,
+    fallbackHostedUrl
+  );
   const directThumb =
     typeof md?.thumb_url === "string" && md.thumb_url.trim().length > 0
       ? md.thumb_url.trim()
@@ -2812,10 +3226,10 @@ const resolveSeasonAssetVariantUrls = (
       : null) ?? directCropDetail;
 
   return {
-    original_url: hostedUrl,
-    thumb_url: variantThumb ?? variantDisplay ?? hostedUrl,
-    display_url: variantDisplay ?? hostedUrl,
-    detail_url: variantDetail ?? hostedUrl,
+    original_url: canonicalOriginalUrl ?? fallbackUrl,
+    thumb_url: variantThumb ?? variantDisplay ?? fallbackUrl,
+    display_url: variantDisplay ?? fallbackUrl,
+    detail_url: variantDetail ?? fallbackUrl,
     crop_display_url: variantCropDisplay,
     crop_detail_url: variantCropDetail,
   };
@@ -2854,6 +3268,13 @@ export async function getAssetsByShowSeason(
       endDate.setHours(0, 0, 0, 0);
     }
     return { startDate, endDate };
+  };
+  const toSqlDate = (value: Date | null): string | null => {
+    if (!value) return null;
+    const yyyy = value.getFullYear();
+    const mm = String(value.getMonth() + 1).padStart(2, "0");
+    const dd = String(value.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
   };
 
   let seasonId: string | null = null;
@@ -3025,10 +3446,14 @@ export async function getAssetsByShowSeason(
           type: "season",
           origin_table: "media_assets",
           source: normalizedScrape,
-          source_url: row.source_url ?? null,
+          source_url: sourceUrlForNormalization,
           kind: row.link_kind ?? "other",
           hosted_url: hostedUrl,
-          ...resolveSeasonAssetVariantUrls(mergedMetadata, hostedUrl),
+          ...resolveSeasonAssetVariantUrls(mergedMetadata, {
+            hostedUrl,
+            originalUrl: readMetadataOriginalUrl(mergedMetadata),
+            sourceUrl: sourceUrlForNormalization,
+          }),
           width: row.width ?? null,
           height: row.height ?? null,
           caption: row.caption ?? `Season ${seasonNumber}`,
@@ -3060,13 +3485,15 @@ export async function getAssetsByShowSeason(
       source: string;
       kind: string;
       image_type: string | null;
+      url: string | null;
+      url_original: string | null;
       hosted_url: string | null;
       width: number | null;
       height: number | null;
       created_at: string | null;
       metadata: Record<string, unknown> | null;
     }>(
-      `SELECT id, source, kind, image_type, hosted_url, width, height, created_at, metadata
+      `SELECT id, source, kind, image_type, url, url_original, hosted_url, width, height, created_at, metadata
        FROM core.season_images
        WHERE show_id = $1::uuid
          AND season_number = $2::int
@@ -3084,9 +3511,14 @@ export async function getAssetsByShowSeason(
         type: "season",
         origin_table: "season_images",
         source: img.source,
+        source_url: img.url ?? null,
         kind: imageKind,
         hosted_url: img.hosted_url,
-        ...resolveSeasonAssetVariantUrls(img.metadata, img.hosted_url),
+        ...resolveSeasonAssetVariantUrls(img.metadata, {
+          hostedUrl: img.hosted_url,
+          originalUrl: img.url_original,
+          sourceUrl: img.url,
+        }),
         width: img.width,
         height: img.height,
         caption: `Season ${seasonNumber}`,
@@ -3116,6 +3548,8 @@ export async function getAssetsByShowSeason(
       source: string;
       kind: string;
       image_type: string | null;
+      url: string | null;
+      url_original: string | null;
       hosted_url: string | null;
       width: number | null;
       height: number | null;
@@ -3123,7 +3557,7 @@ export async function getAssetsByShowSeason(
       created_at: string | null;
       metadata: Record<string, unknown> | null;
     }>(
-      `SELECT id, source, kind, image_type, hosted_url, width, height, episode_number, created_at, metadata
+      `SELECT id, source, kind, image_type, url, url_original, hosted_url, width, height, episode_number, created_at, metadata
        FROM core.episode_images
        WHERE show_id = $1::uuid
          AND season_number = $2::int
@@ -3142,9 +3576,14 @@ export async function getAssetsByShowSeason(
         type: "episode",
         origin_table: "episode_images",
         source: img.source,
+        source_url: img.url ?? null,
         kind: imageKind,
         hosted_url: img.hosted_url,
-        ...resolveSeasonAssetVariantUrls(img.metadata, img.hosted_url),
+        ...resolveSeasonAssetVariantUrls(img.metadata, {
+          hostedUrl: img.hosted_url,
+          originalUrl: img.url_original,
+          sourceUrl: img.url,
+        }),
         width: img.width,
         height: img.height,
         caption: `Episode ${img.episode_number}`,
@@ -3171,10 +3610,18 @@ export async function getAssetsByShowSeason(
   // 3) cast photos for season members (by tag or within season window)
   try {
     const seasonCast = await pgQuery<{ person_id: string; person_name: string }>(
-      `SELECT person_id, person_name
-       FROM core.v_person_show_seasons
-       WHERE show_id = $1::uuid
-         AND seasons_appeared @> ARRAY[$2]::int[]
+      `SELECT DISTINCT c.person_id, p.full_name AS person_name
+       FROM core.credits AS c
+       JOIN core.people AS p
+         ON p.id = c.person_id
+       JOIN core.credit_occurrences AS co
+         ON co.credit_id = c.id
+       JOIN core.episodes AS e
+         ON e.id = co.episode_id
+       JOIN core.seasons AS sea
+         ON sea.id = e.season_id
+       WHERE c.show_id = $1::uuid
+         AND sea.season_number = $2::int
        LIMIT 500`,
       [showId, seasonNumber]
     );
@@ -3182,6 +3629,8 @@ export async function getAssetsByShowSeason(
     if (seasonCast.rows.length > 0) {
       const personIds = seasonCast.rows.map((row) => row.person_id);
       const personNameMap = new Map(seasonCast.rows.map((row) => [row.person_id, row.person_name]));
+      const seasonStartSqlDate = toSqlDate(seasonStartDate);
+      const seasonEndSqlDate = toSqlDate(seasonEndDate);
 
       const castPhotos = await pgQuery<{
         id: string;
@@ -3225,22 +3674,22 @@ export async function getAssetsByShowSeason(
          FROM core.cast_photos
          WHERE person_id = ANY($1::uuid[])
            AND hosted_url IS NOT NULL
+           AND (
+             season = $2::int
+             OR (
+               $3::date IS NOT NULL
+               AND $4::date IS NOT NULL
+               AND COALESCE(fetched_at::date, hosted_at::date, updated_at::date) BETWEEN $3::date AND $4::date
+             )
+           )
+         ORDER BY COALESCE(fetched_at, hosted_at, updated_at) DESC NULLS LAST
          LIMIT 500`,
-        [personIds]
+        [personIds, seasonNumber, seasonStartSqlDate, seasonEndSqlDate]
       );
       const castTagRows = await getTagsByPhotoIds(castPhotos.rows.map((photo) => photo.id));
 
       for (const photo of castPhotos.rows) {
         if (!photo.hosted_url) continue;
-        const isSeasonTagged = photo.season === seasonNumber;
-        const photoDate = photo.fetched_at ?? photo.hosted_at ?? photo.updated_at ?? null;
-        const photoDateOnly = toDateOnly(photoDate);
-        const inSeasonWindow =
-          seasonStartDate && seasonEndDate && photoDateOnly
-            ? photoDateOnly >= seasonStartDate && photoDateOnly <= seasonEndDate
-            : false;
-
-        if (!isSeasonTagged && !inSeasonWindow) continue;
 
         if (photo.title_imdb_ids && photo.title_imdb_ids.length > 0) {
           if (showImdbId && !photo.title_imdb_ids.includes(showImdbId)) continue;
@@ -3278,7 +3727,11 @@ export async function getAssetsByShowSeason(
           source_url: photo.url ?? null,
           kind: "profile",
           hosted_url: photo.hosted_url,
-          ...resolveSeasonAssetVariantUrls(photo.metadata, photo.hosted_url),
+          ...resolveSeasonAssetVariantUrls(photo.metadata, {
+            hostedUrl: photo.hosted_url,
+            originalUrl: readMetadataOriginalUrl(photo.metadata),
+            sourceUrl: photo.url,
+          }),
           width: photo.width,
           height: photo.height,
           caption: photo.caption,
@@ -3444,10 +3897,14 @@ export async function getAssetsByShowId(
         type: "show",
         origin_table: "media_assets",
         source: normalizedScrape,
-        source_url: row.source_url ?? null,
+        source_url: sourceUrlForNormalization,
         kind: row.link_kind ?? "other",
         hosted_url: hostedUrl,
-        ...resolveSeasonAssetVariantUrls(mergedMetadata, hostedUrl),
+        ...resolveSeasonAssetVariantUrls(mergedMetadata, {
+          hostedUrl,
+          originalUrl: readMetadataOriginalUrl(mergedMetadata),
+          sourceUrl: sourceUrlForNormalization,
+        }),
         width: row.width ?? null,
         height: row.height ?? null,
         caption: row.caption ?? null,
@@ -3477,13 +3934,15 @@ export async function getAssetsByShowId(
       source: string;
       kind: string;
       image_type: string | null;
+      url: string | null;
+      url_original: string | null;
       hosted_url: string | null;
       width: number | null;
       height: number | null;
       created_at: string | null;
       metadata: Record<string, unknown> | null;
     }>(
-      `SELECT id, source, kind, image_type, hosted_url, width, height, created_at, metadata
+      `SELECT id, source, kind, image_type, url, url_original, hosted_url, width, height, created_at, metadata
        FROM core.show_images
        WHERE show_id = $1::uuid
          AND hosted_url IS NOT NULL
@@ -3500,9 +3959,14 @@ export async function getAssetsByShowId(
         type: "show",
         origin_table: "show_images",
         source: img.source,
+        source_url: img.url ?? null,
         kind: imageKind,
         hosted_url: img.hosted_url,
-        ...resolveSeasonAssetVariantUrls(img.metadata, img.hosted_url),
+        ...resolveSeasonAssetVariantUrls(img.metadata, {
+          hostedUrl: img.hosted_url,
+          originalUrl: img.url_original,
+          sourceUrl: img.url,
+        }),
         width: img.width,
         height: img.height,
         caption: null,

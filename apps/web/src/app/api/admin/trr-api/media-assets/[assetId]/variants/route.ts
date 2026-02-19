@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { IMAGE_PIPELINE_TIMEOUTS } from "@/lib/admin/image-pipeline-timeouts";
 
 export const dynamic = "force-dynamic";
+const VARIANT_TIMEOUT_MS = IMAGE_PIPELINE_TIMEOUTS.variantsMs;
 
 interface RouteParams {
   params: Promise<{ assetId: string }>;
@@ -72,7 +74,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           },
           body: JSON.stringify(body ?? {}),
         },
-        120_000
+        VARIANT_TIMEOUT_MS
       );
       backendResponse = out.response;
       data = out.data;
@@ -81,7 +83,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return NextResponse.json(
           {
             error: "Variant generation timed out",
-            detail: "Timed out waiting for backend variant response (120s).",
+            detail: `Timed out waiting for backend variant response (${Math.round(VARIANT_TIMEOUT_MS / 1000)}s).`,
           },
           { status: 504 }
         );

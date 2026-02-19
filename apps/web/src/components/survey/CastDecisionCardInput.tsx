@@ -9,6 +9,7 @@ import type {
   SliderChoice,
   ThreeChoiceSliderConfig,
 } from "@/lib/surveys/question-config-types";
+import SurveyContinueButton from "./SurveyContinueButton";
 import {
   extractPrimaryFontToken,
   isCloudfrontCdnFontCandidate,
@@ -37,11 +38,12 @@ interface TemplateFontOverrides {
   missingFonts: string[];
 }
 
-const DEFAULT_PROMPT_FONT = '"Geometric Slabserif 703", var(--font-sans), sans-serif';
+const DEFAULT_PROMPT_FONT = '"Gloucester MT Std", var(--font-sans), sans-serif';
 const DEFAULT_CAST_NAME_FONT = '"Geometric Slabserif 703", var(--font-sans), sans-serif';
 const DEFAULT_CHOICE_FONT = '"Geometric Slabserif 703", var(--font-sans), sans-serif';
 const DEFAULT_NEXT_BUTTON_FONT = '"Plymouth Serial", var(--font-sans), sans-serif';
 const DEFAULT_PROMPT_TEXT = "KEEP, FIRE OR DEMOTE";
+const DEFAULT_PROMPT_TEXT_WITH_PREFIX = "WOULD YOU KEEP, FIRE OR DEMOTE";
 
 const CHOICE_COLORS: Record<string, string> = {
   fire: "#B3000B",
@@ -340,6 +342,7 @@ function resolveRowImage(row: MatrixRow): string | null {
 function resolvePromptText(
   config: CastDecisionCardConfig | ThreeChoiceSliderConfig,
   choices: ChoiceDescriptor[],
+  hasSelection: boolean,
 ): string {
   const configRecord = config as unknown as UnknownRecord;
   const explicitCandidates = [
@@ -358,7 +361,7 @@ function resolvePromptText(
 
   const keys = choices.map((choice) => choice.key);
   if (keys.includes("keep") && keys.includes("fire") && keys.includes("demote")) {
-    return DEFAULT_PROMPT_TEXT;
+    return hasSelection ? DEFAULT_PROMPT_TEXT : DEFAULT_PROMPT_TEXT_WITH_PREFIX;
   }
 
   if (choices.length === 2) {
@@ -421,23 +424,6 @@ export default function CastDecisionCardInput({
       "#000000",
     [configRecord],
   );
-  const nextButtonColor = React.useMemo(
-    () =>
-      readColorValue(configRecord, ["continueButtonColor"]) ??
-      readColorValue(configRecord, ["nextButtonColor"]) ??
-      readColorValue(configRecord, ["styles", "continueButtonColor"]) ??
-      "#121212",
-    [configRecord],
-  );
-  const nextButtonTextColor = React.useMemo(
-    () =>
-      readColorValue(configRecord, ["continueButtonTextColor"]) ??
-      readColorValue(configRecord, ["nextButtonTextColor"]) ??
-      readColorValue(configRecord, ["styles", "continueButtonTextColor"]) ??
-      "#F8F8F8",
-    [configRecord],
-  );
-
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -492,7 +478,15 @@ export default function CastDecisionCardInput({
     setCurrentRowIndex((prev) => Math.min(prev + 1, rows.length - 1));
   }, [rows.length]);
 
-  const promptText = React.useMemo(() => resolvePromptText(config, choices), [choices, config]);
+  const currentRow = rows[currentRowIndex];
+  const currentSelection = currentRow && value?.[currentRow.id]
+    ? normalizeChoiceKey(value[currentRow.id])
+    : null;
+  const hasSelection = Boolean(currentSelection);
+  const promptText = React.useMemo(
+    () => resolvePromptText(config, choices, hasSelection),
+    [choices, config, hasSelection],
+  );
 
   const fontProbeTokens = React.useMemo(() => {
     const tokens = [
@@ -547,7 +541,6 @@ export default function CastDecisionCardInput({
     };
   }, [fontProbeTokens]);
 
-  const currentRow = rows[currentRowIndex];
   if (!currentRow || choices.length === 0) {
     return (
       <div className="rounded-xl border border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
@@ -556,12 +549,18 @@ export default function CastDecisionCardInput({
     );
   }
 
-  const currentSelection = value?.[currentRow.id] ? normalizeChoiceKey(value[currentRow.id]) : null;
   const currentImage = resolveRowImage(currentRow);
-  const showNextButton = Boolean(currentSelection) && !disabled && currentRowIndex < rows.length - 1;
+  const isLastRow = currentRowIndex >= rows.length - 1;
+  const showInlineActionButton = hasSelection && !disabled;
   const responsiveScale = clampNumber((containerWidth - 320) / 920, 0, 1);
-  const promptFontSize = Math.round(clampNumber(interpolate(16, 45, responsiveScale), 15, 50));
-  const promptLetterSpacing = interpolate(0.035, 0.05, responsiveScale);
+  const promptFontSize = Math.round(
+    clampNumber(
+      interpolate(hasSelection ? 20 : 17, hasSelection ? 45 : 31, responsiveScale),
+      15,
+      50,
+    ),
+  );
+  const promptLetterSpacing = interpolate(hasSelection ? 0.045 : 0.038, hasSelection ? 0.055 : 0.045, responsiveScale);
   const nameFontSize = Math.round(clampNumber(interpolate(44, 120, responsiveScale), 32, 132));
   const circlesGap = Math.round(clampNumber(interpolate(8, 28, responsiveScale) * shapeScaleFactor, 6, 44));
   const circleSize = (() => {
@@ -574,10 +573,7 @@ export default function CastDecisionCardInput({
   const choiceFontSize = Math.round(
     clampNumber(interpolate(18, 40, responsiveScale) * buttonScaleFactor, 12, 52),
   );
-  const nextButtonHeight = Math.round(clampNumber(interpolate(42, 64, responsiveScale) * buttonScaleFactor, 36, 84));
-  const nextButtonWidth = Math.round(clampNumber(interpolate(124, 190, responsiveScale) * buttonScaleFactor, 100, 280));
-  const nextButtonFontSize = Math.round(clampNumber(interpolate(18, 30, responsiveScale) * buttonScaleFactor, 12, 40));
-  const nextButtonRadius = Math.round(clampNumber(interpolate(26, 104, responsiveScale) * shapeScaleFactor, 18, 120));
+  const nextButtonMarginTop = Math.round(clampNumber(interpolate(20, 34, responsiveScale), 16, 40));
 
   return (
     <div
@@ -592,7 +588,7 @@ export default function CastDecisionCardInput({
           className="mx-auto max-w-[32ch] uppercase leading-[1.15] text-black"
           style={{
             fontFamily: fontOverrides.promptFontFamily,
-            fontWeight: 500,
+            fontWeight: 700,
             fontSize: `${promptFontSize}px`,
             letterSpacing: `${promptLetterSpacing}em`,
             color: promptTextColor,
@@ -654,8 +650,8 @@ export default function CastDecisionCardInput({
                   width: `${circleSize}px`,
                   height: `${circleSize}px`,
                   boxShadow: isSelected
-                    ? "0 0 0 2px rgba(255,255,255,0.88), 0 0 0 6px rgba(18,18,18,0.18)"
-                    : "0 0 0 1px rgba(18,18,18,0.08)",
+                    ? "0 0 0 2px rgba(255,255,255,0.7), 0 0 18px rgba(255,255,255,0.35)"
+                    : "none",
                 }}
                 aria-label={`Set ${currentRow.label} to ${choice.label}`}
                 aria-pressed={isSelected}
@@ -674,7 +670,7 @@ export default function CastDecisionCardInput({
                       alt={currentRow.label}
                       width={circleSize}
                       height={circleSize}
-                      className="absolute inset-0 h-full w-full rounded-full object-cover grayscale contrast-125 brightness-95"
+                      className="absolute inset-0 h-full w-full rounded-full object-cover saturate-[0.8] brightness-[0.86]"
                       unoptimized={currentImage.startsWith("http")}
                       draggable={false}
                     />
@@ -683,11 +679,10 @@ export default function CastDecisionCardInput({
                       style={{
                         backgroundColor: choice.color,
                         mixBlendMode: "multiply",
-                        opacity: 0.58,
+                        opacity: 0.56,
                       }}
                       aria-hidden="true"
                     />
-                    <span className="absolute inset-0 rounded-full ring-2 ring-white/35" aria-hidden="true" />
                   </>
                 )}
 
@@ -712,25 +707,25 @@ export default function CastDecisionCardInput({
           })}
         </div>
 
-        {showNextButton && (
-          <button
-            type="button"
-            onClick={handleNext}
-          className="mx-auto mt-5 inline-flex items-center justify-center bg-[#121212] px-6 text-[#F8F8F8] transition hover:bg-black"
-          style={{
-            minWidth: `${nextButtonWidth}px`,
-            height: `${nextButtonHeight}px`,
-            borderRadius: `${nextButtonRadius}px`,
-            fontFamily: fontOverrides.nextButtonFontFamily,
-            fontSize: `${nextButtonFontSize}px`,
-            fontWeight: 800,
-            letterSpacing: "0.033em",
-            backgroundColor: nextButtonColor,
-            color: nextButtonTextColor,
-          }}
-        >
-            Next
-          </button>
+        {showInlineActionButton && (
+          <SurveyContinueButton
+            onClick={() => {
+              if (!isLastRow) {
+                handleNext();
+                return;
+              }
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent("survey-question-continue", { detail: { questionId: question.id } }),
+                );
+              }
+            }}
+            label={isLastRow ? "Continue" : "Next"}
+            className="mx-auto"
+            style={{
+              marginTop: `${nextButtonMarginTop}px`,
+            }}
+          />
         )}
       </div>
     </div>

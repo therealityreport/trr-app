@@ -4,6 +4,7 @@ import {
   fetchSeasonBackendJson,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
+import { isValidPositiveIntegerString, isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +19,24 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!showId) {
       return NextResponse.json({ error: "showId is required", code: "BAD_REQUEST", retryable: false }, { status: 400 });
     }
+    if (!isValidUuid(showId)) {
+      return NextResponse.json(
+        { error: "showId must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    if (!isValidPositiveIntegerString(seasonNumber)) {
+      return NextResponse.json(
+        { error: "seasonNumber must be a valid positive integer", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
 
     const data = await fetchSeasonBackendJson(showId, seasonNumber, "/ingest/jobs", {
       queryString: request.nextUrl.searchParams.toString(),
       fallbackError: "Failed to fetch social jobs",
       retries: 2,
-      timeoutMs: 20_000,
+      timeoutMs: 45_000,
     });
     return NextResponse.json(data);
   } catch (error) {

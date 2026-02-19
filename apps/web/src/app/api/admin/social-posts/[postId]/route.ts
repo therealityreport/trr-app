@@ -7,6 +7,8 @@ import {
   deletePost,
   type SocialPlatform,
 } from "@/lib/server/admin/social-posts-repository";
+import { getSeasonById } from "@/lib/server/trr-api/trr-shows-repository";
+import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!postId) {
       return NextResponse.json(
         { error: "postId is required" },
+        { status: 400 }
+      );
+    }
+    if (!isValidUuid(postId)) {
+      return NextResponse.json(
+        { error: "postId must be a valid UUID" },
         { status: 400 }
       );
     }
@@ -82,6 +90,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         { status: 400 }
       );
     }
+    if (!isValidUuid(postId)) {
+      return NextResponse.json(
+        { error: "postId must be a valid UUID" },
+        { status: 400 }
+      );
+    }
 
     const body = await request.json();
     const { platform, url, trr_season_id, title, notes } = body;
@@ -107,6 +121,27 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       } catch {
         return NextResponse.json(
           { error: "url must be a valid URL" },
+          { status: 400 }
+        );
+      }
+    }
+
+    const existingPost = await getPostById(postId);
+    if (!existingPost) {
+      return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    }
+
+    if (trr_season_id !== undefined && trr_season_id !== null) {
+      if (typeof trr_season_id !== "string" || !isValidUuid(trr_season_id)) {
+        return NextResponse.json(
+          { error: "trr_season_id must be a valid UUID when provided" },
+          { status: 400 }
+        );
+      }
+      const season = await getSeasonById(trr_season_id);
+      if (!season || season.show_id !== existingPost.trr_show_id) {
+        return NextResponse.json(
+          { error: "trr_season_id must belong to the post show" },
           { status: 400 }
         );
       }
@@ -149,6 +184,12 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!postId) {
       return NextResponse.json(
         { error: "postId is required" },
+        { status: 400 }
+      );
+    }
+    if (!isValidUuid(postId)) {
+      return NextResponse.json(
+        { error: "postId must be a valid UUID" },
         { status: 400 }
       );
     }

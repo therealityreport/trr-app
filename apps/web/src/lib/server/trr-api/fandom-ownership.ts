@@ -52,6 +52,39 @@ export const extractFandomPageNameFromUrl = (url: string | null | undefined): st
   }
 };
 
+export const extractFandomOwnerNameFromStaticFileUrl = (
+  url: string | null | undefined
+): string | null => {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("static.wikia.nocookie.net")) return null;
+    const segments = parsed.pathname
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    if (segments.length === 0) return null;
+    const rawFilename = decodeURIComponent(segments[segments.length - 1] ?? "");
+    const withoutExt = rawFilename.replace(/\.[a-z0-9]+$/i, "");
+    const normalized = withoutExt
+      .replace(/_/g, " ")
+      .replace(/[’]/g, "'")
+      .replace(/\(.*?\)/g, " ")
+      .replace(/\b(look|reunion|tagline|promo|confessional|intro|poster|backdrop)\b.*$/i, " ")
+      .replace(/\bRH[A-Z0-9]{2,}\b.*$/i, " ")
+      .replace(/\bS\d{1,2}\b.*$/i, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!normalized) return null;
+    const leading = normalized.split(" ").slice(0, 3).join(" ").trim();
+    if (!leading) return null;
+    return leading.replace(/'s$/i, "").trim() || null;
+  } catch {
+    return null;
+  }
+};
+
 export const extractWikipediaPageNameFromUrl = (url: string | null | undefined): string | null => {
   if (!url) return null;
   try {
@@ -74,6 +107,8 @@ export const extractPersonKnowledgePageNameFromUrl = (
   url: string | null | undefined
 ): string | null => {
   if (!url) return null;
+  const fandomStaticName = extractFandomOwnerNameFromStaticFileUrl(url);
+  if (fandomStaticName) return fandomStaticName;
   const fandomName = extractFandomPageNameFromUrl(url);
   if (fandomName) return fandomName;
   return extractWikipediaPageNameFromUrl(url);
@@ -182,7 +217,7 @@ export const isFandomPhotoOwnedByExpectedPerson = (params: {
   expectedPersonName?: string | null;
 }): boolean => {
   const sourceLower = (params.source ?? "").trim().toLowerCase();
-  if (sourceLower !== "fandom") return true;
+  if (sourceLower !== "fandom" && sourceLower !== "fandom-gallery") return true;
   if (!params.expectedPersonName) return true;
 
   const metadata = params.metadata ?? {};
@@ -192,20 +227,37 @@ export const isFandomPhotoOwnedByExpectedPerson = (params: {
     typeof metadata.sourcePageUrl === "string" ? metadata.sourcePageUrl : null;
   const metadataSourceUrl = typeof metadata.source_url === "string" ? metadata.source_url : null;
   const metadataSourceUrlAlt = typeof metadata.sourceUrl === "string" ? metadata.sourceUrl : null;
-  const candidateNames = [
+  const metadataOriginalUrl =
+    typeof metadata.original_url === "string" ? metadata.original_url : null;
+  const metadataUrlOriginal =
+    typeof metadata.url_original === "string" ? metadata.url_original : null;
+  const trustedCandidateNames = [
     extractFandomPageNameFromUrl(params.sourcePageUrl),
-    extractFandomPageNameFromUrl(metadataSourcePageUrl),
-    extractFandomPageNameFromUrl(metadataSourcePageUrlAlt),
-    extractFandomPageNameFromUrl(params.sourceUrl),
-    extractFandomPageNameFromUrl(metadataSourceUrl),
-    extractFandomPageNameFromUrl(metadataSourceUrlAlt),
-    ...(params.peopleNames ?? []),
+    extractPersonKnowledgePageNameFromUrl(metadataSourcePageUrl),
+    extractPersonKnowledgePageNameFromUrl(metadataSourcePageUrlAlt),
+    extractPersonKnowledgePageNameFromUrl(params.sourceUrl),
+    extractPersonKnowledgePageNameFromUrl(metadataSourceUrl),
+    extractPersonKnowledgePageNameFromUrl(metadataSourceUrlAlt),
+    extractPersonKnowledgePageNameFromUrl(metadataOriginalUrl),
+    extractPersonKnowledgePageNameFromUrl(metadataUrlOriginal),
   ]
     .map((name) => (typeof name === "string" ? name.trim() : ""))
     .filter(Boolean);
 
-  if (candidateNames.length === 0) return true;
-  return candidateNames.some((candidate) =>
-    fandomPersonNameMatches(params.expectedPersonName, candidate)
-  );
+  if (trustedCandidateNames.length > 0) {
+    return trustedCandidateNames.some((candidate) =>
+      fandomPersonNameMatches(params.expectedPersonName, candidate)
+    );
+  }
+
+  const tagCandidateNames = (params.peopleNames ?? [])
+    .map((name) => (typeof name === "string" ? name.trim() : ""))
+    .filter(Boolean);
+  if (tagCandidateNames.length > 0) {
+    return tagCandidateNames.some((candidate) =>
+      fandomPersonNameMatches(params.expectedPersonName, candidate)
+    );
+  }
+
+  return true;
 };

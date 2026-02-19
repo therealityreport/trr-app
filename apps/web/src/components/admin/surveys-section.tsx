@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import type { UiVariant } from "@/lib/surveys/question-config-types";
 
 // ============================================================================
@@ -97,10 +97,20 @@ const formatName = (format: TemplateUiFormat): string => {
       return "Whose Side";
     case "multi-select-choice":
       return "Multi-select";
+    case "cast-multi-select":
+      return "Cast Multi-select";
     case "text-multiple-choice":
       return "Single-select";
+    case "rank-text-fields":
+      return "Rank Text Fields";
     case "image-multiple-choice":
       return "Image select";
+    case "poster-single-select":
+      return "PosterSingleSelect";
+    case "cast-single-select":
+      return "SingleSelectCast";
+    case "reunion-seating-prediction":
+      return "ReunionSeatingPrediction";
     case "dropdown":
       return "Dropdown";
     case "text-entry":
@@ -159,6 +169,20 @@ function FormatThumbnail({ format }: { format: TemplateUiFormat }) {
           </div>
         </div>
       );
+    case "cast-multi-select":
+    case "cast-single-select":
+      return (
+        <div className={`${base} flex items-center justify-center`}>
+          <div className="grid grid-cols-4 gap-1.5">
+            {Array.from({ length: 8 }, (_, idx) => (
+              <div
+                key={idx}
+                className={`h-3 w-3 rounded-full ${idx < 2 ? "bg-indigo-400" : "bg-zinc-200"}`}
+              />
+            ))}
+          </div>
+        </div>
+      );
     case "poster-rankings":
     case "rectangle-ranking":
       return (
@@ -174,6 +198,7 @@ function FormatThumbnail({ format }: { format: TemplateUiFormat }) {
         </div>
       );
     case "image-multiple-choice":
+    case "poster-single-select":
       return (
         <div className={`${base} flex items-center justify-center`}>
           <div className="grid grid-cols-3 gap-1.5">
@@ -224,19 +249,11 @@ export default function SurveysSection({
   const [formCreateRun, setFormCreateRun] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Helper to get auth headers
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
-
   // Fetch surveys
   const fetchSurveys = useCallback(async () => {
     try {
       setLoading(true);
-      const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${showId}/surveys`, { headers });
+      const response = await fetchAdminWithAuth(`/api/admin/trr-api/shows/${showId}/surveys`);
       if (!response.ok) throw new Error("Failed to fetch surveys");
       const data = await response.json();
       setSurveys(data.surveys);
@@ -246,7 +263,7 @@ export default function SurveysSection({
     } finally {
       setLoading(false);
     }
-  }, [showId, getAuthHeaders]);
+  }, [showId]);
 
   useEffect(() => {
     fetchSurveys();
@@ -278,10 +295,9 @@ export default function SurveysSection({
     setError(null);
 
     try {
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${showId}/surveys`, {
+      const response = await fetchAdminWithAuth(`/api/admin/trr-api/shows/${showId}/surveys`, {
         method: "POST",
-        headers: { ...authHeaders, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           seasonNumber: formSeasonNumber,
           template: formTemplate,

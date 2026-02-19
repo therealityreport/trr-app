@@ -4,6 +4,10 @@ import { render, screen } from "@testing-library/react";
 
 const personMock = vi.fn(() => <div data-testid="person-rankings-render" />);
 const posterMock = vi.fn(() => <div data-testid="poster-rankings-render" />);
+const castMultiSelectMock = vi.fn(() => <div data-testid="cast-multi-select-render" />);
+const castSingleSelectMock = vi.fn(() => <div data-testid="cast-single-select-render" />);
+const rankTextFieldsMock = vi.fn(() => <div data-testid="rank-text-fields-render" />);
+const posterSingleSelectMock = vi.fn(() => <div data-testid="poster-single-select-render" />);
 
 vi.mock("@/components/survey/PersonRankingsInput", () => ({
   __esModule: true,
@@ -18,6 +22,38 @@ vi.mock("@/components/survey/PosterRankingsInput", () => ({
   default: (props: unknown) => {
     posterMock(props);
     return <div data-testid="poster-rankings-render" />;
+  },
+}));
+
+vi.mock("@/components/survey/CastMultiSelectInput", () => ({
+  __esModule: true,
+  default: (props: unknown) => {
+    castMultiSelectMock(props);
+    return <div data-testid="cast-multi-select-render" />;
+  },
+}));
+
+vi.mock("@/components/survey/SingleSelectCastInput", () => ({
+  __esModule: true,
+  default: (props: unknown) => {
+    castSingleSelectMock(props);
+    return <div data-testid="cast-single-select-render" />;
+  },
+}));
+
+vi.mock("@/components/survey/RankTextFields", () => ({
+  __esModule: true,
+  default: (props: unknown) => {
+    rankTextFieldsMock(props);
+    return <div data-testid="rank-text-fields-render" />;
+  },
+}));
+
+vi.mock("@/components/survey/PosterSingleSelect", () => ({
+  __esModule: true,
+  default: (props: unknown) => {
+    posterSingleSelectMock(props);
+    return <div data-testid="poster-single-select-render" />;
   },
 }));
 
@@ -43,6 +79,10 @@ describe("QuestionRenderer ranking dispatch", () => {
   beforeEach(() => {
     personMock.mockClear();
     posterMock.mockClear();
+    castMultiSelectMock.mockClear();
+    castSingleSelectMock.mockClear();
+    rankTextFieldsMock.mockClear();
+    posterSingleSelectMock.mockClear();
   });
 
   it("dispatches person-rankings and legacy circle-ranking to PersonRankingsInput", () => {
@@ -59,5 +99,105 @@ describe("QuestionRenderer ranking dispatch", () => {
 
     render(<QuestionRenderer question={makeQuestion("rectangle-ranking") as never} value={[]} onChange={() => {}} />);
     expect(posterMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("dispatches cast-multi-select to CastMultiSelectInput", () => {
+    render(
+      <QuestionRenderer
+        question={{
+          id: "q-cast-multi",
+          survey_id: "survey-1",
+          question_key: "which_feud",
+          question_text: "Which feud?",
+          question_type: "multi_choice",
+          display_order: 1,
+          is_required: false,
+          config: { uiVariant: "cast-multi-select", minSelections: 2, maxSelections: 2 },
+          created_at: "",
+          updated_at: "",
+          options: [],
+        } as never}
+        value={[]}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("cast-multi-select-render")).toBeInTheDocument();
+    expect(castMultiSelectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches cast-single-select to SingleSelectCastInput", () => {
+    render(
+      <QuestionRenderer
+        question={{
+          id: "q-cast-single",
+          survey_id: "survey-1",
+          question_key: "who_funniest",
+          question_text: "Who was the FUNNIEST this season?",
+          question_type: "single_choice",
+          display_order: 1,
+          is_required: false,
+          config: { uiVariant: "cast-single-select", columns: 4 },
+          created_at: "",
+          updated_at: "",
+          options: [],
+        } as never}
+        value={null}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("cast-single-select-render")).toBeInTheDocument();
+    expect(castSingleSelectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches rank-text-fields to RankTextFields", () => {
+    render(
+      <QuestionRenderer
+        question={{
+          id: "q-rank-text",
+          survey_id: "survey-1",
+          question_key: "rank_taglines",
+          question_text: "Rank the Taglines",
+          question_type: "single_choice",
+          display_order: 1,
+          is_required: false,
+          config: { uiVariant: "rank-text-fields" },
+          created_at: "",
+          updated_at: "",
+          options: [],
+        } as never}
+        value={null}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("rank-text-fields-render")).toBeInTheDocument();
+    expect(rankTextFieldsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches poster-single-select to PosterSingleSelect", () => {
+    render(
+      <QuestionRenderer
+        question={{
+          id: "q-poster-select",
+          survey_id: "survey-1",
+          question_key: "season_live_start",
+          question_text: "During which season...",
+          question_type: "single_choice",
+          display_order: 1,
+          is_required: false,
+          config: { uiVariant: "poster-single-select", columns: 3 },
+          created_at: "",
+          updated_at: "",
+          options: [],
+        } as never}
+        value={null}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("poster-single-select-render")).toBeInTheDocument();
+    expect(posterSingleSelectMock).toHaveBeenCalledTimes(1);
   });
 });

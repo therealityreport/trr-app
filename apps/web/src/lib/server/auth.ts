@@ -24,6 +24,9 @@ export interface AuthenticatedUser {
   token: AuthTokenClaims;
 }
 
+const DEV_ADMIN_BYPASS_UID = "dev-admin-bypass";
+const DEV_ADMIN_BYPASS_EMAIL = "dev-admin@localhost";
+
 type TokenKind = "id" | "session";
 type ShadowMismatchField = "uid" | "email" | "name";
 
@@ -372,6 +375,52 @@ async function verifyToken(
   return null;
 }
 
+function isLocalHostname(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "[::1]";
+}
+
+function parseOptionalBoolean(value: string | undefined): boolean | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  return null;
+}
+
+function isDevAdminBypassEnabled(request: NextRequest): boolean {
+  const explicitBypass = parseOptionalBoolean(process.env.TRR_DEV_ADMIN_BYPASS);
+  const bypassEnabled = explicitBypass ?? process.env.NODE_ENV === "development";
+  if (!bypassEnabled) return false;
+  const requestHost = request.nextUrl.hostname;
+  if (isLocalHostname(requestHost)) return true;
+  const hostHeader = request.headers.get("host");
+  if (!hostHeader) return false;
+  const hostWithoutPort = hostHeader.split(":")[0] ?? hostHeader;
+  return isLocalHostname(hostWithoutPort);
+}
+
+function buildDevBypassUser(provider: AuthProvider = "firebase"): AuthenticatedUser {
+  const token: AuthTokenClaims = {
+    uid: DEV_ADMIN_BYPASS_UID,
+    sub: DEV_ADMIN_BYPASS_UID,
+    email: DEV_ADMIN_BYPASS_EMAIL,
+    name: "Dev Admin Bypass",
+  };
+  return {
+    uid: DEV_ADMIN_BYPASS_UID,
+    email: DEV_ADMIN_BYPASS_EMAIL,
+    provider,
+    token,
+  };
+}
+
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
@@ -481,6 +530,11 @@ export function resetAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
 }
 
 export async function requireAdmin(request: NextRequest): Promise<AuthenticatedUser> {
+  if (isDevAdminBypassEnabled(request)) {
+    const existingUser = await getUserFromRequest(request);
+    return existingUser ?? buildDevBypassUser();
+  }
+
   const user = await requireUser(request);
   const email = user.email?.toLowerCase();
   const emailAllowed = Boolean(email && allowedEmails.has(email));

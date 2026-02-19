@@ -275,6 +275,31 @@ describe("mapPhotoToMetadata", () => {
     });
 
     expect(result.sectionTag).toBe("CONFESSIONAL");
+    expect(result.contentType).toBe("CONFESSIONAL");
+  });
+
+  it("prefers explicit metadata content_type for canonical contentType", () => {
+    const result = mapPhotoToMetadata({
+      id: "content-type-explicit",
+      person_id: "p1",
+      source: "tmdb",
+      url: null,
+      hosted_url: "https://example.com/profile.jpg",
+      caption: "Cast portrait",
+      width: null,
+      height: null,
+      context_type: "profile",
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: {
+        content_type: "profile_picture",
+      },
+      fetched_at: null,
+    });
+
+    expect(result.contentType).toBe("PROFILE PICTURE");
+    expect(result.sectionTag).toBe("PROFILE PICTURE");
   });
 
   it("uses fallback people list when tags are missing", () => {
@@ -511,6 +536,34 @@ describe("mapSeasonAssetToMetadata", () => {
     );
 
     expect(meta.originalImageUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg");
+  });
+
+  it("uses metadata content_type as canonical contentType for season assets", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "a6",
+        type: "season",
+        source: "web_scrape:example.com",
+        source_url: "https://example.com/person.jpg",
+        kind: "other",
+        hosted_url: "https://cdn.example.com/person.webp",
+        width: null,
+        height: null,
+        caption: null,
+        season_number: 4,
+        person_name: null,
+        metadata: { content_type: "profile_photo" },
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: "image/webp",
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      4,
+      "RHOSLC",
+    );
+
+    expect(meta.contentType).toBe("PROFILE PICTURE");
+    expect(meta.sectionTag).toBe("PROFILE PICTURE");
   });
 
   it("uses asset-level people_count fallback when metadata count is missing", () => {

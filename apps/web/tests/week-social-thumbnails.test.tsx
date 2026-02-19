@@ -8,9 +8,18 @@ vi.mock("@/lib/admin/useAdminGuard", () => ({
   useAdminGuard: () => ({ hasAccess: true, checking: false }),
 }));
 
+const { mockParams, mockSearch } = vi.hoisted(() => ({
+  mockParams: {
+    showId: "7782652f-783a-488b-8860-41b97de32e75",
+    seasonNumber: "6",
+    weekIndex: "1",
+  },
+  mockSearch: { value: "source_scope=bravo" },
+}));
+
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ showId: "7782652f-783a-488b-8860-41b97de32e75", seasonNumber: "6", weekIndex: "1" }),
-  useSearchParams: () => new URLSearchParams("source_scope=bravo"),
+  useParams: () => mockParams,
+  useSearchParams: () => new URLSearchParams(mockSearch.value),
 }));
 
 const weekPayload = {
@@ -44,7 +53,12 @@ const weekPayload = {
           views: 1000,
           thumbnail_url: null,
           media_urls: ["https://images.test/ig-preview.jpg"],
-          mentions: [],
+          post_format: "reel",
+          profile_tags: ["@tagged_user"],
+          collaborators: ["@collab_user"],
+          hashtags: ["RHOSLC"],
+          mentions: ["@bravotv"],
+          duration_seconds: 14,
         },
       ],
       totals: { posts: 1, total_comments: 10, total_engagement: 100 },
@@ -106,6 +120,10 @@ const weekPayload = {
 
 describe("WeekDetailPage thumbnails", () => {
   beforeEach(() => {
+    mockParams.showId = "7782652f-783a-488b-8860-41b97de32e75";
+    mockParams.seasonNumber = "6";
+    mockParams.weekIndex = "1";
+    mockSearch.value = "source_scope=bravo";
     (auth as unknown as { currentUser?: { getIdToken: () => Promise<string> } }).currentUser = {
       getIdToken: vi.fn().mockResolvedValue("test-token"),
     };
@@ -135,6 +153,8 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
+    const backLink = screen.getByRole("link", { name: /Back to Season Social Analytics/i });
+    expect(backLink.getAttribute("href")).toContain("source_scope=bravo");
 
     expect(screen.getByAltText("Instagram post thumbnail")).toHaveAttribute(
       "src",
@@ -155,6 +175,72 @@ describe("WeekDetailPage thumbnails", () => {
       screen.getByText("* Not all platform-reported comments are saved in Supabase yet."),
     ).toBeInTheDocument();
     expect(screen.getByText(/0\/10\* comments/i)).toBeInTheDocument();
+    expect(screen.getByText("REEL")).toBeInTheDocument();
+    expect(screen.getByText("14s")).toBeInTheDocument();
+    expect(screen.getByText("@tagged_user")).toBeInTheDocument();
+    expect(screen.getByText("@collab_user")).toBeInTheDocument();
+  });
+
+  it("renders enriched instagram metadata inside the Post Stats drawer", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => weekPayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/instagram/ig-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "instagram",
+            source_id: "ig-1",
+            author: "bravotv",
+            text: "IG post",
+            url: "https://instagram.com/p/abc",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: "https://images.test/ig-preview.jpg",
+            post_format: "reel",
+            profile_tags: ["@tagged_user"],
+            collaborators: ["@collab_user"],
+            hashtags: ["RHOSLC"],
+            mentions: ["@bravotv"],
+            duration_seconds: 14,
+            stats: {
+              likes: 50,
+              comments_count: 10,
+              views: 1000,
+              engagement: 1060,
+            },
+            total_comments_in_db: 0,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Week 1")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Post Stats/i })[0]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Stats" })).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("REEL").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("14s").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("@tagged_user").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("@collab_user").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
   });
 
   it("queues incremental week comment sync from Week view", async () => {
@@ -218,7 +304,16 @@ describe("WeekDetailPage thumbnails", () => {
                 created_at: "2026-01-01T00:00:00.000Z",
                 completed_at: "2026-01-01T00:01:00.000Z",
                 config: { stage: "comments" },
-                metadata: { stage_counters: { posts: 0, comments: 10 } },
+                metadata: {
+                  stage_counters: { posts: 0, comments: 10 },
+                  persist_counters: { posts_upserted: 0, comments_upserted: 8 },
+                  activity: {
+                    phase: "comments_fetch",
+                    pages_scanned: 3,
+                    posts_checked: 5,
+                    matched_posts: 1,
+                  },
+                },
               },
             ],
           }),
@@ -245,6 +340,10 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Sync Progress")).toBeInTheDocument();
       expect(screen.getByText(/Ingest complete/)).toBeInTheDocument();
     });
+    expect(screen.getByText(/10 scraped/i)).toBeInTheDocument();
+    expect(screen.getByText(/saved 8/i)).toBeInTheDocument();
+    expect(screen.getByText(/saved 0p\/8c/i)).toBeInTheDocument();
+    expect(screen.getByText(/comments fetch/i)).toBeInTheDocument();
 
     const ingestCall = fetchMock.mock.calls.find(
       (call) => String(call[0]).includes("/social/ingest") && (call[1] as RequestInit | undefined)?.method === "POST",
@@ -298,5 +397,18 @@ describe("WeekDetailPage thumbnails", () => {
       (call) => String(call[0]).includes("/social/ingest") && (call[1] as RequestInit | undefined)?.method === "POST",
     );
     expect(ingestCall).toBeUndefined();
+  });
+
+  it("shows explicit error and skips fetch when season/week route params are invalid", async () => {
+    mockParams.seasonNumber = "not-a-number";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Invalid season\/week URL/i)).toBeInTheDocument();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

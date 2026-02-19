@@ -47,6 +47,12 @@ describe("networks-streaming sync proxy route", () => {
           logos_mirrored: 9,
           variants_black_mirrored: 6,
           variants_white_mirrored: 5,
+          completion_total: 50,
+          completion_resolved: 49,
+          completion_unresolved: 1,
+          completion_percent: 98,
+          completion_gate_passed: false,
+          missing_columns: [],
           unresolved_logos_count: 1,
           unresolved_logos_truncated: false,
           unresolved_logos: [

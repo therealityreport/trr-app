@@ -4,13 +4,45 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useNormalizedSurvey } from "@/hooks/useNormalizedSurvey";
 import QuestionRenderer from "./QuestionRenderer";
+import SurveyContinueButton from "./SurveyContinueButton";
 import type { AnswerInput } from "@/lib/surveys/normalized-types";
 import { getUiVariant, isQuestionComplete } from "./isQuestionComplete";
 import { resolveSingleChoiceOptionId } from "./answerMapping";
 import { groupBySection } from "@/lib/surveys/section-grouping";
+import { resolveCloudfrontCdnFont } from "@/lib/fonts/cdn-fonts";
 
 const FOCUSABLE_SELECTOR =
   "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as UnknownRecord;
+}
+
+function asTrimmedString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function readConfigPath(config: UnknownRecord, path: string[]): unknown {
+  let cursor: unknown = config;
+  for (const key of path) {
+    const record = asRecord(cursor);
+    if (!record || !(key in record)) return undefined;
+    cursor = record[key];
+  }
+  return cursor;
+}
+
+function resolveSurveyFontFamily(value: unknown): string | undefined {
+  const candidate = asTrimmedString(value);
+  if (!candidate) return undefined;
+  const resolved = resolveCloudfrontCdnFont(candidate);
+  return resolved?.fontFamily ?? candidate;
+}
 
 export interface NormalizedSurveyPlayProps {
   surveySlug: string;
@@ -325,13 +357,32 @@ export default function NormalizedSurveyPlay({
 
         {/* Questions */}
         <div className="space-y-6 sm:space-y-8 lg:space-y-12">
-          {questionsForRender.map(({ question, index, section, showSectionHeader }) => (
-            <div
-              key={question.id}
-              className="relative rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6"
-              data-survey-question-card
-              data-survey-question-id={question.id}
-            >
+          {questionsForRender.map(({ question, index, section, showSectionHeader }) => {
+            const uiVariant = getUiVariant(question);
+            const rendersOwnHeading =
+              uiVariant === "poster-single-select" ||
+              uiVariant === "cast-single-select";
+            const config = asRecord(question.config) ?? {};
+            const questionHeadingFontFamily = resolveSurveyFontFamily(
+              readConfigPath(config, ["questionTextFontFamily"]) ??
+                readConfigPath(config, ["headingFontFamily"]) ??
+                readConfigPath(config, ["titleFontFamily"]) ??
+                readConfigPath(config, ["fonts", "questionText"]) ??
+                readConfigPath(config, ["fonts", "heading"]) ??
+                readConfigPath(config, ["fonts", "title"]),
+            );
+            const questionHeadingColor =
+              asTrimmedString(readConfigPath(config, ["questionTextColor"])) ??
+              asTrimmedString(readConfigPath(config, ["styles", "questionTextColor"])) ??
+              undefined;
+
+            return (
+              <div
+                key={question.id}
+                className="relative rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6"
+                data-survey-question-card
+                data-survey-question-id={question.id}
+              >
               <button
                 type="button"
                 onClick={() => scrollToPreviousQuestion(question.id)}
@@ -366,9 +417,17 @@ export default function NormalizedSurveyPlay({
                   Question {index + 1} of {totalQuestions}
                   {question.is_required && <span className="ml-1 text-red-500">*</span>}
                 </span>
-                <h2 className="mt-1 text-base font-semibold leading-snug text-gray-900 sm:text-lg">
-                  {question.question_text}
-                </h2>
+                {!rendersOwnHeading && (
+                  <h2
+                    className="mt-1 text-base font-semibold leading-snug text-gray-900 sm:text-lg"
+                    style={{
+                      fontFamily: questionHeadingFontFamily,
+                      color: questionHeadingColor,
+                    }}
+                  >
+                    {question.question_text}
+                  </h2>
+                )}
               </div>
 
               <QuestionRenderer
@@ -377,9 +436,13 @@ export default function NormalizedSurveyPlay({
                 onChange={(value) => handleAnswerChange(question.id, value)}
               />
               {(() => {
-                const uiVariant = getUiVariant(question);
                 const hasInlineContinue =
                   uiVariant === "agree-likert-scale" ||
+                  uiVariant === "two-choice-slider" ||
+                  uiVariant === "poster-single-select" ||
+                  uiVariant === "cast-single-select" ||
+                  uiVariant === "reunion-seating-prediction" ||
+                  uiVariant === "cast-multi-select" ||
                   uiVariant === "cast-decision-card" ||
                   uiVariant === "three-choice-slider";
                 const shouldShowContinue =
@@ -391,19 +454,17 @@ export default function NormalizedSurveyPlay({
 
                 return (
                   <div className="mt-4 flex justify-center sm:mt-5">
-                    <button
-                      type="button"
+                    <SurveyContinueButton
                       onClick={() => scrollToNextQuestion(question.id)}
-                      className="inline-flex items-center justify-center rounded-full bg-[#121212] px-7 py-2.5 text-base font-semibold text-[#F8F8F8] transition hover:bg-black focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/30 sm:px-9 sm:py-3"
+                      className="mx-auto"
                       data-testid={`survey-question-continue-${question.id}`}
-                    >
-                      Continue
-                    </button>
+                    />
                   </div>
                 );
               })()}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
 
         {/* Submit section */}

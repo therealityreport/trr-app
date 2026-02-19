@@ -3,6 +3,10 @@
 import * as React from "react";
 import Image from "next/image";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
+import {
+  isCloudfrontCdnFontCandidate,
+  resolveCloudfrontCdnFont,
+} from "@/lib/fonts/cdn-fonts";
 
 export interface SingleSelectInputProps {
   question: SurveyQuestion & { options: QuestionOption[] };
@@ -13,6 +17,101 @@ export interface SingleSelectInputProps {
   layout?: "vertical" | "horizontal" | "grid";
 }
 
+const DEFAULT_FIGMA_OPTION_FONT = "\"Plymouth Serial\", var(--font-sans), sans-serif";
+const DEFAULT_FIGMA_OPTION_BG = "#E2C3E9";
+const DEFAULT_FIGMA_OPTION_BG_SELECTED = "#5D3167";
+const DEFAULT_FIGMA_OPTION_TEXT = "#111111";
+const DEFAULT_FIGMA_OPTION_TEXT_SELECTED = "#FFFFFF";
+const MOBILE_MIN_WIDTH = 280;
+const MOBILE_MAX_WIDTH = 520;
+const TABLET_MAX_WIDTH = 840;
+const DESKTOP_MAX_WIDTH = 1039;
+
+type UnknownRecord = Record<string, unknown>;
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function interpolate(min: number, max: number, progress: number): number {
+  return min + (max - min) * progress;
+}
+
+function toRecord(value: unknown): UnknownRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as UnknownRecord;
+}
+
+function toTrimmedString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeHexColor(colorValue: string): string | null {
+  const match = colorValue.trim().match(/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (!match || !match[1]) return null;
+  const hex = match[1];
+  const expanded = hex.length === 3
+    ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+    : hex;
+  return `#${expanded.toUpperCase()}`;
+}
+
+function toColorString(value: unknown): string | null {
+  const trimmed = toTrimmedString(value);
+  if (!trimmed) return null;
+  if (trimmed.startsWith("#")) return normalizeHexColor(trimmed) ?? trimmed;
+  return trimmed;
+}
+
+function readPath(record: UnknownRecord, path: string[]): unknown {
+  let cursor: unknown = record;
+  for (const key of path) {
+    const current = toRecord(cursor);
+    if (!current || !(key in current)) return undefined;
+    cursor = current[key];
+  }
+  return cursor;
+}
+
+function readFontValue(record: UnknownRecord, path: string[]): string | null {
+  const value = readPath(record, path);
+  const direct = toTrimmedString(value);
+  if (direct) return direct;
+  const nested = toRecord(value);
+  if (!nested) return null;
+  return (
+    toTrimmedString(nested.fontFamily) ??
+    toTrimmedString(nested.font) ??
+    toTrimmedString(nested.family) ??
+    null
+  );
+}
+
+function readColorValue(record: UnknownRecord, path: string[]): string | null {
+  const value = readPath(record, path);
+  const direct = toColorString(value);
+  if (direct) return direct;
+  const nested = toRecord(value);
+  if (!nested) return null;
+  return toColorString(nested.color) ?? toColorString(nested.value) ?? null;
+}
+
+function pushUnique(values: string[], next: string | null) {
+  if (!next || values.includes(next)) return;
+  values.push(next);
+}
+
+function resolveFont(candidates: string[], fallback: string): string {
+  for (const candidate of candidates) {
+    const resolved = resolveCloudfrontCdnFont(candidate);
+    if (resolved) return resolved.fontFamily;
+    if (!isCloudfrontCdnFontCandidate(candidate)) return candidate;
+  }
+  return fallback;
+}
+
 export default function SingleSelectInput({
   question,
   value,
@@ -20,6 +119,12 @@ export default function SingleSelectInput({
   disabled = false,
   layout = "vertical",
 }: SingleSelectInputProps) {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = React.useState(MOBILE_MAX_WIDTH);
+  const configRecord = React.useMemo(
+    () => ((question.config ?? {}) as UnknownRecord),
+    [question.config],
+  );
   const sortedOptions = [...question.options].sort((a, b) => a.display_order - b.display_order);
 
   const handleSelect = React.useCallback(
@@ -36,6 +141,118 @@ export default function SingleSelectInput({
   };
 
   const hasImages = sortedOptions.some((opt) => getImagePath(opt));
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const applyWidth = (next: number) => {
+      if (!Number.isFinite(next) || next <= 0) return;
+      setContainerWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+    };
+
+    applyWidth(container.getBoundingClientRect().width);
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const measured = entries[0]?.contentRect.width;
+      if (typeof measured === "number") applyWidth(measured);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  const figmaOptionFontFamily = React.useMemo(() => {
+    const candidates: string[] = [];
+    const paths: string[][] = [
+      ["optionTextFontFamily"],
+      ["choiceFontFamily"],
+      ["optionFontFamily"],
+      ["fonts", "optionText"],
+      ["fonts", "choice"],
+      ["fonts", "option"],
+      ["typography", "optionText"],
+      ["typography", "choice"],
+      ["typography", "option"],
+    ];
+    for (const path of paths) {
+      pushUnique(candidates, readFontValue(configRecord, path));
+    }
+    return resolveFont(candidates, DEFAULT_FIGMA_OPTION_FONT);
+  }, [configRecord]);
+
+  const figmaOptionBg = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["componentBackgroundColor"]) ??
+      readColorValue(configRecord, ["optionBackgroundColor"]) ??
+      readColorValue(configRecord, ["styles", "componentBackgroundColor"]) ??
+      readColorValue(configRecord, ["styles", "optionBackgroundColor"]) ??
+      DEFAULT_FIGMA_OPTION_BG,
+    [configRecord],
+  );
+  const figmaOptionBgSelected = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["selectedOptionBackgroundColor"]) ??
+      readColorValue(configRecord, ["placeholderShapeColor"]) ??
+      readColorValue(configRecord, ["styles", "selectedOptionBackgroundColor"]) ??
+      readColorValue(configRecord, ["styles", "placeholderShapeColor"]) ??
+      DEFAULT_FIGMA_OPTION_BG_SELECTED,
+    [configRecord],
+  );
+  const figmaOptionTextColor = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["optionTextColor"]) ??
+      readColorValue(configRecord, ["styles", "optionTextColor"]) ??
+      DEFAULT_FIGMA_OPTION_TEXT,
+    [configRecord],
+  );
+  const figmaOptionTextColorSelected = React.useMemo(
+    () =>
+      readColorValue(configRecord, ["selectedOptionTextColor"]) ??
+      readColorValue(configRecord, ["placeholderTextColor"]) ??
+      readColorValue(configRecord, ["styles", "selectedOptionTextColor"]) ??
+      readColorValue(configRecord, ["styles", "placeholderTextColor"]) ??
+      DEFAULT_FIGMA_OPTION_TEXT_SELECTED,
+    [configRecord],
+  );
+
+  const responsiveSizing = React.useMemo(() => {
+    const width = clampNumber(containerWidth, MOBILE_MIN_WIDTH, DESKTOP_MAX_WIDTH);
+
+    if (width <= MOBILE_MAX_WIDTH) {
+      const progress = clampNumber((width - MOBILE_MIN_WIDTH) / (MOBILE_MAX_WIDTH - MOBILE_MIN_WIDTH), 0, 1);
+      return {
+        optionHeight: Math.round(interpolate(52, 72, progress)),
+        optionRadius: Math.round(interpolate(10, 11, progress)),
+        optionFontSize: Math.round(interpolate(15, 20, progress)),
+        optionGap: Math.round(interpolate(10, 14, progress)),
+        optionPaddingX: Math.round(interpolate(14, 20, progress)),
+        optionLetterSpacing: interpolate(0.022, 0.028, progress),
+      };
+    }
+
+    if (width <= TABLET_MAX_WIDTH) {
+      const progress = clampNumber((width - MOBILE_MAX_WIDTH) / (TABLET_MAX_WIDTH - MOBILE_MAX_WIDTH), 0, 1);
+      return {
+        optionHeight: Math.round(interpolate(72, 96, progress)),
+        optionRadius: Math.round(interpolate(11, 12, progress)),
+        optionFontSize: Math.round(interpolate(20, 27, progress)),
+        optionGap: Math.round(interpolate(14, 18, progress)),
+        optionPaddingX: Math.round(interpolate(20, 25, progress)),
+        optionLetterSpacing: interpolate(0.028, 0.03, progress),
+      };
+    }
+
+    const progress = clampNumber((width - TABLET_MAX_WIDTH) / (DESKTOP_MAX_WIDTH - TABLET_MAX_WIDTH), 0, 1);
+    return {
+      optionHeight: Math.round(interpolate(96, 113, progress)),
+      optionRadius: Math.round(interpolate(12, 13, progress)),
+      optionFontSize: Math.round(interpolate(27, 33, progress)),
+      optionGap: Math.round(interpolate(18, 21, progress)),
+      optionPaddingX: Math.round(interpolate(25, 29, progress)),
+      optionLetterSpacing: interpolate(0.03, 0.03, progress),
+    };
+  }, [containerWidth]);
 
   if (layout === "horizontal") {
     // Horizontal layout for likert-scale
@@ -116,7 +333,11 @@ export default function SingleSelectInput({
 
   // Standard vertical radio list
   return (
-    <div className="space-y-1.5 sm:space-y-2">
+    <div
+      ref={containerRef}
+      className="mx-auto grid w-full max-w-[1039px]"
+      style={{ rowGap: `${responsiveSizing.optionGap}px` }}
+    >
       {sortedOptions.map((option) => {
         const isSelected = value === option.option_key;
         return (
@@ -126,27 +347,31 @@ export default function SingleSelectInput({
             onClick={() => handleSelect(option.option_key)}
             disabled={disabled}
             className={`
-              w-full rounded-lg border-2 p-2.5 text-left transition-all sm:p-3
-              flex items-center gap-2.5 sm:gap-3
-              ${isSelected
-                ? "border-indigo-500 bg-indigo-50"
-                : "border-gray-200 bg-white hover:border-gray-300"
-              }
-              ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
+              mb-0 block w-full text-left transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5D3167]/25
+              ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:brightness-[0.985]"}
             `}
             aria-pressed={isSelected}
+            style={{
+              height: `${responsiveSizing.optionHeight}px`,
+              borderRadius: `${responsiveSizing.optionRadius}px`,
+              paddingLeft: `${responsiveSizing.optionPaddingX}px`,
+              paddingRight: `${responsiveSizing.optionPaddingX}px`,
+              backgroundColor: isSelected ? figmaOptionBgSelected : figmaOptionBg,
+              color: isSelected ? figmaOptionTextColorSelected : figmaOptionTextColor,
+              fontFamily: figmaOptionFontFamily,
+              fontWeight: 800,
+              fontSize: `${responsiveSizing.optionFontSize}px`,
+              lineHeight: "1.2",
+              letterSpacing: `${responsiveSizing.optionLetterSpacing}em`,
+              textTransform: "uppercase",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-start",
+              boxShadow: isSelected ? "0 0 0 2px rgba(255, 255, 255, 0.35) inset" : "none",
+            }}
+            data-testid={`single-select-option-${option.option_key}`}
           >
-            {/* Radio indicator */}
-            <div
-              className={`
-                h-4 w-4 flex-shrink-0 rounded-full border-2 sm:h-5 sm:w-5
-                flex items-center justify-center
-                ${isSelected ? "border-indigo-500" : "border-gray-300"}
-              `}
-            >
-              {isSelected && <div className="h-2 w-2 rounded-full bg-indigo-500 sm:h-2.5 sm:w-2.5" />}
-            </div>
-            <span className="text-xs font-medium text-gray-800 sm:text-sm">{option.option_text}</span>
+            {option.option_text}
           </button>
         );
       })}

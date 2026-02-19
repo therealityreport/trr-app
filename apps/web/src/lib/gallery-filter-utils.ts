@@ -68,7 +68,7 @@ export function matchesContentTypesForPersonPhoto(
 ): boolean {
   if (contentTypes.length === 0) return true;
   const meta = mapPhotoToMetadata(photo);
-  const sectionTag = (meta.sectionTag ?? "").toLowerCase();
+  const sectionTag = (meta.contentType ?? meta.sectionTag ?? "").toLowerCase();
   const label = (meta.sectionLabel ?? "").toLowerCase();
   const caption = (meta.caption ?? "").toLowerCase();
   const text = `${sectionTag} ${label} ${caption}`;
@@ -103,7 +103,7 @@ export function matchesContentTypesForSeasonAsset(
 ): boolean {
   if (contentTypes.length === 0) return true;
   const meta = mapSeasonAssetToMetadata(asset, seasonNumber, showName);
-  const sectionTag = (meta.sectionTag ?? "").toLowerCase();
+  const sectionTag = (meta.contentType ?? meta.sectionTag ?? "").toLowerCase();
   const label = (meta.sectionLabel ?? "").toLowerCase();
   const caption = (meta.caption ?? "").toLowerCase();
   const text = `${sectionTag} ${label} ${caption}`;

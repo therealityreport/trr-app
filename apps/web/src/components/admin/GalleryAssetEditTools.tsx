@@ -6,6 +6,8 @@ import { THUMBNAIL_DEFAULTS, type ThumbnailCrop } from "@/lib/thumbnail-crop";
 import type { GalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
+const GALLERY_EDIT_REQUEST_TIMEOUT_MS = 120_000;
+
 interface GalleryAssetEditToolsProps {
   asset: SeasonAsset;
   capabilities: GalleryAssetCapabilities;
@@ -29,6 +31,22 @@ const asFinite = (value: unknown): number | null =>
 
 const clampPercent = (value: number): number => Math.min(100, Math.max(0, value));
 const clampZoom = (value: number): number => Math.min(4, Math.max(1, value));
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError";
+
+const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
 
 const mergeMetadata = (
   original: SeasonAsset["metadata"],
@@ -79,14 +97,28 @@ export function GalleryAssetEditTools({
     init?: RequestInit
   ): Promise<Record<string, unknown>> => {
     const headers = await getAuthHeaders();
-    const response = await fetch(url, {
-      ...init,
-      headers: {
-        ...headers,
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        url,
+        {
+          ...init,
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+            ...(init?.headers ?? {}),
+          },
+        },
+        GALLERY_EDIT_REQUEST_TIMEOUT_MS
+      );
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw new Error(
+          `Request timed out after ${Math.round(GALLERY_EDIT_REQUEST_TIMEOUT_MS / 1000)}s`
+        );
+      }
+      throw error;
+    }
     const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (!response.ok) {
       const message =
@@ -500,4 +532,3 @@ export function GalleryAssetEditTools({
 }
 
 export default GalleryAssetEditTools;
-

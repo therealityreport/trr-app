@@ -4,12 +4,13 @@ import * as React from "react";
 import Image from "next/image";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { TwoChoiceSliderConfig } from "@/lib/surveys/question-config-types";
+import SurveyContinueButton from "./SurveyContinueButton";
 import {
   isCloudfrontCdnFontCandidate,
   resolveCloudfrontCdnFont,
 } from "@/lib/fonts/cdn-fonts";
 
-export interface WhoseSideInputProps {
+export interface TwoChoiceCastProps {
   question: SurveyQuestion & { options: QuestionOption[] };
   value: string | null;
   onChange: (value: string) => void;
@@ -104,12 +105,12 @@ function resolveFont(candidates: string[], fallback: string): string {
   return fallback;
 }
 
-export default function WhoseSideInput({
+export default function TwoChoiceCast({
   question,
   value,
   onChange,
   disabled = false,
-}: WhoseSideInputProps) {
+}: TwoChoiceCastProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(390);
   const config = question.config as unknown as TwoChoiceSliderConfig;
@@ -137,42 +138,31 @@ export default function WhoseSideInput({
     () => normalizeScalePercent(config.shapeScale, 100) / 100,
     [config.shapeScale],
   );
-  const buttonScaleFactor = React.useMemo(
-    () => normalizeScalePercent(config.buttonScale, 100) / 100,
-    [config.buttonScale],
-  );
   const componentBackgroundColor = React.useMemo(
     () =>
       readColorValue(configRecord, ["componentBackgroundColor"]) ??
       readColorValue(configRecord, ["styles", "componentBackgroundColor"]) ??
-      "#000000",
+      "#C8C8CB",
     [configRecord],
   );
   const questionTextColor = React.useMemo(
     () =>
       readColorValue(configRecord, ["questionTextColor"]) ??
       readColorValue(configRecord, ["styles", "questionTextColor"]) ??
-      "#FFFFFF",
+      "#111111",
     [configRecord],
   );
   const placeholderShapeColor = React.useMemo(
     () =>
       readColorValue(configRecord, ["placeholderShapeColor"]) ??
       readColorValue(configRecord, ["styles", "placeholderShapeColor"]) ??
-      "#D9D9D9",
+      "#CBCBCD",
     [configRecord],
   );
-  const placeholderShapeBorderColor = React.useMemo(
+  const selectedOutlineColor = React.useMemo(
     () =>
-      readColorValue(configRecord, ["placeholderShapeBorderColor"]) ??
-      readColorValue(configRecord, ["styles", "placeholderShapeBorderColor"]) ??
-      "rgba(255,255,255,0.12)",
-    [configRecord],
-  );
-  const neutralButtonTextColor = React.useMemo(
-    () =>
-      readColorValue(configRecord, ["optionTextColor"]) ??
-      readColorValue(configRecord, ["styles", "optionTextColor"]) ??
+      readColorValue(configRecord, ["selectedOptionBorderColor"]) ??
+      readColorValue(configRecord, ["styles", "selectedOptionBorderColor"]) ??
       "#FFFFFF",
     [configRecord],
   );
@@ -200,48 +190,64 @@ export default function WhoseSideInput({
   }, []);
 
   const headingFontSize = React.useMemo(() => {
-    return Math.max(28, Math.min(70, containerWidth * 0.082));
+    return Math.round(clampNumber(containerWidth * 0.054, 20, 70));
   }, [containerWidth]);
+  const headingMaxWidth = React.useMemo(
+    () => Math.round(clampNumber(containerWidth * 0.72, 260, 720)),
+    [containerWidth],
+  );
   const circleSize = React.useMemo(() => {
-    const base = Math.max(72, Math.min(300, containerWidth * 0.24));
-    return clampNumber(base * shapeScaleFactor, 52, 340);
+    const base = clampNumber(containerWidth * 0.18, 78, 166);
+    return clampNumber(base * shapeScaleFactor, 64, 188);
   }, [containerWidth, shapeScaleFactor]);
   const circleGapX = React.useMemo(() => {
-    return Math.max(6, Math.min(40, containerWidth * 0.03 * shapeScaleFactor));
+    return Math.round(clampNumber(containerWidth * 0.016 * shapeScaleFactor, 6, 24));
   }, [containerWidth, shapeScaleFactor]);
   const circleGapY = React.useMemo(() => {
-    return Math.max(8, Math.min(26, containerWidth * 0.04 * shapeScaleFactor));
+    return Math.round(clampNumber(containerWidth * 0.025 * shapeScaleFactor, 8, 18));
   }, [containerWidth, shapeScaleFactor]);
-  const neutralButtonHeight = React.useMemo(
-    () => Math.round(clampNumber(40 * buttonScaleFactor, 30, 68)),
-    [buttonScaleFactor],
+  const circleGridMarginTop = React.useMemo(
+    () => Math.round(clampNumber(containerWidth * 0.052, 18, 42)),
+    [containerWidth],
   );
-  const neutralButtonFontSize = React.useMemo(
-    () => Math.round(clampNumber(12 * buttonScaleFactor, 10, 20)),
-    [buttonScaleFactor],
-  );
-  const neutralButtonPaddingX = React.useMemo(
-    () => Math.round(clampNumber(16 * buttonScaleFactor, 10, 30)),
-    [buttonScaleFactor],
-  );
-  const neutralButtonRadius = React.useMemo(
-    () => Math.round(clampNumber(999 * shapeScaleFactor, 16, 9999)),
-    [shapeScaleFactor],
+  const innerPanelMaxWidth = React.useMemo(
+    () => Math.round(clampNumber(containerWidth * 0.84, 280, 760)),
+    [containerWidth],
   );
 
-  // Options: first two are the sides, third (if exists) is neutral
+  // Options: first two are the two selectable sides.
   const sortedOptions = [...question.options].sort((a, b) => a.display_order - b.display_order);
   const optionA = sortedOptions[0];
   const optionB = sortedOptions[1];
-  const neutralOption = sortedOptions.find((opt) => opt.option_key === "neutral");
 
   const handleSelect = React.useCallback(
     (optionKey: string) => {
       if (disabled) return;
       onChange(value === optionKey ? "" : optionKey);
     },
-    [disabled, onChange, value]
+    [disabled, onChange, value],
   );
+  const handleContinue = React.useCallback(() => {
+    if (disabled || !value) return;
+
+    const root = containerRef.current;
+    const currentCard = root?.closest<HTMLElement>("[data-survey-question-card], [data-question-preview-card]");
+    const nextCard = currentCard?.nextElementSibling as HTMLElement | null;
+    if (nextCard) {
+      nextCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      const focusTarget = nextCard.querySelector<HTMLElement>(
+        "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      );
+      focusTarget?.focus({ preventScroll: true });
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("survey-question-continue", { detail: { questionId: question.id } }),
+      );
+    }
+  }, [disabled, question.id, value]);
 
   const getImagePath = (option: QuestionOption): string | undefined => {
     const metadata = option.metadata as { imagePath?: string; imageUrl?: string } | null | undefined;
@@ -251,6 +257,7 @@ export default function WhoseSideInput({
   const renderOptionCircle = (option: QuestionOption) => {
     const imagePath = getImagePath(option);
     const isSelected = value === option.option_key;
+    const shouldDesaturate = Boolean(value) && !isSelected;
     return (
       <button
         key={option.option_key}
@@ -258,34 +265,41 @@ export default function WhoseSideInput({
         onClick={() => handleSelect(option.option_key)}
         disabled={disabled}
         className={`
-          relative rounded-full transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/60
+          relative rounded-full transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/25
           ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
-          ${isSelected ? "ring-4 ring-white shadow-[0_0_0_6px_rgba(255,255,255,0.24)]" : "ring-1"}
         `}
         style={{
           width: `${circleSize}px`,
           height: `${circleSize}px`,
-          borderColor: placeholderShapeBorderColor,
+          border: "none",
+          backgroundColor: "transparent",
+          boxShadow: isSelected
+            ? `0 0 0 2px ${selectedOutlineColor}, 0 0 18px rgba(255, 255, 255, 0.32)`
+            : "none",
         }}
         aria-label={option.option_text}
         aria-pressed={isSelected}
       >
-        {imagePath ? (
-          <Image
-            src={imagePath}
-            alt={option.option_text}
-            fill
-            sizes={`${Math.round(circleSize)}px`}
-            className="rounded-full object-cover"
-            unoptimized={imagePath.startsWith("http")}
-          />
-        ) : (
-          <span
-            className="absolute inset-0 rounded-full"
-            style={{ backgroundColor: placeholderShapeColor }}
-            aria-hidden="true"
-          />
-        )}
+        <span className="absolute inset-0 overflow-hidden rounded-full bg-zinc-200">
+          {imagePath ? (
+            <Image
+              src={imagePath}
+              alt={option.option_text}
+              fill
+              sizes={`${Math.round(circleSize)}px`}
+              className={`rounded-full object-cover transition-[filter] duration-200 ${
+                shouldDesaturate ? "grayscale saturate-0 contrast-[0.9]" : ""
+              }`}
+              unoptimized={imagePath.startsWith("http")}
+            />
+          ) : (
+            <span
+              className="absolute inset-0 rounded-full"
+              style={{ backgroundColor: placeholderShapeColor }}
+              aria-hidden="true"
+            />
+          )}
+        </span>
         <span className="sr-only">{option.option_text}</span>
       </button>
     );
@@ -294,56 +308,54 @@ export default function WhoseSideInput({
   return (
     <div
       ref={containerRef}
-      className="rounded-[18px] bg-black px-3 py-5 sm:px-8 sm:py-10"
-      style={{ backgroundColor: componentBackgroundColor }}
+      data-testid="two-choice-cast-root"
+      className="mx-auto w-full max-w-[1040px] rounded-[32px] border border-[#D4D4D8] bg-[#F8F8F8] px-4 py-4 sm:px-6 sm:py-6"
+      style={{ backgroundColor: "#F8F8F8", borderColor: "#D4D4D8" }}
     >
-      <h3
-        className="mx-auto max-w-5xl text-center leading-[0.94]"
+      <div
+        data-testid="two-choice-cast-panel"
+        className="mx-auto w-full rounded-[22px] px-5 py-6 sm:px-8 sm:py-10"
         style={{
-          fontFamily: headingFontFamily,
-          fontWeight: 800,
-          letterSpacing: "0.01em",
-          fontSize: `${headingFontSize}px`,
-          color: questionTextColor,
+          backgroundColor: componentBackgroundColor,
+          maxWidth: `${innerPanelMaxWidth}px`,
         }}
       >
-        {question.question_text}
-      </h3>
+        <h3
+          className="mx-auto text-center leading-[0.95]"
+          style={{
+            fontFamily: headingFontFamily,
+            fontWeight: 800,
+            letterSpacing: "0.01em",
+            fontSize: `${headingFontSize}px`,
+            color: questionTextColor,
+            maxWidth: `${headingMaxWidth}px`,
+          }}
+        >
+          {question.question_text}
+        </h3>
 
-      <div
-        className="mt-5 grid grid-cols-2 justify-items-center sm:mt-10"
-        style={{ columnGap: `${circleGapX}px`, rowGap: `${circleGapY}px` }}
-      >
-        {optionA && renderOptionCircle(optionA)}
-        {optionB && renderOptionCircle(optionB)}
-      </div>
-
-      {(neutralOption || config.neutralOption) && (
-        <div className="mt-5 flex justify-center sm:mt-6">
-          <button
-            type="button"
-            onClick={() => handleSelect(neutralOption?.option_key ?? "neutral")}
-            disabled={disabled}
-            className={`
-              border font-semibold uppercase tracking-[0.08em] transition-colors
-              ${value === (neutralOption?.option_key ?? "neutral")
-                ? "border-white bg-white text-black"
-                : "border-white/40 bg-transparent text-white hover:border-white/70"
-              }
-              ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
-            `}
-            style={{
-              height: `${neutralButtonHeight}px`,
-              paddingInline: `${neutralButtonPaddingX}px`,
-              borderRadius: `${neutralButtonRadius}px`,
-              fontSize: `${neutralButtonFontSize}px`,
-              color: value === (neutralOption?.option_key ?? "neutral") ? "#000000" : neutralButtonTextColor,
-            }}
-          >
-            {neutralOption?.option_text ?? config.neutralOption}
-          </button>
+        <div
+          className="grid grid-cols-2 justify-items-center"
+          style={{
+            marginTop: `${circleGridMarginTop}px`,
+            columnGap: `${circleGapX}px`,
+            rowGap: `${circleGapY}px`,
+          }}
+        >
+          {optionA && renderOptionCircle(optionA)}
+          {optionB && renderOptionCircle(optionB)}
         </div>
-      )}
+
+        {value && !disabled && (
+          <div className="mt-5 flex w-full justify-center sm:mt-6">
+            <SurveyContinueButton
+              onClick={handleContinue}
+              className="mx-auto"
+              data-testid="two-choice-cast-continue"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

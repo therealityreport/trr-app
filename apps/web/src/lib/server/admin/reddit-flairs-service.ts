@@ -1,3 +1,5 @@
+import { sanitizeRedditFlairList } from "@/lib/server/admin/reddit-flair-normalization";
+
 export type RedditFlairSource = "api" | "listing_fallback" | "none";
 
 export interface RedditPostFlaresResult {
@@ -39,8 +41,6 @@ const normalizeSubreddit = (value: string): string => {
 };
 
 const isValidSubreddit = (value: string): boolean => SUBREDDIT_RE.test(value);
-
-const normalizeFlairLabel = (value: string): string => value.trim().replace(/\s+/g, " ");
 
 const toWarning = (error: unknown): string => {
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -104,13 +104,13 @@ const fetchJsonWithTimeout = async <T>(url: string): Promise<T> => {
   }
 };
 
-const rankAndCapFlares = (rawFlares: string[], cap: number): string[] => {
+const rankAndCapFlares = (subreddit: string, rawFlares: string[], cap: number): string[] => {
   const firstSeenOrder = new Map<string, number>();
   const displayByKey = new Map<string, string>();
   const countByKey = new Map<string, number>();
 
   for (const raw of rawFlares) {
-    const normalized = normalizeFlairLabel(raw);
+    const normalized = raw.trim().replace(/\s+/g, " ");
     if (!normalized) continue;
 
     const key = normalized.toLowerCase();
@@ -129,7 +129,8 @@ const rankAndCapFlares = (rawFlares: string[], cap: number): string[] => {
     return (firstSeenOrder.get(a) ?? 0) - (firstSeenOrder.get(b) ?? 0);
   });
 
-  return sortedKeys.slice(0, cap).map((key) => displayByKey.get(key) ?? key);
+  const ranked = sortedKeys.map((key) => displayByKey.get(key) ?? key);
+  return sanitizeRedditFlairList(subreddit, ranked).slice(0, cap);
 };
 
 const fetchFromFlairApi = async (subreddit: string): Promise<string[]> => {
@@ -141,7 +142,7 @@ const fetchFromFlairApi = async (subreddit: string): Promise<string[]> => {
   const flares = payload
     .map((entry) => (typeof entry?.text === "string" ? entry.text : ""))
     .filter((value) => value.trim().length > 0);
-  return rankAndCapFlares(flares, getFlairCap());
+  return rankAndCapFlares(subreddit, flares, getFlairCap());
 };
 
 const fetchFromListingsFallback = async (subreddit: string): Promise<string[]> => {
@@ -168,7 +169,7 @@ const fetchFromListingsFallback = async (subreddit: string): Promise<string[]> =
     }
   }
 
-  return rankAndCapFlares(rawFlares, getFlairCap());
+  return rankAndCapFlares(subreddit, rawFlares, getFlairCap());
 };
 
 export async function fetchSubredditPostFlares(subredditInput: string): Promise<RedditPostFlaresResult> {

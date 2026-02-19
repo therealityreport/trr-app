@@ -22,12 +22,16 @@ export type QuestionType =
   | "cast-decision-card"   // Cast decision cards (Keep/Fire/Demote, Bring Back/Keep Gone)
   | "three-choice-slider"  // Keep/Fire/Demote slider (was matrix-likert for verdicts)
   | "agree-likert-scale"   // Agree/Disagree scale (was matrix-likert for statements)
+  | "reunion-seating-prediction" // Reunion seating layout prediction
   | "numeric-scale-slider" // Boring/Entertaining slider per cast member (was slider)
   | "two-axis-grid"        // 2D perceptual map (snap-to-grid cast placement)
   | "two-choice-slider"    // Whose side feuds (was whose-side)
   | "multi-select-choice"  // Select multiple options (was multi-select)
   | "image-multiple-choice" // Single select with images
   | "text-multiple-choice"  // Single select with text options
+  | "rank-text-fields"      // Figma tagline rank text-fields (single select)
+  | "poster-single-select"  // Single select poster grid
+  | "cast-single-select"    // Single select cast-circle grid for superlatives
   | "text-entry"           // Free text input
   | "dropdown";            // Dropdown select
 
@@ -97,6 +101,16 @@ export interface AgreeLikertScaleQuestion extends BaseQuestion {
   scale: LikertColumn[];
 }
 
+/** Reunion seating prediction around host */
+export interface ReunionSeatingPredictionQuestion extends BaseQuestion {
+  type: "reunion-seating-prediction";
+  hostName?: string;
+  hostImagePath?: string;
+  fullTimePrompt?: string;
+  friendPrompt?: string;
+  subjects: CastMemberOption[];
+}
+
 /** Numeric scale slider (Boring/Entertaining) for individual cast members */
 export interface NumericScaleSliderQuestion extends BaseQuestion {
   type: "numeric-scale-slider";
@@ -135,6 +149,7 @@ export interface TwoChoiceSliderQuestion extends BaseQuestion {
 /** Multi-select choice (checkboxes) */
 export interface MultiSelectChoiceQuestion extends BaseQuestion {
   type: "multi-select-choice";
+  uiVariant?: "multi-select-choice" | "cast-multi-select";
   options: SelectOption[];
   minSelections?: number;
   maxSelections?: number;
@@ -151,6 +166,26 @@ export interface ImageMultipleChoiceQuestion extends BaseQuestion {
 export interface TextMultipleChoiceQuestion extends BaseQuestion {
   type: "text-multiple-choice";
   options: SelectOption[];
+}
+
+/** Single select with taglines-style text fields */
+export interface RankTextFieldsQuestion extends BaseQuestion {
+  type: "rank-text-fields";
+  options: SelectOption[];
+}
+
+/** Single select with poster-style cards */
+export interface PosterSingleSelectQuestion extends BaseQuestion {
+  type: "poster-single-select";
+  options: ImageOption[];
+  columns?: number;
+}
+
+/** Single select with cast-circle image cards */
+export interface CastSingleSelectQuestion extends BaseQuestion {
+  type: "cast-single-select";
+  options: ImageOption[];
+  columns?: number;
 }
 
 // ============================================================================
@@ -234,12 +269,16 @@ export type SurveyQuestion =
   | CastDecisionCardQuestion
   | ThreeChoiceSliderQuestion
   | AgreeLikertScaleQuestion
+  | ReunionSeatingPredictionQuestion
   | NumericScaleSliderQuestion
   | TwoAxisGridQuestion
   | TwoChoiceSliderQuestion
   | MultiSelectChoiceQuestion
   | ImageMultipleChoiceQuestion
   | TextMultipleChoiceQuestion
+  | RankTextFieldsQuestion
+  | PosterSingleSelectQuestion
+  | CastSingleSelectQuestion
   | TextEntryQuestion
   | DropdownQuestion;
 

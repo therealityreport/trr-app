@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 interface SeasonTabAliasPageProps {
   params: Promise<{ showId: string; showSection: string; seasonTab: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 const ALLOWED_SEASON_TABS = new Set([
@@ -14,8 +15,28 @@ const ALLOWED_SEASON_TABS = new Set([
   "details",
 ]);
 
-export default async function SeasonTabAliasPage({ params }: SeasonTabAliasPageProps) {
+const serializeSearchParams = (input: Record<string, string | string[] | undefined>): string => {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === "string") {
+      query.append(key, value);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        query.append(key, item);
+      }
+    }
+  }
+  return query.toString();
+};
+
+export default async function SeasonTabAliasPage({ params, searchParams }: SeasonTabAliasPageProps) {
   const { showId, showSection, seasonTab } = await params;
+  const resolvedSearchParams = (searchParams ? await searchParams : {}) as Record<
+    string,
+    string | string[] | undefined
+  >;
   const normalizedSlug = showSection.trim().toLowerCase();
   const normalizedTab = seasonTab.trim().toLowerCase();
 
@@ -32,5 +53,10 @@ export default async function SeasonTabAliasPage({ params }: SeasonTabAliasPageP
     notFound();
   }
 
-  redirect(`/admin/trr-shows/${showId}/seasons/${seasonNumber}?tab=${normalizedTab}`);
+  const query = new URLSearchParams(serializeSearchParams(resolvedSearchParams));
+  query.set("tab", normalizedTab);
+  const queryString = query.toString();
+  redirect(
+    `/admin/trr-shows/${showId}/seasons/${seasonNumber}${queryString ? `?${queryString}` : ""}`,
+  );
 }

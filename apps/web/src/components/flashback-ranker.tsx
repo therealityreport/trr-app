@@ -29,15 +29,20 @@ const FIGMA_GRID_MAX_WIDTH = 708;
 const FIGMA_RECT_GRID_MAX_WIDTH = 690;
 const TWO_AXIS_BENCH_TOKEN_MOBILE = 48; // aligns with TwoAxisGridInput w-12
 const TWO_AXIS_BENCH_TOKEN_DESKTOP = 56; // aligns with TwoAxisGridInput sm:w-14
+const MOBILE_MIN_WIDTH = 320;
+const MOBILE_BASE_WIDTH = 390;
+const TABLET_MIN_WIDTH = 640;
+const DESKTOP_MIN_WIDTH = 1024;
 
 type FlashbackRankerLayoutPreset = "legacy" | "figma-rank-circles" | "figma-rank-rectangles";
 type TokenVariant = "circle" | "season-card";
+type CircleTokenStyle = "default" | "figma-rank";
 type SeasonCardSize = number | "fill";
 
 type FigmaCircleLayoutMetrics = {
   containerWidth: number;
   gridWidth: number;
-  columns: 2 | 3 | 4;
+  columns: number;
   gapX: number;
   gapY: number;
   slotSize: number;
@@ -61,7 +66,7 @@ type FigmaRectangleLayoutMetrics = {
   framePaddingX: number;
   framePaddingY: number;
   gridWidth: number;
-  columns: 2 | 3;
+  columns: number;
   gapX: number;
   gapY: number;
   slotWidth: number;
@@ -440,14 +445,15 @@ export default function FlashbackRanker({
 
   const lineItems = previewLine ?? line;
   const lineLength = lineItems.length;
+  const totalSlots = items.length;
   const lineMetrics = React.useMemo(() => computeLineMetrics(lineLength), [lineLength]);
   const circleLayout = React.useMemo(
-    () => computeFigmaCircleLayoutMetrics(containerWidth, shapeScaleFactor, buttonScaleFactor),
-    [buttonScaleFactor, containerWidth, shapeScaleFactor],
+    () => computeFigmaCircleLayoutMetrics(containerWidth, totalSlots, shapeScaleFactor, buttonScaleFactor),
+    [buttonScaleFactor, containerWidth, shapeScaleFactor, totalSlots],
   );
   const rectangleLayout = React.useMemo(
-    () => computeFigmaRectangleLayoutMetrics(containerWidth, shapeScaleFactor, buttonScaleFactor),
-    [buttonScaleFactor, containerWidth, shapeScaleFactor],
+    () => computeFigmaRectangleLayoutMetrics(containerWidth, totalSlots, shapeScaleFactor, buttonScaleFactor),
+    [buttonScaleFactor, containerWidth, shapeScaleFactor, totalSlots],
   );
   const shouldForceMobilePicker = isFigmaPreset && containerWidth < 640;
   const activeIsOnLine = React.useMemo(
@@ -502,7 +508,6 @@ export default function FlashbackRanker({
       Math.max(56, rectangleLayout.slotWidth - 2),
     ),
   );
-  const totalSlots = items.length;
   const slotItems = slots;
   const gridBench = React.useMemo(() => {
     const assigned = new Set(slotItems.filter(Boolean).map((item) => (item as SurveyRankingItem).id));
@@ -645,6 +650,8 @@ export default function FlashbackRanker({
               overlay
               size={activeOverlaySize}
               variant={activeOverlayVariant}
+              circleStyle={isFigmaRankCircles ? "figma-rank" : "default"}
+              circleBorderColor={resolvedStyleOverrides.unassignedItemBorderColor}
               seasonCardLabelFontFamily={resolvedFontOverrides.cardLabelFontFamily}
               seasonCardLabelSize={rectangleLayout.cardLabelFontSize}
             />
@@ -750,11 +757,11 @@ function FigmaCircleBench({
     >
       <div
         ref={setNodeRef}
-        className="rounded-[12px] border transition"
+        className="rounded-2xl border shadow-sm transition"
         style={{
           padding: `${layout.benchPaddingY}px ${layout.benchPaddingX}px`,
-          borderColor: isOver ? "rgba(0,0,0,0.2)" : containerBorderColor,
-          backgroundColor: isOver ? "rgba(0,0,0,0.05)" : containerFillColor,
+          borderColor: isOver ? "rgba(0,0,0,0.22)" : containerBorderColor,
+          backgroundColor: isOver ? "rgba(0,0,0,0.06)" : containerFillColor,
         }}
         aria-label="Unassigned cast members"
         data-testid="figma-circle-unassigned-bank"
@@ -764,12 +771,13 @@ function FigmaCircleBench({
           style={{ gap: `${layout.benchGap}px` }}
         >
           {items.map((item) => (
-            <div
-              key={item.id}
-              className="shrink-0 snap-start rounded-full border p-[1px]"
-              style={{ borderColor: tokenBorderColor }}
-            >
-              <Token item={item} size={tokenSize} />
+            <div key={item.id} className="shrink-0 snap-start">
+              <Token
+                item={item}
+                size={tokenSize}
+                circleStyle="figma-rank"
+                circleBorderColor={tokenBorderColor}
+              />
             </div>
           ))}
         </div>
@@ -974,6 +982,8 @@ function Token({
   asPlaceholder = false,
   size = TOKEN_BASE_SIZE,
   variant = "circle",
+  circleStyle = "default",
+  circleBorderColor = "#D4D4D8",
   seasonCardLabelFontFamily = DEFAULT_CARD_LABEL_FONT,
   seasonCardLabelSize,
 }: {
@@ -983,6 +993,8 @@ function Token({
   asPlaceholder?: boolean;
   size?: SeasonCardSize;
   variant?: TokenVariant;
+  circleStyle?: CircleTokenStyle;
+  circleBorderColor?: string;
   seasonCardLabelFontFamily?: string;
   seasonCardLabelSize?: number;
 }) {
@@ -1038,8 +1050,9 @@ function Token({
               fontSize: `${resolvedLabelSize}px`,
               fontWeight: 700,
               letterSpacing: "0.02em",
-              lineHeight: "0.9",
+              lineHeight: "1",
             }}
+            data-testid={`season-card-label-${item.id}`}
           >
             {item.label}
           </div>
@@ -1074,13 +1087,30 @@ function Token({
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, width: size, height: size }
     : { width: size, height: size };
 
-  const base =
-    "rounded-full overflow-hidden ring-2 ring-transparent transition shadow-sm bg-white select-none touch-none";
-  const state = dragging || isDragging ? "ring-blue-600 scale-[1.05]" : "hover:ring-gray-300";
+  const isFigmaCircle = circleStyle === "figma-rank";
+  const figmaInset = typeof size === "number"
+    ? Math.round(clampNumber(size * 0.04, 2, 6))
+    : 3;
+  const base = isFigmaCircle
+    ? "rounded-full transition shadow-sm bg-white border box-border select-none touch-none"
+    : "rounded-full overflow-hidden ring-2 ring-transparent transition shadow-sm bg-white select-none touch-none";
+  const state = isFigmaCircle
+    ? (dragging || isDragging ? "scale-[1.02] border-black/40" : "hover:border-black/30")
+    : (dragging || isDragging ? "ring-blue-600 scale-[1.05]" : "hover:ring-gray-300");
+  const circleStyleObject: React.CSSProperties = isFigmaCircle
+    ? {
+      borderColor: circleBorderColor,
+      borderWidth: "1px",
+      padding: `${figmaInset}px`,
+      overflow: "hidden",
+    }
+    : {
+      overflow: "hidden",
+    };
   const imageSize = typeof size === "number" ? Math.max(1, Math.round(size)) : 512;
 
   const fallback = (
-    <div className="flex h-full w-full items-center justify-center bg-rose-200 text-xs font-bold uppercase text-rose-700">
+    <div className="flex h-full w-full items-center justify-center rounded-full bg-rose-200 text-xs font-bold uppercase text-rose-700">
       {item.label.split(" ").map((part) => part[0]).join("")}
     </div>
   );
@@ -1091,7 +1121,7 @@ function Token({
       alt={item.label}
       width={imageSize}
       height={imageSize}
-      className="h-full w-full object-cover"
+      className={`h-full w-full object-cover ${isFigmaCircle ? "rounded-full" : ""}`}
       unoptimized
       draggable={false}
     />
@@ -1101,7 +1131,7 @@ function Token({
 
   if (overlay) {
     return (
-      <div className={`${base} ${state}`} style={style}>
+      <div className={`${base} ${state}`} style={{ ...style, ...circleStyleObject }}>
         {image}
       </div>
     );
@@ -1110,11 +1140,11 @@ function Token({
   return (
     <button
       ref={setNodeRef}
-      style={style}
       {...listeners}
       {...attributes}
       aria-label={`Drag ${item.label}`}
-      className={`${base} ${state} focus:outline-none focus:ring-blue-600`}
+      className={`${base} ${state} focus:outline-none ${isFigmaCircle ? "focus:ring-2 focus:ring-black/25" : "focus:ring-blue-600"}`}
+      style={{ ...style, ...circleStyleObject }}
       type="button"
     >
       {image}
@@ -1227,18 +1257,24 @@ function GridSlot({
           {number}
         </span>
         <div
-          className={`relative flex aspect-square w-full items-center justify-center rounded-full border transition ${
-            isOver || isActive ? "ring-4 ring-black/20" : ""
-          }`}
+          className="relative flex items-center justify-center rounded-full border transition"
           style={{
             width: `${resolvedCircleLayout.slotSize}px`,
-            borderColor: item ? "transparent" : resolvedStyleOverrides.circlePlaceholderBorderColor,
-            backgroundColor: item ? "rgba(0,0,0,0.05)" : resolvedStyleOverrides.circlePlaceholderFillColor,
+            height: `${resolvedCircleLayout.slotSize}px`,
+            borderColor: item
+              ? (isOver || isActive ? "rgba(0,0,0,0.28)" : "transparent")
+              : (isOver || isActive ? "rgba(0,0,0,0.28)" : resolvedStyleOverrides.circlePlaceholderBorderColor),
+            backgroundColor: item ? "transparent" : resolvedStyleOverrides.circlePlaceholderFillColor,
           }}
         >
           {item ? (
             <>
-              <Token item={item} size={resolvedCircleLayout.tokenSize} />
+              <Token
+                item={item}
+                size={resolvedCircleLayout.tokenSize}
+                circleStyle="figma-rank"
+                circleBorderColor={resolvedStyleOverrides.unassignedItemBorderColor}
+              />
               <button
                 type="button"
                 onClick={() => onRemoveItem?.(item)}
@@ -1410,13 +1446,19 @@ function SelectionPicker({
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
   const showMobileSheet = mobileSheet && (forceMobileSheet || (viewportWidth > 0 && viewportWidth < 640));
   const isSeasonPicker = pickerVariant === "season-card";
+  const mobileSheetProgress = clampNumber(
+    (viewportWidth - MOBILE_MIN_WIDTH) / (MOBILE_BASE_WIDTH - MOBILE_MIN_WIDTH),
+    0,
+    1,
+  );
+  const mobileSheetScale = showMobileSheet ? interpolate(0.9, 1, mobileSheetProgress) : 1;
   const closeButtonSize = Math.round(clampNumber(36 * buttonScaleFactor, 28, 56));
-  const pickerLabelFontSize = Math.round(clampNumber(12 * buttonScaleFactor, 10, 20));
-  const pickerNameFontSize = Math.round(clampNumber(14 * buttonScaleFactor, 11, 22));
-  const pickerRowMinHeight = Math.round(clampNumber(40 * buttonScaleFactor, 34, 84));
-  const pickerGap = Math.round(clampNumber(10 * shapeScaleFactor, 6, 20));
+  const pickerLabelFontSize = Math.round(clampNumber(12 * buttonScaleFactor * mobileSheetScale, 10, 20));
+  const pickerNameFontSize = Math.round(clampNumber(14 * buttonScaleFactor * mobileSheetScale, 11, 22));
+  const pickerRowMinHeight = Math.round(clampNumber(40 * buttonScaleFactor * mobileSheetScale, 34, 84));
+  const pickerGap = Math.round(clampNumber(10 * shapeScaleFactor * mobileSheetScale, 6, 20));
   const seasonPickerCardSize = Math.round(clampNumber(84 * shapeScaleFactor, 60, 168));
-  const avatarSizeMobile = Math.round(clampNumber(40 * shapeScaleFactor, 28, 86));
+  const avatarSizeMobile = Math.round(clampNumber(40 * shapeScaleFactor * mobileSheetScale, 28, 86));
   const avatarSizeDesktop = Math.round(clampNumber(48 * shapeScaleFactor, 32, 94));
 
   if (showMobileSheet) {
@@ -1666,60 +1708,94 @@ function SelectionPicker({
 
 function computeFigmaCircleLayoutMetrics(
   containerWidth: number,
+  totalSlots = 8,
   shapeScaleFactor = 1,
   buttonScaleFactor = 1,
 ): FigmaCircleLayoutMetrics {
   const clampedContainerWidth = clampNumber(containerWidth, 280, 1200);
-  const columns: 2 | 3 | 4 = clampedContainerWidth < 640 ? 2 : clampedContainerWidth < 1024 ? 3 : 4;
-  const maxGridWidth = columns === 4 ? FIGMA_GRID_MAX_WIDTH : columns === 3 ? 552 : clampedContainerWidth;
+  const isMobile = clampedContainerWidth < TABLET_MIN_WIDTH;
+  const isTablet = clampedContainerWidth >= TABLET_MIN_WIDTH && clampedContainerWidth < DESKTOP_MIN_WIDTH;
+  const mobileProgress = clampNumber(
+    (clampedContainerWidth - MOBILE_MIN_WIDTH) / (MOBILE_BASE_WIDTH - MOBILE_MIN_WIDTH),
+    0,
+    1,
+  );
+  const columns = totalSlots >= 4 ? 4 : Math.max(1, totalSlots || 4);
+  const maxGridWidth = columns >= 4 ? FIGMA_GRID_MAX_WIDTH : columns === 3 ? 552 : clampedContainerWidth;
   const gridWidth = clampNumber(Math.min(clampedContainerWidth, maxGridWidth), 280, maxGridWidth);
   const horizontalScale = clampNumber(
-    columns === 2
-      ? (gridWidth - 280) / 220
-      : columns === 3
+    columns === 3
         ? (gridWidth - 420) / 132
-        : (gridWidth - 620) / 88,
+        : columns === 2
+          ? (gridWidth - 280) / 220
+          : (gridWidth - 620) / 88,
     0,
     1,
   );
   const gapX = Math.round(
-    columns === 2
-      ? interpolate(10, 16, horizontalScale)
+    columns >= 4
+      ? (isMobile
+        ? interpolate(6, 10, mobileProgress)
+        : isTablet
+          ? interpolate(14, 22, horizontalScale)
+          : interpolate(20, 28, horizontalScale))
       : columns === 3
         ? interpolate(14, 22, horizontalScale)
-        : interpolate(20, 26, horizontalScale),
+        : interpolate(8, 14, mobileProgress),
   );
   const gapY = Math.round(
-    columns === 2
-      ? interpolate(18, 30, horizontalScale)
+    columns >= 4
+      ? (isMobile
+        ? interpolate(12, 18, mobileProgress)
+        : isTablet
+          ? interpolate(22, 38, horizontalScale)
+          : interpolate(40, 58, horizontalScale))
       : columns === 3
         ? interpolate(24, 42, horizontalScale)
-        : interpolate(46, 61, horizontalScale),
+        : interpolate(14, 24, mobileProgress),
   );
   const available = gridWidth - gapX * (columns - 1);
   const baseSlotSize = clampNumber(
     available / columns,
-    columns === 2 ? 92 : columns === 3 ? 102 : 120,
-    columns === 2 ? 136 : columns === 3 ? 140 : 156,
+    columns >= 4 ? 64 : columns === 3 ? 102 : 84,
+    columns >= 4 ? 156 : columns === 3 ? 140 : 122,
   );
   const maxSlotByContainer = Math.max(52, Math.floor(available / columns));
   const slotSize = Math.round(clampNumber(
     baseSlotSize * shapeScaleFactor,
-    columns === 2 ? 56 : columns === 3 ? 62 : 84,
+    columns >= 4 ? 54 : columns === 3 ? 62 : 54,
     maxSlotByContainer,
   ));
-  const tokenInset = clampNumber(slotSize * 0.07, 6, 14);
+  const tokenInset = clampNumber(slotSize * (columns <= 2 ? 0.08 : 0.07), 6, 14);
   const tokenSize = Math.round(clampNumber(slotSize - tokenInset * 2, 48, 170));
-  const benchTokenTarget = columns === 2 ? TWO_AXIS_BENCH_TOKEN_MOBILE : columns === 3 ? 52 : TWO_AXIS_BENCH_TOKEN_DESKTOP;
+  const benchTokenTarget = isMobile
+    ? TWO_AXIS_BENCH_TOKEN_MOBILE
+    : columns === 3
+      ? 52
+      : TWO_AXIS_BENCH_TOKEN_DESKTOP;
   const benchTokenSize = Math.round(
     clampNumber(benchTokenTarget * shapeScaleFactor, 36, Math.max(36, tokenSize - 2)),
   );
   const benchGap = Math.round(clampNumber(interpolate(8, 14, horizontalScale) * shapeScaleFactor, 6, 24));
-  const benchMarginTop = Math.round(interpolate(18, 28, horizontalScale));
-  const benchPaddingY = Math.round(interpolate(8, 14, horizontalScale));
-  const benchPaddingX = Math.round(interpolate(8, 14, horizontalScale));
-  const rankNumberSize = Math.round(clampNumber(slotSize * 0.16 * buttonScaleFactor, 16, 32));
-  const rankNumberMarginBottom = Math.round(clampNumber(slotSize * 0.08, 5, 12));
+  const benchMarginTop = Math.round(isMobile
+    ? interpolate(14, 24, mobileProgress)
+    : interpolate(18, 28, horizontalScale));
+  const benchPaddingY = Math.round(isMobile
+    ? interpolate(8, 12, mobileProgress)
+    : interpolate(8, 14, horizontalScale));
+  const benchPaddingX = Math.round(isMobile
+    ? interpolate(8, 12, mobileProgress)
+    : interpolate(8, 14, horizontalScale));
+  const rankNumberSize = Math.round(
+    clampNumber(
+      slotSize * (isMobile ? 0.145 : 0.16) * buttonScaleFactor,
+      isMobile ? 13 : 16,
+      isMobile ? 24 : 32,
+    ),
+  );
+  const rankNumberMarginBottom = Math.round(
+    clampNumber(slotSize * (isMobile ? 0.06 : 0.08), 4, 12),
+  );
   const removeButtonSize = Math.round(clampNumber(slotSize * 0.27 * buttonScaleFactor, 18, 52));
   const removeButtonOffset = Math.round(clampNumber(removeButtonSize * 0.22, 3, 12));
   const removeButtonFontSize = Math.round(clampNumber(removeButtonSize * 0.48, 10, 24));
@@ -1749,15 +1825,24 @@ function computeFigmaCircleLayoutMetrics(
 
 function computeFigmaRectangleLayoutMetrics(
   containerWidth: number,
+  totalSlots = 6,
   shapeScaleFactor = 1,
   buttonScaleFactor = 1,
 ): FigmaRectangleLayoutMetrics {
   const frameWidth = clampNumber(containerWidth, 280, 920);
+  const isMobile = frameWidth < TABLET_MIN_WIDTH;
+  const isTablet = frameWidth >= TABLET_MIN_WIDTH && frameWidth < DESKTOP_MIN_WIDTH;
   const horizontalScale = clampNumber((frameWidth - 280) / 640, 0, 1);
+  const mobileProgress = clampNumber(
+    (frameWidth - MOBILE_MIN_WIDTH) / (MOBILE_BASE_WIDTH - MOBILE_MIN_WIDTH),
+    0,
+    1,
+  );
+  const desktopProgress = clampNumber((frameWidth - DESKTOP_MIN_WIDTH) / 320, 0, 1);
   const framePaddingX = Math.round(interpolate(10, 24, horizontalScale));
   const framePaddingY = Math.round(interpolate(12, 24, horizontalScale));
   const gridWidth = clampNumber(frameWidth - framePaddingX * 2 - 4, 220, FIGMA_RECT_GRID_MAX_WIDTH);
-  const columns: 2 | 3 = gridWidth < 560 ? 2 : 3;
+  const columns = Math.max(1, Math.min(3, totalSlots || 3));
   const gapX = Math.round(columns === 2 ? interpolate(8, 12, horizontalScale) : interpolate(9, 16, horizontalScale));
   const gapY = Math.round(interpolate(14, 24, horizontalScale));
   const baseSlotWidth = clampNumber((gridWidth - gapX * (columns - 1)) / columns, 88, 204);
@@ -1777,7 +1862,18 @@ function computeFigmaRectangleLayoutMetrics(
   const trayPaddingX = Math.round(interpolate(10, 16, horizontalScale));
   const trayPaddingY = Math.round(interpolate(10, 12, horizontalScale));
   const trayWrap = columns === 3;
-  const cardLabelFontSize = Math.round(clampNumber(slotWidth * 0.145 * buttonScaleFactor, 12, 34));
+  const cardLabelRatio = isMobile
+    ? interpolate(0.11, 0.12, mobileProgress)
+    : isTablet
+      ? interpolate(0.12, 0.132, horizontalScale)
+      : interpolate(0.132, 0.142, desktopProgress);
+  const cardLabelFontSize = Math.round(
+    clampNumber(
+      slotWidth * cardLabelRatio * buttonScaleFactor,
+      isMobile ? 10 : 12,
+      isMobile ? 16 : 30,
+    ),
+  );
 
   return {
     containerWidth: frameWidth,

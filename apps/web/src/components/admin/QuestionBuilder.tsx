@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import type {
   QuestionOption,
   QuestionType,
@@ -52,15 +52,11 @@ export function QuestionBuilder({
       setCreating(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}/questions`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -93,14 +89,10 @@ export function QuestionBuilder({
     if (!confirm("Delete this question?")) return;
 
     try {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
         },
       );
 
@@ -119,15 +111,11 @@ export function QuestionBuilder({
     if (!newOptionKey.trim() || !newOptionText.trim()) return;
 
     try {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -153,14 +141,10 @@ export function QuestionBuilder({
 
   const handleDeleteOption = async (questionId: string, optionId: string) => {
     try {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options?optionId=${optionId}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
         },
       );
 

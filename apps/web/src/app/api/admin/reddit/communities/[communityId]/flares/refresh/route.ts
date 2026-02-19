@@ -6,6 +6,7 @@ import {
   updateRedditCommunityPostFlares,
 } from "@/lib/server/admin/reddit-sources-repository";
 import { fetchSubredditPostFlares } from "@/lib/server/admin/reddit-flairs-service";
+import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { communityId } = await params;
     if (!communityId) {
       return NextResponse.json({ error: "communityId is required" }, { status: 400 });
+    }
+    if (!isValidUuid(communityId)) {
+      return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
     }
 
     const community = await getRedditCommunityById(communityId);

@@ -3,7 +3,9 @@
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type {
   AgreeLikertScaleConfig,
+  CastMultiSelectConfig,
   CastDecisionCardConfig,
+  MultiSelectChoiceConfig,
   QuestionConfig,
   ThreeChoiceSliderConfig,
   TwoAxisGridConfig,
@@ -54,7 +56,20 @@ export function isQuestionComplete(question: QuestionWithOptions, value: unknown
 
   if (isNonEmptyString(value)) return true;
   if (isFiniteNumber(value)) return true;
-  if (isNonEmptyArray(value)) return true;
+  if (Array.isArray(value)) {
+    if (uiVariant === "multi-select-choice" || uiVariant === "cast-multi-select") {
+      const cfg = config as MultiSelectChoiceConfig | CastMultiSelectConfig;
+      const minFromConfig = typeof cfg.minSelections === "number" && Number.isFinite(cfg.minSelections)
+        ? Math.max(0, Math.floor(cfg.minSelections))
+        : undefined;
+      const maxFromConfig = typeof cfg.maxSelections === "number" && Number.isFinite(cfg.maxSelections)
+        ? Math.max(1, Math.floor(cfg.maxSelections))
+        : Infinity;
+      const minSelections = minFromConfig ?? (uiVariant === "cast-multi-select" ? 2 : 1);
+      return value.length >= minSelections && value.length <= maxFromConfig;
+    }
+    return isNonEmptyArray(value);
+  }
 
   if (isPlainObject(value)) {
     switch (uiVariant) {
@@ -74,6 +89,33 @@ export function isQuestionComplete(question: QuestionWithOptions, value: unknown
         if (subjects.length === 0) return false;
         const placements = coercePlacements(value, subjects, extent);
         return subjects.every((s) => Boolean(placements[s.id]));
+      }
+
+      case "reunion-seating-prediction": {
+        const fullTimeOptions = question.options.filter((option) => {
+          const metadata = option.metadata as { castRole?: string; surveyRole?: string } | null | undefined;
+          return metadata?.castRole === "main" || metadata?.surveyRole === "main";
+        });
+        const fallbackFullTimeCount = fullTimeOptions.length > 0
+          ? fullTimeOptions.length
+          : question.options.filter((option) => {
+            const metadata = option.metadata as { castRole?: string; surveyRole?: string } | null | undefined;
+            return metadata?.castRole !== "friend_of" && metadata?.surveyRole !== "friend_of";
+          }).length;
+        const friendCount = question.options.filter((option) => {
+          const metadata = option.metadata as { castRole?: string; surveyRole?: string } | null | undefined;
+          return metadata?.castRole === "friend_of" || metadata?.surveyRole === "friend_of";
+        }).length;
+
+        const fullTimeOrder = Array.isArray(value.fullTimeOrder)
+          ? value.fullTimeOrder.filter((entry): entry is string => isNonEmptyString(entry))
+          : [];
+        const hasFullTimeComplete = fullTimeOrder.length >= fallbackFullTimeCount && fallbackFullTimeCount > 0;
+        if (!hasFullTimeComplete) return false;
+        if (friendCount === 1) {
+          return value.friendSide === "left" || value.friendSide === "right";
+        }
+        return true;
       }
 
       default:

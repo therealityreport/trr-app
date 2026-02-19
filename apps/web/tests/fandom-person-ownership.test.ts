@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   castFandomRowMatchesExpectedPerson,
+  extractFandomOwnerNameFromStaticFileUrl,
   extractFandomPageNameFromUrl,
   extractPersonKnowledgePageNameFromUrl,
   extractWikipediaPageNameFromUrl,
@@ -30,6 +31,14 @@ describe("fandom person ownership helpers", () => {
     expect(
       extractFandomPageNameFromUrl("https://real-housewives.fandom.com/wiki/Special:FilePath/Lisa.png")
     ).toBeNull();
+  });
+
+  it("parses owner hints from static wikia file urls", () => {
+    expect(
+      extractFandomOwnerNameFromStaticFileUrl(
+        "https://static.wikia.nocookie.net/real-housewives/images/7/7b/Lisa%E2%80%99s_RHOSLC_S5_Reunion_Look_%281%29.webp"
+      )
+    ).toBe("Lisa");
   });
 
   it("parses wikipedia person page owner", () => {
@@ -92,6 +101,41 @@ describe("fandom person ownership helpers", () => {
       isFandomPhotoOwnedByExpectedPerson({
         source: "tmdb",
         sourcePageUrl: "https://real-housewives.fandom.com/wiki/Lisa_Barlow",
+        expectedPersonName: "Henry Barlow",
+      })
+    ).toBe(true);
+  });
+
+  it("rejects static wikia files when trusted owner token mismatches expected person", () => {
+    expect(
+      isFandomPhotoOwnedByExpectedPerson({
+        source: "fandom",
+        sourceUrl:
+          "https://static.wikia.nocookie.net/real-housewives/images/7/7b/Lisa%E2%80%99s_RHOSLC_S5_Reunion_Look_%281%29.webp",
+        expectedPersonName: "Henry Barlow",
+      })
+    ).toBe(false);
+  });
+
+  it("uses metadata original/url_original as trusted ownership candidates", () => {
+    expect(
+      isFandomPhotoOwnedByExpectedPerson({
+        source: "fandom",
+        metadata: {
+          original_url:
+            "https://static.wikia.nocookie.net/real-housewives/images/7/7b/Lisa%E2%80%99s_RHOSLC_S5_Reunion_Look_%281%29.webp",
+        },
+        expectedPersonName: "Henry Barlow",
+      })
+    ).toBe(false);
+
+    expect(
+      isFandomPhotoOwnedByExpectedPerson({
+        source: "fandom",
+        metadata: {
+          url_original:
+            "https://static.wikia.nocookie.net/real-housewives/images/7/7b/Henry_Barlow_Reunion.webp",
+        },
         expectedPersonName: "Henry Barlow",
       })
     ).toBe(true);

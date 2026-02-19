@@ -26,7 +26,25 @@ export default function BravoContentDashboardPage() {
   }
 
   if (!user || !hasAccess) {
-    return null;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-6">
+        <div className="w-full max-w-lg rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-900 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-700">Access Required</p>
+          <h1 className="mt-2 text-xl font-bold">Admin access is required</h1>
+          <p className="mt-2 text-sm text-amber-800">
+            You are signed in but do not have permission to view this Social Analytics page.
+          </p>
+          <div className="mt-4">
+            <Link
+              href="/admin/social-media"
+              className="inline-flex rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
+            >
+              Back to Social Analytics
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

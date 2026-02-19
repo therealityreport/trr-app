@@ -1,22 +1,24 @@
 import { notFound, redirect } from "next/navigation";
+import ShowAdminPage from "../page";
 
 interface ShowSectionPageProps {
   params: Promise<{ showId: string; showSection: string }>;
 }
 
-const SECTION_TO_QUERY: Record<string, { tab: string; assets?: "images" | "videos" | "brand" }> =
-  {
-    seasons: { tab: "seasons" },
-    cast: { tab: "cast" },
-    social: { tab: "social" },
-    surveys: { tab: "surveys" },
-    details: { tab: "details" },
-    news: { tab: "news" },
-    assets: { tab: "assets", assets: "images" },
-    "media-gallery": { tab: "assets", assets: "images" },
-    "media-videos": { tab: "assets", assets: "videos" },
-    "media-brand": { tab: "assets", assets: "brand" },
-  };
+const KNOWN_SHOW_SECTIONS = new Set([
+  "overview",
+  "seasons",
+  "cast",
+  "social",
+  "surveys",
+  "details",
+  "settings",
+  "news",
+  "assets",
+  "media-gallery",
+  "media-videos",
+  "media-brand",
+]);
 
 export default async function ShowSectionRedirectPage({ params }: ShowSectionPageProps) {
   const { showId, showSection } = await params;
@@ -31,15 +33,12 @@ export default async function ShowSectionRedirectPage({ params }: ShowSectionPag
     }
   }
 
-  // Handle section redirects (e.g. /admin/trr-shows/{id}/cast)
-  const mapping = SECTION_TO_QUERY[normalizedSection];
-  if (!mapping) {
-    notFound();
+  // Render known section aliases directly through the canonical show admin page.
+  // The client route parser reads the current path and selects the correct tab
+  // without query-string rewrites, which prevents URL bounce loops.
+  if (KNOWN_SHOW_SECTIONS.has(normalizedSection)) {
+    return <ShowAdminPage />;
   }
 
-  const next = new URLSearchParams();
-  next.set("tab", mapping.tab);
-  if (mapping.assets) next.set("assets", mapping.assets);
-  redirect(`/admin/trr-shows/${showId}?${next.toString()}`);
+  notFound();
 }
-

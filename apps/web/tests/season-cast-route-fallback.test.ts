@@ -57,6 +57,7 @@ describe("season cast route fallback behavior", () => {
     expect(payload.cast).toHaveLength(1);
     expect(payload.cast[0].person_id).toBe("p-fallback");
     expect(payload.cast[0].episodes_in_season).toBe(0);
+    expect(payload.cast[0].total_episodes).toBe(0);
   });
 
   it("does not fallback when include_archive_only=true", async () => {

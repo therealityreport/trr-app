@@ -3,7 +3,7 @@ import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
-const BACKEND_TIMEOUT_MS = 20_000;
+const BACKEND_TIMEOUT_MS = 70_000;
 
 interface RouteParams {
   params: Promise<{ showId: string }>;

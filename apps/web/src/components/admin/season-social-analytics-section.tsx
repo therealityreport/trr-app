@@ -2,15 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import type { Route } from "next";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
-import { buildSeasonAdminUrl } from "@/lib/admin/show-admin-routes";
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import { buildSeasonSocialWeekUrl } from "@/lib/admin/show-admin-routes";
 
 type Platform = "instagram" | "tiktok" | "twitter" | "youtube";
-type PlatformTab = "overview" | Platform | "reddit";
+export type PlatformTab = "overview" | Platform | "reddit";
 type Scope = "bravo" | "creator" | "community";
 type SyncStrategy = "incremental" | "full_refresh";
+type WeeklyMetric = "posts" | "comments";
+export type SocialAnalyticsView = "bravo" | "sentiment" | "hashtags" | "advanced";
 
 type SocialJob = {
   id: string;
@@ -139,6 +143,30 @@ type AnalyticsResponse = {
     total_engagement: number;
     has_data: boolean;
   }>;
+  weekly_daily_activity?: Array<{
+    week_index: number;
+    label: string;
+    start: string;
+    end: string;
+    days: Array<{
+      day_index: number;
+      date_local: string;
+      posts: {
+        instagram: number;
+        youtube: number;
+        tiktok: number;
+        twitter: number;
+      };
+      comments: {
+        instagram: number;
+        youtube: number;
+        tiktok: number;
+        twitter: number;
+      };
+      total_posts: number;
+      total_comments: number;
+    }>;
+  }>;
   platform_breakdown: Array<{
     platform: string;
     posts: number;
@@ -162,6 +190,7 @@ type AnalyticsResponse = {
       engagement: number;
       url: string;
       timestamp: string;
+      thumbnail_url?: string | null;
     }>;
     viewer_discussion: Array<{
       platform: string;
@@ -171,9 +200,19 @@ type AnalyticsResponse = {
       url: string;
       timestamp: string;
       sentiment: "positive" | "neutral" | "negative";
+      thumbnail_url?: string | null;
     }>;
   };
   jobs: SocialJob[];
+};
+
+type IngestProxyErrorPayload = {
+  error?: string;
+  detail?: string;
+  code?: string;
+  upstream_status?: number;
+  upstream_detail?: unknown;
+  upstream_detail_code?: string;
 };
 
 interface SeasonSocialAnalyticsSectionProps {
@@ -182,6 +221,10 @@ interface SeasonSocialAnalyticsSectionProps {
   seasonNumber: number;
   seasonId: string;
   showName: string;
+  platformTab?: PlatformTab;
+  onPlatformTabChange?: (tab: PlatformTab) => void;
+  hidePlatformTabs?: boolean;
+  analyticsView?: SocialAnalyticsView;
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -201,14 +244,17 @@ const PLATFORM_TABS: { key: PlatformTab; label: string }[] = [
   { key: "reddit", label: "Reddit" },
 ];
 
-const WEEKLY_ENGAGEMENT_PLATFORMS: Platform[] = ["instagram", "youtube", "tiktok", "twitter"];
+const SOCIAL_PLATFORM_QUERY_KEY = "social_platform";
+const HASHTAG_REGEX = /(^|\s)#([a-z0-9_]+)/gi;
+const HASHTAG_PLATFORMS: Platform[] = ["instagram", "tiktok", "twitter", "youtube"];
 
-const WEEKLY_ENGAGEMENT_BAR_CLASS: Record<Platform, string> = {
-  instagram: "bg-pink-500",
-  youtube: "bg-red-500",
-  tiktok: "bg-teal-400",
-  twitter: "bg-sky-500",
+const isPlatformTab = (value: string | null | undefined): value is PlatformTab => {
+  if (!value) return false;
+  return PLATFORM_TABS.some((tab) => tab.key === value);
 };
+
+const platformFilterFromTab = (tab: PlatformTab): "all" | Platform =>
+  tab === "overview" || tab === "reddit" ? "all" : tab;
 
 const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running"]);
 const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
@@ -265,6 +311,99 @@ const formatDateRangeLabel = (start: string, end: string): string => {
   return `${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`;
 };
 
+export const formatIngestErrorMessage = (payload: IngestProxyErrorPayload): string => {
+  const upstreamDetail =
+    payload.upstream_detail && typeof payload.upstream_detail === "object"
+      ? (payload.upstream_detail as Record<string, unknown>)
+      : null;
+  const fallbackWorkerCode =
+    typeof payload.error === "string" && payload.error.includes("SOCIAL_WORKER_UNAVAILABLE")
+      ? "SOCIAL_WORKER_UNAVAILABLE"
+      : null;
+  const upstreamCode =
+    payload.upstream_detail_code ??
+    (typeof upstreamDetail?.code === "string" ? upstreamDetail.code : null) ??
+    fallbackWorkerCode;
+  const upstreamMessage =
+    (typeof upstreamDetail?.message === "string" && upstreamDetail.message.trim()
+      ? upstreamDetail.message
+      : null) ??
+    payload.error ??
+    payload.detail ??
+    "Failed to run social ingest";
+
+  if (upstreamCode === "SOCIAL_WORKER_UNAVAILABLE") {
+    const workerHealth =
+      upstreamDetail?.worker_health && typeof upstreamDetail.worker_health === "object"
+        ? (upstreamDetail.worker_health as Record<string, unknown>)
+        : null;
+    const healthReason =
+      typeof workerHealth?.reason === "string" && workerHealth.reason.trim()
+        ? ` (${workerHealth.reason})`
+        : "";
+    return `${upstreamMessage}${healthReason}. Start the social worker and retry; inline fallback only works in local/dev backend runtime.`;
+  }
+
+  return upstreamMessage;
+};
+
+const getMonthDayLabel = (dateLocal: string): string => {
+  const timestamp = Date.parse(`${dateLocal}T00:00:00`);
+  if (Number.isNaN(timestamp)) return "-- --";
+  const date = new Date(timestamp);
+  const month = date.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
+  const day = date.toLocaleDateString("en-US", { day: "numeric" });
+  return `${month} ${day}`;
+};
+
+const getHeatmapToneClass = (value: number, maxValue: number): string => {
+  if (value <= 0 || maxValue <= 0) {
+    return "bg-zinc-200 text-zinc-500";
+  }
+  const ratio = value / maxValue;
+  if (ratio >= 0.8) return "bg-emerald-700 text-white";
+  if (ratio >= 0.6) return "bg-emerald-600 text-white";
+  if (ratio >= 0.4) return "bg-emerald-500 text-white";
+  if (ratio >= 0.2) return "bg-emerald-400 text-white";
+  return "bg-emerald-300 text-emerald-950";
+};
+
+const getWeeklyDayValue = (
+  day: NonNullable<AnalyticsResponse["weekly_daily_activity"]>[number]["days"][number],
+  metric: WeeklyMetric,
+  platform: Platform | null,
+): number => {
+  if (metric === "posts") {
+    if (!platform) return Number(day.total_posts ?? 0);
+    return Number(day.posts?.[platform] ?? 0);
+  }
+  if (!platform) return Number(day.total_comments ?? 0);
+  return Number(day.comments?.[platform] ?? 0);
+};
+
+const normalizeHashtag = (value: string | null | undefined): string | null => {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/^#+/, "")
+    .toUpperCase();
+  if (!normalized) return null;
+  if (!/^[A-Z0-9_]+$/.test(normalized)) return null;
+  return normalized;
+};
+
+const extractHashtags = (text: string | null | undefined): string[] => {
+  const source = String(text ?? "");
+  const tags: string[] = [];
+  HASHTAG_REGEX.lastIndex = 0;
+  let match = HASHTAG_REGEX.exec(source);
+  while (match) {
+    const normalized = normalizeHashtag(match[2]);
+    if (normalized) tags.push(normalized);
+    match = HASHTAG_REGEX.exec(source);
+  }
+  return tags;
+};
+
 const statusToLogVerb = (status: SocialJob["status"]): string => {
   if (status === "queued" || status === "pending") return "queued";
   if (status === "retrying") return "retrying";
@@ -274,16 +413,81 @@ const statusToLogVerb = (status: SocialJob["status"]): string => {
   return "cancelled";
 };
 
+const getJobStageCounters = (job: SocialJob): { posts: number; comments: number } | null => {
+  const counters = (job.metadata as Record<string, unknown> | undefined)?.stage_counters as
+    | Record<string, unknown>
+    | undefined;
+  const hasPosts = typeof counters?.posts === "number";
+  const hasComments = typeof counters?.comments === "number";
+  if (!hasPosts && !hasComments) return null;
+  return {
+    posts: Number(counters?.posts ?? 0),
+    comments: Number(counters?.comments ?? 0),
+  };
+};
+
+const getJobPersistCounters = (job: SocialJob): { posts_upserted: number; comments_upserted: number } | null => {
+  const counters = (job.metadata as Record<string, unknown> | undefined)?.persist_counters as
+    | Record<string, unknown>
+    | undefined;
+  const hasPosts = typeof counters?.posts_upserted === "number";
+  const hasComments = typeof counters?.comments_upserted === "number";
+  if (!hasPosts && !hasComments) return null;
+  return {
+    posts_upserted: Number(counters?.posts_upserted ?? 0),
+    comments_upserted: Number(counters?.comments_upserted ?? 0),
+  };
+};
+
+const getJobActivity = (job: SocialJob): Record<string, unknown> | null => {
+  const activity = (job.metadata as Record<string, unknown> | undefined)?.activity as
+    | Record<string, unknown>
+    | undefined;
+  if (!activity || typeof activity !== "object") return null;
+  return activity;
+};
+
+const formatJobActivitySummary = (activity: Record<string, unknown> | null): string => {
+  if (!activity) return "";
+  const segments: string[] = [];
+  if (typeof activity.phase === "string" && activity.phase.trim()) {
+    segments.push(activity.phase.replaceAll("_", " "));
+  }
+  if (typeof activity.pages_scanned === "number") {
+    segments.push(`${activity.pages_scanned}pg`);
+  }
+  if (typeof activity.posts_checked === "number") {
+    segments.push(`${activity.posts_checked}chk`);
+  }
+  if (typeof activity.matched_posts === "number") {
+    segments.push(`${activity.matched_posts}match`);
+  }
+  return segments.join(" · ");
+};
+
 export default function SeasonSocialAnalyticsSection({
   showId,
   showSlug,
   seasonNumber,
   seasonId,
   showName,
+  platformTab: controlledPlatformTab,
+  onPlatformTabChange,
+  hidePlatformTabs = false,
+  analyticsView = "bravo",
 }: SeasonSocialAnalyticsSectionProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [scope, setScope] = useState<Scope>("bravo");
-  const [platformTab, setPlatformTab] = useState<PlatformTab>("overview");
-  const [platformFilter, setPlatformFilter] = useState<"all" | Platform>("all");
+  const [uncontrolledPlatformTab, setUncontrolledPlatformTab] = useState<PlatformTab>("overview");
+  const isPlatformTabControlled = typeof controlledPlatformTab !== "undefined";
+  const tabFromQuery = useMemo<PlatformTab>(() => {
+    const value = searchParams.get(SOCIAL_PLATFORM_QUERY_KEY);
+    return isPlatformTab(value) ? value : "overview";
+  }, [searchParams]);
+  const platformTab = controlledPlatformTab ?? uncontrolledPlatformTab;
+  const platformFilter = useMemo(() => platformFilterFromTab(platformTab), [platformTab]);
   const [weekFilter, setWeekFilter] = useState<number | "all">("all");
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [targets, setTargets] = useState<SocialTarget[]>([]);
@@ -307,6 +511,7 @@ export default function SeasonSocialAnalyticsSection({
   const [runningIngest, setRunningIngest] = useState(false);
   const [cancellingRun, setCancellingRun] = useState(false);
   const [syncStrategy, setSyncStrategy] = useState<SyncStrategy>("incremental");
+  const [weeklyMetric, setWeeklyMetric] = useState<WeeklyMetric>("posts");
   const [ingestingWeek, setIngestingWeek] = useState<number | null>(null);
   const [ingestingPlatform, setIngestingPlatform] = useState<string | null>(null);
   const [activeRunRequest, setActiveRunRequest] = useState<{ week: number | null; platform: "all" | Platform } | null>(null);
@@ -320,13 +525,7 @@ export default function SeasonSocialAnalyticsSection({
   const pollGenerationRef = useRef(0);
   const showRouteSlug = (showSlug || showId).trim();
 
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) {
-      throw new Error("Not authenticated");
-    }
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
 
   const queryString = useMemo(() => {
     const search = new URLSearchParams();
@@ -345,9 +544,35 @@ export default function SeasonSocialAnalyticsSection({
     return data.error ?? data.detail ?? fallback;
   }, []);
 
+  const setPlatformTabAndUrl = useCallback(
+    (nextTab: PlatformTab) => {
+      if (isPlatformTabControlled) {
+        onPlatformTabChange?.(nextTab);
+        return;
+      }
+
+      setUncontrolledPlatformTab(nextTab);
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      if (nextTab === "overview") {
+        nextSearchParams.delete(SOCIAL_PLATFORM_QUERY_KEY);
+      } else {
+        nextSearchParams.set(SOCIAL_PLATFORM_QUERY_KEY, nextTab);
+      }
+      const queryString = nextSearchParams.toString();
+      const nextHref = `${pathname}${queryString ? `?${queryString}` : ""}`;
+      router.replace(nextHref as Route, { scroll: false });
+    },
+    [isPlatformTabControlled, onPlatformTabChange, pathname, router, searchParams],
+  );
+
+  useEffect(() => {
+    if (isPlatformTabControlled) return;
+    setUncontrolledPlatformTab(tabFromQuery);
+  }, [isPlatformTabControlled, tabFromQuery]);
+
   const fetchAnalytics = useCallback(async () => {
     const headers = await getAuthHeaders();
-    const response = await fetch(
+    const response = await fetchAdminWithAuth(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics?${queryString}`,
       { headers, cache: "no-store" }
     );
@@ -364,7 +589,7 @@ export default function SeasonSocialAnalyticsSection({
     const headers = await getAuthHeaders();
     const params = new URLSearchParams({ limit: "100" });
     params.set("source_scope", scope);
-    const response = await fetch(
+    const response = await fetchAdminWithAuth(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/runs?${params.toString()}`,
       { headers, cache: "no-store" },
     );
@@ -379,7 +604,7 @@ export default function SeasonSocialAnalyticsSection({
 
   const fetchTargets = useCallback(async () => {
     const headers = await getAuthHeaders();
-    const response = await fetch(
+    const response = await fetchAdminWithAuth(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/targets?source_scope=${scope}`,
       { headers, cache: "no-store" },
     );
@@ -401,7 +626,7 @@ export default function SeasonSocialAnalyticsSection({
     }
     const headers = await getAuthHeaders();
     const params = new URLSearchParams({ limit: "250", run_id: runId });
-    const response = await fetch(
+    const response = await fetchAdminWithAuth(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?${params.toString()}`,
       { headers, cache: "no-store" },
     );
@@ -423,6 +648,17 @@ export default function SeasonSocialAnalyticsSection({
   }, [getAuthHeaders, readErrorMessage, seasonNumber, showId]);
 
   const refreshAll = useCallback(async () => {
+    if (platformTab === "reddit") {
+      setLoading(false);
+      setSectionErrors({
+        analytics: null,
+        targets: null,
+        runs: null,
+        jobs: null,
+      });
+      return;
+    }
+
     setLoading(true);
     setError(null);
     const nextSectionErrors = {
@@ -475,7 +711,7 @@ export default function SeasonSocialAnalyticsSection({
 
     setSectionErrors(nextSectionErrors);
     setLoading(false);
-  }, [fetchAnalytics, fetchJobs, fetchRuns, fetchTargets, runningIngest, selectedRunId]);
+  }, [fetchAnalytics, fetchJobs, fetchRuns, fetchTargets, platformTab, runningIngest, selectedRunId]);
 
   useEffect(() => {
     void refreshAll();
@@ -690,20 +926,24 @@ export default function SeasonSocialAnalyticsSection({
           "posts";
         const timestamp = job.completed_at ?? job.started_at ?? job.created_at ?? null;
         const ts = timestamp ? Date.parse(timestamp) : Number.NaN;
-        const counters = (job.metadata as Record<string, unknown>)?.stage_counters as
-          | Record<string, number>
-          | undefined;
-        const counterSummary =
-          counters && (typeof counters.posts === "number" || typeof counters.comments === "number")
-            ? ` · ${counters.posts ?? 0}p/${counters.comments ?? 0}c`
+        const counters = getJobStageCounters(job);
+        const persistCounters = getJobPersistCounters(job);
+        const activity = getJobActivity(job);
+        const counterSummary = counters
+          ? ` · ${counters.posts}p/${counters.comments}c`
+          : typeof job.items_found === "number"
+            ? ` · ${job.items_found.toLocaleString()} items`
             : "";
+        const persistSummary = persistCounters
+          ? ` · saved ${persistCounters.posts_upserted}p/${persistCounters.comments_upserted}c`
+          : "";
+        const activitySummary = formatJobActivitySummary(activity);
         const account = typeof job.config?.account === "string" && job.config.account ? ` @${job.config.account}` : "";
-        const itemCount = typeof job.items_found === "number" ? ` · ${job.items_found.toLocaleString()} items` : "";
         return {
           id: job.id,
           timestampMs: Number.isNaN(ts) ? 0 : ts,
           timestampLabel: timestamp ? new Date(timestamp).toLocaleTimeString() : "--:--:--",
-          message: `${PLATFORM_LABELS[job.platform] ?? job.platform} ${stage}${account} ${statusToLogVerb(job.status)}${itemCount}${counterSummary}`,
+          message: `${PLATFORM_LABELS[job.platform] ?? job.platform} ${stage}${account} ${statusToLogVerb(job.status)}${counterSummary}${persistSummary}${activitySummary ? ` · ${activitySummary}` : ""}`,
         };
       })
       .sort((a, b) => b.timestampMs - a.timestampMs)
@@ -829,7 +1069,7 @@ export default function SeasonSocialAnalyticsSection({
     setError(null);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest/runs/${activeRunId}/cancel`,
         {
           method: "POST",
@@ -885,6 +1125,7 @@ export default function SeasonSocialAnalyticsSection({
         fetch_replies: boolean;
         ingest_mode: "posts_only" | "posts_and_comments";
         sync_strategy: SyncStrategy;
+        allow_inline_dev_fallback: boolean;
         date_start?: string;
         date_end?: string;
       } = {
@@ -895,6 +1136,7 @@ export default function SeasonSocialAnalyticsSection({
         fetch_replies: true,
         ingest_mode: "posts_and_comments",
         sync_strategy: syncStrategy,
+        allow_inline_dev_fallback: true,
       }
 
       if (effectivePlatform !== "all") {
@@ -921,7 +1163,7 @@ export default function SeasonSocialAnalyticsSection({
 
       console.log("[social-ingest] Sending payload:", JSON.stringify(payload, null, 2));
 
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest`,
         {
           method: "POST",
@@ -933,8 +1175,8 @@ export default function SeasonSocialAnalyticsSection({
         }
       );
       if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Failed to run social ingest");
+        const data = (await response.json().catch(() => ({}))) as IngestProxyErrorPayload;
+        throw new Error(formatIngestErrorMessage(data));
       }
 
       const result = (await response.json().catch(() => ({}))) as {
@@ -981,7 +1223,7 @@ export default function SeasonSocialAnalyticsSection({
     async (format: "csv" | "pdf") => {
       try {
         const headers = await getAuthHeaders();
-        const response = await fetch(
+        const response = await fetchAdminWithAuth(
           `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/export?format=${format}&${queryString}`,
           { headers }
         );
@@ -1027,124 +1269,325 @@ export default function SeasonSocialAnalyticsSection({
         message: sectionErrors[key] as string,
       }));
   }, [sectionErrors]);
-  const weeklyPlatformEngagementRows = useMemo(
-    () => analytics?.weekly_platform_engagement ?? [],
-    [analytics]
+  const weeklyDailyActivityRows = useMemo(
+    () => analytics?.weekly_daily_activity ?? [],
+    [analytics],
   );
-  const weeklyPlatformEngagementLookup = useMemo(() => {
-    const lookup = new Map<number, NonNullable<AnalyticsResponse["weekly_platform_engagement"]>[number]>();
-    for (const row of weeklyPlatformEngagementRows) {
-      lookup.set(row.week_index, row);
-    }
-    return lookup;
-  }, [weeklyPlatformEngagementRows]);
-  const weeklyPlatformEngagementMax = useMemo(() => {
-    const values = weeklyPlatformEngagementRows.flatMap((row) =>
-      WEEKLY_ENGAGEMENT_PLATFORMS.map((platform) => row.engagement?.[platform] ?? 0)
+  const heatmapPlatform: Platform | null = useMemo(() => {
+    if (platformTab === "overview" || platformTab === "reddit") return null;
+    return platformTab;
+  }, [platformTab]);
+  const weeklyHeatmapMaxValue = useMemo(() => {
+    const values = weeklyDailyActivityRows.flatMap((weekRow) =>
+      weekRow.days.map((day) => getWeeklyDayValue(day, weeklyMetric, heatmapPlatform))
     );
-    return Math.max(1, ...values);
-  }, [weeklyPlatformEngagementRows]);
+    return Math.max(0, ...values);
+  }, [heatmapPlatform, weeklyDailyActivityRows, weeklyMetric]);
+  const weeklyHeatmapTotals = useMemo(() => {
+    const totals = new Map<number, number>();
+    for (const weekRow of weeklyDailyActivityRows) {
+      const total = weekRow.days.reduce(
+        (sum, day) => sum + getWeeklyDayValue(day, weeklyMetric, heatmapPlatform),
+        0,
+      );
+      totals.set(weekRow.week_index, total);
+    }
+    return totals;
+  }, [heatmapPlatform, weeklyDailyActivityRows, weeklyMetric]);
+  const hashtagPlatformsInScope = useMemo(() => {
+    if (platformTab === "overview" || platformTab === "reddit") return HASHTAG_PLATFORMS;
+    return [platformTab];
+  }, [platformTab]);
+  const configuredHashtagSections = useMemo(() => {
+    return hashtagPlatformsInScope
+      .map((platform) => {
+        const tags = new Set<string>();
+        for (const target of targets) {
+          if (target.platform !== platform) continue;
+          for (const rawTag of target.hashtags ?? []) {
+            const normalized = normalizeHashtag(rawTag);
+            if (normalized) tags.add(normalized);
+          }
+        }
+        return {
+          platform,
+          tags: Array.from(tags).sort((a, b) => a.localeCompare(b)),
+        };
+      })
+      .filter((section) => section.tags.length > 0);
+  }, [hashtagPlatformsInScope, targets]);
+  const observedHashtagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    const increment = (tag: string) => counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    const includePlatform = new Set<string>(hashtagPlatformsInScope);
+    for (const item of analytics?.leaderboards.bravo_content ?? []) {
+      if (!includePlatform.has(item.platform)) continue;
+      for (const tag of extractHashtags(item.text)) increment(tag);
+    }
+    for (const item of analytics?.leaderboards.viewer_discussion ?? []) {
+      if (!includePlatform.has(item.platform)) continue;
+      for (const tag of extractHashtags(item.text)) increment(tag);
+    }
+    return Array.from(counts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  }, [analytics, hashtagPlatformsInScope]);
+  const isBravoView = analyticsView === "bravo";
+  const isSentimentView = analyticsView === "sentiment";
+  const isHashtagsView = analyticsView === "hashtags";
+  const isAdvancedView = analyticsView === "advanced";
+  const selectedRunLabel = selectedRunId ? (runOptionLabelById.get(selectedRunId) ?? null) : null;
+  const ingestExportPanel = (
+    <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <h4 className="mb-4 text-lg font-semibold text-zinc-900">Ingest + Export</h4>
+      <div className="space-y-2 text-sm text-zinc-600">
+        <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+          Sync Mode
+          <select
+            value={syncStrategy}
+            onChange={(event) => setSyncStrategy(event.target.value as SyncStrategy)}
+            disabled={runningIngest}
+            className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <option value="incremental">Incremental (Recommended)</option>
+            <option value="full_refresh">Full Refresh</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => runIngest()}
+          disabled={runningIngest}
+          className="w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {runningIngest ? "Running Ingest..." : "Run Season Ingest (All)"}
+        </button>
+        <div className="grid grid-cols-2 gap-2">
+          {(["instagram", "youtube", "tiktok", "twitter"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => runIngest({ platform: p })}
+              disabled={runningIngest}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                runningIngest && ingestingPlatform === p
+                  ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
+                  : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+              }`}
+            >
+              {runningIngest && ingestingPlatform === p ? `${PLATFORM_LABELS[p]}...` : PLATFORM_LABELS[p]}
+            </button>
+          ))}
+        </div>
+        {activeRunId && hasRunningJobs && (
+          <button
+            type="button"
+            onClick={() => {
+              void cancelActiveRun();
+            }}
+            disabled={cancellingRun}
+            className="w-full rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {cancellingRun ? "Cancelling Run..." : `Cancel Active Run (${activeRunId.slice(0, 8)})`}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => downloadExport("csv")}
+          className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+        >
+          Export CSV
+        </button>
+        <button
+          type="button"
+          onClick={() => downloadExport("pdf")}
+          className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+        >
+          Export PDF
+        </button>
+      </div>
+      <p className="mt-3 text-xs text-zinc-500">
+        Run scope:{" "}
+        <span className="font-semibold text-zinc-700">
+          {activeRunScope.weekLabel}
+        </span>
+        {" · "}
+        <span className="font-semibold text-zinc-700">
+          {activeRunScope.platformLabel}
+        </span>
+        {selectedRunId && (
+          <>
+            {" · "}
+            <span className="font-semibold text-zinc-700">Run {selectedRunId.slice(0, 8)}</span>
+          </>
+        )}
+      </p>
+      {selectedRunId && !runningIngest && liveRunLogs.length > 0 && (
+        <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+          <p className="font-semibold text-zinc-700">Last Run Log</p>
+          <div className="mt-1 space-y-0.5">
+            {liveRunLogs.slice(0, 4).map((entry) => (
+              <p key={entry.id} className="flex items-center gap-2">
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-zinc-400">{entry.timestampLabel}</span>
+                <span>{entry.message}</span>
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+        <p className="font-semibold text-zinc-700">Configured Targets</p>
+        <ul className="mt-1 space-y-1">
+          {targets.map((target) => (
+            <li key={target.platform}>
+              {(PLATFORM_LABELS[target.platform] ?? target.platform) + ": "}
+              {(target.accounts ?? []).join(", ") || "(none)"}
+            </li>
+          ))}
+          {targets.length === 0 && <li>No active targets configured.</li>}
+        </ul>
+      </div>
+    </article>
+  );
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-              Season Social Analytics
-            </p>
-            <h3 className="text-2xl font-bold text-zinc-900">{showName} · Season {seasonNumber}</h3>
-            <p className="mt-1 text-sm text-zinc-500">
-              Bravo-owned social analytics with viewer sentiment and weekly rollups.
-            </p>
+      <section className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-50 p-6 shadow-sm">
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white">
+                  Season Social Analytics
+                </p>
+                <p
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                    hasRunningJobs
+                      ? "bg-zinc-300 text-zinc-800"
+                      : "bg-zinc-100 text-zinc-600"
+                  }`}
+                >
+                  {hasRunningJobs ? "Run Active" : "Idle"}
+                </p>
+              </div>
+              <h3 className="mt-3 text-2xl font-bold text-zinc-900">{showName} · Season {seasonNumber}</h3>
+              <p className="mt-1 text-sm text-zinc-500">
+                Bravo-owned social analytics with viewer sentiment and weekly rollups.
+              </p>
+            </div>
+
+            <div className="w-full rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm xl:max-w-xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Current Run</p>
+              <p className="mt-2 text-sm font-medium leading-relaxed text-zinc-800 break-words">
+                {selectedRunLabel ?? "No run selected"}
+              </p>
+            </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-              Scope
-              <select
-                value={scope}
-                onChange={(event) => setScope(event.target.value as Scope)}
-                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700"
-              >
-                <option value="bravo">Bravo</option>
-              </select>
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-              Week
-              <select
-                value={weekFilter}
-                onChange={(event) =>
-                  setWeekFilter(event.target.value === "all" ? "all" : Number.parseInt(event.target.value, 10))
-                }
-                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700"
-              >
-                <option value="all">All Weeks</option>
-                {(analytics?.weekly ?? []).map((week) => (
-                  <option key={week.week_index} value={week.week_index}>
-                    {week.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-              Run
-              <select
-                value={selectedRunId ?? ""}
-                onChange={(event) => {
-                  const nextRunId = event.target.value || null;
-                  setSelectedRunId(nextRunId);
-                  setSectionErrors((current) => ({ ...current, jobs: null }));
-                }}
-                disabled={runningIngest}
-                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <option value="">No Run Selected</option>
-                {runs.map((run) => (
-                  <option key={run.id} value={run.id}>
-                    {runOptionLabelById.get(run.id) ??
-                      `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-          <span className="rounded-full bg-zinc-100 px-3 py-1">Season ID: {seasonId}</span>
-          <span className="rounded-full bg-zinc-100 px-3 py-1">
-            Last Updated: {lastUpdated ? lastUpdated.toLocaleString() : "-"}
-          </span>
-          {analytics?.window?.start && analytics?.window?.end && (
-            <span className="rounded-full bg-zinc-100 px-3 py-1">
-              Window: {formatDateTime(analytics.window.start)} to {formatDateTime(analytics.window.end)}
-            </span>
+
+          {!hidePlatformTabs && (
+            <nav className="flex gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-1 shadow-sm">
+              {PLATFORM_TABS.map((tab) => {
+                const isActive = platformTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => {
+                      setPlatformTabAndUrl(tab.key);
+                    }}
+                    className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                      isActive
+                        ? "bg-white text-zinc-900 shadow-sm"
+                        : "text-zinc-500 hover:bg-white/50 hover:text-zinc-700"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </nav>
           )}
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Filters</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                  Scope
+                  <select
+                    value={scope}
+                    onChange={(event) => setScope(event.target.value as Scope)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
+                  >
+                    <option value="bravo">Bravo</option>
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                  Week
+                  <select
+                    value={weekFilter}
+                    onChange={(event) =>
+                      setWeekFilter(event.target.value === "all" ? "all" : Number.parseInt(event.target.value, 10))
+                    }
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
+                  >
+                    <option value="all">All Weeks</option>
+                    {(analytics?.weekly ?? []).map((week) => (
+                      <option key={week.week_index} value={week.week_index}>
+                        {week.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                  Run
+                  <select
+                    value={selectedRunId ?? ""}
+                    onChange={(event) => {
+                      const nextRunId = event.target.value || null;
+                      setSelectedRunId(nextRunId);
+                      setSectionErrors((current) => ({ ...current, jobs: null }));
+                    }}
+                    disabled={runningIngest}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="">No Run Selected</option>
+                    {runs.map((run) => (
+                      <option key={run.id} value={run.id}>
+                        {runOptionLabelById.get(run.id) ??
+                          `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Season Details</p>
+              <dl className="mt-3 space-y-2">
+                <div className="rounded-lg bg-zinc-50 px-3 py-2">
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Season ID</dt>
+                  <dd className="mt-1 break-all text-sm font-medium text-zinc-800">{seasonId}</dd>
+                </div>
+                <div className="rounded-lg bg-zinc-50 px-3 py-2">
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Last Updated</dt>
+                  <dd className="mt-1 text-sm font-medium text-zinc-800">
+                    {lastUpdated ? lastUpdated.toLocaleString() : "-"}
+                  </dd>
+                </div>
+                {analytics?.window?.start && analytics?.window?.end && (
+                  <div className="rounded-lg bg-zinc-50 px-3 py-2">
+                    <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Window</dt>
+                    <dd className="mt-1 text-sm font-medium text-zinc-800">
+                      {formatDateTime(analytics.window.start)} to {formatDateTime(analytics.window.end)}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          </div>
         </div>
       </section>
-
-      {/* Platform tabs */}
-      <nav className="flex gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-1 shadow-sm">
-        {PLATFORM_TABS.map((tab) => {
-          const isActive = platformTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => {
-                setPlatformTab(tab.key);
-                setPlatformFilter(tab.key === "overview" || tab.key === "reddit" ? "all" : tab.key);
-              }}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                isActive
-                  ? "bg-white text-zinc-900 shadow-sm"
-                  : "text-zinc-500 hover:bg-white/50 hover:text-zinc-700"
-              }`}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </nav>
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -1314,9 +1757,9 @@ export default function SeasonSocialAnalyticsSection({
                       {/* Per-platform rows within stage */}
                       <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                         {s.jobs.map((j) => {
-                          const counters = (j.metadata as Record<string, unknown>)?.stage_counters as
-                            | Record<string, number>
-                            | undefined;
+                          const counters = getJobStageCounters(j);
+                          const persistCounters = getJobPersistCounters(j);
+                          const activitySummary = formatJobActivitySummary(getJobActivity(j));
                           const postsFound = counters?.posts ?? 0;
                           const commentsFound = counters?.comments ?? 0;
                           const account = getAccount(j);
@@ -1331,12 +1774,17 @@ export default function SeasonSocialAnalyticsSection({
                               <span className={`ml-auto ${statusTextClass[j.status] ?? "text-zinc-500"}`}>
                                 {statusVerb[j.status] ?? j.status}
                               </span>
-                              {(postsFound > 0 || commentsFound > 0) && (
-                                <span className="tabular-nums text-zinc-600">{postsFound}p/{commentsFound}c</span>
+                              {counters ? (
+                                <span className="tabular-nums text-zinc-700">{postsFound}p/{commentsFound}c</span>
+                              ) : (
+                                <span className="tabular-nums text-zinc-700">{(j.items_found ?? 0).toLocaleString()} items</span>
                               )}
-                              {j.items_found && j.items_found > 0 && !(postsFound > 0 || commentsFound > 0) ? (
-                                <span className="tabular-nums text-zinc-600">{j.items_found}</span>
-                              ) : null}
+                              {persistCounters && (
+                                <span className="tabular-nums text-zinc-500">
+                                  saved {persistCounters.posts_upserted}p/{persistCounters.comments_upserted}c
+                                </span>
+                              )}
+                              {activitySummary && <span className="text-zinc-400">{activitySummary}</span>}
                               {jobDuration && j.status !== "queued" && j.status !== "pending" && (
                                 <span className="tabular-nums text-zinc-400">{jobDuration}</span>
                               )}
@@ -1408,7 +1856,8 @@ export default function SeasonSocialAnalyticsSection({
         </div>
       ) : (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {(isBravoView || isSentimentView) && (
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Content Volume</p>
               <p className="mt-2 text-3xl font-bold text-zinc-900">{analytics?.summary.total_posts ?? 0}</p>
@@ -1440,194 +1889,106 @@ export default function SeasonSocialAnalyticsSection({
                 </p>
               </div>
             </article>
-          </section>
+            </section>
+          )}
 
-          <section className="grid gap-6 xl:grid-cols-3">
+          {isBravoView && (
+            <section className="grid gap-6 xl:grid-cols-3">
             <article className="xl:col-span-2 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
-                <h4 className="text-lg font-semibold text-zinc-900">Weekly Trend</h4>
-                <span className="text-xs uppercase tracking-[0.2em] text-zinc-400">Episode-air anchored</span>
+                <div>
+                  <h4 className="text-lg font-semibold text-zinc-900">Weekly Trend</h4>
+                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-400">
+                    {platformTab === "youtube" && weeklyMetric === "posts"
+                      ? "YouTube Posts Schedule"
+                      : "Episode-air anchored"}
+                  </span>
+                </div>
+                <div className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setWeeklyMetric("posts")}
+                    className={`rounded px-2.5 py-1 transition ${
+                      weeklyMetric === "posts"
+                        ? "bg-white text-zinc-900 shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700"
+                    }`}
+                  >
+                    Post Count
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWeeklyMetric("comments")}
+                    className={`rounded px-2.5 py-1 transition ${
+                      weeklyMetric === "comments"
+                        ? "bg-white text-zinc-900 shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700"
+                    }`}
+                  >
+                    Comment Count
+                  </button>
+                </div>
               </div>
               <div className="space-y-3">
-                {(analytics?.weekly ?? []).map((week) => {
-                  const engagementRow = weeklyPlatformEngagementLookup.get(week.week_index);
-                  const hasData = Boolean(engagementRow?.has_data);
-                  const engagement = engagementRow?.engagement ?? {
-                    instagram: 0,
-                    youtube: 0,
-                    tiktok: 0,
-                    twitter: 0,
-                  };
+                {weeklyDailyActivityRows.map((weekRow) => {
+                  const weekTotal = weeklyHeatmapTotals.get(weekRow.week_index) ?? 0;
                   return (
                     <div
-                      key={week.week_index}
+                      key={weekRow.week_index}
                       className="space-y-1"
-                      data-testid={`weekly-trend-row-${week.week_index}`}
+                      data-testid={`weekly-heatmap-row-${weekRow.week_index}`}
                     >
                       <div className="flex items-center justify-between text-xs text-zinc-500">
-                        <span>{week.label}</span>
+                        <span>{weekRow.label}</span>
                         <span>
-                          {week.post_volume} posts · {week.comment_volume} comments · {week.engagement.toLocaleString()} engagement
+                          <span data-testid={`weekly-heatmap-total-${weekRow.week_index}`}>
+                            {weekTotal.toLocaleString()} {weeklyMetric}
+                          </span>
                         </span>
                       </div>
-                      {hasData ? (
-                        <div className="space-y-1 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2">
-                          {WEEKLY_ENGAGEMENT_PLATFORMS.map((platform) => {
-                            const value = engagement[platform] ?? 0;
-                            const width =
-                              value > 0
-                                ? `${Math.max(0, (value / weeklyPlatformEngagementMax) * 100)}%`
-                                : "0%";
-                            return (
-                              <div key={`${week.week_index}-${platform}`} className="flex items-center gap-2">
-                                <span className="w-16 text-[11px] text-zinc-500">
-                                  {PLATFORM_LABELS[platform]}
-                                </span>
-                                <div className="h-2 flex-1 rounded-full bg-zinc-200">
-                                  {value > 0 ? (
-                                    <div
-                                      data-testid={`weekly-engagement-bar-${week.week_index}-${platform}`}
-                                      className={`h-2 rounded-full ${WEEKLY_ENGAGEMENT_BAR_CLASS[platform]}`}
-                                      style={{ width }}
-                                    />
-                                  ) : null}
-                                </div>
-                                <span className="w-16 text-right text-[11px] text-zinc-500">
-                                  {value.toLocaleString()}
-                                </span>
+                      <div className="grid grid-cols-7 gap-1.5 rounded-lg border border-zinc-100 bg-zinc-50 p-2">
+                        {weekRow.days.map((day) => {
+                          const value = getWeeklyDayValue(day, weeklyMetric, heatmapPlatform);
+                          return (
+                            <div
+                              key={`${weekRow.week_index}-${day.day_index}`}
+                              data-testid={`weekly-heatmap-day-${weekRow.week_index}-${day.day_index}`}
+                              title={`${day.date_local} · ${value.toLocaleString()} ${weeklyMetric}`}
+                            >
+                              <div
+                                className={`flex aspect-square items-center justify-center rounded px-1 text-[10px] font-semibold tabular-nums ${getHeatmapToneClass(value, weeklyHeatmapMaxValue)}`}
+                              >
+                                {getMonthDayLabel(day.date_local)}
                               </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p
-                          data-testid={`weekly-no-data-${week.week_index}`}
-                          className="text-xs text-zinc-400"
-                        >
-                          No data yet
-                        </p>
-                      )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })}
+                {(analytics?.weekly?.length ?? 0) > 0 && weeklyDailyActivityRows.length === 0 && (
+                  <p data-testid="weekly-heatmap-unavailable" className="text-sm text-zinc-500">
+                    Daily schedule unavailable for selected filters.
+                  </p>
+                )}
                 {(analytics?.weekly?.length ?? 0) === 0 && (
                   <p className="text-sm text-zinc-500">No weekly data for selected filters.</p>
                 )}
               </div>
             </article>
+            {ingestExportPanel}
+            </section>
+          )}
 
-            <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h4 className="mb-4 text-lg font-semibold text-zinc-900">Ingest + Export</h4>
-              <div className="space-y-2 text-sm text-zinc-600">
-                <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Sync Mode
-                  <select
-                    value={syncStrategy}
-                    onChange={(event) => setSyncStrategy(event.target.value as SyncStrategy)}
-                    disabled={runningIngest}
-                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <option value="incremental">Incremental (Recommended)</option>
-                    <option value="full_refresh">Full Refresh</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => runIngest()}
-                  disabled={runningIngest}
-                  className="w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {runningIngest ? "Running Ingest..." : "Run Season Ingest (All)"}
-                </button>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["instagram", "youtube", "tiktok", "twitter"] as const).map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => runIngest({ platform: p })}
-                      disabled={runningIngest}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                        runningIngest && ingestingPlatform === p
-                          ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
-                          : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
-                      }`}
-                    >
-                      {runningIngest && ingestingPlatform === p ? `${PLATFORM_LABELS[p]}...` : PLATFORM_LABELS[p]}
-                    </button>
-                  ))}
-                </div>
-                {activeRunId && hasRunningJobs && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void cancelActiveRun();
-                    }}
-                    disabled={cancellingRun}
-                    className="w-full rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {cancellingRun ? "Cancelling Run..." : `Cancel Active Run (${activeRunId.slice(0, 8)})`}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => downloadExport("csv")}
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                >
-                  Export CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => downloadExport("pdf")}
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                >
-                  Export PDF
-                </button>
-              </div>
-              <p className="mt-3 text-xs text-zinc-500">
-                Run scope:{" "}
-                <span className="font-semibold text-zinc-700">
-                  {activeRunScope.weekLabel}
-                </span>
-                {" · "}
-                <span className="font-semibold text-zinc-700">
-                  {activeRunScope.platformLabel}
-                </span>
-                {selectedRunId && (
-                  <>
-                    {" · "}
-                    <span className="font-semibold text-zinc-700">Run {selectedRunId.slice(0, 8)}</span>
-                  </>
-                )}
-              </p>
-              {selectedRunId && !runningIngest && liveRunLogs.length > 0 && (
-                <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                  <p className="font-semibold text-zinc-700">Last Run Log</p>
-                  <div className="mt-1 space-y-0.5">
-                    {liveRunLogs.slice(0, 4).map((entry) => (
-                      <p key={entry.id} className="flex items-center gap-2">
-                        <span className="shrink-0 font-mono text-[10px] tabular-nums text-zinc-400">{entry.timestampLabel}</span>
-                        <span>{entry.message}</span>
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                <p className="font-semibold text-zinc-700">Configured Targets</p>
-                <ul className="mt-1 space-y-1">
-                  {targets.map((target) => (
-                    <li key={target.platform}>
-                      {(PLATFORM_LABELS[target.platform] ?? target.platform) + ": "}
-                      {(target.accounts ?? []).join(", ") || "(none)"}
-                    </li>
-                  ))}
-                  {targets.length === 0 && <li>No active targets configured.</li>}
-                </ul>
-              </div>
-            </article>
-          </section>
+          {isAdvancedView && (
+            <section className="grid gap-6 xl:grid-cols-1">
+              {ingestExportPanel}
+            </section>
+          )}
 
-          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+          {(isBravoView || isAdvancedView) && (
+            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
               <h4 className="text-lg font-semibold text-zinc-900">Weekly Bravo Post Count Table</h4>
               <span className="text-xs uppercase tracking-[0.2em] text-zinc-400">Trailer to Finale</span>
@@ -1651,11 +2012,12 @@ export default function SeasonSocialAnalyticsSection({
                     <tr key={`table-week-${week.week_index}`} className="border-b border-zinc-100 text-zinc-700">
                       <td className="px-3 py-2 font-semibold">
                         <Link
-                          href={`${buildSeasonAdminUrl({
+                          href={buildSeasonSocialWeekUrl({
                             showSlug: showRouteSlug,
                             seasonNumber,
-                            tab: "social",
-                          })}/week/${week.week_index}?source_scope=${scope}` as "/admin/trr-shows"}
+                            weekIndex: week.week_index,
+                            query: new URLSearchParams({ source_scope: scope }),
+                          }) as "/admin/trr-shows"}
                           className="text-blue-600 hover:text-blue-800 hover:underline"
                         >
                           {week.label ?? (week.week_index === 0 ? "Pre-Season" : `Week ${week.week_index}`)}
@@ -1710,9 +2072,11 @@ export default function SeasonSocialAnalyticsSection({
                 </tbody>
               </table>
             </div>
-          </section>
+            </section>
+          )}
 
-          <section className="grid gap-6 xl:grid-cols-2">
+          {(isBravoView || isSentimentView) && (
+            <section className="grid gap-6 xl:grid-cols-2">
             <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <h4 className="mb-4 text-lg font-semibold text-zinc-900">Platform Sentiment Breakdown</h4>
               <div className="space-y-2">
@@ -1769,59 +2133,148 @@ export default function SeasonSocialAnalyticsSection({
                 </div>
               </div>
             </article>
-          </section>
+            </section>
+          )}
 
-          <section className="grid gap-6 xl:grid-cols-2">
-            <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h4 className="mb-4 text-lg font-semibold text-zinc-900">Bravo Content Leaderboard</h4>
-              <div className="space-y-2">
-                {(analytics?.leaderboards.bravo_content ?? []).slice(0, 10).map((item) => (
-                  <a
-                    key={`${item.platform}-${item.source_id}`}
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
-                  >
-                    <div className="flex items-center justify-between gap-3 text-sm">
-                      <span className="font-semibold text-zinc-900">{PLATFORM_LABELS[item.platform] ?? item.platform}</span>
-                      <span className="text-xs text-zinc-500">{item.engagement.toLocaleString()} engagement</span>
-                    </div>
-                    <p className="mt-1 text-sm text-zinc-700 line-clamp-2">{item.text || item.source_id}</p>
-                  </a>
-                ))}
-                {(analytics?.leaderboards.bravo_content?.length ?? 0) === 0 && (
-                  <p className="text-sm text-zinc-500">No content leaderboard entries yet.</p>
+          {(isBravoView || isSentimentView) && (
+            <section className="grid gap-6 xl:grid-cols-2">
+              {isBravoView && (
+                <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <h4 className="mb-4 text-lg font-semibold text-zinc-900">Bravo Content Leaderboard</h4>
+                  <div className="space-y-2">
+                    {(analytics?.leaderboards.bravo_content ?? []).slice(0, 10).map((item) => (
+                      <a
+                        key={`${item.platform}-${item.source_id}`}
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
+                      >
+                        <div className="flex items-start gap-3">
+                          {item.thumbnail_url && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={item.thumbnail_url}
+                              alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} leaderboard thumbnail`}
+                              loading="lazy"
+                              referrerPolicy="no-referrer"
+                              className="h-12 w-12 shrink-0 rounded-md border border-zinc-200 object-cover"
+                            />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-3 text-sm">
+                              <span className="font-semibold text-zinc-900">
+                                {PLATFORM_LABELS[item.platform] ?? item.platform}
+                              </span>
+                              <span className="text-xs text-zinc-500">{item.engagement.toLocaleString()} engagement</span>
+                            </div>
+                            <p className="mt-1 text-sm text-zinc-700 line-clamp-2">{item.text || item.source_id}</p>
+                          </div>
+                        </div>
+                      </a>
+                    ))}
+                    {(analytics?.leaderboards.bravo_content?.length ?? 0) === 0 && (
+                      <p className="text-sm text-zinc-500">No content leaderboard entries yet.</p>
+                    )}
+                  </div>
+                </article>
+              )}
+
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <h4 className="mb-4 text-lg font-semibold text-zinc-900">Viewer Discussion Highlights</h4>
+                <div className="space-y-2">
+                  {(analytics?.leaderboards.viewer_discussion ?? []).slice(0, 10).map((item) => (
+                    <a
+                      key={`${item.platform}-${item.source_id}`}
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
+                    >
+                      <div className="flex items-start gap-3">
+                        {item.thumbnail_url && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={item.thumbnail_url}
+                            alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} discussion thumbnail`}
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                            className="h-12 w-12 shrink-0 rounded-md border border-zinc-200 object-cover"
+                          />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between text-xs uppercase tracking-[0.15em] text-zinc-500">
+                            <span>{PLATFORM_LABELS[item.platform] ?? item.platform}</span>
+                            <span>{item.sentiment}</span>
+                          </div>
+                          <p className="mt-1 text-sm text-zinc-700 line-clamp-3">{item.text}</p>
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+                  {(analytics?.leaderboards.viewer_discussion?.length ?? 0) === 0 && (
+                    <p className="text-sm text-zinc-500">No viewer discussion highlights yet.</p>
+                  )}
+                </div>
+              </article>
+            </section>
+          )}
+
+          {isHashtagsView && (
+            <section className="grid gap-6 xl:grid-cols-2">
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Configured Hashtags</h4>
+                <p className="-mt-1 mb-4 text-xs text-zinc-500">
+                  {platformTab === "overview"
+                    ? "Grouped by platform from configured social targets."
+                    : `Configured hashtags for ${PLATFORM_LABELS[platformTab] ?? platformTab}.`}
+                </p>
+                {configuredHashtagSections.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No configured hashtags found for the selected platform scope.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {configuredHashtagSections.map((section) => (
+                      <div key={section.platform} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-600">
+                          {PLATFORM_LABELS[section.platform] ?? section.platform}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {section.tags.map((tag) => (
+                            <span key={`${section.platform}-${tag}`} className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </div>
-            </article>
-
-            <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h4 className="mb-4 text-lg font-semibold text-zinc-900">Viewer Discussion Highlights</h4>
-              <div className="space-y-2">
-                {(analytics?.leaderboards.viewer_discussion ?? []).slice(0, 10).map((item) => (
-                  <a
-                    key={`${item.platform}-${item.source_id}`}
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
-                  >
-                    <div className="flex items-center justify-between text-xs uppercase tracking-[0.15em] text-zinc-500">
-                      <span>{PLATFORM_LABELS[item.platform] ?? item.platform}</span>
-                      <span>{item.sentiment}</span>
-                    </div>
-                    <p className="mt-1 text-sm text-zinc-700 line-clamp-3">{item.text}</p>
-                  </a>
-                ))}
-                {(analytics?.leaderboards.viewer_discussion?.length ?? 0) === 0 && (
-                  <p className="text-sm text-zinc-500">No viewer discussion highlights yet.</p>
+              </article>
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Observed Hashtags</h4>
+                <p className="-mt-1 mb-4 text-xs text-zinc-500">
+                  Extracted from leaderboard text in the selected platform scope.
+                </p>
+                {observedHashtagCounts.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No observed hashtags found in current leaderboard content.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {observedHashtagCounts.slice(0, 30).map((item) => (
+                      <li key={item.tag} className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm">
+                        <span className="font-semibold text-zinc-800">#{item.tag}</span>
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                          {item.count} mention{item.count === 1 ? "" : "s"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 )}
-              </div>
-            </article>
-          </section>
+              </article>
+            </section>
+          )}
 
-          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+          {(isBravoView || isAdvancedView) && (
+            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <button
               type="button"
               onClick={() => setJobsOpen((c) => !c)}
@@ -1871,9 +2324,9 @@ export default function SeasonSocialAnalyticsSection({
                     (typeof job.metadata?.stage === "string" ? job.metadata.stage : undefined) ??
                     job.job_type ?? "posts";
                   const account = typeof job.config?.account === "string" && job.config.account ? job.config.account : null;
-                  const counters = (job.metadata as Record<string, unknown>)?.stage_counters as
-                    | Record<string, number>
-                    | undefined;
+                  const counters = getJobStageCounters(job);
+                  const persistCounters = getJobPersistCounters(job);
+                  const activitySummary = formatJobActivitySummary(getJobActivity(job));
                   const retrievalMeta = (job.metadata as Record<string, unknown>)?.retrieval_meta as
                     | Record<string, unknown>
                     | undefined;
@@ -1915,13 +2368,19 @@ export default function SeasonSocialAnalyticsSection({
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-zinc-500">
-                          {counters && (counters.posts > 0 || counters.comments > 0) ? (
+                          {counters ? (
                             <span className="font-semibold tabular-nums text-zinc-700">
-                              {counters.posts ?? 0}p / {counters.comments ?? 0}c
+                              {counters.posts}p / {counters.comments}c
                             </span>
                           ) : (
                             <span className="font-semibold tabular-nums text-zinc-700">{(job.items_found ?? 0).toLocaleString()} items</span>
                           )}
+                          {persistCounters && (
+                            <span className="tabular-nums text-zinc-500">
+                              saved {persistCounters.posts_upserted}p/{persistCounters.comments_upserted}c
+                            </span>
+                          )}
+                          {activitySummary && <span className="text-zinc-400">{activitySummary}</span>}
                           {duration && <span className="tabular-nums text-zinc-400">{duration}</span>}
                         </div>
                       </div>
@@ -1951,9 +2410,11 @@ export default function SeasonSocialAnalyticsSection({
               )}
             </div>
             </>)}
-          </section>
+            </section>
+          )}
 
-          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+          {(isBravoView || isAdvancedView) && (
+            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <button
               type="button"
               onClick={() => setManualSourcesOpen((current) => !current)}
@@ -1967,7 +2428,8 @@ export default function SeasonSocialAnalyticsSection({
                 <SocialPostsSection showId={showId} showName={showName} seasonId={seasonId} />
               </div>
             )}
-          </section>
+            </section>
+          )}
         </>
       )}
     </div>
