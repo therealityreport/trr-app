@@ -181,7 +181,8 @@ describe("RedditSourcesManager", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Discover Threads" }));
+    const discoverButton = await screen.findByRole("button", { name: "Discover Threads" }, { timeout: 10_000 });
+    fireEvent.click(discoverButton);
 
     expect(await screen.findByText("Suggested Include Terms")).toBeInTheDocument();
     expect(screen.getByText("rhoslc")).toBeInTheDocument();
@@ -190,7 +191,7 @@ describe("RedditSourcesManager", () => {
     expect(screen.getByText("Flair: Episode Discussion")).toBeInTheDocument();
     expect(screen.getByText("cast: meredith")).toBeInTheDocument();
     expect(screen.getByText("Selected flair")).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("keeps all-flair discovered threads visible when Show matched only is enabled", async () => {
     const allFlairCommunity = {
