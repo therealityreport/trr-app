@@ -2,6 +2,15 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-19) — Docker footprint docs
+
+- February 19, 2026: Clarified stale local-only Screenalytics env setting.
+  - File:
+    - `apps/web/.env.local`
+  - Change:
+    - Commented `SCREENALYTICS_API_URL=http://127.0.0.1:8888` and documented it as unused for TRR-APP runtime.
+    - Runtime backend routing remains driven by `TRR_API_URL`.
+
 ## Latest Update (2026-02-19)
 
 - February 19, 2026: Fixed `canSyncByBravo` TDZ crash in show admin page Sync by Bravo flow.
