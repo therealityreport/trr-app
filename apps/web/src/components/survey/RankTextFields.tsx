@@ -169,11 +169,8 @@ function RankRow({
   id,
   label,
   disabled,
-  activeId,
   textColor,
-  activeTextColor,
   backgroundColor,
-  activeBackgroundColor,
   optionHeight,
   optionRadius,
   optionPaddingX,
@@ -185,11 +182,8 @@ function RankRow({
   id: string;
   label: string;
   disabled: boolean;
-  activeId: string | null;
   textColor: string;
-  activeTextColor: string;
   backgroundColor: string;
-  activeBackgroundColor: string;
   optionHeight: number;
   optionRadius: number;
   optionPaddingX: number;
@@ -219,7 +213,7 @@ function RankRow({
   const transformStyle = transform
     ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
     : undefined;
-  const isActive = isDragging || activeId === id;
+  const isSourcePlaceholder = isDragging;
 
   return (
     <div
@@ -228,13 +222,13 @@ function RankRow({
       style={{
         height: `${optionHeight}px`,
         borderRadius: `${optionRadius}px`,
-        transform: transformStyle,
-        zIndex: isDragging ? 20 : 0,
-        opacity: isDragging ? 0.92 : 1,
-        backgroundColor: isActive ? activeBackgroundColor : backgroundColor,
-        color: isActive ? activeTextColor : textColor,
+        transform: isSourcePlaceholder ? undefined : transformStyle,
+        zIndex: isSourcePlaceholder ? 0 : 1,
+        opacity: isSourcePlaceholder ? 0 : 1,
+        backgroundColor: backgroundColor,
+        color: textColor,
         boxShadow: isOver && !isDragging ? "0 0 0 2px rgba(17,17,17,0.28) inset" : "none",
-        transition: isDragging ? "none" : "box-shadow 120ms ease, background-color 120ms ease, color 120ms ease",
+        transition: isDragging ? "none" : "box-shadow 120ms ease",
         paddingLeft: `${optionPaddingX}px`,
         paddingRight: `${optionPaddingX}px`,
         display: "flex",
@@ -545,11 +539,8 @@ export default function RankTextFields({
                 id={option.option_key}
                 label={option.option_text}
                 disabled={disabled}
-                activeId={activeId}
                 textColor={optionTextColor}
-                activeTextColor={optionTextColorActive}
                 backgroundColor={optionBg}
-                activeBackgroundColor={optionBgActive}
                 optionHeight={responsiveSizing.optionHeight}
                 optionRadius={responsiveSizing.optionRadius}
                 optionPaddingX={responsiveSizing.optionPaddingX}

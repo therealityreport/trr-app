@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => {
     replace: router.replace,
     isClientAdmin: vi.fn(() => true),
     getCurrentUser: () => currentUser,
+    setCurrentUser(user: unknown) {
+      currentUser = user;
+    },
     onAuthStateChanged: vi.fn((cb: (user: unknown) => void) => {
       listener = cb;
       return () => {
@@ -88,6 +91,59 @@ function GuardObserver({ onUserKey }: { onUserKey: (value: string | null) => voi
 describe("useAdminGuard stability", () => {
   beforeEach(() => {
     mocks.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  it("completes guard resolution on first auth emission even when authStateReady never resolves", async () => {
+    render(<GuardObserver onUserKey={() => undefined} />);
+
+    await act(async () => {
+      mocks.emit({ uid: "u0", email: "admin@example.com", displayName: "Admin User" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-access", "1");
+    });
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("redirects unauthenticated users when authStateReady is slow via fallback timeout", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS", "10");
+    render(<GuardObserver onUserKey={() => undefined} />);
+
+    await act(async () => {
+      mocks.emit(null);
+    });
+
+    expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+    expect(mocks.replace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12);
+    });
+
+    expect(mocks.replace).toHaveBeenCalledWith("/");
+  });
+
+  it("resolves from auth.currentUser snapshot when auth emission never arrives", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS", "10");
+    mocks.setCurrentUser({ uid: "u-no-emit", email: "admin@example.com", displayName: "Admin User" });
+    render(<GuardObserver onUserKey={() => undefined} />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12);
+    });
+
+    expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+    expect(screen.getByTestId("guard-state")).toHaveAttribute("data-access", "1");
+    expect(mocks.replace).not.toHaveBeenCalled();
   });
 
   it("keeps userKey stable across duplicate auth emissions and does not retrigger userKey consumer effect", async () => {

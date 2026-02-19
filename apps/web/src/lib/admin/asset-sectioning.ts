@@ -157,6 +157,14 @@ export function classifySeasonAssetSection(
   if (byContentType !== "other") return byContentType;
   if (byContentType === "other" && contentType !== "OTHER") return byContentType;
 
+  // OSA cast promos are frequently stored with "profile" kinds in upstream sources.
+  if (
+    isOfficialSeasonAnnouncement &&
+    (kind === "cast" || kind === "promo" || kind === "profile" || kind === "profile picture" || kind === "profile_picture")
+  ) {
+    return "cast_photos";
+  }
+
   if (hasProfileSignal) return "profile_pictures";
   if (asset.type === "episode") return "episode_stills";
 

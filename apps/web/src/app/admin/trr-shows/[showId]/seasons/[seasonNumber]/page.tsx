@@ -11,6 +11,10 @@ import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
+import FandomSyncModal, {
+  type FandomSyncOptions,
+  type FandomSyncPreviewResponse,
+} from "@/components/admin/FandomSyncModal";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
 import SurveysSection from "@/components/admin/surveys-section";
@@ -156,7 +160,20 @@ interface BravoVideoItem {
   published_at?: string | null;
 }
 
-type TabId = "episodes" | "assets" | "videos" | "cast" | "surveys" | "social" | "details";
+interface TrrSeasonFandom {
+  id: string;
+  source: string;
+  source_url: string;
+  page_title: string | null;
+  scraped_at: string;
+  summary: string | null;
+  dynamic_sections?: unknown[] | null;
+  citations?: unknown[] | null;
+  conflicts?: unknown[] | null;
+  source_variants?: unknown;
+}
+
+type TabId = "episodes" | "assets" | "videos" | "fandom" | "cast" | "surveys" | "social" | "details";
 type SeasonCastSource = "season_evidence" | "show_fallback";
 type GalleryDiagnosticFilter = "all" | "missing-variants" | "oversized" | "unclassified";
 type RefreshProgressState = {
@@ -708,6 +725,14 @@ export default function SeasonDetailPage() {
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
   const [bravoVideosLoading, setBravoVideosLoading] = useState(false);
   const [bravoVideosError, setBravoVideosError] = useState<string | null>(null);
+  const [seasonFandomData, setSeasonFandomData] = useState<TrrSeasonFandom[]>([]);
+  const [seasonFandomLoading, setSeasonFandomLoading] = useState(false);
+  const [seasonFandomError, setSeasonFandomError] = useState<string | null>(null);
+  const [fandomSyncOpen, setFandomSyncOpen] = useState(false);
+  const [fandomSyncPreview, setFandomSyncPreview] = useState<FandomSyncPreviewResponse | null>(null);
+  const [fandomSyncPreviewLoading, setFandomSyncPreviewLoading] = useState(false);
+  const [fandomSyncCommitLoading, setFandomSyncCommitLoading] = useState(false);
+  const [fandomSyncError, setFandomSyncError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("episodes");
   const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
   const [allowPlaceholderMediaOverride, setAllowPlaceholderMediaOverride] = useState(false);
@@ -1020,9 +1045,12 @@ export default function SeasonDetailPage() {
     setTrrShowCastLoading(true);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${showId}/cast?limit=500`, {
-        headers,
-      });
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${showId}/cast?limit=500&photo_fallback=none`,
+        {
+          headers,
+        }
+      );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error((data as { error?: string }).error || "Failed to fetch show cast");
@@ -1128,6 +1156,102 @@ export default function SeasonDetailPage() {
     }
   }, [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
 
+  const fetchSeasonFandomData = useCallback(async () => {
+    const requestShowId = showId;
+    const requestSeasonNumber = seasonNumber;
+    const requestKey = `${requestShowId}:${requestSeasonNumber}`;
+    if (!requestShowId || !Number.isFinite(requestSeasonNumber)) return;
+    if (!isCurrentSeasonRequest(requestKey)) return;
+    setSeasonFandomLoading(true);
+    setSeasonFandomError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/fandom`,
+        {
+          headers,
+          cache: "no-store",
+        }
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        fandomData?: TrrSeasonFandom[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error || "Failed to fetch season fandom");
+      if (!isCurrentSeasonRequest(requestKey)) return;
+      setSeasonFandomData(Array.isArray(data.fandomData) ? data.fandomData : []);
+    } catch (err) {
+      if (!isCurrentSeasonRequest(requestKey)) return;
+      setSeasonFandomError(err instanceof Error ? err.message : "Failed to fetch season fandom");
+    } finally {
+      if (!isCurrentSeasonRequest(requestKey)) return;
+      setSeasonFandomLoading(false);
+    }
+  }, [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
+
+  const previewSyncByFandom = useCallback(
+    async (options: FandomSyncOptions) => {
+      if (!showId || !Number.isFinite(seasonNumber)) return;
+      try {
+        setFandomSyncPreviewLoading(true);
+        setFandomSyncError(null);
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/import-fandom/preview`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(options),
+          }
+        );
+        const data = (await response.json().catch(() => ({}))) as FandomSyncPreviewResponse & {
+          error?: string;
+        };
+        if (!response.ok) throw new Error(data.error || "Season fandom preview failed");
+        setFandomSyncPreview(data);
+      } catch (err) {
+        setFandomSyncError(err instanceof Error ? err.message : "Season fandom preview failed");
+      } finally {
+        setFandomSyncPreviewLoading(false);
+      }
+    },
+    [getAuthHeaders, seasonNumber, showId]
+  );
+
+  const commitSyncByFandom = useCallback(
+    async (options: FandomSyncOptions) => {
+      if (!showId || !Number.isFinite(seasonNumber)) return;
+      try {
+        setFandomSyncCommitLoading(true);
+        setFandomSyncError(null);
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/import-fandom/commit`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(options),
+          }
+        );
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) throw new Error(data.error || "Season fandom save failed");
+        await fetchSeasonFandomData();
+        setFandomSyncOpen(false);
+      } catch (err) {
+        setFandomSyncError(err instanceof Error ? err.message : "Season fandom save failed");
+      } finally {
+        setFandomSyncCommitLoading(false);
+      }
+    },
+    [fetchSeasonFandomData, getAuthHeaders, seasonNumber, showId]
+  );
+
   const loadSeasonData = useCallback(async () => {
     const requestShowId = showId;
     const requestSeasonNumber = seasonNumber;
@@ -1222,7 +1346,7 @@ export default function SeasonDetailPage() {
             ((member.archive_episodes_in_season as number | null | undefined) ?? 0) > 0
         )
       );
-      await fetchSeasonBravoVideos();
+      await Promise.all([fetchSeasonBravoVideos(), fetchSeasonFandomData()]);
       if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setError(null);
     } catch (err) {
@@ -1239,7 +1363,7 @@ export default function SeasonDetailPage() {
       if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setLoading(false);
     }
-  }, [fetchSeasonBravoVideos, getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
+  }, [fetchSeasonBravoVideos, fetchSeasonFandomData, getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -1285,6 +1409,12 @@ export default function SeasonDetailPage() {
       void fetchShowCastForBrand();
     }
   }, [activeTab, fetchCastRoleMembers, fetchShowCastForBrand, hasAccess, showId]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId) return;
+    if (activeTab !== "fandom") return;
+    void fetchSeasonFandomData();
+  }, [activeTab, fetchSeasonFandomData, hasAccess, showId]);
 
   const fetchAssets = useCallback(async () => {
     if (!showId) return;
@@ -3391,6 +3521,7 @@ export default function SeasonDetailPage() {
                   { id: "episodes", label: "Seasons & Episodes" },
                   { id: "assets", label: "Assets" },
                   { id: "videos", label: "Videos" },
+                  { id: "fandom", label: "Fandom" },
                   { id: "cast", label: "Cast" },
                   { id: "surveys", label: "Surveys" },
                   { id: "social", label: "Social Media" },
@@ -4162,6 +4293,80 @@ export default function SeasonDetailPage() {
             </div>
           )}
 
+          {activeTab === "fandom" && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Fandom</p>
+                    <h3 className="text-xl font-bold text-zinc-900">Season {season.season_number}</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFandomSyncOpen(true)}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                  >
+                    Sync by Fandom
+                  </button>
+                </div>
+                {fandomSyncError && <p className="mt-3 text-sm text-red-600">{fandomSyncError}</p>}
+                {seasonFandomError && <p className="mt-2 text-sm text-red-600">{seasonFandomError}</p>}
+              </div>
+
+              {seasonFandomLoading ? (
+                <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm text-zinc-500">Loading season fandom...</p>
+                </div>
+              ) : seasonFandomData.length === 0 ? (
+                <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm text-zinc-500">No persisted Fandom data found for this season.</p>
+                </div>
+              ) : (
+                seasonFandomData.map((fandom) => (
+                  <div key={fandom.id} className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                    <div className="mb-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">{fandom.source}</p>
+                        <h4 className="text-lg font-semibold text-zinc-900">{fandom.page_title || "Fandom Season Profile"}</h4>
+                      </div>
+                      {fandom.source_url && (
+                        <a
+                          href={fandom.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                        >
+                          View on Fandom →
+                        </a>
+                      )}
+                    </div>
+                    {fandom.summary && <p className="mb-4 text-sm leading-relaxed text-zinc-700">{fandom.summary}</p>}
+                    {Array.isArray(fandom.dynamic_sections) && fandom.dynamic_sections.length > 0 && (
+                      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Dynamic Sections</p>
+                        <pre className="overflow-auto text-xs text-zinc-700">{JSON.stringify(fandom.dynamic_sections, null, 2)}</pre>
+                      </div>
+                    )}
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      {Array.isArray(fandom.citations) && (
+                        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Citations</p>
+                          <pre className="overflow-auto text-xs text-zinc-700">{JSON.stringify(fandom.citations, null, 2)}</pre>
+                        </div>
+                      )}
+                      {Array.isArray(fandom.conflicts) && (
+                        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Conflicts</p>
+                          <pre className="overflow-auto text-xs text-zinc-700">{JSON.stringify(fandom.conflicts, null, 2)}</pre>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
           {activeTab === "cast" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
@@ -4894,6 +5099,17 @@ export default function SeasonDetailPage() {
           unknownTextCount={isTextFilterActive ? unknownTextCount : undefined}
           onDetectTextForVisible={isTextFilterActive ? detectTextOverlayForUnknown : undefined}
           textOverlayDetectError={textOverlayDetectError}
+        />
+
+        <FandomSyncModal
+          isOpen={fandomSyncOpen}
+          onClose={() => setFandomSyncOpen(false)}
+          onPreview={previewSyncByFandom}
+          onCommit={commitSyncByFandom}
+          previewData={fandomSyncPreview}
+          previewLoading={fandomSyncPreviewLoading}
+          commitLoading={fandomSyncCommitLoading}
+          entityLabel={show?.name ? `${show.name} Season ${seasonNumber}` : `Season ${seasonNumber}`}
         />
 
         {/* Add Backdrops drawer */}

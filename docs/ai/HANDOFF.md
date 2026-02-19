@@ -4,6 +4,37 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-19)
 
+- February 19, 2026: Fixed `canSyncByBravo` TDZ crash in show admin page Sync by Bravo flow.
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Changes:
+    - Resolved runtime `ReferenceError: Cannot access 'canSyncByBravo' before initialization` by moving Sync-by-Bravo readiness derivations (`syncedSeasonCount`, `syncedEpisodeCount`, `syncedCastCount`, `syncBravoReadinessIssues`, `canSyncByBravo`, `syncBravoReadinessMessage`) above `startSyncBravoFlow` hook initialization.
+    - Kept behavior unchanged otherwise; removed duplicate late declarations in render section.
+  - Validation:
+    - `pnpm -C TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass; pre-existing `@next/next/no-img-element` warnings only)
+    - `pnpm -C TRR-APP/apps/web exec vitest run tests/show-bravo-cast-only-wiring.test.ts` (`2 passed`)
+
+- February 19, 2026: Fixed multi-tab admin loading stalls by bounding client auth readiness waits and decoupling guard completion from `authStateReady`.
+  - Files:
+    - `apps/web/src/lib/admin/client-auth.ts`
+    - `apps/web/src/lib/admin/useAdminGuard.ts`
+    - `apps/web/tests/admin-client-auth.test.ts`
+    - `apps/web/tests/use-admin-guard-stability.test.tsx`
+  - Changes:
+    - Added bounded Firebase auth readiness wait in `getClientAuthHeaders(...)` using `NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS` (default `2500ms`) so admin token retrieval cannot block indefinitely.
+    - Preserved fail-closed behavior (`Not authenticated`) and existing token retry/refresh semantics.
+    - Updated `useAdminGuard` so first `onAuthStateChanged` emission can clear `checking` even if `authStateReady` is delayed.
+    - Added bounded guard fallback timer (same env/default timeout) so redirect decisions (`/` and `/hub`) still complete when readiness is slow.
+    - Added regression coverage for:
+      - unresolved `authStateReady` + admin emission,
+      - slow `authStateReady` + unauth redirect fallback,
+      - readiness timeout + token success,
+      - readiness timeout + deterministic unauth failure.
+  - Validation:
+    - `pnpm -C TRR-APP/apps/web exec vitest run tests/use-admin-guard-stability.test.tsx tests/admin-client-auth.test.ts` (`15 passed`)
+    - `pnpm -C TRR-APP/apps/web exec eslint src/lib/admin/useAdminGuard.ts src/lib/admin/client-auth.ts tests/use-admin-guard-stability.test.tsx tests/admin-client-auth.test.ts` (pass)
+    - Manual browser validation for dual-tab `/admin/fonts` + show social route not executed in this session.
+
 - February 19, 2026: Implemented admin multi-tab auth stabilization across shared auth primitives, guard redirect behavior, and admin surfaces.
   - Files:
     - `apps/web/src/lib/admin/client-auth.ts`
@@ -3742,3 +3773,136 @@ Continuation (same session, 2026-02-19) — social/reddit hardening pass (20 add
   - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with existing warnings)
   - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-threads-route.test.ts tests/social-admin-proxy.test.ts tests/reddit-discovery-service.test.ts` (`10 passed`)
   - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` failed on unrelated pre-existing error in `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/scrape-images/page.tsx:995` (`Cannot find name 'getAuthHeaders'`).
+
+Continuation (same session, 2026-02-19) — Sync by Bravo mode picker + cast-only flow wiring:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-bravo-cast-only-wiring.test.ts` (new)
+- Changes:
+  - Added cast URL inference helper for show cast names (`https://www.bravotv.com/people/{firstname-lastname}`) and threaded inferred URLs into Bravo preview/commit payloads via `person_url_candidates`.
+  - Added existing-run mode picker modal for Sync by Bravo with:
+    - `Cast Only`
+    - `Re-Run Show URL`
+  - Wired `Cast Only` to run preview/commit with `cast_only=true`, suppress full show/video/news editing UI, and focus on valid cast profile URL results.
+  - Kept full rerun path intact for existing behavior, including show metadata, images, videos, and news flow.
+  - Added reset guards so sync modal/mode state and image-selection state are cleared on show change and when entering cast-only mode.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-news-tab-google-wiring.test.ts tests/show-social-subnav-wiring.test.ts tests/show-bravo-cast-only-wiring.test.ts` (`7 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass; existing repo warnings only, no new errors)
+
+Continuation (same session, 2026-02-19) — TRR-APP admin page-load latency remediation (runtime-first):
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/cast/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/covered-shows-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-cast-route-default-min-episodes.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-cast-route-fallback.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/trr-shows-repository-photo-fallback.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-cast-lazy-loading-wiring.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/covered-shows-route-metadata.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/covered-shows-page-no-fanout-wiring.test.ts` (new)
+- Changes:
+  - Added explicit cast photo fallback policy to cast APIs via query param `photo_fallback=none|bravo` (default `none`) on:
+    - `GET /api/admin/trr-api/shows/[showId]/cast`
+    - `GET /api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast`
+  - Refactored cast photo lookup in repository to use typed fallback mode (`none` default, `bravo` opt-in), removing hardcoded always-on Bravo HTML fallback behavior.
+  - Added cast photo lookup diagnostics plumbing and route-level structured timing logs (gated by `TRR_CAST_PERF_LOGS`) including:
+    - total request ms
+    - repo call ms
+    - `db_queries_ms`
+    - `photo_map_stage_ms`
+    - `external_fetch_ms`
+    - external fetch attempted/resolved counts
+  - Changed show detail page initial load to stop blocking on cast fetch:
+    - initial load now waits on show + seasons + coverage only
+    - cast is lazy-loaded when Cast tab is opened
+    - cast fetch errors are localized to Cast UI (`castLoadError`) instead of global page-fatal error
+  - Added on-demand cast enrichment UI action: `Enrich Missing Cast Photos`:
+    - calls cast endpoint with `photo_fallback=bravo`
+    - merges only missing `photo_url`/thumbnail fields into existing cast state
+  - Updated season show-cast fetch for brand workflows to explicit fast mode:
+    - `/api/admin/trr-api/shows/{showId}/cast?limit=500&photo_fallback=none`
+  - Eliminated covered-shows N+1 fan-out:
+    - enriched `/api/admin/covered-shows` server payload with optional `canonical_slug`, `show_total_episodes`, `poster_url`
+    - updated `/admin/trr-shows` covered cards to consume enriched payload directly
+    - removed per-show seasons/show fetch worker loop
+- Timing baseline and after-status:
+  - Before (from workspace logs): `show_cast_api` avg total ~22.96s, avg render ~21.9s; repeated ~24.6s–30.8s spikes.
+  - After (code-path policy): default mode is now `photo_fallback=none`, so Bravo profile HTML fetch stage is disabled unless explicitly requested.
+  - After (instrumentation evidence path): when default mode is used, `external_fetch_ms` should remain `0` in cast timing logs; when `photo_fallback=bravo`, external stage is isolated and measurable.
+  - After (UX path): `/admin/trr-shows/[showId]` no longer blocks initial readiness on cast API completion.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/show-cast-route-default-min-episodes.test.ts tests/season-cast-route-fallback.test.ts tests/trr-shows-repository-photo-fallback.test.ts tests/show-cast-lazy-loading-wiring.test.ts tests/covered-shows-route-metadata.test.ts tests/covered-shows-page-no-fanout-wiring.test.ts` (`18 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass; warnings only, no errors)
+- Notes:
+  - Live end-to-end timing replay in this session was limited by admin-authenticated runtime access; added diagnostics are in place to capture before/after in active dev runs.
+
+Continuation (same session, 2026-02-19) — covered-shows join type hotfix:
+- File:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/covered-shows-repository.ts`
+- Fix:
+  - Resolved Postgres type mismatch (`operator does not exist: text = uuid`) in covered-shows enrichment join by normalizing both sides to text:
+    - from: `s.id::text = cs.trr_show_id`
+    - to: `s.id::text = cs.trr_show_id::text`
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/vitest.config.ts tests/covered-shows-route-metadata.test.ts` (`1 passed`)
+
+Continuation (same session, 2026-02-19) — covered-shows canonical slug schema hotfix:
+- File:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/covered-shows-repository.ts`
+- Fix:
+  - Removed dependency on missing `core.shows.canonical_slug` column in covered-shows enrichment query.
+  - Added local slug derivation (`SHOW_SLUG_SQL`) + collision-safe canonical slug generation using `core.shows.name` and `id` suffix, matching TRR show-repository behavior.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/vitest.config.ts tests/covered-shows-route-metadata.test.ts tests/covered-shows-page-no-fanout-wiring.test.ts` (`3 passed`)
+
+Continuation (same session, 2026-02-19) — `/admin` loading spinner deadlock fix:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/useAdminGuard.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/use-admin-guard-stability.test.tsx`
+- Fix:
+  - Resolved a guard deadlock where `/admin` could stay indefinitely on `Preparing admin dashboard...` when Firebase auth listener emission was delayed or missing.
+  - On auth-ready timeout, guard now seeds a one-time auth snapshot from `auth.currentUser`, sets `user/userKey/hasAccess`, clears `checking`, and applies existing redirect rules (`/` for unauthenticated, `/hub` for non-admin).
+  - This preserves normal emission-based behavior while preventing infinite spinner state.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/use-admin-guard-stability.test.tsx` (`9 passed`)
+  - Browser check with Playwright on `http://127.0.0.1:3000/admin`: spinner text `Preparing admin dashboard...` no longer persists.
+
+Continuation (same session, 2026-02-19) — Sync by Fandom app wiring (person + season tabs):
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/FandomSyncModal.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/people/[personId]/fandom/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/people/[personId]/import-fandom/preview/route.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/people/[personId]/import-fandom/commit/route.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/fandom/route.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/import-fandom/preview/route.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/import-fandom/commit/route.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-admin-routes.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-admin-routes.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-fandom-route-proxy.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-fandom-route-proxy.test.ts` (new)
+- Changes:
+  - Added reusable read-only two-step `Sync by Fandom` modal (`preview -> save`).
+  - Switched person fandom read route to backend proxy contract (`/api/v1/admin/person/{person_id}/fandom`).
+  - Added proxy routes for person and season fandom preview/commit workflows.
+  - Added person tab UX wiring:
+    - Sync button in Fandom tab.
+    - preview/commit handlers.
+    - rendering for `casting_summary`, `bio_card`, `dynamic_sections`, `citations`, `conflicts`.
+  - Added season tab UX wiring:
+    - new `Fandom` tab in season admin nav.
+    - season fandom fetch + sync modal integration.
+    - rendering for dynamic sections/citations/conflicts.
+  - Updated season route parsing/building types to include `fandom` tab.
+  - Extended shared fandom interfaces with dynamic/AI/citation/conflict/source-variant fields.
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm vitest run tests/show-admin-routes.test.ts tests/person-fandom-route-proxy.test.ts tests/season-fandom-route-proxy.test.ts` (`13 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm run lint` (pass; warnings only, no errors)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec tsc --noEmit` (pass)

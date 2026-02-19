@@ -95,6 +95,13 @@ describe("show-admin-routes", () => {
         new URLSearchParams("tab=media")
       )
     ).toMatchObject({ tab: "assets", assetsSubTab: "media", source: "query" });
+
+    expect(
+      parseSeasonRouteState(
+        "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4",
+        new URLSearchParams("tab=fandom")
+      )
+    ).toMatchObject({ tab: "fandom", assetsSubTab: "media", source: "query" });
   });
 
   it("builds canonical season URLs", () => {
@@ -129,6 +136,14 @@ describe("show-admin-routes", () => {
         tab: "assets",
       })
     ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=assets&assets=media");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonNumber: 4,
+        tab: "fandom",
+      })
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=fandom");
   });
 
   it("builds canonical season social week URLs", () => {

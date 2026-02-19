@@ -174,49 +174,59 @@ function buildUShapeSeatCenters(total: number, arcWidth: number, arcHeight: numb
     return [{ x: arcWidth / 2, y: arcHeight * 0.3 }];
   }
 
-  const topCount = total <= 6 ? 2 : 3;
-  const remaining = Math.max(0, total - topCount);
-  const leftCount = Math.ceil(remaining / 2);
-  const rightCount = remaining - leftCount;
+  const centerX = arcWidth * 0.5;
+  const centerY = arcHeight * 0.56;
+  const radiusX = arcWidth * 0.33;
+  const radiusY = arcHeight * 0.31;
+  const startAngle = (210 * Math.PI) / 180;
+  const endAngle = (-30 * Math.PI) / 180;
+  const samples = 480;
 
-  const leftX = arcWidth * 0.2;
-  const rightX = arcWidth * 0.8;
-  const sideTopY = arcHeight * 0.45;
-  const sideBottomY = arcHeight * 0.78;
+  const sampledPoints: SeatCenter[] = [];
+  const cumulativeLengths: number[] = [];
+  let totalLength = 0;
 
-  const topCenterX = arcWidth * 0.5;
-  const topCenterY = arcHeight * 0.4;
-  const topRx = arcWidth * 0.24;
-  const topRy = arcHeight * 0.16;
-
-  const left: SeatCenter[] = Array.from({ length: leftCount }, (_, index) => {
-    const t = leftCount <= 1 ? 0 : index / (leftCount - 1);
-    return {
-      x: leftX,
-      y: sideBottomY - (sideBottomY - sideTopY) * t,
+  for (let i = 0; i <= samples; i += 1) {
+    const t = i / samples;
+    const angle = startAngle + (endAngle - startAngle) * t;
+    const point: SeatCenter = {
+      x: centerX + Math.cos(angle) * radiusX,
+      y: centerY - Math.sin(angle) * radiusY,
     };
-  });
+    sampledPoints.push(point);
 
-  const top: SeatCenter[] = Array.from({ length: topCount }, (_, index) => {
-    const t = topCount <= 1 ? 0.5 : index / (topCount - 1);
-    const startAngle = Math.PI * 0.9;
-    const endAngle = Math.PI * 0.1;
-    const angle = startAngle - (startAngle - endAngle) * t;
-    return {
-      x: topCenterX + Math.cos(angle) * topRx,
-      y: topCenterY - Math.sin(angle) * topRy,
-    };
-  });
+    if (i === 0) {
+      cumulativeLengths.push(0);
+      continue;
+    }
 
-  const right: SeatCenter[] = Array.from({ length: rightCount }, (_, index) => {
-    const t = rightCount <= 1 ? 0 : index / (rightCount - 1);
-    return {
-      x: rightX,
-      y: sideTopY + (sideBottomY - sideTopY) * t,
-    };
-  });
+    const previous = sampledPoints[i - 1]!;
+    totalLength += Math.hypot(point.x - previous.x, point.y - previous.y);
+    cumulativeLengths.push(totalLength);
+  }
 
-  return [...left, ...top, ...right];
+  const centers: SeatCenter[] = [];
+  for (let seatIndex = 0; seatIndex < total; seatIndex += 1) {
+    const targetLength = (totalLength * seatIndex) / (total - 1);
+    let segmentIndex = 1;
+    while (segmentIndex < cumulativeLengths.length && cumulativeLengths[segmentIndex]! < targetLength) {
+      segmentIndex += 1;
+    }
+
+    const previousLength = cumulativeLengths[segmentIndex - 1] ?? 0;
+    const nextLength = cumulativeLengths[segmentIndex] ?? previousLength;
+    const distance = nextLength - previousLength;
+    const blend = distance <= 0 ? 0 : (targetLength - previousLength) / distance;
+    const previousPoint = sampledPoints[segmentIndex - 1] ?? sampledPoints[0]!;
+    const nextPoint = sampledPoints[segmentIndex] ?? previousPoint;
+
+    centers.push({
+      x: previousPoint.x + (nextPoint.x - previousPoint.x) * blend,
+      y: previousPoint.y + (nextPoint.y - previousPoint.y) * blend,
+    });
+  }
+
+  return centers;
 }
 
 export function computeReunionSeatLayout(seatCount: number, containerWidth: number): ReunionSeatLayout {

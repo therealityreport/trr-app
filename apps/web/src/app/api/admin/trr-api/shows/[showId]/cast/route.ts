@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getCoverPhotos } from "@/lib/server/admin/person-cover-photos-repository";
 import {
+  type CastPhotoFallbackMode,
+  type CastPhotoLookupDiagnostics,
   getCastByShowId,
   getShowArchiveFootageCast,
   getShowCastWithStats,
@@ -20,6 +22,21 @@ interface RouteParams {
   params: Promise<{ showId: string }>;
 }
 
+const CAST_PERF_LOGS_ENABLED = /^(1|true)$/i.test(process.env.TRR_CAST_PERF_LOGS ?? "");
+
+const createPhotoLookupDiagnostics = (): CastPhotoLookupDiagnostics => ({
+  media_links_query_ms: 0,
+  cast_photos_query_ms: 0,
+  people_query_ms: 0,
+  bravo_links_query_ms: 0,
+  bravo_profile_fetch_ms: 0,
+  bravo_profiles_attempted: 0,
+  bravo_profiles_resolved: 0,
+});
+
+const parsePhotoFallbackMode = (value: string | null): CastPhotoFallbackMode =>
+  value?.trim().toLowerCase() === "bravo" ? "bravo" : "none";
+
 /**
  * GET /api/admin/trr-api/shows/[showId]/cast
  *
@@ -32,8 +49,10 @@ interface RouteParams {
  * - offset: pagination offset (default 0)
  * - minEpisodes: filter to cast with at least N total episodes
  * - requireImage: filter to cast with at least 1 image URL
+ * - photo_fallback: none|bravo (default none)
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
+  const requestStartedAt = Date.now();
   try {
     await requireAdmin(request);
 
@@ -57,6 +76,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .toLowerCase();
     const rosterMode: CastRosterMode =
       rosterModeRaw === "imdb_show_membership" ? "imdb_show_membership" : "episode_evidence";
+    const photoFallbackMode = parsePhotoFallbackMode(searchParams.get("photo_fallback"));
 
     const parsedMinEpisodes = minEpisodes ? parseInt(minEpisodes, 10) : DEFAULT_MIN_EPISODES;
     const minEpisodesValue =
@@ -64,12 +84,64 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         ? parsedMinEpisodes
         : DEFAULT_MIN_EPISODES;
 
+    const episodeEvidenceDiagnostics = createPhotoLookupDiagnostics();
+    const archiveDiagnostics = createPhotoLookupDiagnostics();
+    const membershipDiagnostics = createPhotoLookupDiagnostics();
+    const fallbackDiagnostics = createPhotoLookupDiagnostics();
+
+    let episodeEvidenceQueryMs = 0;
+    let archiveQueryMs = 0;
+    let membershipQueryMs = 0;
+    let fallbackQueryMs = 0;
+
+    const episodeEvidencePromise = (async () => {
+      const startedAt = Date.now();
+      try {
+        return await getShowCastWithStats(showId, {
+          limit,
+          offset,
+          photoFallbackMode,
+          photoLookupDiagnostics: episodeEvidenceDiagnostics,
+        });
+      } finally {
+        episodeEvidenceQueryMs = Date.now() - startedAt;
+      }
+    })();
+
+    const archivePromise = (async () => {
+      const startedAt = Date.now();
+      try {
+        return await getShowArchiveFootageCast(showId, {
+          limit,
+          offset,
+          photoFallbackMode,
+          photoLookupDiagnostics: archiveDiagnostics,
+        });
+      } finally {
+        archiveQueryMs = Date.now() - startedAt;
+      }
+    })();
+
+    const membershipPromise = rosterMode === "imdb_show_membership"
+      ? (async () => {
+          const startedAt = Date.now();
+          try {
+            return await getCastByShowId(showId, {
+              limit,
+              offset,
+              photoFallbackMode,
+              photoLookupDiagnostics: membershipDiagnostics,
+            });
+          } finally {
+            membershipQueryMs = Date.now() - startedAt;
+          }
+        })()
+      : Promise.resolve([]);
+
     const [episodeEvidenceCast, archiveCast, membershipCast] = await Promise.all([
-      getShowCastWithStats(showId, { limit, offset }),
-      getShowArchiveFootageCast(showId, { limit, offset }),
-      rosterMode === "imdb_show_membership"
-        ? getCastByShowId(showId, { limit, offset })
-        : Promise.resolve([]),
+      episodeEvidencePromise,
+      archivePromise,
+      membershipPromise,
     ]);
 
     const evidenceByPersonId = new Map(
@@ -119,7 +191,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     if (rosterMode === "episode_evidence" && !hasExplicitMinEpisodes && cast.length === 0) {
-      const fallbackCast = await getCastByShowId(showId, { limit, offset });
+      const fallbackStartedAt = Date.now();
+      const fallbackCast = await getCastByShowId(showId, {
+        limit,
+        offset,
+        photoFallbackMode,
+        photoLookupDiagnostics: fallbackDiagnostics,
+      });
+      fallbackQueryMs = Date.now() - fallbackStartedAt;
       if (fallbackCast.length > 0) {
         cast = fallbackCast;
         castSource = "show_fallback";
@@ -163,6 +242,60 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     if (requireImage === "true" || requireImage === "1") {
       archiveCastWithCover = archiveCastWithCover.filter((member) => Boolean(member.photo_url));
+    }
+
+    if (CAST_PERF_LOGS_ENABLED) {
+      const diagnostics = [
+        episodeEvidenceDiagnostics,
+        archiveDiagnostics,
+        membershipDiagnostics,
+        fallbackDiagnostics,
+      ];
+      const dbQueriesMs = diagnostics.reduce(
+        (sum, metric) =>
+          sum +
+          metric.media_links_query_ms +
+          metric.cast_photos_query_ms +
+          metric.people_query_ms +
+          metric.bravo_links_query_ms,
+        0
+      );
+      const externalFetchMs = diagnostics.reduce(
+        (sum, metric) => sum + metric.bravo_profile_fetch_ms,
+        0
+      );
+      const externalFetchAttempted = diagnostics.reduce(
+        (sum, metric) => sum + metric.bravo_profiles_attempted,
+        0
+      );
+      const externalFetchResolved = diagnostics.reduce(
+        (sum, metric) => sum + metric.bravo_profiles_resolved,
+        0
+      );
+
+      console.info(
+        "[show_cast_api_timing]",
+        JSON.stringify({
+          show_id: showId,
+          roster_mode: rosterMode,
+          photo_fallback: photoFallbackMode,
+          cast_source: castSource,
+          total_ms: Date.now() - requestStartedAt,
+          repo_call_ms: {
+            episode_evidence: episodeEvidenceQueryMs,
+            archive_cast: archiveQueryMs,
+            membership_cast: membershipQueryMs,
+            fallback_cast: fallbackQueryMs,
+          },
+          db_queries_ms: dbQueriesMs,
+          photo_map_stage_ms: dbQueriesMs + externalFetchMs,
+          external_fetch_ms: externalFetchMs,
+          external_fetch_attempted: externalFetchAttempted,
+          external_fetch_resolved: externalFetchResolved,
+          cast_count: castWithCover.length,
+          archive_cast_count: archiveCastWithCover.length,
+        })
+      );
     }
 
     return NextResponse.json({

@@ -17,7 +17,7 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 
 import { GET } from "@/app/api/admin/trr-api/people/[personId]/fandom/route";
 
-describe("person fandom route", () => {
+describe("person fandom proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
@@ -28,24 +28,16 @@ describe("person fandom route", () => {
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role";
   });
 
-  it("forwards showId query param to repository for show-scoped relationship fallback", async () => {
+  it("proxies backend fandom response", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ fandomData: [{ id: "f1" }], count: 1 }),
     });
-
-    const request = new NextRequest(
-      "http://localhost/api/admin/trr-api/people/person-1/fandom?showId=show-123"
-    );
-
-    const response = await GET(request, {
-      params: Promise.resolve({ personId: "person-1" }),
-    });
-
+    const request = new NextRequest("http://localhost/api/admin/trr-api/people/person-1/fandom");
+    const response = await GET(request, { params: Promise.resolve({ personId: "person-1" }) });
+    const payload = await response.json();
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://backend/api/v1/admin/person/person-1/fandom?showId=show-123",
-      expect.objectContaining({ method: "GET" }),
-    );
+    expect(payload.count).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

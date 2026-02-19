@@ -5,44 +5,27 @@ import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 export const dynamic = "force-dynamic";
 
 interface RouteParams {
-  params: Promise<{ personId: string }>;
+  params: Promise<{ showId: string; seasonNumber: string }>;
 }
 
-/**
- * GET /api/admin/trr-api/people/[personId]/fandom
- *
- * Get Fandom/Wikia biographical data for a person.
- */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     await requireAdmin(request);
-
-    const { personId } = await params;
-    const showId = request.nextUrl.searchParams.get("showId")?.trim() ?? "";
-
-    if (!personId) {
-      return NextResponse.json(
-        { error: "personId is required" },
-        { status: 400 }
-      );
+    const { showId, seasonNumber } = await params;
+    if (!showId || !seasonNumber) {
+      return NextResponse.json({ error: "showId and seasonNumber are required" }, { status: 400 });
     }
 
-    const backendUrl = getBackendApiUrl(`/admin/person/${personId}/fandom`);
+    const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/seasons/${seasonNumber}/fandom`);
     if (!backendUrl) {
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
-
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }
 
-    const backendRequestUrl = new URL(backendUrl);
-    if (showId) {
-      backendRequestUrl.searchParams.set("showId", showId);
-    }
-
-    const response = await fetch(backendRequestUrl.toString(), {
+    const response = await fetch(backendUrl, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${serviceRoleKey}`,
@@ -56,19 +39,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           ? data.error
           : typeof data.detail === "string"
             ? data.detail
-            : "Fandom fetch failed";
+            : "Season fandom fetch failed";
       return NextResponse.json({ error }, { status: response.status });
     }
-
-    return NextResponse.json({
-      fandomData: Array.isArray(data.fandomData) ? data.fandomData : [],
-      count: typeof data.count === "number" ? data.count : 0,
-    });
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("[api] Failed to get TRR person fandom data", error);
+    console.error("[api] Failed to fetch season fandom", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

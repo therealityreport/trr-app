@@ -10,6 +10,9 @@ export interface CoveredShow {
   id: string;
   trr_show_id: string;
   show_name: string;
+  canonical_slug?: string | null;
+  show_total_episodes?: number | null;
+  poster_url?: string | null;
   created_at: string;
   created_by_firebase_uid: string;
 }
@@ -24,6 +27,18 @@ export interface CreateCoveredShowInput {
 // ============================================================================
 
 const TABLE = "admin.covered_shows";
+const SHOW_SLUG_SQL = `
+  lower(
+    trim(
+      both '-' FROM regexp_replace(
+        regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
+        '[^a-z0-9]+',
+        '-',
+        'gi'
+      )
+    )
+  )
+`;
 
 // ============================================================================
 // Read Operations
@@ -34,7 +49,26 @@ const TABLE = "admin.covered_shows";
  */
 export async function getCoveredShows(): Promise<CoveredShow[]> {
   const result = await query<CoveredShow>(
-    `SELECT * FROM ${TABLE} ORDER BY show_name ASC`,
+    `WITH shows_with_slug AS (
+       SELECT
+         s.*,
+         ${SHOW_SLUG_SQL} AS slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     )
+     SELECT
+       cs.*,
+       CASE
+         WHEN s.slug_collision_count > 1
+           THEN s.slug || '--' || lower(left(s.id::text, 8))
+         ELSE s.slug
+       END AS canonical_slug,
+       s.show_total_episodes,
+       si.hosted_url AS poster_url
+     FROM ${TABLE} cs
+     LEFT JOIN shows_with_slug s ON s.id::text = cs.trr_show_id::text
+     LEFT JOIN core.show_images si ON si.id = s.primary_poster_image_id
+     ORDER BY cs.show_name ASC`,
     [],
   );
   return result.rows;

@@ -8,10 +8,22 @@ import { isClientAdmin } from "./client-access";
 import { isDevAdminBypassEnabledClient } from "./dev-admin-bypass";
 
 const TRANSIENT_UNAUTH_GRACE_MS = 2500;
+const DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS = 2500;
 
 function buildUserKey(user: User | null): string | null {
   if (!user) return null;
   return `${user.uid}|${user.email ?? ""}|${user.displayName ?? ""}`;
+}
+
+function getAdminAuthReadyTimeoutMs(): number {
+  const rawTimeout = process.env.NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS;
+  if (!rawTimeout) return DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS;
+
+  const parsed = Number.parseInt(rawTimeout, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS;
+  }
+  return parsed;
 }
 
 export function useAdminGuard() {
@@ -41,6 +53,7 @@ export function useAdminGuard() {
     let pendingHasAccess = false;
     let hadAuthenticatedSession = false;
     let transientUnauthTimer: ReturnType<typeof setTimeout> | null = null;
+    let authReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
     const clearTransientUnauthTimer = () => {
       if (!transientUnauthTimer) return;
@@ -48,9 +61,15 @@ export function useAdminGuard() {
       transientUnauthTimer = null;
     };
 
+    const clearAuthReadyFallbackTimer = () => {
+      if (!authReadyFallbackTimer) return;
+      clearTimeout(authReadyFallbackTimer);
+      authReadyFallbackTimer = null;
+    };
+
     const finishCheckingIfReady = () => {
       if (!mounted) return;
-      if (authReady && receivedAuthEmission) {
+      if (receivedAuthEmission) {
         setChecking(false);
       }
     };
@@ -68,14 +87,35 @@ export function useAdminGuard() {
       lastHasAccess = pendingHasAccess;
     };
 
-    const authStateReady = (auth as { authStateReady?: () => Promise<void> }).authStateReady;
-    const authReadyPromise =
-      typeof authStateReady === "function" ? authStateReady.call(auth) : Promise.resolve();
-    void authReadyPromise.finally(() => {
+    const markAuthReady = () => {
+      if (authReady) return;
       authReady = true;
+      clearAuthReadyFallbackTimer();
+      if (!receivedAuthEmission) {
+        const snapshotUser = auth.currentUser;
+        const snapshotUserKey = buildUserKey(snapshotUser);
+        const snapshotHasAccess = Boolean(snapshotUser && isClientAdmin(snapshotUser));
+        receivedAuthEmission = true;
+        pendingUserKey = snapshotUserKey;
+        pendingHasAccess = snapshotHasAccess;
+        lastUserKey = snapshotUserKey;
+        lastHasAccess = snapshotHasAccess;
+        hadAuthenticatedSession = Boolean(snapshotUserKey);
+        setUser(snapshotUser);
+        setUserKey(snapshotUserKey);
+        setHasAccess(snapshotHasAccess);
+      }
       finishCheckingIfReady();
       evaluateInitialRedirect();
-    });
+    };
+
+    authReadyFallbackTimer = setTimeout(markAuthReady, getAdminAuthReadyTimeoutMs());
+    const authStateReady = (auth as { authStateReady?: () => Promise<void> }).authStateReady;
+    const authReadyPromise =
+      typeof authStateReady === "function"
+        ? Promise.resolve(authStateReady.call(auth)).catch(() => undefined)
+        : Promise.resolve();
+    void authReadyPromise.finally(markAuthReady);
 
     const unsubscribe = auth.onAuthStateChanged((currentUser) => {
       if (!mounted) return;
@@ -144,6 +184,7 @@ export function useAdminGuard() {
     return () => {
       mounted = false;
       clearTransientUnauthTimer();
+      clearAuthReadyFallbackTimer();
       unsubscribe();
     };
   }, [router]);

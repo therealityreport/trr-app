@@ -5,6 +5,7 @@ import { isDevAdminBypassEnabledClient } from "@/lib/admin/dev-admin-bypass";
 import { auth } from "@/lib/firebase";
 
 const DEFAULT_TOKEN_RETRY_DELAYS_MS = [150, 300, 600] as const;
+const DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS = 2500;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -18,6 +19,36 @@ function isPreferredUserMatch(currentUser: User | null, preferredUser: User | nu
   if (!preferredUser?.uid) return true;
   if (!currentUser?.uid) return false;
   return currentUser.uid === preferredUser.uid;
+}
+
+function getAdminAuthReadyTimeoutMs(): number {
+  const rawTimeout = process.env.NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS;
+  if (!rawTimeout) return DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS;
+
+  const parsed = Number.parseInt(rawTimeout, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS;
+  }
+  return parsed;
+}
+
+async function waitForAuthStateReadyWithTimeout(): Promise<void> {
+  if (typeof auth.authStateReady !== "function") return;
+
+  const timeoutMs = getAdminAuthReadyTimeoutMs();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const safeAuthReadyPromise = Promise.resolve()
+    .then(() => auth.authStateReady?.())
+    .catch(() => undefined);
+  const timeoutPromise = new Promise<void>((resolve) => {
+    timeoutId = setTimeout(resolve, timeoutMs);
+  });
+
+  await Promise.race([safeAuthReadyPromise, timeoutPromise]);
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
 }
 
 export interface ClientAuthOptions {
@@ -36,9 +67,7 @@ export async function getClientAuthHeaders(
       ? options.tokenRetryDelaysMs
       : [...DEFAULT_TOKEN_RETRY_DELAYS_MS];
 
-  if (typeof auth.authStateReady === "function") {
-    await auth.authStateReady();
-  }
+  await waitForAuthStateReadyWithTimeout();
 
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     const currentUser = auth.currentUser;
