@@ -191,6 +191,26 @@ interface BravoNewsItem {
   person_tags?: BravoPersonTag[];
 }
 
+interface UnifiedNewsSeasonMatch {
+  season_number?: number | null;
+  match_types?: string[] | null;
+}
+
+interface UnifiedNewsItem {
+  source_id?: string | null;
+  headline?: string | null;
+  article_url: string;
+  image_url?: string | null;
+  published_at?: string | null;
+  publisher_name?: string | null;
+  publisher_domain?: string | null;
+  person_tags?: BravoPersonTag[];
+  topic_tags?: string[] | null;
+  season_matches?: UnifiedNewsSeasonMatch[] | null;
+  feed_rank?: number | null;
+  trending_rank?: number | null;
+}
+
 interface BravoPreviewPerson {
   name?: string | null;
   canonical_url?: string | null;
@@ -968,11 +988,26 @@ export default function TrrShowDetailPage() {
   const [selectedSocialSeasonId, setSelectedSocialSeasonId] = useState<string | null>(null);
   const [assetsView, setAssetsView] = useState<"images" | "videos" | "brand">("images");
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
-  const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
   const [bravoLoading, setBravoLoading] = useState(false);
   const [bravoError, setBravoError] = useState<string | null>(null);
   const [bravoLoaded, setBravoLoaded] = useState(false);
   const bravoLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const [unifiedNews, setUnifiedNews] = useState<UnifiedNewsItem[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsSyncing, setNewsSyncing] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsNotice, setNewsNotice] = useState<string | null>(null);
+  const [newsLoaded, setNewsLoaded] = useState(false);
+  const [newsGoogleUrlMissing, setNewsGoogleUrlMissing] = useState(false);
+  const [newsSort, setNewsSort] = useState<"trending" | "latest">("trending");
+  const [newsSourceFilter, setNewsSourceFilter] = useState<string>("");
+  const [newsPersonFilter, setNewsPersonFilter] = useState<string>("");
+  const [newsTopicFilter, setNewsTopicFilter] = useState<string>("");
+  const [newsSeasonFilter, setNewsSeasonFilter] = useState<string>("");
+  const newsLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const newsSyncInFlightRef = useRef<Promise<void> | null>(null);
+  const newsAutoSyncAttemptedRef = useRef(false);
+  const newsLoadedSortRef = useRef<"trending" | "latest" | null>(null);
   const [syncBravoOpen, setSyncBravoOpen] = useState(false);
   const [syncBravoUrl, setSyncBravoUrl] = useState("");
   const [syncBravoDescription, setSyncBravoDescription] = useState("");
@@ -1021,6 +1056,11 @@ export default function TrrShowDetailPage() {
   const [linksLoading, setLinksLoading] = useState(false);
   const [linksError, setLinksError] = useState<string | null>(null);
   const [linksNotice, setLinksNotice] = useState<string | null>(null);
+  const [googleNewsLinkId, setGoogleNewsLinkId] = useState<string | null>(null);
+  const [googleNewsUrl, setGoogleNewsUrl] = useState("");
+  const [googleNewsSaving, setGoogleNewsSaving] = useState(false);
+  const [googleNewsError, setGoogleNewsError] = useState<string | null>(null);
+  const [googleNewsNotice, setGoogleNewsNotice] = useState<string | null>(null);
 
   const [showRoles, setShowRoles] = useState<ShowRole[]>([]);
   const [showRolesLoadedOnce, setShowRolesLoadedOnce] = useState(false);
@@ -2094,6 +2134,78 @@ export default function TrrShowDetailPage() {
     [fetchShowLinks, getAuthHeaders, showId]
   );
 
+  const saveGoogleNewsLink = useCallback(async () => {
+    if (!showId) return;
+    const trimmedUrl = googleNewsUrl.trim();
+    if (!trimmedUrl) {
+      setGoogleNewsError("Google News URL is required.");
+      return;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmedUrl);
+    } catch {
+      setGoogleNewsError("Enter a valid URL.");
+      return;
+    }
+    if (!parsed.hostname.includes("news.google.com")) {
+      setGoogleNewsError("Google News URL must use news.google.com.");
+      return;
+    }
+
+    setGoogleNewsSaving(true);
+    setGoogleNewsError(null);
+    setGoogleNewsNotice(null);
+    try {
+      const headers = await getAuthHeaders();
+      if (googleNewsLinkId) {
+        const response = await fetch(`/api/admin/trr-api/shows/${showId}/links/${googleNewsLinkId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: trimmedUrl,
+            label: "Google News URL",
+            link_group: "official",
+            link_kind: "google_news_url",
+            status: "approved",
+          }),
+        });
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to update Google News URL");
+        }
+      } else {
+        const response = await fetch(`/api/admin/trr-api/shows/${showId}/links`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entity_type: "show",
+            entity_id: showId,
+            link_group: "official",
+            link_kind: "google_news_url",
+            label: "Google News URL",
+            url: trimmedUrl,
+            season_number: 0,
+            status: "approved",
+            source: "manual",
+            metadata: {},
+          }),
+        });
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to create Google News URL");
+        }
+      }
+      setGoogleNewsNotice("Saved Google News URL.");
+      setNewsGoogleUrlMissing(false);
+      await fetchShowLinks();
+    } catch (err) {
+      setGoogleNewsError(err instanceof Error ? err.message : "Failed to save Google News URL");
+    } finally {
+      setGoogleNewsSaving(false);
+    }
+  }, [fetchShowLinks, getAuthHeaders, googleNewsLinkId, googleNewsUrl, showId]);
+
   const fetchShowRoles = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       if (!showId) return;
@@ -2440,43 +2552,25 @@ export default function TrrShowDetailPage() {
         setBravoError(null);
         const headers = await getAuthHeaders();
 
-        const [videosResponse, newsResponse] = await Promise.all([
-          fetchWithTimeout(
-            `/api/admin/trr-api/shows/${showId}/bravo/videos?merge_person_sources=true`,
-            {
-              headers,
-              cache: "no-store",
-            },
-            BRAVO_LOAD_TIMEOUT_MS
-          ),
-          fetchWithTimeout(
-            `/api/admin/trr-api/shows/${showId}/bravo/news`,
-            {
-              headers,
-              cache: "no-store",
-            },
-            BRAVO_LOAD_TIMEOUT_MS
-          ),
-        ]);
+        const videosResponse = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/bravo/videos?merge_person_sources=true`,
+          {
+            headers,
+            cache: "no-store",
+          },
+          BRAVO_LOAD_TIMEOUT_MS
+        );
 
         const videosData = (await videosResponse.json().catch(() => ({}))) as {
           videos?: BravoVideoItem[];
-          error?: string;
-        };
-        const newsData = (await newsResponse.json().catch(() => ({}))) as {
-          news?: BravoNewsItem[];
           error?: string;
         };
 
         if (!videosResponse.ok) {
           throw new Error(videosData.error || "Failed to fetch Bravo videos");
         }
-        if (!newsResponse.ok) {
-          throw new Error(newsData.error || "Failed to fetch Bravo news");
-        }
 
         setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
-        setBravoNews(Array.isArray(newsData.news) ? newsData.news : []);
         setBravoLoaded(true);
       } catch (err) {
         const message = isAbortError(err)
@@ -2500,6 +2594,121 @@ export default function TrrShowDetailPage() {
       }
     }
   }, [bravoLoaded, getAuthHeaders, showId]);
+
+  const syncGoogleNews = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!showId) return;
+      if (newsSyncInFlightRef.current) {
+        await newsSyncInFlightRef.current;
+        return;
+      }
+
+      const request = (async () => {
+        try {
+          setNewsSyncing(true);
+          const headers = await getAuthHeaders();
+          const response = await fetch(`/api/admin/trr-api/shows/${showId}/google-news/sync`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ force }),
+          });
+          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          if (!response.ok) {
+            if (response.status === 409) {
+              const message = data.error || "Google News URL is not configured for this show.";
+              setNewsGoogleUrlMissing(true);
+              setNewsNotice(message);
+              return;
+            }
+            throw new Error(data.error || "Failed to sync Google News");
+          }
+          setNewsGoogleUrlMissing(false);
+          setNewsNotice(null);
+        } catch (err) {
+          throw err;
+        } finally {
+          setNewsSyncing(false);
+        }
+      })();
+
+      newsSyncInFlightRef.current = request;
+      try {
+        await request;
+      } finally {
+        if (newsSyncInFlightRef.current === request) {
+          newsSyncInFlightRef.current = null;
+        }
+      }
+    },
+    [getAuthHeaders, showId]
+  );
+
+  const loadUnifiedNews = useCallback(
+    async ({ force = false, forceSync = false }: { force?: boolean; forceSync?: boolean } = {}) => {
+      if (!showId) return;
+      if (!force && newsLoaded && newsLoadedSortRef.current === newsSort) return;
+      if (newsLoadInFlightRef.current) {
+        await newsLoadInFlightRef.current;
+        return;
+      }
+
+      const request = (async () => {
+        try {
+          setNewsLoading(true);
+          setNewsError(null);
+          if (forceSync || !newsAutoSyncAttemptedRef.current) {
+            await syncGoogleNews({ force: forceSync });
+            newsAutoSyncAttemptedRef.current = true;
+          }
+
+          const headers = await getAuthHeaders();
+          const params = new URLSearchParams({
+            sources: "bravo,google_news",
+            sort: newsSort,
+          });
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showId}/news?${params.toString()}`,
+            {
+              headers,
+              cache: "no-store",
+            },
+            BRAVO_LOAD_TIMEOUT_MS
+          );
+          const data = (await response.json().catch(() => ({}))) as {
+            news?: UnifiedNewsItem[];
+            error?: string;
+          };
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to fetch unified news");
+          }
+          setUnifiedNews(Array.isArray(data.news) ? data.news : []);
+          setNewsLoaded(true);
+          newsLoadedSortRef.current = newsSort;
+        } catch (err) {
+          const message = isAbortError(err)
+            ? `Timed out loading news after ${Math.round(BRAVO_LOAD_TIMEOUT_MS / 1000)}s`
+            : err instanceof Error
+              ? err.message
+              : "Failed to load unified news";
+          setNewsLoaded(false);
+          newsLoadedSortRef.current = null;
+          setNewsError(message);
+        } finally {
+          setNewsLoading(false);
+        }
+      })();
+
+      newsLoadInFlightRef.current = request;
+      try {
+        await request;
+      } finally {
+        if (newsLoadInFlightRef.current === request) {
+          newsLoadInFlightRef.current = null;
+        }
+      }
+    },
+    [getAuthHeaders, newsLoaded, newsSort, showId, syncGoogleNews]
+  );
 
   const syncBravoSeasonOptions = useMemo(() => {
     const numbers = seasons
@@ -2776,7 +2985,9 @@ export default function TrrShowDetailPage() {
 
       await Promise.all([fetchShow(), fetchCast()]);
       setBravoLoaded(false);
+      setNewsLoaded(false);
       void loadBravoData({ force: true });
+      void loadUnifiedNews({ force: true });
     } catch (err) {
       appendRefreshLog({
         category: "BravoTV",
@@ -2792,6 +3003,7 @@ export default function TrrShowDetailPage() {
     fetchShow,
     getAuthHeaders,
     loadBravoData,
+    loadUnifiedNews,
     showId,
     syncBravoDescription,
     syncBravoImageKinds,
@@ -2802,6 +3014,7 @@ export default function TrrShowDetailPage() {
     syncBravoAirs,
     syncBravoTargetSeasonNumber,
     syncBravoUrl,
+    setNewsLoaded,
   ]);
 
   const syncBravoLoading = syncBravoPreviewLoading || syncBravoCommitLoading;
@@ -2886,6 +3099,33 @@ export default function TrrShowDetailPage() {
   }, [activeTab, fetchShowLinks, hasAccess, showId]);
 
   useEffect(() => {
+    const candidates = showLinks.filter(
+      (link) =>
+        link.entity_type === "show" &&
+        link.link_kind === "google_news_url" &&
+        Number(link.season_number || 0) === 0
+    );
+    if (candidates.length === 0) {
+      setGoogleNewsLinkId(null);
+      setGoogleNewsUrl("");
+      return;
+    }
+    const rankStatus = (status: EntityLinkStatus): number => {
+      if (status === "approved") return 0;
+      if (status === "pending") return 1;
+      return 2;
+    };
+    const sorted = [...candidates].sort((a, b) => {
+      const statusDiff = rankStatus(normalizeEntityLinkStatus(a.status)) - rankStatus(normalizeEntityLinkStatus(b.status));
+      if (statusDiff !== 0) return statusDiff;
+      return (b.updated_at || "").localeCompare(a.updated_at || "");
+    });
+    const selected = sorted[0] ?? null;
+    setGoogleNewsLinkId(selected?.id ?? null);
+    setGoogleNewsUrl(selected?.url ?? "");
+  }, [showLinks]);
+
+  useEffect(() => {
     if (!hasAccess || !showId || (activeTab !== "cast" && activeTab !== "settings")) return;
     if (showRolesLoadedOnce) return;
     void fetchShowRoles();
@@ -2898,10 +3138,23 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     setBravoVideos([]);
-    setBravoNews([]);
     setBravoError(null);
     setBravoLoaded(false);
     bravoLoadInFlightRef.current = null;
+    setUnifiedNews([]);
+    setNewsError(null);
+    setNewsNotice(null);
+    setNewsLoaded(false);
+    setNewsGoogleUrlMissing(false);
+    setNewsSort("trending");
+    setNewsSourceFilter("");
+    setNewsPersonFilter("");
+    setNewsTopicFilter("");
+    setNewsSeasonFilter("");
+    newsLoadInFlightRef.current = null;
+    newsSyncInFlightRef.current = null;
+    newsAutoSyncAttemptedRef.current = false;
+    newsLoadedSortRef.current = null;
     setShowLinks([]);
     setShowRoles([]);
     setShowRolesLoadedOnce(false);
@@ -2915,16 +3168,26 @@ export default function TrrShowDetailPage() {
     setCastMatrixSyncResult(null);
     setLinksError(null);
     setLinksNotice(null);
+    setGoogleNewsLinkId(null);
+    setGoogleNewsUrl("");
+    setGoogleNewsNotice(null);
+    setGoogleNewsError(null);
     setDetailsEditing(false);
   }, [showId]);
 
   useEffect(() => {
     if (!hasAccess || !showId) return;
-    const shouldLoadBravo =
-      refreshLogOpen || activeTab === "news" || (activeTab === "assets" && assetsView === "videos");
+    const shouldLoadBravo = refreshLogOpen || (activeTab === "assets" && assetsView === "videos");
     if (!shouldLoadBravo) return;
     void loadBravoData();
   }, [activeTab, assetsView, hasAccess, loadBravoData, refreshLogOpen, showId]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId) return;
+    const shouldLoadNews = refreshLogOpen || activeTab === "news";
+    if (!shouldLoadNews) return;
+    void loadUnifiedNews();
+  }, [activeTab, hasAccess, loadUnifiedNews, refreshLogOpen, showId]);
 
   useEffect(() => {
     if (seasons.length > 0) {
@@ -3154,6 +3417,90 @@ export default function TrrShowDetailPage() {
     () => showLinks.filter((link) => link.status === "pending").length,
     [showLinks]
   );
+
+  const newsSourceOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const item of unifiedNews) {
+      const domain = String(item.publisher_domain || "").trim();
+      if (domain) {
+        values.add(domain);
+        continue;
+      }
+      const name = String(item.publisher_name || "").trim();
+      if (name) values.add(name);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [unifiedNews]);
+
+  const newsPeopleOptions = useMemo(() => {
+    const values = new Map<string, string>();
+    for (const item of unifiedNews) {
+      for (const tag of item.person_tags || []) {
+        const personId = String(tag?.person_id || "").trim();
+        const personName = String(tag?.person_name || "").trim();
+        if (!personId || !personName || values.has(personId)) continue;
+        values.set(personId, personName);
+      }
+    }
+    return Array.from(values.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [unifiedNews]);
+
+  const newsTopicOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const item of unifiedNews) {
+      for (const topicTag of item.topic_tags || []) {
+        const normalized = String(topicTag || "").trim();
+        if (normalized) values.add(normalized);
+      }
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [unifiedNews]);
+
+  const newsSeasonOptions = useMemo(() => {
+    const values = new Set<number>();
+    for (const item of unifiedNews) {
+      for (const match of item.season_matches || []) {
+        const seasonNumber = Number(match?.season_number || 0);
+        if (Number.isFinite(seasonNumber) && seasonNumber > 0) {
+          values.add(seasonNumber);
+        }
+      }
+    }
+    return Array.from(values).sort((a, b) => b - a);
+  }, [unifiedNews]);
+
+  const filteredUnifiedNews = useMemo(() => {
+    return unifiedNews.filter((item) => {
+      if (newsSourceFilter) {
+        const domain = String(item.publisher_domain || "").trim().toLowerCase();
+        const name = String(item.publisher_name || "").trim().toLowerCase();
+        const token = newsSourceFilter.toLowerCase();
+        if (domain !== token && name !== token) return false;
+      }
+      if (newsPersonFilter) {
+        const hasPerson = (item.person_tags || []).some(
+          (tag) => String(tag?.person_id || "").trim() === newsPersonFilter
+        );
+        if (!hasPerson) return false;
+      }
+      if (newsTopicFilter) {
+        const hasTopic = (item.topic_tags || []).some(
+          (topicTag) => String(topicTag || "").trim().toLowerCase() === newsTopicFilter.toLowerCase()
+        );
+        if (!hasTopic) return false;
+      }
+      if (newsSeasonFilter) {
+        const seasonNumber = Number(newsSeasonFilter);
+        const hasSeason = (item.season_matches || []).some(
+          (match) => Number(match?.season_number || 0) === seasonNumber
+        );
+        if (!hasSeason) return false;
+      }
+      return true;
+    });
+  }, [newsPersonFilter, newsSeasonFilter, newsSourceFilter, newsTopicFilter, unifiedNews]);
 
   const settingsLinkSections = useMemo(() => {
     const showPageLinks: EntityLink[] = [];
@@ -4781,9 +5128,9 @@ export default function TrrShowDetailPage() {
     : bravoVideos.length > 0
       ? "ready"
       : "missing";
-  const newsHealthStatus: HealthStatus = bravoLoading
+  const newsHealthStatus: HealthStatus = newsLoading || newsSyncing
     ? "stale"
-    : bravoNews.length > 0
+    : unifiedNews.length > 0
       ? "ready"
       : "missing";
 
@@ -4845,7 +5192,7 @@ export default function TrrShowDetailPage() {
     {
       key: "news",
       label: "News",
-      countLabel: `${bravoNews.length}`,
+      countLabel: `${unifiedNews.length}`,
       status: newsHealthStatus,
       onClick: () => setTab("news"),
     },
@@ -4889,11 +5236,19 @@ export default function TrrShowDetailPage() {
       },
     });
   }
-  if (bravoNews.length === 0) {
+  if (newsGoogleUrlMissing) {
     operationsInboxItems.push({
-      id: "no-bravo-news",
-      title: "No Bravo news persisted",
-      detail: "Run Sync by Bravo so show and person news can be tagged and displayed.",
+      id: "google-news-url-missing",
+      title: "Google News URL missing",
+      detail: "Add Google News URL in Show Settings to enable Google sync in the News tab.",
+      onClick: () => setTab("settings"),
+    });
+  }
+  if (unifiedNews.length === 0) {
+    operationsInboxItems.push({
+      id: "no-unified-news",
+      title: "No news persisted",
+      detail: "Open News tab to sync Google + Bravo sources, then refresh if needed.",
       onClick: () => setTab("news"),
     });
   }
@@ -5833,30 +6188,149 @@ export default function TrrShowDetailPage() {
           {/* NEWS Tab */}
           {activeTab === "news" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Bravo News
+                    Unified News Feed
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void loadBravoData({ force: true })}
-                  disabled={bravoLoading}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  {bravoLoading ? "Refreshing..." : "Refresh"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setNewsSort("trending")}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                        newsSort === "trending"
+                          ? "bg-white text-zinc-900 shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700"
+                      }`}
+                    >
+                      Trending
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewsSort("latest")}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                        newsSort === "latest"
+                          ? "bg-white text-zinc-900 shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700"
+                      }`}
+                    >
+                      Latest
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadUnifiedNews({ force: true, forceSync: true })}
+                    disabled={newsLoading || newsSyncing}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {newsLoading || newsSyncing ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
               </div>
 
-              {bravoError && <p className="mb-4 text-sm text-red-600">{bravoError}</p>}
-              {!bravoLoading && bravoNews.length === 0 && !bravoError && (
-                <p className="text-sm text-zinc-500">No persisted Bravo news found for this show.</p>
+              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  Source
+                  <select
+                    value={newsSourceFilter}
+                    onChange={(event) => setNewsSourceFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                  >
+                    <option value="">All sources</option>
+                    {newsSourceOptions.map((sourceOption) => (
+                      <option key={`news-source-${sourceOption}`} value={sourceOption}>
+                        {sourceOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  People
+                  <select
+                    value={newsPersonFilter}
+                    onChange={(event) => setNewsPersonFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                  >
+                    <option value="">All people</option>
+                    {newsPeopleOptions.map((personOption) => (
+                      <option key={`news-person-${personOption.id}`} value={personOption.id}>
+                        {personOption.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  Topic
+                  <select
+                    value={newsTopicFilter}
+                    onChange={(event) => setNewsTopicFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                  >
+                    <option value="">All topics</option>
+                    {newsTopicOptions.map((topicOption) => (
+                      <option key={`news-topic-${topicOption}`} value={topicOption}>
+                        {topicOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  Season
+                  <select
+                    value={newsSeasonFilter}
+                    onChange={(event) => setNewsSeasonFilter(event.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                  >
+                    <option value="">All seasons</option>
+                    {newsSeasonOptions.map((seasonOption) => (
+                      <option key={`news-season-${seasonOption}`} value={String(seasonOption)}>
+                        Season {seasonOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewsSourceFilter("");
+                      setNewsPersonFilter("");
+                      setNewsTopicFilter("");
+                      setNewsSeasonFilter("");
+                    }}
+                    className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+                <div className="flex items-end">
+                  <p className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-600">
+                    {filteredUnifiedNews.length} shown
+                  </p>
+                </div>
+              </div>
+
+              {(newsError || newsNotice) && (
+                <p className={`mb-4 text-sm ${newsError ? "text-red-600" : "text-zinc-500"}`}>
+                  {newsError || newsNotice}
+                </p>
+              )}
+              {newsGoogleUrlMissing && (
+                <p className="mb-4 text-sm text-amber-700">
+                  Google News URL is missing. Add it in Settings, then refresh this tab.
+                </p>
+              )}
+              {!newsLoading && filteredUnifiedNews.length === 0 && !newsError && (
+                <p className="text-sm text-zinc-500">
+                  No news items match the current filters. Sync Google News or adjust filters.
+                </p>
               )}
 
               <div className="grid gap-4 sm:grid-cols-2">
-                {bravoNews.map((item, index) => (
+                {filteredUnifiedNews.map((item, index) => (
                   <article key={`${item.article_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                     <a
                       href={item.article_url}
@@ -5868,7 +6342,7 @@ export default function TrrShowDetailPage() {
                         {item.image_url ? (
                           <GalleryImage
                             src={item.image_url}
-                            alt={item.headline || "Bravo news"}
+                            alt={item.headline || "News item"}
                             sizes="400px"
                             className="object-cover transition group-hover:scale-105"
                           />
@@ -5880,6 +6354,16 @@ export default function TrrShowDetailPage() {
                         {item.headline || "Untitled story"}
                       </h4>
                     </a>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700">
+                        {(item.publisher_name || item.publisher_domain || item.source_id || "Source").toString()}
+                      </span>
+                      {item.source_id === "google_news" && typeof item.feed_rank === "number" && (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
+                          Feed #{item.feed_rank + 1}
+                        </span>
+                      )}
+                    </div>
                     {Array.isArray(item.person_tags) && item.person_tags.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {item.person_tags.map((tag, tagIndex) => (
@@ -5888,6 +6372,33 @@ export default function TrrShowDetailPage() {
                             className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700"
                           >
                             {tag.person_name || "Person"}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(item.topic_tags) && item.topic_tags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {item.topic_tags.map((topicTag) => (
+                          <span
+                            key={`${item.article_url}-topic-${topicTag}`}
+                            className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700"
+                          >
+                            {topicTag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(item.season_matches) && item.season_matches.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {item.season_matches.map((match, matchIndex) => (
+                          <span
+                            key={`${item.article_url}-season-${match?.season_number || "x"}-${matchIndex}`}
+                            className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700"
+                          >
+                            Season {match?.season_number || "?"}
+                            {Array.isArray(match?.match_types) && match.match_types.length > 0
+                              ? ` (${match.match_types.join("+")})`
+                              : ""}
                           </span>
                         ))}
                       </div>
@@ -6452,13 +6963,46 @@ export default function TrrShowDetailPage() {
                 </button>
               </div>
 
-              {(linksError || linksNotice || rolesError) && (
+              {(linksError || linksNotice || rolesError || googleNewsError || googleNewsNotice) && (
                 <p className={`mb-4 text-sm ${linksError || rolesError ? "text-red-600" : "text-zinc-500"}`}>
-                  {linksError || rolesError || linksNotice}
+                  {linksError || rolesError || googleNewsError || linksNotice || googleNewsNotice}
                 </p>
               )}
 
               <div className="space-y-6">
+                <section>
+                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Google News Feed</h4>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    <p className="mb-2 text-xs text-zinc-500">
+                      Configure the show-level Google News topic URL used by auto-sync in the News tab.
+                    </p>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        value={googleNewsUrl}
+                        onChange={(event) => setGoogleNewsUrl(event.target.value)}
+                        placeholder="https://news.google.com/topics/..."
+                        className="min-w-[320px] flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void saveGoogleNewsLink()}
+                        disabled={googleNewsSaving}
+                        className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                      >
+                        {googleNewsSaving ? "Saving..." : "Save URL"}
+                      </button>
+                    </div>
+                    {(googleNewsError || googleNewsNotice) && (
+                      <p className={`mt-2 text-sm ${googleNewsError ? "text-red-600" : "text-zinc-500"}`}>
+                        {googleNewsError || googleNewsNotice}
+                      </p>
+                    )}
+                    {googleNewsLinkId && (
+                      <p className="mt-2 text-xs text-zinc-500">Linked as `google_news_url` (show-level).</p>
+                    )}
+                  </div>
+                </section>
+
                 <section>
                   <h4 className="mb-3 text-sm font-semibold text-zinc-700">Role Catalog</h4>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">

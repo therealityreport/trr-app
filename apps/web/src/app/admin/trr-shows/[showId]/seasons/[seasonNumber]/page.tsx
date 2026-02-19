@@ -784,7 +784,6 @@ export default function SeasonDetailPage() {
     seasonRouteState.tab,
     showRouteParam,
   ]);
-
   const fetchShowCastForBrand = useCallback(async () => {
     if (!showId) return;
     setTrrShowCastError(null);

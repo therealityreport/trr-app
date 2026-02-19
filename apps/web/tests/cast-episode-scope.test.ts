@@ -25,7 +25,6 @@ describe("resolveShowCastEpisodeCount", () => {
       })
     ).toBe(84);
   });
-
   it("uses season-scoped count when season filters are selected", () => {
     expect(
       resolveShowCastEpisodeCount({

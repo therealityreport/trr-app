@@ -179,6 +179,65 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
     - Backend contract/migration updates completed under `TRR-Backend/docs/cross-collab/TASK10/`.
     - screenalytics compatibility validation completed with no required code changes.
 
+- February 17, 2026: Implemented canonical slug URLs and path-based tab routing for admin show/season pages with legacy URL auto-canonicalization.
+  - Files:
+    - `apps/web/src/lib/admin/show-admin-routes.ts` (new)
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/page.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - `apps/web/src/components/admin/SurveyQuestionsEditor.tsx`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - `apps/web/next.config.ts`
+    - `apps/web/tests/show-admin-routes.test.ts` (new)
+    - `apps/web/tests/trr-shows-slug-route.test.ts` (new)
+  - Changes:
+    - Added centralized route parser/builder utilities for show and season admin URLs:
+      - canonical show root = overview.
+      - show/season tabs and assets sub-tabs encoded in path segments.
+      - legacy `tab/assets` query parsing + cleanup helpers.
+    - Added explicit `next.config.ts` `beforeFiles` rewrites for path-based show/season tab routes to existing render pages.
+    - Updated show and season admin pages to:
+      - parse tab state from pathname first and query fallback second.
+      - navigate via canonical path URLs (no query-tab routing).
+      - auto-canonicalize legacy UUID/query/alias URLs to slug + path equivalents while preserving non-routing query params.
+    - Updated show list and covered-show links to emit canonical slug URLs.
+    - Updated week drilldown and season social back links to path-based routes.
+    - Updated survey cast-role setup guidance link to path form (`/cast`).
+    - Added slug-aware person-page handling:
+      - preserves slug in `showId` query context.
+      - resolves slug to UUID for API calls.
+      - prefers current slug context for same-show credit links, UUID fallback for others.
+    - Extended TRR show payloads from repository with `slug` and `canonical_slug` for both search and single-show fetches.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/show-admin-routes.ts' 'src/app/admin/trr-shows/page.tsx' 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/components/admin/SurveyQuestionsEditor.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/lib/server/trr-api/trr-shows-repository.ts' 'next.config.ts'` (pass with existing warnings only, no errors)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts tests/trr-shows-slug-route.test.ts` (pass; 2 files / 8 tests)
+  - Notes:
+    - Existing legacy alias pages remain in place as fallback, but canonical navigation now routes through slug/path builders.
+
+- February 17, 2026: Implemented Task 10 social admin completion/polling correctness and incremental/full-refresh ingest UX.
+  - Files:
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+    - `docs/cross-collab/TASK9/PLAN.md`
+    - `docs/cross-collab/TASK9/OTHER_PROJECTS.md`
+    - `docs/cross-collab/TASK9/STATUS.md`
+  - Changes:
+    - Fixed false ingest completion race by deriving completion from authoritative run lifecycle status/summary, not transient run-scoped jobs emptiness.
+    - Replaced overlapping interval polling with single-flight polling loop and stale-response guards.
+    - Preserved last-good jobs data on transient empty/error poll responses while run remains active.
+    - Added ingest `Sync Mode` UI with default `Incremental` and explicit `Full Refresh` override; payload now includes `sync_strategy`.
+    - Upgraded run dropdown labels to include week scope, platform scope, progress, item totals, timestamp, and short run id.
+    - Extended `SocialRun` typing for additive backend fields (`config`, `initiated_by`, richer summary reads).
+  - Validation:
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (`11 passed`)
+  - Cross-repo:
+    - Backend contract/migration updates completed under `TRR-Backend/docs/cross-collab/TASK10/`.
+    - screenalytics compatibility validation completed with no required code changes.
+
 - February 17, 2026: Completed social admin reliability hardening across social proxy routes and season analytics run-scoped UX.
   - Files:
     - `apps/web/src/lib/server/trr-api/social-admin-proxy.ts`

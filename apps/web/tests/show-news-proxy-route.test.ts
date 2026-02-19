@@ -46,11 +46,10 @@ describe("show unified news proxy route", () => {
     expect(response.status).toBe(200);
     expect(Array.isArray(payload.news)).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://backend.example.com/api/v1/admin/shows/show-1/news?sources=bravo,google_news&sort=trending&season_number=5",
+      "https://backend.example.com/api/v1/admin/shows/show-1/news?sources=bravo%2Cgoogle_news&sort=trending&season_number=5",
       expect.objectContaining({
         cache: "no-store",
       })
     );
   });
 });
-
