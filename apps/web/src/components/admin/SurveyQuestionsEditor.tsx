@@ -291,7 +291,7 @@ export function SurveyQuestionsEditor({
     if (newPreset === "custom") return;
 
     if (newPreset === "rank_cast_members") {
-      setNewTemplate("circle-ranking");
+      setNewTemplate("person-rankings");
       setNewKey(makeUniqueQuestionKey("cast_ranking"));
       setNewText("Rank the cast members from your favorite to least favorite");
       setNewSection("Rankings");
@@ -300,7 +300,7 @@ export function SurveyQuestionsEditor({
     }
 
     if (newPreset === "rank_seasons") {
-      setNewTemplate("rectangle-ranking");
+      setNewTemplate("poster-rankings");
       setNewKey(makeUniqueQuestionKey("season_ranking"));
       setNewText("Rank the seasons from best to worst");
       setNewSection("Rankings");
@@ -413,7 +413,7 @@ export function SurveyQuestionsEditor({
 
       if (eligible.length === 0) {
         throw new Error(
-          `No Main/Friend-of set for this season. Set roles at /admin/trr-shows/${showId}/seasons/${seasonNumber}?tab=cast`,
+          `No Main/Friend-of set for this season. Set roles at /admin/trr-shows/${showId}/seasons/${seasonNumber}/cast`,
         );
       }
 
@@ -551,7 +551,7 @@ export function SurveyQuestionsEditor({
       const seedOptions = await fetchCastSeedOptions(["main", "friend_of"]);
 
       await createQuestionWithSeedOptions({
-        uiVariant: "circle-ranking",
+        uiVariant: "person-rankings",
         questionKey: makeUniqueQuestionKey("cast_ranking"),
         questionText: "Rank the cast members from your favorite to least favorite",
         isRequired: true,
@@ -577,7 +577,7 @@ export function SurveyQuestionsEditor({
       const seedOptions = await fetchSeasonsSeedOptions();
 
       await createQuestionWithSeedOptions({
-        uiVariant: "rectangle-ranking",
+        uiVariant: "poster-rankings",
         questionKey: makeUniqueQuestionKey("season_ranking"),
         questionText: "Rank the seasons from best to worst",
         isRequired: true,

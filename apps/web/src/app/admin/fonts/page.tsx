@@ -10,6 +10,13 @@ import {
   DESIGN_SYSTEM_BASE_COLORS,
   DESIGN_SYSTEM_COLORS_STORAGE_KEY,
 } from "@/lib/admin/design-system-tokens";
+import {
+  TAB_DEFINITIONS,
+  buildTabHref,
+  getTabFromQuery,
+  isValidTabQuery,
+  type TabId,
+} from "./_components/tab-routing";
 
 const QuestionsTab = dynamic(() => import("./_components/QuestionsTab"), {
   loading: () => (
@@ -18,44 +25,13 @@ const QuestionsTab = dynamic(() => import("./_components/QuestionsTab"), {
     </div>
   ),
 });
-
-type TabId = "fonts" | "questions" | "colors";
-type TabDefinition = {
-  id: TabId;
-  label: string;
-  queryValue: string;
-};
-
-const TAB_DEFINITIONS: TabDefinition[] = [
-  { id: "fonts", label: "Fonts", queryValue: "fonts" },
-  { id: "colors", label: "Colors", queryValue: "colors" },
-  { id: "questions", label: "Questions & Forms", queryValue: "questions-forms" },
-];
-
-const TAB_QUERY_TO_ID: Record<string, TabId> = {
-  fonts: "fonts",
-  colors: "colors",
-  questions: "questions",
-  "questions-forms": "questions",
-};
-
-function getTabFromQuery(tabQueryValue: string | null): TabId {
-  if (!tabQueryValue) return "fonts";
-  return TAB_QUERY_TO_ID[tabQueryValue] ?? "fonts";
-}
-
-function isValidTabQuery(tabQueryValue: string | null): boolean {
-  if (!tabQueryValue) return true;
-  return Boolean(TAB_QUERY_TO_ID[tabQueryValue]);
-}
-
-type TabHref = "/admin/fonts" | "/admin/fonts?tab=colors" | "/admin/fonts?tab=questions-forms";
-
-function buildTabHref(tabId: TabId): TabHref {
-  if (tabId === "colors") return "/admin/fonts?tab=colors";
-  if (tabId === "questions") return "/admin/fonts?tab=questions-forms";
-  return "/admin/fonts";
-}
+const ButtonsTab = dynamic(() => import("./_components/ButtonsTab"), {
+  loading: () => (
+    <div className="py-12 text-center text-sm text-zinc-500">
+      Loading button catalog...
+    </div>
+  ),
+});
 
 const TINT_SHADE_SWATCHES_PER_SIDE = 3;
 
@@ -1227,7 +1203,7 @@ function AdminFontsPageContent() {
               <div>
                 <h1 className="text-2xl font-bold text-zinc-900">UI Design System</h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Fonts, colors, question components, and form patterns used across the app.
+                  Fonts, colors, buttons, question components, and form patterns used across the app.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1276,6 +1252,9 @@ function AdminFontsPageContent() {
 
         {/* Questions & Forms Tab */}
         {activeTab === "questions" && <QuestionsTab baseColors={designSystemColors} />}
+
+        {/* Buttons Tab */}
+        {activeTab === "buttons" && <ButtonsTab />}
 
         {/* Colors Tab */}
         {activeTab === "colors" && (

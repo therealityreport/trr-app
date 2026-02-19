@@ -20,6 +20,8 @@ import {
 export interface TrrShow {
   id: string;
   name: string;
+  slug: string;
+  canonical_slug: string;
   alternative_names: string[];
   imdb_id: string | null;
   tmdb_id: number | null;
@@ -140,7 +142,7 @@ export interface TrrPerson {
   updated_at: string;
 }
 
-const CANONICAL_PROFILE_SOURCES = ["tmdb", "fandom", "manual"] as const;
+const CANONICAL_PROFILE_SOURCES = ["tmdb", "imdb", "fandom", "manual"] as const;
 type CanonicalProfileSource = (typeof CANONICAL_PROFILE_SOURCES)[number];
 
 export interface TrrCastFandom {
@@ -190,6 +192,18 @@ export interface SourcePaginationOptions extends PaginationOptions {
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 500;
+const SHOW_SLUG_SQL = `
+  lower(
+    trim(
+      both '-' FROM regexp_replace(
+        regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
+        '[^a-z0-9]+',
+        '-',
+        'gi'
+      )
+    )
+  )
+`;
 
 function normalizePagination(options?: PaginationOptions): {
   limit: number;
@@ -251,12 +265,24 @@ export async function searchShows(
   const like = `%${query}%`;
 
   const result = await pgQuery<TrrShow>(
-    `SELECT
+    `WITH shows_with_slug AS (
+       SELECT
+         s.*,
+         ${SHOW_SLUG_SQL} AS slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     )
+     SELECT
        s.*,
+       CASE
+         WHEN s.slug_collision_count > 1
+           THEN s.slug || '--' || lower(left(s.id::text, 8))
+         ELSE s.slug
+       END AS canonical_slug,
        poster.hosted_url AS poster_url,
        backdrop.hosted_url AS backdrop_url,
        logo.hosted_url AS logo_url
-     FROM core.shows AS s
+     FROM shows_with_slug AS s
      LEFT JOIN core.show_images AS poster ON poster.id = s.primary_poster_image_id
      LEFT JOIN core.show_images AS backdrop ON backdrop.id = s.primary_backdrop_image_id
      LEFT JOIN core.show_images AS logo ON logo.id = s.primary_logo_image_id
@@ -280,12 +306,24 @@ export async function searchShows(
  */
 export async function getShowById(id: string): Promise<TrrShow | null> {
   const result = await pgQuery<TrrShow>(
-    `SELECT
+    `WITH shows_with_slug AS (
+       SELECT
+         s.*,
+         ${SHOW_SLUG_SQL} AS slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     )
+     SELECT
        s.*,
+       CASE
+         WHEN s.slug_collision_count > 1
+           THEN s.slug || '--' || lower(left(s.id::text, 8))
+         ELSE s.slug
+       END AS canonical_slug,
        poster.hosted_url AS poster_url,
        backdrop.hosted_url AS backdrop_url,
        logo.hosted_url AS logo_url
-     FROM core.shows AS s
+     FROM shows_with_slug AS s
      LEFT JOIN core.show_images AS poster ON poster.id = s.primary_poster_image_id
      LEFT JOIN core.show_images AS backdrop ON backdrop.id = s.primary_backdrop_image_id
      LEFT JOIN core.show_images AS logo ON logo.id = s.primary_logo_image_id
@@ -394,12 +432,24 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
  */
 export async function getShowByImdbId(imdbId: string): Promise<TrrShow | null> {
   const result = await pgQuery<TrrShow>(
-    `SELECT
+    `WITH shows_with_slug AS (
+       SELECT
+         s.*,
+         ${SHOW_SLUG_SQL} AS slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     )
+     SELECT
        s.*,
+       CASE
+         WHEN s.slug_collision_count > 1
+           THEN s.slug || '--' || lower(left(s.id::text, 8))
+         ELSE s.slug
+       END AS canonical_slug,
        poster.hosted_url AS poster_url,
        backdrop.hosted_url AS backdrop_url,
        logo.hosted_url AS logo_url
-     FROM core.shows AS s
+     FROM shows_with_slug AS s
      LEFT JOIN core.show_images AS poster ON poster.id = s.primary_poster_image_id
      LEFT JOIN core.show_images AS backdrop ON backdrop.id = s.primary_backdrop_image_id
      LEFT JOIN core.show_images AS logo ON logo.id = s.primary_logo_image_id
@@ -1553,6 +1603,21 @@ const toThumbnailCropFields = (value: unknown): ThumbnailCropFields => {
   };
 };
 
+const parsePeopleCount = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+  }
+  return null;
+};
+
+const parsePeopleCountSource = (value: unknown): "auto" | "manual" | null => {
+  return value === "auto" || value === "manual" ? value : null;
+};
+
 const clampFaceCoord = (value: number): number => Math.min(1, Math.max(0, value));
 
 const toFaceBoxes = (value: unknown): FaceBoxTag[] | null => {
@@ -2656,6 +2721,14 @@ export interface SeasonAsset {
   context_type?: string | null;
   metadata?: Record<string, unknown> | null;
   hosted_content_type?: string | null;
+  link_id?: string | null;
+  media_asset_id?: string | null;
+  people_count?: number | null;
+  people_count_source?: "auto" | "manual" | null;
+  thumbnail_focus_x?: number | null;
+  thumbnail_focus_y?: number | null;
+  thumbnail_zoom?: number | null;
+  thumbnail_crop_mode?: "manual" | "auto" | null;
 }
 
 type SeasonAssetVariantUrls = Pick<
@@ -2936,6 +3009,16 @@ export async function getAssetsByShowSeason(
           typeof (ctx as Record<string, unknown>).context_type === "string"
             ? ((ctx as Record<string, unknown>).context_type as string)
             : null;
+        const contextPeopleCount = parsePeopleCount(
+          (ctx as Record<string, unknown>).people_count
+        );
+        const contextPeopleCountSource = parsePeopleCountSource(
+          (ctx as Record<string, unknown>).people_count_source
+        );
+        const thumbnailCropFromContext =
+          (ctx as Record<string, unknown>).thumbnail_crop ??
+          (mergedMetadata as Record<string, unknown>).thumbnail_crop;
+        const thumbnailCropFields = toThumbnailCropFields(thumbnailCropFromContext);
 
         assets.push({
           id: row.asset_id ?? row.media_asset_id,
@@ -2957,6 +3040,11 @@ export async function getAssetsByShowSeason(
           metadata: mergedMetadata,
           ingest_status: row.ingest_status ?? null,
           hosted_content_type: row.hosted_content_type ?? null,
+          link_id: row.link_id,
+          media_asset_id: row.media_asset_id,
+          people_count: contextPeopleCount,
+          people_count_source: contextPeopleCountSource,
+          ...thumbnailCropFields,
         });
         hostedUrlSeen.add(hostedUrl);
       }
@@ -3006,6 +3094,14 @@ export async function getAssetsByShowSeason(
         created_at: img.created_at,
         ingest_status: null,
         metadata: img.metadata,
+        link_id: null,
+        media_asset_id: null,
+        people_count: null,
+        people_count_source: null,
+        thumbnail_focus_x: null,
+        thumbnail_focus_y: null,
+        thumbnail_zoom: null,
+        thumbnail_crop_mode: null,
       });
       hostedUrlSeen.add(img.hosted_url);
     }
@@ -3057,6 +3153,14 @@ export async function getAssetsByShowSeason(
         created_at: img.created_at,
         ingest_status: null,
         metadata: img.metadata,
+        link_id: null,
+        media_asset_id: null,
+        people_count: null,
+        people_count_source: null,
+        thumbnail_focus_x: null,
+        thumbnail_focus_y: null,
+        thumbnail_zoom: null,
+        thumbnail_crop_mode: null,
       });
       hostedUrlSeen.add(img.hosted_url);
     }
@@ -3124,6 +3228,7 @@ export async function getAssetsByShowSeason(
          LIMIT 500`,
         [personIds]
       );
+      const castTagRows = await getTagsByPhotoIds(castPhotos.rows.map((photo) => photo.id));
 
       for (const photo of castPhotos.rows) {
         if (!photo.hosted_url) continue;
@@ -3151,6 +3256,20 @@ export async function getAssetsByShowSeason(
         if (!isLikelyImage(photo.hosted_content_type, photo.hosted_url)) continue;
         if (hostedUrlSeen.has(photo.hosted_url)) continue;
 
+        const tagRow = castTagRows.get(photo.id);
+        const metadataPeopleCount = parsePeopleCount(
+          (photo.metadata as Record<string, unknown> | null)?.people_count
+        );
+        const metadataPeopleCountSource = parsePeopleCountSource(
+          (photo.metadata as Record<string, unknown> | null)?.people_count_source
+        );
+        const peopleCount = tagRow?.people_count ?? metadataPeopleCount ?? null;
+        const peopleCountSource =
+          tagRow?.people_count_source ?? metadataPeopleCountSource ?? null;
+        const thumbnailCropFields = toThumbnailCropFields(
+          (photo.metadata as Record<string, unknown> | null)?.thumbnail_crop
+        );
+
         assets.push({
           id: photo.id,
           type: "cast",
@@ -3173,6 +3292,11 @@ export async function getAssetsByShowSeason(
           metadata: photo.metadata,
           ingest_status: null,
           hosted_content_type: photo.hosted_content_type,
+          link_id: null,
+          media_asset_id: null,
+          people_count: peopleCount,
+          people_count_source: peopleCountSource,
+          ...thumbnailCropFields,
         });
         hostedUrlSeen.add(photo.hosted_url);
       }
@@ -3304,6 +3428,16 @@ export async function getAssetsByShowId(
         typeof (ctx as Record<string, unknown>).context_type === "string"
           ? ((ctx as Record<string, unknown>).context_type as string)
           : null;
+      const contextPeopleCount = parsePeopleCount(
+        (ctx as Record<string, unknown>).people_count
+      );
+      const contextPeopleCountSource = parsePeopleCountSource(
+        (ctx as Record<string, unknown>).people_count_source
+      );
+      const thumbnailCropFromContext =
+        (ctx as Record<string, unknown>).thumbnail_crop ??
+        (mergedMetadata as Record<string, unknown>).thumbnail_crop;
+      const thumbnailCropFields = toThumbnailCropFields(thumbnailCropFromContext);
 
       assets.push({
         id: row.asset_id ?? row.media_asset_id,
@@ -3324,6 +3458,11 @@ export async function getAssetsByShowId(
         metadata: mergedMetadata,
         ingest_status: row.ingest_status ?? null,
         hosted_content_type: row.hosted_content_type ?? null,
+        link_id: row.link_id,
+        media_asset_id: row.media_asset_id,
+        people_count: contextPeopleCount,
+        people_count_source: contextPeopleCountSource,
+        ...thumbnailCropFields,
       });
       hostedUrlSeen.add(hostedUrl);
     }
@@ -3370,6 +3509,14 @@ export async function getAssetsByShowId(
         created_at: img.created_at,
         ingest_status: null,
         metadata: img.metadata,
+        link_id: null,
+        media_asset_id: null,
+        people_count: null,
+        people_count_source: null,
+        thumbnail_focus_x: null,
+        thumbnail_focus_y: null,
+        thumbnail_zoom: null,
+        thumbnail_crop_mode: null,
       });
       hostedUrlSeen.add(img.hosted_url);
     }

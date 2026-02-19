@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { buildSeasonAdminUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { auth } from "@/lib/firebase";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
@@ -71,9 +72,13 @@ type ResolvedField = {
   sources: Array<{ source: string; value: string }>;
 };
 
-const DEFAULT_CANONICAL_SOURCE_ORDER = ["tmdb", "fandom", "manual"] as const;
+const DEFAULT_CANONICAL_SOURCE_ORDER = ["tmdb", "imdb", "fandom", "manual"] as const;
 type CanonicalSource = (typeof DEFAULT_CANONICAL_SOURCE_ORDER)[number];
 type CanonicalSourceOrder = CanonicalSource[];
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const looksLikeUuid = (value: string): boolean => UUID_RE.test(value);
 
 const isCanonicalSource = (value: string): value is CanonicalSource =>
   (DEFAULT_CANONICAL_SOURCE_ORDER as readonly string[]).includes(value);
@@ -112,7 +117,13 @@ const readCanonicalSourceOrderFromExternalIds = (
 };
 
 const formatCanonicalSourceLabel = (source: CanonicalSource): string =>
-  source === "tmdb" ? "TMDB" : source === "fandom" ? "Fandom" : "Manual";
+  source === "tmdb"
+    ? "TMDB"
+    : source === "imdb"
+      ? "IMDb"
+      : source === "fandom"
+        ? "Fandom"
+        : "Manual";
 
 const resolveMultiSourceField = (
   field: MultiSourceField,
@@ -374,6 +385,21 @@ const formatRefreshSummary = (summary: unknown): string | null => {
   return null;
 };
 
+type RefreshLogLevel = "info" | "success" | "error";
+
+type RefreshLogEntry = {
+  id: number;
+  ts: number;
+  source: "page_refresh" | "image_refresh";
+  stage: string;
+  message: string;
+  detail?: string | null;
+  level: RefreshLogLevel;
+  runId?: string | null;
+};
+
+const MAX_REFRESH_LOG_ENTRIES = 400;
+
 const parseDimensionValue = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
   if (typeof value === "string") {
@@ -413,7 +439,7 @@ const getPersonPhotoDetailUrl = (photo: TrrPersonPhoto): string | null =>
   pickNonEmptyUrl(photo.crop_detail_url, photo.detail_url, photo.hosted_url, photo.url);
 
 const getPersonPhotoOriginalUrl = (photo: TrrPersonPhoto): string | null =>
-  pickNonEmptyUrl(photo.original_url, photo.hosted_url, photo.url);
+  pickNonEmptyUrl(photo.hosted_url, photo.original_url, photo.url);
 
 const buildThumbnailCropPreview = (
   photo: TrrPersonPhoto | null | undefined
@@ -434,6 +460,22 @@ const buildThumbnailCropPreview = (
     imageWidth: dims.width,
     imageHeight: dims.height,
     aspectRatio: 4 / 5,
+  };
+};
+
+const buildThumbnailCropPayload = (photo: TrrPersonPhoto): Record<string, unknown> | null => {
+  if (
+    photo.thumbnail_focus_x === null ||
+    photo.thumbnail_focus_y === null ||
+    photo.thumbnail_zoom === null
+  ) {
+    return null;
+  }
+  return {
+    x: photo.thumbnail_focus_x,
+    y: photo.thumbnail_focus_y,
+    zoom: photo.thumbnail_zoom,
+    mode: photo.thumbnail_crop_mode ?? "auto",
   };
 };
 
@@ -1910,15 +1952,23 @@ export default function PersonProfilePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const personId = params.personId as string;
-  const showIdParam = searchParams.get("showId");
+  const showIdParamRaw = searchParams.get("showId");
+  const showIdParam =
+    typeof showIdParamRaw === "string" && showIdParamRaw.trim().length > 0
+      ? showIdParamRaw.trim()
+      : null;
+  const [resolvedShowIdParam, setResolvedShowIdParam] = useState<string | null>(
+    showIdParam && looksLikeUuid(showIdParam) ? showIdParam : null
+  );
+  const showIdForApi = resolvedShowIdParam;
   const seasonNumberParam = searchParams.get("seasonNumber");
   const seasonNumberRaw = seasonNumberParam ? Number.parseInt(seasonNumberParam, 10) : Number.NaN;
   const seasonNumber = Number.isFinite(seasonNumberRaw) ? seasonNumberRaw : null;
 
   const backHref = showIdParam
     ? seasonNumber !== null
-      ? `/admin/trr-shows/${showIdParam}/seasons/${seasonNumber}?tab=cast`
-      : `/admin/trr-shows/${showIdParam}`
+      ? buildSeasonAdminUrl({ showSlug: showIdParam, seasonNumber, tab: "cast" })
+      : buildShowAdminUrl({ showSlug: showIdParam })
     : "/admin/trr-shows";
   const backLabel = showIdParam
     ? seasonNumber !== null
@@ -1990,6 +2040,19 @@ export default function PersonProfilePage() {
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [photosError, setPhotosError] = useState<string | null>(null);
+  const [refreshLogOpen, setRefreshLogOpen] = useState(false);
+  const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
+  const refreshLogCounterRef = useRef(0);
+
+  const appendRefreshLog = useCallback(
+    (entry: Omit<RefreshLogEntry, "id" | "ts"> & { ts?: number }) => {
+      const id = ++refreshLogCounterRef.current;
+      const ts = typeof entry.ts === "number" ? entry.ts : Date.now();
+      const normalized: RefreshLogEntry = { ...entry, id, ts };
+      setRefreshLogEntries((prev) => [normalized, ...prev].slice(0, MAX_REFRESH_LOG_ENTRIES));
+    },
+    []
+  );
 
   const advancedFilters = useMemo(
     () =>
@@ -2031,8 +2094,8 @@ export default function PersonProfilePage() {
   }, [showIdParam]);
 
   const activeShow = useMemo(
-    () => (showIdParam ? credits.find((credit) => credit.show_id === showIdParam) ?? null : null),
-    [credits, showIdParam]
+    () => (showIdForApi ? credits.find((credit) => credit.show_id === showIdForApi) ?? null : null),
+    [credits, showIdForApi]
   );
   const activeShowName = activeShow?.show_name ?? null;
   const activeShowAcronym = useMemo(
@@ -2046,7 +2109,7 @@ export default function PersonProfilePage() {
       { key: string; showId: string | null; showName: string; acronym: string | null }
     >();
     for (const credit of credits) {
-      if (credit.show_id === showIdParam) continue;
+      if (showIdForApi && credit.show_id === showIdForApi) continue;
       const showName = credit.show_name?.trim() ?? "";
       if (!showName || isWwhlShowName(showName)) continue;
       const key = credit.show_id ? `id:${credit.show_id}` : `name:${showName.toLowerCase()}`;
@@ -2059,7 +2122,7 @@ export default function PersonProfilePage() {
       });
     }
     return Array.from(byKey.values()).sort((a, b) => a.showName.localeCompare(b.showName));
-  }, [credits, showIdParam]);
+  }, [credits, showIdForApi]);
   const otherShowNameMatches = useMemo(
     () => otherShowOptions.map((option) => option.showName.toLowerCase()),
     [otherShowOptions]
@@ -2126,7 +2189,7 @@ export default function PersonProfilePage() {
       result = result.filter((photo) => {
         const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
         const metaShowId = typeof metadata.show_id === "string" ? metadata.show_id : null;
-        const metaShowIdMatches = Boolean(showIdParam && metaShowId && metaShowId === showIdParam);
+        const metaShowIdMatches = Boolean(showIdForApi && metaShowId && metaShowId === showIdForApi);
         const text = [
           photo.caption,
           photo.context_section,
@@ -2306,6 +2369,7 @@ export default function PersonProfilePage() {
     advancedFilters.seeded,
     advancedFilters.sort,
     showIdParam,
+    showIdForApi,
     activeShowName,
     activeShowAcronym,
     otherShowNameMatches,
@@ -2354,6 +2418,51 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     if (!showIdParam || !hasAccess) {
+      setResolvedShowIdParam(null);
+      return;
+    }
+    if (looksLikeUuid(showIdParam)) {
+      setResolvedShowIdParam(showIdParam);
+      return;
+    }
+
+    let cancelled = false;
+    const resolveSlug = async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(
+          `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(showIdParam)}`,
+          { headers, cache: "no-store" }
+        );
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          resolved?: { show_id?: string | null };
+        };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to resolve show slug");
+        }
+        const resolvedId =
+          typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
+            ? data.resolved.show_id
+            : null;
+        if (!resolvedId) {
+          throw new Error("Resolved show slug did not return a valid show id.");
+        }
+        if (cancelled) return;
+        setResolvedShowIdParam(resolvedId);
+      } catch {
+        if (cancelled) return;
+        setResolvedShowIdParam(null);
+      }
+    };
+    void resolveSlug();
+    return () => {
+      cancelled = true;
+    };
+  }, [getAuthHeaders, hasAccess, showIdParam]);
+
+  useEffect(() => {
+    if (!showIdForApi || !hasAccess) {
       setSeasonPremiereMap({});
       return;
     }
@@ -2370,7 +2479,7 @@ export default function PersonProfilePage() {
           return;
         }
         const response = await fetch(
-          `/api/admin/trr-api/shows/${showIdParam}/seasons?limit=50`,
+          `/api/admin/trr-api/shows/${showIdForApi}/seasons?limit=50`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!response.ok) throw new Error("Failed to fetch seasons");
@@ -2401,7 +2510,7 @@ export default function PersonProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [showIdParam, hasAccess]);
+  }, [showIdForApi, hasAccess]);
 
   // Fetch person details
   const fetchPerson = useCallback(async () => {
@@ -2625,8 +2734,8 @@ export default function PersonProfilePage() {
     try {
       const headers = await getAuthHeaders();
       const showIdQuery =
-        typeof showIdParam === "string" && showIdParam.trim().length > 0
-          ? `?showId=${encodeURIComponent(showIdParam.trim())}`
+        typeof showIdForApi === "string" && showIdForApi.trim().length > 0
+          ? `?showId=${encodeURIComponent(showIdForApi.trim())}`
           : "";
       const response = await fetch(
         `/api/admin/trr-api/people/${personId}/fandom${showIdQuery}`,
@@ -2638,10 +2747,10 @@ export default function PersonProfilePage() {
     } catch (err) {
       console.error("Failed to fetch fandom data:", err);
     }
-  }, [personId, getAuthHeaders, showIdParam]);
+  }, [personId, getAuthHeaders, showIdForApi]);
 
   const fetchBravoContent = useCallback(async () => {
-    if (!showIdParam) {
+    if (!showIdForApi) {
       setBravoVideos([]);
       setBravoNews([]);
       setBravoContentError(null);
@@ -2654,13 +2763,13 @@ export default function PersonProfilePage() {
       const headers = await getAuthHeaders();
       const [videosResponse, newsResponse] = await Promise.all([
         fetch(
-          `/api/admin/trr-api/shows/${showIdParam}/bravo/videos?person_id=${personId}&merge_person_sources=true`,
+          `/api/admin/trr-api/shows/${showIdForApi}/bravo/videos?person_id=${personId}&merge_person_sources=true`,
           {
             headers,
             cache: "no-store",
           }
         ),
-        fetch(`/api/admin/trr-api/shows/${showIdParam}/bravo/news?person_id=${personId}`, {
+        fetch(`/api/admin/trr-api/shows/${showIdForApi}/bravo/news?person_id=${personId}`, {
           headers,
           cache: "no-store",
         }),
@@ -2688,7 +2797,7 @@ export default function PersonProfilePage() {
     } finally {
       setBravoContentLoading(false);
     }
-  }, [getAuthHeaders, personId, showIdParam]);
+  }, [getAuthHeaders, personId, showIdForApi]);
 
   // Set cover photo
   const handleSetCover = async (photo: TrrPersonPhoto) => {
@@ -2828,12 +2937,12 @@ export default function PersonProfilePage() {
   );
 
   const runPhotoMetadataJob = useCallback(
-    async (endpoint: string) => {
+    async (endpoint: string, payload?: Record<string, unknown>) => {
       const headers = await getAuthHeaders();
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ force: true }),
+        body: JSON.stringify(payload ?? { force: true }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -2850,49 +2959,117 @@ export default function PersonProfilePage() {
   const handleRefreshLightboxPhotoMetadata = useCallback(
     async (photo: TrrPersonPhoto) => {
       const errors: string[] = [];
+      const cropPayload = buildThumbnailCropPayload(photo);
+      const logStep = (
+        level: RefreshLogLevel,
+        stage: string,
+        message: string,
+        detail?: string | null,
+      ) => {
+        appendRefreshLog({
+          source: "image_refresh",
+          stage,
+          message,
+          detail,
+          level,
+        });
+      };
+
+      const runStep = async (step: {
+        label: string;
+        endpoint: string;
+        payload?: Record<string, unknown>;
+      }) => {
+        logStep("info", "image_pipeline", `${step.label} started`);
+        try {
+          await runPhotoMetadataJob(step.endpoint, step.payload ?? { force: true });
+          logStep("success", "image_pipeline", `${step.label} complete`);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "failed";
+          errors.push(`${step.label}: ${detail}`);
+          logStep("error", "image_pipeline", `${step.label} failed`, detail);
+        }
+      };
+
+      logStep("info", "image_pipeline", `Refreshing full pipeline for ${photo.id}`);
 
       if (photo.origin === "media_links") {
         if (!photo.media_asset_id) {
-          throw new Error("Cannot refresh jobs: media asset id is missing");
+          throw new Error("Cannot refresh pipeline: media asset id is missing");
         }
-        const jobs = [
+        const assetId = photo.media_asset_id;
+        const steps: Array<{
+          label: string;
+          endpoint: string;
+          payload: Record<string, unknown>;
+        }> = [
+          {
+            label: "Mirror",
+            endpoint: `/api/admin/trr-api/media-assets/${assetId}/mirror`,
+            payload: { force: true },
+          },
           {
             label: "People count",
-            endpoint: `/api/admin/trr-api/media-assets/${photo.media_asset_id}/auto-count`,
+            endpoint: `/api/admin/trr-api/media-assets/${assetId}/auto-count`,
+            payload: { force: true },
           },
           {
             label: "Text overlay",
-            endpoint: `/api/admin/trr-api/media-assets/${photo.media_asset_id}/detect-text-overlay`,
+            endpoint: `/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`,
+            payload: { force: true },
+          },
+          {
+            label: "Variants (base)",
+            endpoint: `/api/admin/trr-api/media-assets/${assetId}/variants`,
+            payload: { force: true },
           },
         ];
-        for (const job of jobs) {
-          try {
-            await runPhotoMetadataJob(job.endpoint);
-          } catch (error) {
-            errors.push(
-              `${job.label}: ${error instanceof Error ? error.message : "failed"}`
-            );
-          }
+        if (cropPayload) {
+          steps.push({
+            label: "Variants (crop)",
+            endpoint: `/api/admin/trr-api/media-assets/${assetId}/variants`,
+            payload: { force: true, crop: cropPayload },
+          });
+        }
+        for (const step of steps) {
+          await runStep(step);
         }
       } else {
-        const jobs = [
+        const steps: Array<{
+          label: string;
+          endpoint: string;
+          payload: Record<string, unknown>;
+        }> = [
+          {
+            label: "Mirror",
+            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/mirror`,
+            payload: { force: true },
+          },
           {
             label: "People count",
             endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`,
+            payload: { force: true },
           },
           {
             label: "Text overlay",
             endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`,
+            payload: { force: true },
+          },
+          {
+            label: "Variants (base)",
+            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/variants`,
+            payload: { force: true },
           },
         ];
-        for (const job of jobs) {
-          try {
-            await runPhotoMetadataJob(job.endpoint);
-          } catch (error) {
-            errors.push(
-              `${job.label}: ${error instanceof Error ? error.message : "failed"}`
-            );
-          }
+        if (cropPayload) {
+          steps.push({
+            label: "Variants (crop)",
+            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/variants`,
+            payload: { force: true, crop: cropPayload },
+          });
+        }
+        for (const step of steps) {
+          await runStep(step);
         }
       }
 
@@ -2911,10 +3088,11 @@ export default function PersonProfilePage() {
         throw new Error(errors.join(" | "));
       }
 
-      setRefreshNotice("Photo metadata refreshed.");
+      setRefreshNotice("Photo full pipeline refreshed.");
       setRefreshError(null);
+      logStep("success", "image_pipeline", `Full pipeline complete for ${photo.id}`);
     },
-    [fetchPhotos, runPhotoMetadataJob]
+    [appendRefreshLog, fetchPhotos, runPhotoMetadataJob]
   );
 
   const handleRefreshAutoThumbnailCrop = useCallback(
@@ -2930,6 +3108,12 @@ export default function PersonProfilePage() {
         throw new Error("Cannot refresh auto crop: media asset id is missing");
       }
 
+      appendRefreshLog({
+        source: "image_refresh",
+        stage: "auto_count",
+        message: `Auto crop refresh started for ${photo.id}`,
+        level: "info",
+      });
       await runPhotoMetadataJob(endpoint);
 
       const refreshedPhotos = await fetchPhotos();
@@ -2944,8 +3128,14 @@ export default function PersonProfilePage() {
       });
       setRefreshNotice("Auto thumbnail crop refreshed.");
       setRefreshError(null);
+      appendRefreshLog({
+        source: "image_refresh",
+        stage: "auto_count",
+        message: `Auto crop refresh complete for ${photo.id}`,
+        level: "success",
+      });
     },
-    [fetchPhotos, runPhotoMetadataJob],
+    [appendRefreshLog, fetchPhotos, runPhotoMetadataJob],
   );
 
   const handleThumbnailCropUpdated = useCallback(
@@ -2981,6 +3171,12 @@ export default function PersonProfilePage() {
     setRefreshNotice(null);
     setRefreshError(null);
     setPhotosError(null);
+    appendRefreshLog({
+      source: "page_refresh",
+      stage: "syncing",
+      message: "Refresh Images started",
+      level: "info",
+    });
 
     try {
       const runStreamAttempt = async () => {
@@ -2995,7 +3191,7 @@ export default function PersonProfilePage() {
               skip_mirror: false,
               force_mirror: true,
               limit_per_source: 200,
-              show_id: showIdParam ?? undefined,
+              show_id: showIdForApi ?? undefined,
               show_name: activeShowName ?? undefined,
             }),
           }
@@ -3116,6 +3312,13 @@ export default function PersonProfilePage() {
                   runId,
                   lastEventAt: Date.now(),
                 });
+                appendRefreshLog({
+                  source: "page_refresh",
+                  stage: rawStage ?? "progress",
+                  message: message ?? "Refresh progress update",
+                  level: "info",
+                  runId,
+                });
               } else if (eventType === "complete") {
                 sawComplete = true;
                 const summary = payload && typeof payload === "object" && "summary" in payload
@@ -3123,6 +3326,12 @@ export default function PersonProfilePage() {
                   : payload;
                 const summaryText = formatRefreshSummary(summary);
                 setRefreshNotice(summaryText || "Images refreshed.");
+                appendRefreshLog({
+                  source: "page_refresh",
+                  stage: "complete",
+                  message: summaryText || "Images refreshed.",
+                  level: "success",
+                });
               } else if (eventType === "error") {
                 const errorPayload =
                   payload && typeof payload === "object"
@@ -3136,6 +3345,13 @@ export default function PersonProfilePage() {
                 // Mark as a backend error so the retry loop does NOT retry.
                 const backendErr = new Error(errorText);
                 backendErr.name = "BackendError";
+                appendRefreshLog({
+                  source: "page_refresh",
+                  stage: errorPayload?.stage ?? "error",
+                  message: errorPayload?.error || "Failed to refresh images",
+                  detail: errorPayload?.detail,
+                  level: "error",
+                });
                 throw backendErr;
               }
 
@@ -3177,6 +3393,13 @@ export default function PersonProfilePage() {
                 }
               : prev
           );
+          appendRefreshLog({
+            source: "page_refresh",
+            stage: "stream_retry",
+            message: "Stream disconnected, retrying refresh...",
+            detail: streamError,
+            level: "error",
+          });
           continue;
         }
       }
@@ -3194,9 +3417,16 @@ export default function PersonProfilePage() {
       ]);
     } catch (err) {
       console.error("Failed to refresh images:", err);
-      setRefreshError(
-        err instanceof Error ? err.message : "Failed to refresh images"
-      );
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to refresh images";
+      setRefreshError(errorMessage);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "refresh_error",
+        message: "Refresh Images failed",
+        detail: errorMessage,
+        level: "error",
+      });
     } finally {
       setRefreshingImages(false);
       setRefreshProgress(null);
@@ -3204,6 +3434,7 @@ export default function PersonProfilePage() {
   }, [
     refreshingImages,
     reprocessingImages,
+    appendRefreshLog,
     fetchPerson,
     fetchCredits,
     fetchFandomData,
@@ -3212,7 +3443,7 @@ export default function PersonProfilePage() {
     fetchCoverPhoto,
     getAuthHeaders,
     personId,
-    showIdParam,
+    showIdForApi,
     activeShowName,
   ]);
 
@@ -3228,6 +3459,12 @@ export default function PersonProfilePage() {
     });
     setRefreshNotice(null);
     setRefreshError(null);
+    appendRefreshLog({
+      source: "page_refresh",
+      stage: "reprocess_start",
+      message: "Count & Crop started",
+      level: "info",
+    });
 
     try {
       const headers = await getAuthHeaders();
@@ -3319,6 +3556,12 @@ export default function PersonProfilePage() {
               phase: mappedPhase ?? rawPhase,
               message,
             });
+            appendRefreshLog({
+              source: "page_refresh",
+              stage: rawPhase ?? "reprocess_progress",
+              message: message ?? "Count & Crop progress update",
+              level: "info",
+            });
           } else if (eventType === "complete") {
             sawComplete = true;
             const summary = payload && typeof payload === "object" && "summary" in payload
@@ -3326,6 +3569,12 @@ export default function PersonProfilePage() {
               : payload;
             const summaryText = formatRefreshSummary(summary);
             setRefreshNotice(summaryText || "Reprocessing complete.");
+            appendRefreshLog({
+              source: "page_refresh",
+              stage: "reprocess_complete",
+              message: summaryText || "Reprocessing complete.",
+              level: "success",
+            });
           } else if (eventType === "error") {
             hadError = true;
             const message =
@@ -3337,6 +3586,13 @@ export default function PersonProfilePage() {
                 ? `${message.error}: ${message.detail}`
                 : message?.error || "Failed to reprocess images";
             setRefreshError(errorText);
+            appendRefreshLog({
+              source: "page_refresh",
+              stage: "reprocess_error",
+              message: message?.error || "Failed to reprocess images",
+              detail: message?.detail,
+              level: "error",
+            });
           }
 
           boundaryIndex = buffer.indexOf("\n\n");
@@ -3345,15 +3601,28 @@ export default function PersonProfilePage() {
 
       if (!sawComplete && !hadError) {
         setRefreshNotice("Reprocessing complete.");
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "reprocess_complete",
+          message: "Reprocessing complete.",
+          level: "success",
+        });
       }
 
       // Reload photos to show updated crops/counts
       await fetchPhotos();
     } catch (err) {
       console.error("Failed to reprocess images:", err);
-      setRefreshError(
-        err instanceof Error ? err.message : "Failed to reprocess images"
-      );
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to reprocess images";
+      setRefreshError(errorMessage);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "reprocess_error",
+        message: "Count & Crop failed",
+        detail: errorMessage,
+        level: "error",
+      });
     } finally {
       setReprocessingImages(false);
       setRefreshProgress(null);
@@ -3361,6 +3630,7 @@ export default function PersonProfilePage() {
   }, [
     refreshingImages,
     reprocessingImages,
+    appendRefreshLog,
     fetchPhotos,
     getAuthHeaders,
     personId,
@@ -3734,7 +4004,64 @@ export default function PersonProfilePage() {
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
                     {credits.length} credits
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setRefreshLogOpen((prev) => !prev)}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    Refresh Log ({refreshLogEntries.length})
+                  </button>
                 </div>
+                {refreshLogOpen && (
+                  <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                        Refresh Activity
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setRefreshLogEntries([])}
+                        className="text-xs font-semibold text-zinc-500 hover:text-zinc-800"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {refreshLogEntries.length === 0 ? (
+                      <p className="text-xs text-zinc-500">No refresh events yet.</p>
+                    ) : (
+                      <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                        {refreshLogEntries.map((entry) => {
+                          const levelClass =
+                            entry.level === "error"
+                              ? "text-red-700"
+                              : entry.level === "success"
+                                ? "text-emerald-700"
+                                : "text-zinc-700";
+                          const timestamp = new Date(entry.ts).toLocaleTimeString();
+                          return (
+                            <div
+                              key={entry.id}
+                              className="rounded-md border border-zinc-200 bg-white px-2 py-1.5"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className={`text-xs font-semibold ${levelClass}`}>
+                                  {entry.message}
+                                </p>
+                                <span className="shrink-0 text-[10px] text-zinc-500">{timestamp}</span>
+                              </div>
+                              <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+                                {entry.stage} · {entry.source === "image_refresh" ? "Image" : "Page"}
+                              </p>
+                              {entry.detail && (
+                                <p className="mt-0.5 text-[11px] text-zinc-600">{entry.detail}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {photosError && (
                   <div className="mt-2">
                     <p className="text-xs text-red-600">{photosError}</p>
@@ -4037,10 +4364,14 @@ export default function PersonProfilePage() {
                       </>
                     );
                     if (credit.show_id) {
+                      const showLinkSlug =
+                        showIdParam && showIdForApi && credit.show_id === showIdForApi
+                          ? showIdParam
+                          : credit.show_id;
                       return (
                         <Link
                           key={credit.id}
-                          href={`/admin/trr-shows/${credit.show_id}`}
+                          href={`/admin/trr-shows/${showLinkSlug}`}
                           className={rowClassName}
                         >
                           {content}
@@ -4511,10 +4842,14 @@ export default function PersonProfilePage() {
                     </>
                   );
                   if (credit.show_id) {
+                    const showLinkSlug =
+                      showIdParam && showIdForApi && credit.show_id === showIdForApi
+                        ? showIdParam
+                        : credit.show_id;
                     return (
                       <Link
                         key={credit.id}
-                        href={`/admin/trr-shows/${credit.show_id}`}
+                        href={`/admin/trr-shows/${showLinkSlug}`}
                         className={rowClassName}
                       >
                         {content}

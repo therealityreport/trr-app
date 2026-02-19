@@ -24,6 +24,7 @@ describe("person refresh progress mapping", () => {
     expect(mapPersonRefreshStage("centering_cropping")).toBe(
       PERSON_REFRESH_PHASES.centeringCropping,
     );
+    expect(mapPersonRefreshStage("resizing")).toBe(PERSON_REFRESH_PHASES.resizing);
   });
 
   it("accepts preformatted UI phases", () => {

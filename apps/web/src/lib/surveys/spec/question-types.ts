@@ -15,8 +15,10 @@ export interface BaseQuestion {
 // Question type enum
 export type QuestionType =
   | "numeric-ranking"      // Episode rating with stars (was star-rating)
-  | "circle-ranking"       // Cast power rankings - grid with circles (was rank-order grid)
-  | "rectangle-ranking"    // Season/franchise rankings - classic list (was rank-order classic)
+  | "person-rankings"      // Canonical: cast/person power rankings - grid with circles
+  | "poster-rankings"      // Canonical: season/poster rankings - rectangular cards
+  | "circle-ranking"       // Legacy alias for person-rankings
+  | "rectangle-ranking"    // Legacy alias for poster-rankings
   | "cast-decision-card"   // Cast decision cards (Keep/Fire/Demote, Bring Back/Keep Gone)
   | "three-choice-slider"  // Keep/Fire/Demote slider (was matrix-likert for verdicts)
   | "agree-likert-scale"   // Agree/Disagree scale (was matrix-likert for statements)
@@ -46,20 +48,30 @@ export interface NumericRankingQuestion extends BaseQuestion {
 // Ranking Questions
 // ============================================================================
 
-/** Cast power rankings - circular tokens in a grid */
-export interface CircleRankingQuestion extends BaseQuestion {
-  type: "circle-ranking";
+/** Canonical cast/person rankings - circular tokens in a grid */
+export interface PersonRankingsQuestion extends BaseQuestion {
+  type: "person-rankings";
   items: RankItem[];
   lineLabelTop?: string;
   lineLabelBottom?: string;
 }
 
-/** Season/franchise rankings - rectangular items in a list */
-export interface RectangleRankingQuestion extends BaseQuestion {
-  type: "rectangle-ranking";
+/** Canonical season/poster rankings - rectangular cards */
+export interface PosterRankingsQuestion extends BaseQuestion {
+  type: "poster-rankings";
   items: RankItem[];
   lineLabelTop?: string;
   lineLabelBottom?: string;
+}
+
+/** Legacy alias for person rankings */
+export interface CircleRankingQuestion extends Omit<PersonRankingsQuestion, "type"> {
+  type: "circle-ranking";
+}
+
+/** Legacy alias for poster rankings */
+export interface RectangleRankingQuestion extends Omit<PosterRankingsQuestion, "type"> {
+  type: "rectangle-ranking";
 }
 
 // ============================================================================
@@ -215,6 +227,8 @@ export interface TextValidation {
 
 export type SurveyQuestion =
   | NumericRankingQuestion
+  | PersonRankingsQuestion
+  | PosterRankingsQuestion
   | CircleRankingQuestion
   | RectangleRankingQuestion
   | CastDecisionCardQuestion

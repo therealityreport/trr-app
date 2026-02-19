@@ -5,11 +5,14 @@ import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { auth } from "@/lib/firebase";
 
 interface TrrShow {
   id: string;
   name: string;
+  slug: string;
+  canonical_slug: string;
   alternative_names?: string[] | null;
   imdb_id: string | null;
   tmdb_id: number | null;
@@ -161,6 +164,9 @@ export default function TrrShowsPage() {
   const [coveredShowPosterById, setCoveredShowPosterById] = useState<
     Record<string, string | null>
   >({});
+  const [coveredShowCanonicalSlugById, setCoveredShowCanonicalSlugById] = useState<
+    Record<string, string | null>
+  >({});
   const [coveredShowTotalEpisodesById, setCoveredShowTotalEpisodesById] = useState<
     Record<string, number | null>
   >({});
@@ -293,9 +299,17 @@ export default function TrrShowsPage() {
               >;
 
               let totalEpisodes: number | null = null;
+              let canonicalSlug: string | null = null;
               if (showResponse.ok) {
                 const showRaw = (showData as { show?: Record<string, unknown> }).show;
                 totalEpisodes = toFiniteNumber(showRaw?.show_total_episodes);
+                const canonicalCandidate =
+                  typeof showRaw?.canonical_slug === "string"
+                    ? showRaw.canonical_slug.trim()
+                    : "";
+                const slugCandidate =
+                  typeof showRaw?.slug === "string" ? showRaw.slug.trim() : "";
+                canonicalSlug = canonicalCandidate || slugCandidate || null;
                 if (!posterUrl) {
                   posterUrl =
                     normalizePosterUrl(showRaw?.poster_url) ||
@@ -308,6 +322,10 @@ export default function TrrShowsPage() {
               if (posterUrl) {
                 setCoveredShowPosterById((prev) => ({ ...prev, [trrShowId]: posterUrl }));
               }
+              setCoveredShowCanonicalSlugById((prev) => ({
+                ...prev,
+                [trrShowId]: canonicalSlug,
+              }));
               setCoveredShowTotalEpisodesById((prev) => ({
                 ...prev,
                 [trrShowId]: totalEpisodes,
@@ -605,7 +623,9 @@ export default function TrrShowsPage() {
                           <li key={show.id} className="flex items-start justify-between gap-3 p-3">
                             <div className="min-w-0 flex-1">
                               <Link
-                                href={`/admin/trr-shows/${show.id}`}
+                                href={buildShowAdminUrl({
+                                  showSlug: show.canonical_slug || show.slug || show.id,
+                                }) as "/admin/trr-shows"}
                                 className="block rounded-md px-1 py-0.5 transition hover:bg-zinc-50"
                               >
                                 <p className="truncate text-sm font-semibold text-zinc-900">
@@ -731,7 +751,10 @@ export default function TrrShowsPage() {
                       className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
                     >
                       <Link
-                        href={`/admin/trr-shows/${show.trr_show_id}`}
+                        href={buildShowAdminUrl({
+                          showSlug:
+                            coveredShowCanonicalSlugById[show.trr_show_id] || show.trr_show_id,
+                        }) as "/admin/trr-shows"}
                         className="group flex min-w-0 flex-1 items-start gap-3"
                       >
                         <div className="relative w-20 flex-shrink-0 aspect-[4/5] overflow-hidden rounded-md bg-zinc-200">

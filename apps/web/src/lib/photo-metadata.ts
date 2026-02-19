@@ -854,6 +854,7 @@ export function mapSeasonAssetToMetadata(
   );
   const faceBoxes = parseFaceBoxes(metadata.face_boxes);
   const peopleCount =
+    toPeopleCount((asset as { people_count?: unknown }).people_count) ??
     toPeopleCount((metadata as Record<string, unknown>).people_count) ??
     (faceBoxes.length > 0 ? faceBoxes.length : null);
   const s3MirrorFileName = inferS3MirrorFileName(metadata, [

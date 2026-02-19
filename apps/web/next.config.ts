@@ -28,6 +28,63 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async rewrites() {
+    return {
+      beforeFiles: [
+        // Show tabs (path-based UI state -> canonical page renderer)
+        { source: "/admin/trr-shows/:showId/overview", destination: "/admin/trr-shows/:showId?tab=details" },
+        { source: "/admin/trr-shows/:showId/details", destination: "/admin/trr-shows/:showId?tab=details" },
+        { source: "/admin/trr-shows/:showId/settings", destination: "/admin/trr-shows/:showId?tab=settings" },
+        { source: "/admin/trr-shows/:showId/seasons", destination: "/admin/trr-shows/:showId?tab=seasons" },
+        { source: "/admin/trr-shows/:showId/news", destination: "/admin/trr-shows/:showId?tab=news" },
+        { source: "/admin/trr-shows/:showId/cast", destination: "/admin/trr-shows/:showId?tab=cast" },
+        { source: "/admin/trr-shows/:showId/surveys", destination: "/admin/trr-shows/:showId?tab=surveys" },
+        { source: "/admin/trr-shows/:showId/social", destination: "/admin/trr-shows/:showId?tab=social" },
+        { source: "/admin/trr-shows/:showId/assets", destination: "/admin/trr-shows/:showId?tab=assets&assets=images" },
+        { source: "/admin/trr-shows/:showId/assets/images", destination: "/admin/trr-shows/:showId?tab=assets&assets=images" },
+        { source: "/admin/trr-shows/:showId/assets/videos", destination: "/admin/trr-shows/:showId?tab=assets&assets=videos" },
+        { source: "/admin/trr-shows/:showId/assets/brand", destination: "/admin/trr-shows/:showId?tab=assets&assets=brand" },
+
+        // Season tabs
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/episodes",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=episodes",
+        },
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/assets",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=assets&assets=media",
+        },
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/assets/media",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=assets&assets=media",
+        },
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/assets/brand",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=assets&assets=brand",
+        },
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/videos",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=videos",
+        },
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/cast",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=cast",
+        },
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/surveys",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=surveys",
+        },
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/social",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=social",
+        },
+        {
+          source: "/admin/trr-shows/:showId/seasons/:seasonNumber/details",
+          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=details",
+        },
+      ],
+    };
+  },
   async headers() {
     return [
       {

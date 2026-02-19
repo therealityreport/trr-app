@@ -27,5 +27,10 @@ describe("UI_TEMPLATES", () => {
       }
     }
   });
-});
 
+  it("includes canonical ranking variants", () => {
+    const variants = UI_TEMPLATES.map((t) => t.uiVariant);
+    expect(variants).toContain("person-rankings");
+    expect(variants).toContain("poster-rankings");
+  });
+});

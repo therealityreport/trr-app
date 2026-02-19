@@ -3,7 +3,7 @@
 import type { SurveyQuestion } from "@/lib/surveys/normalized-types";
 import type { QuestionType } from "@/lib/surveys/normalized-types";
 import type { QuestionConfig, UiVariant } from "@/lib/surveys/question-config-types";
-import { inferUiVariant } from "@/lib/surveys/question-config-types";
+import { canonicalizeRankingVariant, inferUiVariant } from "@/lib/surveys/question-config-types";
 
 export interface UiTemplateSeedOption {
   option_key: string;
@@ -102,23 +102,23 @@ export const UI_TEMPLATES: UiTemplate[] = [
     },
   },
   {
-    uiVariant: "rectangle-ranking",
-    label: "Ranking (list)",
-    description: "Drag-and-drop ranking list.",
+    uiVariant: "poster-rankings",
+    label: "Poster Rankings",
+    description: "Drag-and-drop season/poster rankings.",
     questionType: "ranking",
     defaultConfig: {
-      uiVariant: "rectangle-ranking",
+      uiVariant: "poster-rankings",
       lineLabelTop: "BEST",
       lineLabelBottom: "WORST",
     },
   },
   {
-    uiVariant: "circle-ranking",
-    label: "Ranking (grid)",
-    description: "Drag-and-drop ranking grid.",
+    uiVariant: "person-rankings",
+    label: "Person Rankings",
+    description: "Drag-and-drop person/cast rankings.",
     questionType: "ranking",
     defaultConfig: {
-      uiVariant: "circle-ranking",
+      uiVariant: "person-rankings",
       lineLabelTop: "BEST",
       lineLabelBottom: "WORST",
     },
@@ -201,13 +201,18 @@ export function getUiTemplate(uiVariant: UiVariant): UiTemplate | undefined {
 export function getQuestionUiVariant(question: SurveyQuestion): UiVariant {
   const config = question.config as Record<string, unknown> | null | undefined;
   const raw = config?.uiVariant;
-  if (typeof raw === "string") return raw as UiVariant;
-  return inferUiVariant(question.question_type);
+  if (typeof raw === "string") {
+    return canonicalizeRankingVariant(raw) as UiVariant;
+  }
+  return canonicalizeRankingVariant(inferUiVariant(question.question_type)) as UiVariant;
 }
 
 export function uiVariantLabel(uiVariant: UiVariant): string {
-  const template = getUiTemplate(uiVariant);
+  const canonical = canonicalizeRankingVariant(uiVariant) as UiVariant;
+  const template = getUiTemplate(canonical);
   if (template) return template.label;
+  if (uiVariant === "circle-ranking") return "Person Rankings";
+  if (uiVariant === "rectangle-ranking") return "Poster Rankings";
   if (uiVariant === "three-choice-slider") return "Cast decision card";
   // Fallback for any variants not in the picker yet.
   return uiVariant;

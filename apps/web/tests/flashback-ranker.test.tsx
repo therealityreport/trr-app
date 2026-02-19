@@ -53,6 +53,40 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
     expect(screen.getByRole("button", { name: /select cast member for rank 1/i })).toBeInTheDocument();
   });
 
+  it("uses 3 columns on tablet and 4 columns on desktop", () => {
+    const first = render(
+      <FlashbackRanker
+        items={ITEMS}
+        variant="grid"
+        layoutPreset="figma-rank-circles"
+      />,
+    );
+
+    expect(screen.getByTestId("figma-rank-grid")).toHaveAttribute("data-columns", "2");
+    first.unmount();
+
+    setViewport(768, 1024);
+    const second = render(
+      <FlashbackRanker
+        items={ITEMS}
+        variant="grid"
+        layoutPreset="figma-rank-circles"
+      />,
+    );
+    expect(screen.getByTestId("figma-rank-grid")).toHaveAttribute("data-columns", "3");
+    second.unmount();
+
+    setViewport(1280, 900);
+    render(
+      <FlashbackRanker
+        items={ITEMS}
+        variant="grid"
+        layoutPreset="figma-rank-circles"
+      />,
+    );
+    expect(screen.getByTestId("figma-rank-grid")).toHaveAttribute("data-columns", "4");
+  });
+
   it("uses mobile bottom sheet picker on small screens", () => {
     render(
       <FlashbackRanker
@@ -101,6 +135,7 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
     const defaultBenchTokenWidth = parsePx(defaultBenchToken.style.width);
     const defaultRankNumber = screen.getAllByText(/^1$/)[0] as HTMLElement;
     const defaultRankNumberSize = Number.parseInt(defaultRankNumber.style.fontSize ?? "0", 10);
+    expect(defaultBenchTokenWidth).toBe(48);
     expect(defaultBenchTokenWidth).toBeLessThan(defaultSlotWidth);
     unmount();
 
@@ -242,5 +277,23 @@ describe("FlashbackRanker figma-rank-rectangles preset", () => {
         expect.objectContaining({ id: "mary" }),
       ]);
     });
+  });
+});
+
+describe("FlashbackRanker classic timeline", () => {
+  it("renders timeline labels and draggable bench tokens", () => {
+    render(
+      <FlashbackRanker
+        items={ITEMS}
+        variant="classic"
+        lineLabelTop="EARLIER"
+        lineLabelBottom="LATER"
+      />,
+    );
+
+    expect(screen.getByText("EARLIER")).toBeInTheDocument();
+    expect(screen.getByText("LATER")).toBeInTheDocument();
+    expect(screen.getByLabelText("Drag from here")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /drag lisa/i })).toBeInTheDocument();
   });
 });

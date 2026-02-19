@@ -3,11 +3,12 @@
 import * as React from "react";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { QuestionConfig, UiVariant } from "@/lib/surveys/question-config-types";
-import { inferUiVariant } from "@/lib/surveys/question-config-types";
+import { canonicalizeRankingVariant, inferUiVariant } from "@/lib/surveys/question-config-types";
 
 import StarRatingInput from "./StarRatingInput";
 import SliderInput from "./SliderInput";
-import RankOrderInput from "./RankOrderInput";
+import PersonRankingsInput from "./PersonRankingsInput";
+import PosterRankingsInput from "./PosterRankingsInput";
 import WhoseSideInput from "./WhoseSideInput";
 import MatrixLikertInput from "./MatrixLikertInput";
 import CastDecisionCardInput from "./CastDecisionCardInput";
@@ -43,7 +44,9 @@ export default function QuestionRenderer({
   disabled = false,
 }: QuestionRendererProps) {
   const config = question.config as QuestionConfig;
-  const uiVariant: UiVariant = config.uiVariant ?? inferUiVariant(question.question_type);
+  const uiVariant: UiVariant = canonicalizeRankingVariant(
+    config.uiVariant ?? inferUiVariant(question.question_type),
+  ) as UiVariant;
 
   const commonProps = {
     question,
@@ -80,10 +83,36 @@ export default function QuestionRenderer({
       );
 
     // Ranking questions (drag and drop)
+    case "person-rankings":
+      return (
+        <PersonRankingsInput
+          {...commonProps}
+          value={value as string[] | null}
+          onChange={onChange}
+        />
+      );
+
+    case "poster-rankings":
+      return (
+        <PosterRankingsInput
+          {...commonProps}
+          value={value as string[] | null}
+          onChange={onChange}
+        />
+      );
+
     case "circle-ranking":
+      return (
+        <PersonRankingsInput
+          {...commonProps}
+          value={value as string[] | null}
+          onChange={onChange}
+        />
+      );
+
     case "rectangle-ranking":
       return (
-        <RankOrderInput
+        <PosterRankingsInput
           {...commonProps}
           value={value as string[] | null}
           onChange={onChange}

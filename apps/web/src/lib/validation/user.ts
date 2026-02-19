@@ -25,6 +25,7 @@ export type UserProfile = {
   username: string; // lowercase, 3-20, [a-z0-9_]
   birthday: string; // ISO date YYYY-MM-DD
   shows: string[];
+  showRequests?: string[];
   gender?: string; // optional gender
   livesInUS?: boolean; // optional US residency
   state?: string; // optional US state (if livesInUS is true)

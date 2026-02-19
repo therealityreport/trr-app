@@ -3,7 +3,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import QuestionRenderer from "@/components/survey/QuestionRenderer";
 import IconRatingInput from "@/components/survey/IconRatingInput";
-import FlashbackRanker, { type FlashbackRankerFontOverrides } from "@/components/flashback-ranker";
+import FlashbackRanker, {
+  type FlashbackRankerFontOverrides,
+  type FlashbackRankerStyleOverrides,
+} from "@/components/flashback-ranker";
 import {
   DESIGN_SYSTEM_BASE_COLORS,
   DESIGN_SYSTEM_CDN_FONT_OPTIONS,
@@ -12,6 +15,7 @@ import {
 import { extractPrimaryFontToken, resolveCloudfrontCdnFont } from "@/lib/fonts/cdn-fonts";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { SurveyRankingItem } from "@/lib/surveys/types";
+import MultiSelectPills from "@/components/survey/MultiSelectPills";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -47,12 +51,20 @@ interface TemplatePreviewEditorState {
   subText: string;
   titleColor: string;
   subTextColor: string;
+  questionColor: string;
+  componentBackgroundColor: string;
+  placeholderShapeColor: string;
+  placeholderShapeBorderColor: string;
+  unassignedContainerColor: string;
+  unassignedContainerBorderColor: string;
+  unassignedCastCircleBorderColor: string;
   titleFontFamily: string;
   subTextFontFamily: string;
   titleFontSize: number;
   subTextFontSize: number;
   shapeScale: number;
   buttonScale: number;
+  unassignedCastCircleSize: number;
   canvasBackground: string;
   frameBackground: string;
   frameBorderColor: string;
@@ -61,12 +73,20 @@ interface TemplatePreviewEditorState {
 type TemplateStyleKey =
   | "titleColor"
   | "subTextColor"
+  | "questionColor"
+  | "componentBackgroundColor"
+  | "placeholderShapeColor"
+  | "placeholderShapeBorderColor"
+  | "unassignedContainerColor"
+  | "unassignedContainerBorderColor"
+  | "unassignedCastCircleBorderColor"
   | "titleFontFamily"
   | "subTextFontFamily"
   | "titleFontSize"
   | "subTextFontSize"
   | "shapeScale"
   | "buttonScale"
+  | "unassignedCastCircleSize"
   | "canvasBackground"
   | "frameBackground"
   | "frameBorderColor";
@@ -75,12 +95,20 @@ type TemplateStyleDefaults = Pick<TemplatePreviewEditorState, TemplateStyleKey>;
 const TEMPLATE_STYLE_FIELDS: TemplateStyleKey[] = [
   "titleColor",
   "subTextColor",
+  "questionColor",
+  "componentBackgroundColor",
+  "placeholderShapeColor",
+  "placeholderShapeBorderColor",
+  "unassignedContainerColor",
+  "unassignedContainerBorderColor",
+  "unassignedCastCircleBorderColor",
   "titleFontFamily",
   "subTextFontFamily",
   "titleFontSize",
   "subTextFontSize",
   "shapeScale",
   "buttonScale",
+  "unassignedCastCircleSize",
   "canvasBackground",
   "frameBackground",
   "frameBorderColor",
@@ -104,12 +132,24 @@ type TemplateEditorStringKey =
   | "subText"
   | "titleColor"
   | "subTextColor"
+  | "questionColor"
+  | "componentBackgroundColor"
+  | "placeholderShapeColor"
+  | "placeholderShapeBorderColor"
+  | "unassignedContainerColor"
+  | "unassignedContainerBorderColor"
+  | "unassignedCastCircleBorderColor"
   | "titleFontFamily"
   | "subTextFontFamily"
   | "canvasBackground"
   | "frameBackground"
   | "frameBorderColor";
-type TemplateEditorNumberKey = "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale";
+type TemplateEditorNumberKey =
+  | "titleFontSize"
+  | "subTextFontSize"
+  | "shapeScale"
+  | "buttonScale"
+  | "unassignedCastCircleSize";
 
 /* ------------------------------------------------------------------ */
 /*  Auth / Signup field data                                            */
@@ -157,6 +197,19 @@ const SAMPLE_SHOWS = [
   "Million Dollar Listing",
 ];
 
+const CHARACTERISTIC_PILLS = [
+  "Shady/Messy",
+  "Philanthropy",
+  "Personal Storylines",
+  "Relatability",
+  "Wealth",
+  "Humor",
+  "Authentic",
+  "Honest",
+  "Fashion",
+  "Family Drama",
+];
+
 const SHOW_COLORS = [
   "#7A0307", "#95164A", "#B81D22", "#CF5315", "#C76D00", "#F1991B",
   "#B05E2A", "#E3A320", "#D48C42", "#ECC91C", "#977022", "#744A1F",
@@ -198,6 +251,17 @@ function mkQ(
   };
 }
 
+const RHOSLC_S6_CAST_OPTIONS: Array<{ key: string; text: string; metadata: { imagePath: string } }> = [
+  { key: "angie", text: "Angie Katsanevas", metadata: { imagePath: "/images/cast/rhoslc-s6/angie.png" } },
+  { key: "britani", text: "Britani Bateman", metadata: { imagePath: "/images/cast/rhoslc-s6/britani.png" } },
+  { key: "bronwyn", text: "Bronwyn Newport", metadata: { imagePath: "/images/cast/rhoslc-s6/bronwyn.png" } },
+  { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } },
+  { key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } },
+  { key: "mary", text: "Mary Cosby", metadata: { imagePath: "/images/cast/rhoslc-s6/mary.png" } },
+  { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } },
+  { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } },
+];
+
 /* ------------------------------------------------------------------ */
 /*  Catalog data – real survey questions with multiple examples         */
 /* ------------------------------------------------------------------ */
@@ -235,9 +299,11 @@ const SURVEY_CATALOG: CatalogEntry[] = [
     { label: "Cast Verdict (Keep/Fire/Demote)", source: "RHOSLC S6 Survey", mockQuestion: mkQ("verdict", "For each cast member, should Bravo keep, demote, or fire them?", "likert", { uiVariant: "cast-decision-card", choices: [{ value: "fire", label: "Fire" }, { value: "demote", label: "Demote" }, { value: "keep", label: "Keep" }], rows: [{ id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" }, { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" }] }, [{ key: "fire", text: "Fire" }, { key: "demote", text: "Demote" }, { key: "keep", text: "Keep" }]), mockValue: {} },
     { label: "Ex-Wives: Bring Back / Keep Gone", source: "Legacy Cast Survey", mockQuestion: mkQ("exwives", "Should these former cast members return?", "likert", { uiVariant: "cast-decision-card", choices: [{ value: "bring_back", label: "Bring Back" }, { value: "keep_gone", label: "Keep Gone" }], rows: [{ id: "monica", label: "Monica Garcia" }, { id: "jen", label: "Jen Shah" }] }, [{ key: "bring_back", text: "Bring Back" }, { key: "keep_gone", text: "Keep Gone" }]), mockValue: {} },
   ]},
-  { key: "rank-order", displayName: "Rank Order (Drag & Drop)", description: "Drag-and-drop ranked slots with an unranked tray. Supports circle cast and rectangle seasons templates.", componentPath: "components/survey/RankOrderInput.tsx + flashback-ranker.tsx", category: "survey", examples: [
-    { label: "RHOSLC Season Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_seasons", "Rank the Seasons of RHOSLC.", "ranking", { uiVariant: "rectangle-ranking", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "s1", text: "SEASON 1" }, { key: "s2", text: "SEASON 2" }, { key: "s3", text: "SEASON 3" }, { key: "s4", text: "SEASON 4" }, { key: "s5", text: "SEASON 5" }, { key: "s6", text: "SEASON 6" }]), mockValue: [] },
-    { label: "RHOSLC Cast Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_rhoslc", "Rank the Cast of RHOSLC S6.", "ranking", { uiVariant: "circle-ranking", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }, { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } }]), mockValue: [] },
+  { key: "poster-rankings", displayName: "Poster Rankings", description: "Drag-and-drop ranked season/poster slots with an unassigned bank.", componentPath: "components/survey/PosterRankingsInput.tsx", category: "survey", examples: [
+    { label: "RHOSLC Season Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_seasons", "Rank the Seasons of RHOSLC.", "ranking", { uiVariant: "poster-rankings", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "s1", text: "SEASON 1" }, { key: "s2", text: "SEASON 2" }, { key: "s3", text: "SEASON 3" }, { key: "s4", text: "SEASON 4" }, { key: "s5", text: "SEASON 5" }, { key: "s6", text: "SEASON 6" }]), mockValue: [] },
+  ]},
+  { key: "person-rankings", displayName: "Person Rankings", description: "Drag-and-drop ranked cast slots with an unassigned cast bank.", componentPath: "components/survey/PersonRankingsInput.tsx", category: "survey", examples: [
+    { label: "RHOSLC Cast Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_rhoslc", "Rank the Cast of RHOSLC S6.", "ranking", { uiVariant: "person-rankings", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, RHOSLC_S6_CAST_OPTIONS), mockValue: [] },
   ]},
   { key: "two-axis-grid", displayName: "Two-Axis Grid (2D Map)", description: "Draggable tokens on a 2D grid with labeled axes. Snap-to-grid.", componentPath: "components/survey/TwoAxisGridInput.tsx", category: "survey", examples: [
     { label: "Cast Perception Map", source: "RHOSLC S6 Survey", mockQuestion: mkQ("perception", "Place each housewife on the grid", "likert", { uiVariant: "two-axis-grid", extent: 3, xLabelLeft: "VILLAIN", xLabelRight: "HERO", yLabelTop: "ENTERTAINING", yLabelBottom: "BORING", rows: [{ id: "lisa", label: "Lisa B.", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather G.", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith M.", img: "/images/cast/rhoslc-s6/meredith.png" }] }), mockValue: {} },
@@ -257,7 +323,8 @@ const AUTH_CATALOG: CatalogEntry[] = [
   { key: "auth-gender", displayName: "Gender (Select)", description: "Dropdown select with 5 options: Male, Female, Non-binary, Prefer not to say, Other.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
   { key: "auth-country", displayName: "Country (Datalist)", description: "Text input with datalist autocomplete. 196 countries.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
   { key: "auth-state", displayName: "State (Datalist)", description: "Text input with datalist autocomplete. 50 US states. Only shows if country = United States.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
-  { key: "auth-shows", displayName: "Pill Multi Select (Shows)", description: "Scrollable pill-based multi-select with 30+ shows. Each pill has a unique color. Min 3 required.", componentPath: "app/auth/finish/page.tsx", category: "auth" },
+  { key: "auth-shows", displayName: "MultiSelectPills (Shows)", description: "Scrollable pill-based multi-select for shows. Min 3 required.", componentPath: "components/survey/MultiSelectPills.tsx + app/auth/finish/page.tsx", category: "auth" },
+  { key: "auth-characteristics", displayName: "MultiSelectPills (Characteristics)", description: "Characteristic-based pill selector variant for question templates.", componentPath: "components/survey/MultiSelectPills.tsx", category: "auth" },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -265,16 +332,19 @@ const AUTH_CATALOG: CatalogEntry[] = [
 /* ------------------------------------------------------------------ */
 
 const RHOSLC_CAST: SurveyRankingItem[] = [
-  { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" },
-  { id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" },
-  { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" },
-  { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" },
   { id: "angie", label: "Angie Katsanevas", img: "/images/cast/rhoslc-s6/angie.png" },
+  { id: "britani", label: "Britani Bateman", img: "/images/cast/rhoslc-s6/britani.png" },
+  { id: "bronwyn", label: "Bronwyn Newport", img: "/images/cast/rhoslc-s6/bronwyn.png" },
+  { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" },
+  { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" },
+  { id: "mary", label: "Mary Cosby", img: "/images/cast/rhoslc-s6/mary.png" },
+  { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" },
+  { id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" },
 ];
 
 const STANDALONE_CATALOG: CatalogEntry[] = [
   { key: "icon-rating", displayName: "Icon Rating (Snowflake)", description: "Partial-fill icon rating using any masked SVG. Click or drag across icons. Supports half-values and text input. Used with snowflakes for RHOSLC.", componentPath: "components/survey/IconRatingInput.tsx", category: "standalone" },
-  { key: "flashback-ranker", displayName: "Flashback Ranker (Drag & Drop)", description: "Drag cast members from the bench onto a ranked line. Supports classic (vertical list) and grid (circle tokens) variants.", componentPath: "components/flashback-ranker.tsx", category: "standalone" },
+  { key: "flashback-ranker", displayName: "Flashback Ranker (Timeline)", description: "Drag cast members from the bench onto a timeline line (classic mode).", componentPath: "components/flashback-ranker.tsx", category: "standalone" },
 ];
 
 const PREVIEW_VIEWPORTS: Array<{ key: PreviewViewport; label: string }> = [
@@ -283,16 +353,10 @@ const PREVIEW_VIEWPORTS: Array<{ key: PreviewViewport; label: string }> = [
   { key: "desktop", label: "Desktop" },
 ];
 
-const PREVIEW_VIEWPORT_WIDTH_CLASS: Record<PreviewViewport, string> = {
-  phone: "max-w-[390px]",
-  tablet: "max-w-[768px]",
-  desktop: "max-w-full",
-};
-
-const PREVIEW_VIEWPORT_HEIGHT_CLASS: Record<PreviewViewport, string> = {
-  phone: "h-[640px]",
-  tablet: "h-[740px]",
-  desktop: "max-h-[760px]",
+const PREVIEW_VIEWPORT_FRAME: Record<PreviewViewport, { width: number; height: number; maxWidthClass: string }> = {
+  phone: { width: 390, height: 844, maxWidthClass: "max-w-[390px]" },
+  tablet: { width: 768, height: 1024, maxWidthClass: "max-w-[768px]" },
+  desktop: { width: 1280, height: 800, maxWidthClass: "max-w-[1280px]" },
 };
 
 const TEMPLATE_FONT_OPTIONS: Array<{ label: string; value: string }> = DESIGN_SYSTEM_CDN_FONT_OPTIONS.map((font) => ({
@@ -329,12 +393,20 @@ const FIGMA_SUBTEXT_FONT = "\"Plymouth Serial\", var(--font-sans), sans-serif";
 const DEFAULT_SURVEY_STYLE_MOBILE: TemplateStyleDefaults = {
   titleColor: "#111111",
   subTextColor: "#111111",
+  questionColor: "#111111",
+  componentBackgroundColor: "#D9D9D9",
+  placeholderShapeColor: "#111111",
+  placeholderShapeBorderColor: "#E4E4E7",
+  unassignedContainerColor: "#F4F4F5",
+  unassignedContainerBorderColor: "#D4D4D8",
+  unassignedCastCircleBorderColor: "#D4D4D8",
   titleFontFamily: DEFAULT_TITLE_FONT,
   subTextFontFamily: DEFAULT_SUBTEXT_FONT,
   titleFontSize: 20,
   subTextFontSize: 14,
   shapeScale: 100,
   buttonScale: 100,
+  unassignedCastCircleSize: 100,
   canvasBackground: "#FFFFFF",
   frameBackground: "#FFFFFF",
   frameBorderColor: "#E4E4E7",
@@ -343,12 +415,20 @@ const DEFAULT_SURVEY_STYLE_MOBILE: TemplateStyleDefaults = {
 const DEFAULT_SURVEY_STYLE_DESKTOP: TemplateStyleDefaults = {
   titleColor: "#111111",
   subTextColor: "#111111",
+  questionColor: "#111111",
+  componentBackgroundColor: "#D9D9D9",
+  placeholderShapeColor: "#111111",
+  placeholderShapeBorderColor: "#E4E4E7",
+  unassignedContainerColor: "#F4F4F5",
+  unassignedContainerBorderColor: "#D4D4D8",
+  unassignedCastCircleBorderColor: "#D4D4D8",
   titleFontFamily: DEFAULT_TITLE_FONT,
   subTextFontFamily: DEFAULT_SUBTEXT_FONT,
   titleFontSize: 24,
   subTextFontSize: 16,
   shapeScale: 100,
   buttonScale: 100,
+  unassignedCastCircleSize: 100,
   canvasBackground: "#FFFFFF",
   frameBackground: "#FFFFFF",
   frameBorderColor: "#E4E4E7",
@@ -385,6 +465,13 @@ function buildTemplateEditorDefaults(
     subText,
     titleColor: "#111111",
     subTextColor: "#111111",
+    questionColor: "#111111",
+    componentBackgroundColor: isFigmaRankPreview ? "#D9D9D9" : "#FFFFFF",
+    placeholderShapeColor: isFigmaRankPreview ? "#111111" : "#E4E4E7",
+    placeholderShapeBorderColor: "#D4D4D8",
+    unassignedContainerColor: isFigmaRankPreview ? "#F4F4F5" : "#FFFFFF",
+    unassignedContainerBorderColor: "#D4D4D8",
+    unassignedCastCircleBorderColor: "#D4D4D8",
     titleFontFamily: isFigmaRankPreview
       ? FIGMA_TITLE_FONT
       : DEFAULT_TITLE_FONT,
@@ -395,9 +482,10 @@ function buildTemplateEditorDefaults(
     subTextFontSize: isFigmaRankPreview ? 35 : 16,
     shapeScale: 100,
     buttonScale: 100,
+    unassignedCastCircleSize: 100,
     canvasBackground: "#FFFFFF",
-    frameBackground: isFigmaRankPreview ? "#D9D9D9" : "#FFFFFF",
-    frameBorderColor: isFigmaRankPreview ? "#D9D9D9" : "#E4E4E7",
+    frameBackground: "#FFFFFF",
+    frameBorderColor: "#E4E4E7",
   };
 }
 
@@ -417,6 +505,13 @@ function sanitizeTemplateEditorState(
     "subText",
     "titleColor",
     "subTextColor",
+    "questionColor",
+    "componentBackgroundColor",
+    "placeholderShapeColor",
+    "placeholderShapeBorderColor",
+    "unassignedContainerColor",
+    "unassignedContainerBorderColor",
+    "unassignedCastCircleBorderColor",
     "titleFontFamily",
     "subTextFontFamily",
     "canvasBackground",
@@ -428,6 +523,7 @@ function sanitizeTemplateEditorState(
     "subTextFontSize",
     "shapeScale",
     "buttonScale",
+    "unassignedCastCircleSize",
   ];
 
   const sanitized: Partial<TemplatePreviewEditorState> = {};
@@ -456,20 +552,28 @@ function sanitizeTemplateStyleDefaults(value: unknown): Partial<TemplateStyleDef
   const candidate = value as Record<string, unknown>;
   const sanitized: Partial<TemplateStyleDefaults> = {};
 
-  const stringFields: Array<Exclude<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale">> = [
+  const stringFields: Array<Exclude<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale" | "unassignedCastCircleSize">> = [
     "titleColor",
     "subTextColor",
+    "questionColor",
+    "componentBackgroundColor",
+    "placeholderShapeColor",
+    "placeholderShapeBorderColor",
+    "unassignedContainerColor",
+    "unassignedContainerBorderColor",
+    "unassignedCastCircleBorderColor",
     "titleFontFamily",
     "subTextFontFamily",
     "canvasBackground",
     "frameBackground",
     "frameBorderColor",
   ];
-  const numberFields: Array<Extract<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale">> = [
+  const numberFields: Array<Extract<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale" | "unassignedCastCircleSize">> = [
     "titleFontSize",
     "subTextFontSize",
     "shapeScale",
     "buttonScale",
+    "unassignedCastCircleSize",
   ];
 
   for (const field of stringFields) {
@@ -534,6 +638,11 @@ function withEditorFontOverridesForQuestion(
         ...baseConfig,
         shapeScale: editorState.shapeScale,
         buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        subTextHeadingColor: editorState.subTextColor,
+        componentBackgroundColor: editorState.componentBackgroundColor,
+        placeholderShapeColor: editorState.placeholderShapeColor,
+        placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
         subTextHeadingFontFamily: editorState.subTextFontFamily,
         questionTextFontFamily: editorState.titleFontFamily,
         optionTextFontFamily: editorState.subTextFontFamily,
@@ -563,6 +672,10 @@ function withEditorFontOverridesForQuestion(
         ...baseConfig,
         shapeScale: editorState.shapeScale,
         buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        componentBackgroundColor: editorState.componentBackgroundColor,
+        placeholderShapeColor: editorState.placeholderShapeColor,
+        placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
         questionTextFontFamily: editorState.titleFontFamily,
         headingFontFamily: editorState.titleFontFamily,
         titleFontFamily: editorState.titleFontFamily,
@@ -580,7 +693,12 @@ function withEditorFontOverridesForQuestion(
     };
   }
 
-  if (uiVariant === "circle-ranking" || uiVariant === "rectangle-ranking") {
+  if (
+    uiVariant === "person-rankings" ||
+    uiVariant === "poster-rankings" ||
+    uiVariant === "circle-ranking" ||
+    uiVariant === "rectangle-ranking"
+  ) {
     const existingFonts = asConfigRecord(baseConfig.fonts);
     return {
       ...question,
@@ -588,6 +706,14 @@ function withEditorFontOverridesForQuestion(
         ...baseConfig,
         shapeScale: editorState.shapeScale,
         buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        placeholderShapeColor: editorState.placeholderShapeColor,
+        placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
+        placeholderTextColor: editorState.questionColor,
+        unassignedContainerColor: editorState.unassignedContainerColor,
+        unassignedContainerBorderColor: editorState.unassignedContainerBorderColor,
+        unassignedCircleBorderColor: editorState.unassignedCastCircleBorderColor,
+        unassignedCircleSize: editorState.unassignedCastCircleSize,
         rankNumberFontFamily: editorState.titleFontFamily,
         trayLabelFontFamily: editorState.subTextFontFamily,
         cardLabelFontFamily: editorState.titleFontFamily,
@@ -613,6 +739,12 @@ function withEditorFontOverridesForQuestion(
         ...baseConfig,
         shapeScale: editorState.shapeScale,
         buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        subTextHeadingColor: editorState.subTextColor,
+        componentBackgroundColor: editorState.componentBackgroundColor,
+        optionTextColor: editorState.subTextColor,
+        placeholderShapeColor: editorState.placeholderShapeColor,
+        placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
         subTextHeadingFontFamily: FIGMA_MATRIX_HEADING_FONT,
         promptFontFamily: FIGMA_MATRIX_HEADING_FONT,
         headingFontFamily: FIGMA_MATRIX_HEADING_FONT,
@@ -641,6 +773,25 @@ function withEditorFontOverridesForQuestion(
     };
   }
 
+  if (uiVariant === "two-axis-grid") {
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        componentBackgroundColor: editorState.componentBackgroundColor,
+        placeholderShapeColor: editorState.placeholderShapeColor,
+        placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
+        unassignedContainerColor: editorState.unassignedContainerColor,
+        unassignedContainerBorderColor: editorState.unassignedContainerBorderColor,
+        unassignedCircleBorderColor: editorState.unassignedCastCircleBorderColor,
+        unassignedCircleSize: editorState.unassignedCastCircleSize,
+      },
+    };
+  }
+
   return question;
 }
 
@@ -651,6 +802,19 @@ function buildStandaloneFontOverrides(editorState: TemplatePreviewEditorState): 
     cardLabelFontFamily: editorState.titleFontFamily,
     pickerTitleFontFamily: editorState.subTextFontFamily,
     pickerItemFontFamily: editorState.subTextFontFamily,
+  };
+}
+
+function buildStandaloneStyleOverrides(editorState: TemplatePreviewEditorState): FlashbackRankerStyleOverrides {
+  return {
+    circlePlaceholderFillColor: editorState.placeholderShapeColor,
+    circlePlaceholderBorderColor: editorState.placeholderShapeBorderColor,
+    circlePlaceholderNumberColor: editorState.questionColor,
+    rectanglePlaceholderFillColor: editorState.placeholderShapeColor,
+    unassignedContainerFillColor: editorState.unassignedContainerColor,
+    unassignedContainerBorderColor: editorState.unassignedContainerBorderColor,
+    unassignedItemBorderColor: editorState.unassignedCastCircleBorderColor,
+    unassignedItemSizePercent: editorState.unassignedCastCircleSize,
   };
 }
 
@@ -697,6 +861,7 @@ function PreviewViewportToggle({
       <div className="inline-flex rounded-full border border-zinc-200 bg-white p-1">
         {PREVIEW_VIEWPORTS.map((option) => {
           const active = option.key === value;
+          const viewportMeta = PREVIEW_VIEWPORT_FRAME[option.key];
           return (
             <button
               key={option.key}
@@ -708,6 +873,7 @@ function PreviewViewportToggle({
                   : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
               }`}
               aria-pressed={active}
+              title={`${viewportMeta.width}x${viewportMeta.height}`}
             >
               {option.label}
             </button>
@@ -954,7 +1120,7 @@ function SurveyDefaultSettingsPanel({
               onChange={(subTextFontSize) => updateActiveDefaults({ subTextFontSize })}
             />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-sm">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-md">
             <TemplateFontSizeInput
               label="Shape Size (%)"
               value={activeDefaults.shapeScale}
@@ -965,9 +1131,14 @@ function SurveyDefaultSettingsPanel({
               value={activeDefaults.buttonScale}
               onChange={(buttonScale) => updateActiveDefaults({ buttonScale })}
             />
+            <TemplateFontSizeInput
+              label="Unassigned Circle Size (%)"
+              value={activeDefaults.unassignedCastCircleSize}
+              onChange={(unassignedCastCircleSize) => updateActiveDefaults({ unassignedCastCircleSize })}
+            />
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
             <TemplateColorSelect
               label="Title"
               value={activeDefaults.titleColor}
@@ -979,6 +1150,48 @@ function SurveyDefaultSettingsPanel({
               value={activeDefaults.subTextColor}
               baseColors={baseColors}
               onChange={(subTextColor) => updateActiveDefaults({ subTextColor })}
+            />
+            <TemplateColorSelect
+              label="Question Text"
+              value={activeDefaults.questionColor}
+              baseColors={baseColors}
+              onChange={(questionColor) => updateActiveDefaults({ questionColor })}
+            />
+            <TemplateColorSelect
+              label="Component BG"
+              value={activeDefaults.componentBackgroundColor}
+              baseColors={baseColors}
+              onChange={(componentBackgroundColor) => updateActiveDefaults({ componentBackgroundColor })}
+            />
+            <TemplateColorSelect
+              label="Placeholder Fill"
+              value={activeDefaults.placeholderShapeColor}
+              baseColors={baseColors}
+              onChange={(placeholderShapeColor) => updateActiveDefaults({ placeholderShapeColor })}
+            />
+            <TemplateColorSelect
+              label="Placeholder Border"
+              value={activeDefaults.placeholderShapeBorderColor}
+              baseColors={baseColors}
+              onChange={(placeholderShapeBorderColor) => updateActiveDefaults({ placeholderShapeBorderColor })}
+            />
+            <TemplateColorSelect
+              label="Unassigned Container"
+              value={activeDefaults.unassignedContainerColor}
+              baseColors={baseColors}
+              onChange={(unassignedContainerColor) => updateActiveDefaults({ unassignedContainerColor })}
+            />
+            <TemplateColorSelect
+              label="Unassigned Border"
+              value={activeDefaults.unassignedContainerBorderColor}
+              baseColors={baseColors}
+              onChange={(unassignedContainerBorderColor) => updateActiveDefaults({ unassignedContainerBorderColor })}
+            />
+            <TemplateColorSelect
+              label="Unassigned Circle Border"
+              value={activeDefaults.unassignedCastCircleBorderColor}
+              baseColors={baseColors}
+              onChange={(unassignedCastCircleBorderColor) => updateActiveDefaults({ unassignedCastCircleBorderColor })}
             />
             <TemplateColorSelect
               label="Canvas"
@@ -1039,9 +1252,14 @@ function SurveyPreviewCard({
   const example = examples[safeExampleIdx] as QuestionExample;
   const activeVariant = (example.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
   const suppressTemplateHeading = activeVariant === "agree-likert-scale";
+  const isRankingVariant =
+    activeVariant === "person-rankings" ||
+    activeVariant === "poster-rankings" ||
+    activeVariant === "circle-ranking" ||
+    activeVariant === "rectangle-ranking";
   const isRankOrderPreview =
-    entry.key === "rank-order" &&
-    (activeVariant === "circle-ranking" || activeVariant === "rectangle-ranking");
+    (entry.key === "person-rankings" || entry.key === "poster-rankings") &&
+    isRankingVariant;
   const [values, setValues] = useState<Record<number, unknown>>(() => {
     const init: Record<number, unknown> = {};
     examples.forEach((ex, i) => {
@@ -1060,8 +1278,13 @@ function SurveyPreviewCard({
   const buildDefaults = useCallback(
     (exampleValue: QuestionExample) => {
       const variant = (exampleValue.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
-      const isRankPreview = entry.key === "rank-order" && (variant === "circle-ranking" || variant === "rectangle-ranking");
-      const isSeasonPreview = entry.key === "rank-order" && variant === "rectangle-ranking";
+      const isRankPreview =
+        (entry.key === "person-rankings" || entry.key === "poster-rankings") &&
+        (variant === "person-rankings" || variant === "poster-rankings" || variant === "circle-ranking" || variant === "rectangle-ranking");
+      const isSeasonPreview =
+        (entry.key === "poster-rankings" && (variant === "poster-rankings" || variant === "rectangle-ranking"))
+        || variant === "poster-rankings"
+        || variant === "rectangle-ranking";
       const isThreeChoice = variant === "three-choice-slider" || variant === "cast-decision-card";
       const isWhoseSide = variant === "two-choice-slider";
       const defaults = buildTemplateEditorDefaults(
@@ -1217,6 +1440,7 @@ function SurveyPreviewCard({
     () => withEditorFontOverridesForQuestion(example.mockQuestion, effectiveEditorState),
     [effectiveEditorState, example.mockQuestion],
   );
+  const viewportFrame = PREVIEW_VIEWPORT_FRAME[viewport];
   const updateEditorState = useCallback(
     (partial: Partial<TemplatePreviewEditorState>) => {
       const touchesStyleDefaults = Object.keys(partial).some((field) =>
@@ -1251,7 +1475,7 @@ function SurveyPreviewCard({
     }));
   }, [buildDefaults, example, safeExampleIdx, shouldUseGlobalDefaultsForExample]);
 
-  const renderPreview = (heightClass: string) => (
+  const renderPreview = () => (
     <div
       className="rounded-2xl border p-2 sm:p-3"
       style={{
@@ -1259,15 +1483,16 @@ function SurveyPreviewCard({
         borderColor: effectiveEditorState.frameBorderColor,
       }}
     >
-      <div className={`mx-auto w-full ${PREVIEW_VIEWPORT_WIDTH_CLASS[viewport]}`}>
+      <div className="mx-auto flex w-full justify-center">
         <div
-          className={`overflow-auto rounded-[24px] border shadow-sm ${heightClass}`}
+          className={`w-full overflow-hidden rounded-[24px] border shadow-sm ${viewportFrame.maxWidthClass}`}
           style={{
             backgroundColor: effectiveEditorState.frameBackground,
             borderColor: effectiveEditorState.frameBorderColor,
+            aspectRatio: `${viewportFrame.width} / ${viewportFrame.height}`,
           }}
         >
-          <div className="p-3 sm:p-6">
+          <div className="h-full overflow-auto p-3 sm:p-6">
             {!suppressTemplateHeading && (effectiveEditorState.titleText.trim().length > 0 || effectiveEditorState.subText.trim().length > 0) && (
               <div className="mb-3 sm:mb-4">
                 {effectiveEditorState.titleText.trim().length > 0 && (
@@ -1350,7 +1575,7 @@ function SurveyPreviewCard({
       </CardHeader>
 
       <div className="flex-1 p-3 sm:p-4">
-        {renderPreview(PREVIEW_VIEWPORT_HEIGHT_CLASS[viewport])}
+        {renderPreview()}
       </div>
 
       {isEditorOpen && (
@@ -1476,6 +1701,11 @@ function SurveyPreviewCard({
                       value={effectiveEditorState.buttonScale}
                       onChange={(buttonScale) => updateEditorState({ buttonScale })}
                     />
+                    <TemplateFontSizeInput
+                      label="Unassigned Circle Size (%)"
+                      value={effectiveEditorState.unassignedCastCircleSize}
+                      onChange={(unassignedCastCircleSize) => updateEditorState({ unassignedCastCircleSize })}
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -1490,6 +1720,48 @@ function SurveyPreviewCard({
                       value={effectiveEditorState.subTextColor}
                       baseColors={baseColors}
                       onChange={(subTextColor) => updateEditorState({ subTextColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Question Text"
+                      value={effectiveEditorState.questionColor}
+                      baseColors={baseColors}
+                      onChange={(questionColor) => updateEditorState({ questionColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Component BG"
+                      value={effectiveEditorState.componentBackgroundColor}
+                      baseColors={baseColors}
+                      onChange={(componentBackgroundColor) => updateEditorState({ componentBackgroundColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Placeholder Fill"
+                      value={effectiveEditorState.placeholderShapeColor}
+                      baseColors={baseColors}
+                      onChange={(placeholderShapeColor) => updateEditorState({ placeholderShapeColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Placeholder Border"
+                      value={effectiveEditorState.placeholderShapeBorderColor}
+                      baseColors={baseColors}
+                      onChange={(placeholderShapeBorderColor) => updateEditorState({ placeholderShapeBorderColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Unassigned Container"
+                      value={effectiveEditorState.unassignedContainerColor}
+                      baseColors={baseColors}
+                      onChange={(unassignedContainerColor) => updateEditorState({ unassignedContainerColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Unassigned Border"
+                      value={effectiveEditorState.unassignedContainerBorderColor}
+                      baseColors={baseColors}
+                      onChange={(unassignedContainerBorderColor) => updateEditorState({ unassignedContainerBorderColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Unassigned Circle Border"
+                      value={effectiveEditorState.unassignedCastCircleBorderColor}
+                      baseColors={baseColors}
+                      onChange={(unassignedCastCircleBorderColor) => updateEditorState({ unassignedCastCircleBorderColor })}
                     />
                     <TemplateColorSelect
                       label="Canvas"
@@ -1516,7 +1788,7 @@ function SurveyPreviewCard({
               <div className="overflow-y-auto p-4 sm:p-5">
                 <PreviewViewportToggle value={viewport} onChange={setViewport} />
                 <div className="mt-3">
-                  {renderPreview("h-[min(72vh,860px)]")}
+                  {renderPreview()}
                 </div>
               </div>
             </div>
@@ -1700,39 +1972,47 @@ function AuthFieldPreview({ fieldKey }: { fieldKey: string }) {
 
     case "auth-shows":
       return (
-        <div className="space-y-2">
-          <label className={AUTH_LABEL}>Which shows do you watch?</label>
-          <p className="text-xs text-zinc-400 mb-1">
-            Select at least 3 shows. ({selectedShows.length} selected)
-          </p>
-          <div className="w-full h-64 overflow-y-auto border border-zinc-200 rounded-lg p-3">
-            <div className="flex flex-wrap gap-2">
-              {SAMPLE_SHOWS.map((show, i) => {
-                const isSelected = selectedShows.includes(show);
-                const color = SHOW_COLORS[i % SHOW_COLORS.length];
-                return (
-                  <button
-                    key={show}
-                    type="button"
-                    onClick={() =>
-                      setSelectedShows((prev) =>
-                        isSelected ? prev.filter((s) => s !== show) : [...prev, show],
-                      )
-                    }
-                    className="px-3 py-1 h-8 rounded-full text-sm font-normal font-hamburg transition-all"
-                    style={{
-                      backgroundColor: isSelected ? color : "#000",
-                      color: "#fff",
-                      border: isSelected ? `1.5px solid ${color}` : "1.5px solid #fff",
-                    }}
-                  >
-                    {show}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        <MultiSelectPills
+          title="Which shows do you watch?"
+          items={SAMPLE_SHOWS.map((show, index) => ({
+            id: show,
+            label: show,
+            color: SHOW_COLORS[index % SHOW_COLORS.length],
+          }))}
+          minRequired={3}
+          selected={selectedShows}
+          onToggle={(id) =>
+            setSelectedShows((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+          }
+          palette={SHOW_COLORS}
+          height={256}
+          ariaLabel="Shows multi-select preview"
+          footer={
+            <p className="pt-1 text-xs font-semibold text-zinc-700 underline underline-offset-2">
+              Don&apos;t see a show? Request on here
+            </p>
+          }
+        />
+      );
+
+    case "auth-characteristics":
+      return (
+        <MultiSelectPills
+          title="Which of the following characteristics do you think makes for an iconic housewife?"
+          items={CHARACTERISTIC_PILLS.map((item, index) => ({
+            id: item,
+            label: item,
+            color: SHOW_COLORS[index % SHOW_COLORS.length],
+          }))}
+          minRequired={3}
+          selected={selectedShows}
+          onToggle={(id) =>
+            setSelectedShows((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+          }
+          palette={SHOW_COLORS}
+          height={256}
+          ariaLabel="Characteristics multi-select preview"
+        />
       );
 
     default:
@@ -1748,17 +2028,17 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
   const storageKey = `${TEMPLATE_EDITOR_STORAGE_PREFIX}.standalone.${entry.key}`;
   const [viewport, setViewport] = useState<PreviewViewport>("phone");
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const isFigmaRankPreview = entry.key === "flashback-ranker";
+  const isFigmaRankPreview = false;
   const buildStandaloneDefaults = useCallback(
     () =>
       buildTemplateEditorDefaults(
-        entry.key === "flashback-ranker" ? "Rank the Seasons of RHOSLC." : "Rate the season",
+        entry.key === "flashback-ranker" ? "Rank RHOSLC Flashbacks." : "Rate the season",
         entry.key === "flashback-ranker"
-          ? "Drag-and-Drop the Seasons to their Rank."
+          ? "Drag-and-drop cast members onto the timeline line."
           : "Pick 1 to 5 snowflakes. Halves are allowed.",
-        isFigmaRankPreview,
+        false,
       ),
-    [entry.key, isFigmaRankPreview],
+    [entry.key],
   );
   const [editorState, setEditorState] = useState<TemplatePreviewEditorState>(() => buildStandaloneDefaults());
   const updateEditorState = useCallback(
@@ -1774,6 +2054,11 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
     () => buildStandaloneFontOverrides(editorState),
     [editorState],
   );
+  const standaloneStyleOverrides = useMemo(
+    () => buildStandaloneStyleOverrides(editorState),
+    [editorState],
+  );
+  const viewportFrame = PREVIEW_VIEWPORT_FRAME[viewport];
 
   useEffect(() => {
     try {
@@ -1799,7 +2084,7 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
     }
   }, [editorState, storageKey]);
 
-  const renderPreview = (heightClass: string) => (
+  const renderPreview = () => (
     <div
       className="rounded-2xl border p-2 sm:p-3"
       style={{
@@ -1807,15 +2092,16 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
         borderColor: editorState.frameBorderColor,
       }}
     >
-      <div className={`mx-auto w-full ${PREVIEW_VIEWPORT_WIDTH_CLASS[viewport]}`}>
+      <div className="mx-auto flex w-full justify-center">
         <div
-          className={`overflow-auto rounded-[24px] border shadow-sm ${heightClass}`}
+          className={`w-full overflow-hidden rounded-[24px] border shadow-sm ${viewportFrame.maxWidthClass}`}
           style={{
             backgroundColor: editorState.frameBackground,
             borderColor: editorState.frameBorderColor,
+            aspectRatio: `${viewportFrame.width} / ${viewportFrame.height}`,
           }}
         >
-          <div className="p-3 sm:p-6">
+          <div className="h-full overflow-auto p-3 sm:p-6">
             {(editorState.titleText.trim().length > 0 || editorState.subText.trim().length > 0) && (
               <div className="mb-3 sm:mb-4">
                 {editorState.titleText.trim().length > 0 && (
@@ -1846,7 +2132,13 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
                 )}
               </div>
             )}
-            <StandaloneFieldPreview fieldKey={entry.key} fontOverrides={standaloneFontOverrides} />
+            <StandaloneFieldPreview
+              fieldKey={entry.key}
+              fontOverrides={standaloneFontOverrides}
+              styleOverrides={standaloneStyleOverrides}
+              shapeScalePercent={editorState.shapeScale}
+              buttonScalePercent={editorState.buttonScale}
+            />
           </div>
         </div>
       </div>
@@ -1869,7 +2161,7 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
         </button>
       </CardHeader>
       <div className="flex-1 p-3 sm:p-4">
-        {renderPreview(PREVIEW_VIEWPORT_HEIGHT_CLASS[viewport])}
+        {renderPreview()}
       </div>
 
       {isEditorOpen && (
@@ -1963,6 +2255,24 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
+                    <TemplateFontSizeInput
+                      label="Shape Size (%)"
+                      value={editorState.shapeScale}
+                      onChange={(shapeScale) => updateEditorState({ shapeScale })}
+                    />
+                    <TemplateFontSizeInput
+                      label="Button Size (%)"
+                      value={editorState.buttonScale}
+                      onChange={(buttonScale) => updateEditorState({ buttonScale })}
+                    />
+                    <TemplateFontSizeInput
+                      label="Unassigned Circle Size (%)"
+                      value={editorState.unassignedCastCircleSize}
+                      onChange={(unassignedCastCircleSize) => updateEditorState({ unassignedCastCircleSize })}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
                     <TemplateColorSelect
                       label="Title"
                       value={editorState.titleColor}
@@ -1974,6 +2284,48 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
                       value={editorState.subTextColor}
                       baseColors={baseColors}
                       onChange={(subTextColor) => updateEditorState({ subTextColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Question Text"
+                      value={editorState.questionColor}
+                      baseColors={baseColors}
+                      onChange={(questionColor) => updateEditorState({ questionColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Component BG"
+                      value={editorState.componentBackgroundColor}
+                      baseColors={baseColors}
+                      onChange={(componentBackgroundColor) => updateEditorState({ componentBackgroundColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Placeholder Fill"
+                      value={editorState.placeholderShapeColor}
+                      baseColors={baseColors}
+                      onChange={(placeholderShapeColor) => updateEditorState({ placeholderShapeColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Placeholder Border"
+                      value={editorState.placeholderShapeBorderColor}
+                      baseColors={baseColors}
+                      onChange={(placeholderShapeBorderColor) => updateEditorState({ placeholderShapeBorderColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Unassigned Container"
+                      value={editorState.unassignedContainerColor}
+                      baseColors={baseColors}
+                      onChange={(unassignedContainerColor) => updateEditorState({ unassignedContainerColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Unassigned Border"
+                      value={editorState.unassignedContainerBorderColor}
+                      baseColors={baseColors}
+                      onChange={(unassignedContainerBorderColor) => updateEditorState({ unassignedContainerBorderColor })}
+                    />
+                    <TemplateColorSelect
+                      label="Unassigned Circle Border"
+                      value={editorState.unassignedCastCircleBorderColor}
+                      baseColors={baseColors}
+                      onChange={(unassignedCastCircleBorderColor) => updateEditorState({ unassignedCastCircleBorderColor })}
                     />
                     <TemplateColorSelect
                       label="Canvas"
@@ -2000,7 +2352,7 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
               <div className="overflow-y-auto p-4 sm:p-5">
                 <PreviewViewportToggle value={viewport} onChange={setViewport} />
                 <div className="mt-3">
-                  {renderPreview("h-[min(72vh,860px)]")}
+                  {renderPreview()}
                 </div>
               </div>
             </div>
@@ -2014,9 +2366,15 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
 function StandaloneFieldPreview({
   fieldKey,
   fontOverrides,
+  styleOverrides,
+  shapeScalePercent,
+  buttonScalePercent,
 }: {
   fieldKey: string;
   fontOverrides?: FlashbackRankerFontOverrides;
+  styleOverrides?: FlashbackRankerStyleOverrides;
+  shapeScalePercent?: number;
+  buttonScalePercent?: number;
 }) {
   const [rating, setRating] = useState<number | null>(null);
 
@@ -2044,11 +2402,13 @@ function StandaloneFieldPreview({
       return (
         <FlashbackRanker
           items={RHOSLC_CAST}
-          lineLabelTop="ICONIC"
-          lineLabelBottom="SNOOZE"
-          variant="grid"
-          layoutPreset="figma-rank-circles"
+          lineLabelTop="EARLIER"
+          lineLabelBottom="LATER"
+          variant="classic"
           fontOverrides={fontOverrides}
+          styleOverrides={styleOverrides}
+          shapeScalePercent={shapeScalePercent}
+          buttonScalePercent={buttonScalePercent}
         />
       );
 

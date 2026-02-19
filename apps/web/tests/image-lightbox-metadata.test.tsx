@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
@@ -78,5 +78,83 @@ describe("ImageLightbox metadata panel", () => {
     openMetadataPanel();
 
     expect(screen.getByText("EXAMPLE.COM | Unknown Page")).toBeInTheDocument();
+  });
+
+  it("shows Refresh Full Pipeline action when refresh is available", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        canManage
+        onRefresh={vi.fn(async () => {})}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByRole("button", { name: "Refresh Full Pipeline" })).toBeInTheDocument();
+  });
+
+  it("renders placeholders for blank metadata fields instead of hiding rows", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          sourceVariant: null,
+          sourcePageTitle: null,
+          sourceUrl: null,
+          sourceLogo: null,
+          assetName: null,
+          sectionTag: null,
+          sectionLabel: null,
+          fileType: null,
+          createdAt: null,
+          addedAt: null,
+          season: null,
+          episodeLabel: null,
+          imdbType: null,
+          contextType: null,
+          caption: null,
+          people: [],
+          titles: [],
+          fetchedAt: null,
+          peopleCount: null,
+          faceBoxes: [],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getAllByText("Source Variant").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Section").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Caption").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("renders Edit and Star/Flag labels in manage mode", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        metadataExtras={<div>edit tools</div>}
+        canManage
+        onToggleStar={vi.fn(async () => {})}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getAllByRole("button", { name: "Edit" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Star/Flag" }).length).toBeGreaterThan(0);
   });
 });

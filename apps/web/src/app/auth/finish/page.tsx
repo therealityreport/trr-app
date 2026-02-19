@@ -7,13 +7,19 @@ import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { getUserByUsername } from "@/lib/db/users";
 import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
-import { ALL_SHOWS, type Show, getShowAbbreviation } from "@/lib/data/shows";
+import { ALL_SHOWS } from "@/lib/data/shows";
 import { COUNTRIES } from "@/lib/data/countries";
 import { US_STATES, GENDER_OPTIONS } from "@/lib/data/states";
 import ClientOnly from "@/components/ClientOnly";
 import Image from "next/image";
+import MultiSelectPills from "@/components/survey/MultiSelectPills";
 
 type FieldErrors = Partial<Record<"username" | "birthday" | "shows" | "gender" | "country" | "state", string>>;
+
+const FINISH_SHOW_REQUESTS_STORAGE_KEY = "finish_show_requests";
+
+// Explicit overrides only. If a show is not listed here, render raw show name.
+const SHOW_DISPLAY_NAME_OVERRIDES: Record<string, string> = {};
 
 function FinishProfileContent() {
   const router = useRouter();
@@ -28,8 +34,10 @@ function FinishProfileContent() {
   const [country, setCountry] = useState("");
   const [state, setState] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
-  const [showsFromApi, setShowsFromApi] = useState<Show[]>([]);
   const [showsLoading, setShowsLoading] = useState(true);
+  const [showRequestOpen, setShowRequestOpen] = useState(false);
+  const [showRequestInput, setShowRequestInput] = useState("");
+  const [showRequests, setShowRequests] = useState<string[]>([]);
 
   // Fetch shows with alternative names from API
   useEffect(() => {
@@ -37,8 +45,7 @@ function FinishProfileContent() {
       try {
         const response = await fetch("/api/shows/list");
         if (response.ok) {
-          const data = await response.json();
-          setShowsFromApi(data.shows ?? []);
+          await response.json();
         }
       } catch (error) {
         console.error("Failed to fetch shows:", error);
@@ -97,6 +104,11 @@ function FinishProfileContent() {
           for (const s of arr) map[s] = true;
           setShowSelections(map);
         }
+        const sShowRequests = sessionStorage.getItem(FINISH_SHOW_REQUESTS_STORAGE_KEY);
+        if (sShowRequests) {
+          const arr: string[] = JSON.parse(sShowRequests);
+          setShowRequests(parseShows(arr));
+        }
       } catch {}
     });
     return () => unsub();
@@ -133,18 +145,32 @@ function FinishProfileContent() {
     return {};
   });
 
-  // Get display name with abbreviation for a show
+  // Use assigned display-name overrides only; otherwise keep the raw show name.
   const getDisplayName = (showName: string): string => {
-    const apiShow = showsFromApi.find(
-      (s) => s.name === showName || s.name === `The ${showName}`
-    );
-    if (apiShow) {
-      const abbrev = getShowAbbreviation(apiShow);
-      if (abbrev) {
-        return `${abbrev} - ${showName}`;
-      }
-    }
-    return showName;
+    return SHOW_DISPLAY_NAME_OVERRIDES[showName] ?? showName;
+  };
+
+  const addShowRequest = () => {
+    const next = showRequestInput.trim();
+    if (!next) return;
+    setShowRequests((prev) => {
+      const merged = parseShows([...prev, next]);
+      try {
+        sessionStorage.setItem(FINISH_SHOW_REQUESTS_STORAGE_KEY, JSON.stringify(merged));
+      } catch {}
+      return merged;
+    });
+    setShowRequestInput("");
+  };
+
+  const removeShowRequest = (request: string) => {
+    setShowRequests((prev) => {
+      const next = prev.filter((item) => item !== request);
+      try {
+        sessionStorage.setItem(FINISH_SHOW_REQUESTS_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   };
 
   const checkUsernameUnique = async (u: string): Promise<string | null> => {
@@ -213,6 +239,7 @@ function FinishProfileContent() {
         username: username.trim(),
         birthday: requireBirthday ? birthday.trim() : birthday.trim(),
         shows: parseShows(selectedShows),
+        showRequests: parseShows(showRequests),
         gender: gender.trim(),
         livesInUS: country.trim() === "United States",
         state: country.trim() === "United States" ? state.trim() : undefined,
@@ -244,6 +271,7 @@ function FinishProfileContent() {
           username: username.trim(),
           birthday: requireBirthday ? birthday.trim() : birthday.trim(),
           shows: parseShows(selectedShows),
+          showRequests: parseShows(showRequests),
           gender: gender.trim(),
           livesInUS: country.trim() === "United States",
           state: country.trim() === "United States" ? state.trim() : undefined,
@@ -261,6 +289,7 @@ function FinishProfileContent() {
           sessionStorage.removeItem("finish_username");
           sessionStorage.removeItem("finish_shows");
           sessionStorage.removeItem("finish_birthday");
+          sessionStorage.removeItem(FINISH_SHOW_REQUESTS_STORAGE_KEY);
         } catch {}
         router.replace("/hub");
       } catch (firestoreError) {
@@ -460,41 +489,77 @@ function FinishProfileContent() {
                   </button>
                 )}
               </div>
-              
-              {/* Scrollable Show Pills Container */}
-              <div className="w-full h-64 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 bg-white dark:bg-zinc-900">
-                {showsLoading ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="w-6 h-6 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin" />
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {ALL_SHOWS.map((name, index) => {
-                      const active = !!showSelections[name];
-                      const colorHex = showColors[index % showColors.length];
-                      const displayName = getDisplayName(name);
-
-                      return (
-                        <button
-                          key={name}
-                          type="button"
-                          onClick={() => toggleShow(name)}
-                          disabled={pending}
-                          className="px-3 py-1 h-8 rounded-full text-sm font-normal font-hamburg leading-tight border whitespace-nowrap disabled:opacity-60 transition-colors duration-200 flex-shrink-0"
-                          style={{
-                            backgroundColor: active ? colorHex : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#f3f4f6'),
-                            color: active ? 'white' : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#000000'),
-                            borderColor: active ? colorHex : (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? '#4b5563' : '#d1d5db')
-                          }}
-                          aria-pressed={active}
-                        >
-                          {displayName}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              {showsLoading ? (
+                <div className="w-full h-64 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 bg-white dark:bg-zinc-900 flex items-center justify-center">
+                  <div className="w-6 h-6 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <MultiSelectPills
+                  title="Which shows do you watch?"
+                  items={ALL_SHOWS.map((name, index) => ({
+                    id: name,
+                    label: getDisplayName(name),
+                    color: showColors[index % showColors.length],
+                  }))}
+                  minRequired={3}
+                  selected={selectedShows}
+                  onToggle={toggleShow}
+                  palette={showColors}
+                  height={256}
+                  disabled={pending}
+                  ariaLabel="Shows multi-select"
+                  footer={
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowRequestOpen((prev) => !prev)}
+                        disabled={pending}
+                        className="text-xs font-semibold text-zinc-700 underline underline-offset-2 hover:text-zinc-900 disabled:opacity-60"
+                      >
+                        Don&apos;t see a show? Request on here
+                      </button>
+                      {showRequestOpen && (
+                        <div className="mt-2 space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={showRequestInput}
+                              onChange={(event) => setShowRequestInput(event.target.value)}
+                              placeholder="Type a show name..."
+                              className="h-9 w-full rounded border border-zinc-300 bg-white px-3 text-sm text-zinc-900"
+                              disabled={pending}
+                            />
+                            <button
+                              type="button"
+                              onClick={addShowRequest}
+                              disabled={pending || showRequestInput.trim().length === 0}
+                              className="rounded border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-800 disabled:opacity-50"
+                            >
+                              Add
+                            </button>
+                          </div>
+                          {showRequests.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {showRequests.map((request) => (
+                                <button
+                                  key={request}
+                                  type="button"
+                                  onClick={() => removeShowRequest(request)}
+                                  className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700"
+                                  aria-label={`Remove requested show ${request}`}
+                                >
+                                  {request}
+                                  <span aria-hidden>×</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  }
+                />
+              )}
               
               {errors.shows && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.shows}</p>}
             </div>

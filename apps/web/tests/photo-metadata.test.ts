@@ -512,4 +512,30 @@ describe("mapSeasonAssetToMetadata", () => {
 
     expect(meta.originalImageUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg");
   });
+
+  it("uses asset-level people_count fallback when metadata count is missing", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "a5",
+        type: "season",
+        source: "tmdb",
+        kind: "poster",
+        hosted_url: "https://cdn.example.com/poster.jpg",
+        width: null,
+        height: null,
+        caption: null,
+        season_number: 4,
+        metadata: {},
+        people_count: 2,
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: "image/jpeg",
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      4,
+      "RHOSLC",
+    );
+
+    expect(meta.peopleCount).toBe(2);
+  });
 });
