@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { auth } from "@/lib/firebase";
 
 interface SurveyConfig {
   id: string;
@@ -29,28 +29,24 @@ interface SurveyConfig {
 
 export default function AdminSurveysPage() {
   const router = useRouter();
-  const { user, checking, hasAccess } = useAdminGuard();
+  const { user, userKey, checking, hasAccess } = useAdminGuard();
   const [surveys, setSurveys] = useState<SurveyConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSurveys = useCallback(async () => {
-    if (!user) return;
+    if (!userKey) return;
 
     try {
       setLoading(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) {
-        setError("Not authenticated");
-        return;
-      }
-
-      const response = await fetch("/api/admin/surveys?full=true", {
+      const response = await fetchAdminWithAuth("/api/admin/surveys?full=true", {
         headers: {
-          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
         },
+      }, {
+        preferredUser: user,
       });
 
       if (!response.ok) {
@@ -66,13 +62,13 @@ export default function AdminSurveysPage() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, userKey]);
 
   useEffect(() => {
-    if (hasAccess && user) {
+    if (hasAccess && userKey) {
       fetchSurveys();
     }
-  }, [hasAccess, user, fetchSurveys]);
+  }, [hasAccess, userKey, fetchSurveys]);
 
   if (checking) {
     return (

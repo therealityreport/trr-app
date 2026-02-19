@@ -57,7 +57,10 @@ describe("social-admin-proxy", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 502,
-      json: async () => ({ error: "still down" }),
+      json: async () => ({
+        error: "still down",
+        detail: { code: "SOCIAL_WORKER_UNAVAILABLE", message: "No healthy workers", worker_health: { healthy: false } },
+      }),
     } as Response);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
@@ -79,12 +82,20 @@ describe("social-admin-proxy", () => {
       code?: string;
       retryable?: boolean;
       upstream_status?: number;
+      upstream_detail?: unknown;
+      upstream_detail_code?: string;
     };
 
     expect(response.status).toBe(502);
     expect(payload.code).toBe("UPSTREAM_ERROR");
     expect(payload.retryable).toBe(true);
     expect(payload.upstream_status).toBe(502);
+    expect(payload.upstream_detail_code).toBe("SOCIAL_WORKER_UNAVAILABLE");
+    expect(payload.upstream_detail).toEqual({
+      code: "SOCIAL_WORKER_UNAVAILABLE",
+      message: "No healthy workers",
+      worker_health: { healthy: false },
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

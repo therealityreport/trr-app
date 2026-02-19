@@ -1,3 +1,8 @@
+import {
+  normalizeRedditFlairLabel,
+  sanitizeRedditFlairList,
+} from "@/lib/server/admin/reddit-flair-normalization";
+
 export type RedditListingSort = "new" | "hot" | "top";
 
 export interface RedditDiscoveryThread {
@@ -10,10 +15,13 @@ export interface RedditDiscoveryThread {
   score: number;
   num_comments: number;
   posted_at: string | null;
+  link_flair_text: string | null;
   source_sorts: RedditListingSort[];
   matched_terms: string[];
+  matched_cast_terms: string[];
   cross_show_terms: string[];
   is_show_match: boolean;
+  passes_flair_filter: boolean;
   match_score: number;
   suggested_include_terms: string[];
   suggested_exclude_terms: string[];
@@ -28,6 +36,9 @@ export interface DiscoverSubredditThreadsInput {
   subreddit: string;
   showName: string;
   showAliases?: string[] | null;
+  castNames?: string[] | null;
+  analysisFlares?: string[] | null;
+  analysisAllFlares?: string[] | null;
   sortModes?: RedditListingSort[];
   limitPerMode?: number;
 }
@@ -62,6 +73,7 @@ interface RedditListingChild {
     score?: number;
     num_comments?: number;
     created_utc?: number;
+    link_flair_text?: string | null;
   };
 }
 
@@ -100,7 +112,7 @@ const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]
 
 const getFetchTimeoutMs = (): number => {
   const raw = process.env.REDDIT_FETCH_TIMEOUT_MS;
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
   }
@@ -176,6 +188,27 @@ const buildShowTerms = (showName: string, aliases: string[] = []): string[] => {
   return dedupeTerms(extraTerms).slice(0, 18);
 };
 
+const buildCastTerms = (castNames: string[] = []): string[] => {
+  const terms: string[] = [];
+  for (const castName of castNames) {
+    const normalizedName = normalizeText(castName);
+    if (!normalizedName) continue;
+    terms.push(normalizedName);
+
+    const pieces = normalizedName
+      .split(" ")
+      .map((piece) => piece.replace(/[^a-z0-9]/g, ""))
+      .filter((piece) => piece.length >= 3);
+    if (pieces.length > 0) {
+      terms.push(pieces[0]);
+      if (pieces.length > 1) {
+        terms.push(pieces[pieces.length - 1]);
+      }
+    }
+  }
+  return dedupeTerms(terms).slice(0, 160);
+};
+
 const containsTerm = (haystack: string, term: string): boolean => {
   const escaped = escapeRegex(term);
   const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i");
@@ -238,6 +271,11 @@ const fetchSort = async (
       .map((child): RedditDiscoveryThread | null => {
         const data = child.data;
         if (!data?.id || !data.title || !data.url) return null;
+        const flair =
+          typeof data.link_flair_text === "string" && data.link_flair_text.trim().length > 0
+            ? data.link_flair_text
+            : null;
+
         return {
           reddit_post_id: data.id,
           title: data.title,
@@ -248,10 +286,13 @@ const fetchSort = async (
           score: Number.isFinite(data.score) ? (data.score as number) : 0,
           num_comments: Number.isFinite(data.num_comments) ? (data.num_comments as number) : 0,
           posted_at: toIsoOrNull(data.created_utc),
+          link_flair_text: flair,
           source_sorts: [sort],
           matched_terms: [],
+          matched_cast_terms: [],
           cross_show_terms: [],
           is_show_match: false,
+          passes_flair_filter: true,
           match_score: 0,
           suggested_include_terms: [],
           suggested_exclude_terms: [],
@@ -292,38 +333,71 @@ const mergeByPostId = (rows: RedditDiscoveryThread[]): RedditDiscoveryThread[] =
 const applyMatchMetadata = (
   threads: RedditDiscoveryThread[],
   terms: string[],
+  castTerms: string[],
+  subreddit: string,
+  analysisScanFlares: string[],
+  analysisAllFlares: string[],
 ): { threads: RedditDiscoveryThread[]; hints: RedditDiscoveryHints } => {
   const includeCounts = new Map<string, number>();
   const excludeCounts = new Map<string, number>();
-  const threadsWithMeta = threads.map((thread) => {
+  const analysisAllFlairKeys = new Set(analysisAllFlares.map((flair) => flair.toLowerCase()));
+  const analysisScanFlairKeys = new Set(
+    analysisScanFlares
+      .map((flair) => flair.toLowerCase())
+      .filter((flair) => !analysisAllFlairKeys.has(flair)),
+  );
+  const hasAnalysisFlairFilter = analysisAllFlairKeys.size > 0 || analysisScanFlairKeys.size > 0;
+  const threadsWithMeta: RedditDiscoveryThread[] = [];
+
+  for (const thread of threads) {
     const text = normalizeText(`${thread.title} ${thread.text ?? ""}`);
     const matchedTerms = findMatchedTerms(text, terms);
+    const matchedCastTerms = findMatchedTerms(text, castTerms);
     const crossShowTerms = FRANCHISE_EXCLUDE_TERMS.filter((term) => {
       if (terms.includes(term)) return false;
       return containsTerm(text, term);
     });
-    const titleMatchBonus = matchedTerms.some((term) => containsTerm(normalizeText(thread.title), term))
+    const includeTerms = dedupeTerms([...matchedTerms, ...matchedCastTerms]);
+    const titleMatchBonus = includeTerms.some((term) => containsTerm(normalizeText(thread.title), term))
       ? 1
       : 0;
-    const matchScore = matchedTerms.length + titleMatchBonus;
+    const isShowMatch = includeTerms.length > 0;
+    const matchScore = includeTerms.length + titleMatchBonus;
+    const normalizedThreadFlair = thread.link_flair_text
+      ? normalizeRedditFlairLabel(subreddit, thread.link_flair_text)
+      : null;
+    const flairKey = normalizedThreadFlair?.toLowerCase() ?? null;
+    const matchesAllPostsFlair = Boolean(flairKey && analysisAllFlairKeys.has(flairKey));
+    const matchesScanFlair = Boolean(flairKey && analysisScanFlairKeys.has(flairKey));
+    const passesFlairFilter = hasAnalysisFlairFilter ? matchesAllPostsFlair || matchesScanFlair : true;
+    const shouldInclude = !hasAnalysisFlairFilter
+      ? true
+      : matchesAllPostsFlair || (matchesScanFlair && isShowMatch);
 
-    for (const term of matchedTerms) {
+    if (!shouldInclude) {
+      continue;
+    }
+
+    for (const term of includeTerms) {
       includeCounts.set(term, (includeCounts.get(term) ?? 0) + 1);
     }
     for (const term of crossShowTerms) {
       excludeCounts.set(term, (excludeCounts.get(term) ?? 0) + 1);
     }
 
-    return {
+    threadsWithMeta.push({
       ...thread,
+      link_flair_text: normalizedThreadFlair ?? thread.link_flair_text,
       matched_terms: matchedTerms,
+      matched_cast_terms: matchedCastTerms,
       cross_show_terms: crossShowTerms,
-      is_show_match: matchedTerms.length > 0,
+      is_show_match: isShowMatch,
+      passes_flair_filter: passesFlairFilter,
       match_score: matchScore,
-      suggested_include_terms: matchedTerms.slice(0, 4),
+      suggested_include_terms: includeTerms.slice(0, 4),
       suggested_exclude_terms: crossShowTerms.slice(0, 4),
-    };
-  });
+    });
+  }
 
   const suggestedIncludeTerms = [...includeCounts.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -354,6 +428,9 @@ export async function discoverSubredditThreads(
     MAX_LIMIT_PER_MODE,
   );
   const terms = buildShowTerms(input.showName, input.showAliases ?? []);
+  const castTerms = buildCastTerms(input.castNames ?? []);
+  const analysisScanFlares = sanitizeRedditFlairList(subreddit, input.analysisFlares ?? []);
+  const analysisAllFlares = sanitizeRedditFlairList(subreddit, input.analysisAllFlares ?? []);
 
   if (terms.length === 0) {
     throw new RedditDiscoveryError("Show terms are required for discovery", 400);
@@ -363,7 +440,14 @@ export async function discoverSubredditThreads(
     sortModes.map(async (sort) => fetchSort(subreddit, sort, limitPerMode)),
   );
   const mergedThreads = mergeByPostId(fetchedBySort.flat());
-  const { threads, hints } = applyMatchMetadata(mergedThreads, terms);
+  const { threads, hints } = applyMatchMetadata(
+    mergedThreads,
+    terms,
+    castTerms,
+    subreddit,
+    analysisScanFlares,
+    analysisAllFlares,
+  );
 
   threads.sort((a, b) => {
     if (b.match_score !== a.match_score) return b.match_score - a.match_score;

@@ -213,6 +213,44 @@ function mapSpecQuestion(specQuestion: SpecQuestion): MappedQuestion {
         })),
       };
 
+    case "reunion-seating-prediction":
+      return {
+        dbType: "likert",
+        config: {
+          uiVariant: "reunion-seating-prediction",
+          hostName: specQuestion.hostName,
+          hostImagePath: specQuestion.hostImagePath,
+          fullTimePrompt: specQuestion.fullTimePrompt,
+          friendPrompt: specQuestion.friendPrompt,
+          description: specQuestion.description,
+        },
+        options: specQuestion.subjects.map((subject, index: number) => {
+          const subjectRecord = subject as unknown as Record<string, unknown>;
+          const castRoleRaw =
+            typeof subjectRecord.castRole === "string"
+              ? subjectRecord.castRole
+              : typeof subjectRecord.surveyRole === "string"
+                ? subjectRecord.surveyRole
+                : typeof subjectRecord.role === "string"
+                  ? subjectRecord.role
+                  : undefined;
+          const castRole = castRoleRaw === "main" || castRoleRaw === "friend_of"
+            ? castRoleRaw
+            : undefined;
+
+          return {
+            question_id: "",
+            option_key: subject.id,
+            option_text: subject.name,
+            display_order: index,
+            metadata: {
+              imagePath: subject.img,
+              ...(castRole ? { castRole } : {}),
+            },
+          };
+        }),
+      };
+
     case "text-multiple-choice":
       return {
         dbType: "single_choice",
@@ -229,11 +267,27 @@ function mapSpecQuestion(specQuestion: SpecQuestion): MappedQuestion {
         })),
       };
 
+    case "rank-text-fields":
+      return {
+        dbType: "single_choice",
+        config: {
+          uiVariant: "rank-text-fields",
+          description: specQuestion.description,
+        },
+        options: specQuestion.options.map((opt: SelectOption, index: number) => ({
+          question_id: "",
+          option_key: opt.value,
+          option_text: opt.label,
+          display_order: index,
+          metadata: {},
+        })),
+      };
+
     case "multi-select-choice":
       return {
         dbType: "multi_choice",
         config: {
-          uiVariant: "multi-select-choice",
+          uiVariant: specQuestion.uiVariant ?? "multi-select-choice",
           minSelections: specQuestion.minSelections,
           maxSelections: specQuestion.maxSelections,
           description: specQuestion.description,
@@ -252,6 +306,40 @@ function mapSpecQuestion(specQuestion: SpecQuestion): MappedQuestion {
         dbType: "single_choice",
         config: {
           uiVariant: "image-multiple-choice",
+          columns: specQuestion.columns,
+          description: specQuestion.description,
+        },
+        options: specQuestion.options.map((opt: ImageOption, index: number) => ({
+          question_id: "",
+          option_key: opt.id,
+          option_text: opt.label,
+          display_order: index,
+          metadata: { imagePath: opt.img },
+        })),
+      };
+
+    case "poster-single-select":
+      return {
+        dbType: "single_choice",
+        config: {
+          uiVariant: "poster-single-select",
+          columns: specQuestion.columns,
+          description: specQuestion.description,
+        },
+        options: specQuestion.options.map((opt: ImageOption, index: number) => ({
+          question_id: "",
+          option_key: opt.id,
+          option_text: opt.label,
+          display_order: index,
+          metadata: { imagePath: opt.img },
+        })),
+      };
+
+    case "cast-single-select":
+      return {
+        dbType: "single_choice",
+        config: {
+          uiVariant: "cast-single-select",
           columns: specQuestion.columns,
           description: specQuestion.description,
         },

@@ -9,12 +9,17 @@ import StarRatingInput from "./StarRatingInput";
 import SliderInput from "./SliderInput";
 import PersonRankingsInput from "./PersonRankingsInput";
 import PosterRankingsInput from "./PosterRankingsInput";
-import WhoseSideInput from "./WhoseSideInput";
+import TwoChoiceCast from "./TwoChoiceCast";
 import MatrixLikertInput from "./MatrixLikertInput";
 import CastDecisionCardInput from "./CastDecisionCardInput";
 import TwoAxisGridInput from "./TwoAxisGridInput";
+import ReunionSeatingPredictionInput from "./ReunionSeatingPredictionInput";
 import MultiSelectInput from "./MultiSelectInput";
+import CastMultiSelectInput from "./CastMultiSelectInput";
 import SingleSelectInput from "./SingleSelectInput";
+import RankTextFields from "./RankTextFields";
+import PosterSingleSelect from "./PosterSingleSelect";
+import SingleSelectCastInput from "./SingleSelectCastInput";
 import DropdownInput from "./DropdownInput";
 import TextEntryInput from "./TextEntryInput";
 
@@ -122,7 +127,7 @@ export default function QuestionRenderer({
     // Slider choice questions
     case "two-choice-slider":
       return (
-        <WhoseSideInput
+        <TwoChoiceCast
           {...commonProps}
           value={value as string | null}
           onChange={onChange}
@@ -148,10 +153,28 @@ export default function QuestionRenderer({
         />
       );
 
+    case "reunion-seating-prediction":
+      return (
+        <ReunionSeatingPredictionInput
+          {...commonProps}
+          value={value as { fullTimeOrder?: string[]; friendSide?: "left" | "right" | null; completed?: boolean } | null}
+          onChange={onChange}
+        />
+      );
+
     // Multiple choice questions
     case "multi-select-choice":
       return (
         <MultiSelectInput
+          {...commonProps}
+          value={value as string[] | null}
+          onChange={onChange}
+        />
+      );
+
+    case "cast-multi-select":
+      return (
+        <CastMultiSelectInput
           {...commonProps}
           value={value as string[] | null}
           onChange={onChange}
@@ -167,6 +190,15 @@ export default function QuestionRenderer({
         />
       );
 
+    case "rank-text-fields":
+      return (
+        <RankTextFields
+          {...commonProps}
+          value={value as string[] | null}
+          onChange={onChange}
+        />
+      );
+
     case "image-multiple-choice":
       return (
         <SingleSelectInput
@@ -174,6 +206,24 @@ export default function QuestionRenderer({
           value={value as string | null}
           onChange={onChange}
           layout="grid"
+        />
+      );
+
+    case "poster-single-select":
+      return (
+        <PosterSingleSelect
+          {...commonProps}
+          value={value as string | null}
+          onChange={onChange}
+        />
+      );
+
+    case "cast-single-select":
+      return (
+        <SingleSelectCastInput
+          {...commonProps}
+          value={value as string | null}
+          onChange={onChange}
         />
       );
 

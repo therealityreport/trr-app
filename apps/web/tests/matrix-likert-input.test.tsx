@@ -178,14 +178,26 @@ describe("MatrixLikertInput", () => {
     );
 
     const row = screen.getByTestId("agree-likert-row-s1");
+    expect(screen.getByTestId("agree-likert-rows")).toHaveStyle({ marginTop: "15px" });
+    expect(screen.getByTestId("agree-likert-option-stack-s1")).toHaveStyle({ marginTop: "20px" });
     const buttons = within(row).getAllByRole("button");
     expect(buttons).toHaveLength(5);
 
     expect(buttons[0]).toHaveTextContent("Strongly Agree");
     expect(buttons[0]).toHaveStyle({ backgroundColor: "rgb(53, 106, 59)" });
+    expect(buttons[0]).toHaveStyle({ color: "rgb(255, 255, 255)" });
+
+    expect(buttons[1]).toHaveTextContent("Somewhat Agree");
+    expect(buttons[1]).toHaveStyle({ backgroundColor: "rgb(118, 163, 76)" });
+    expect(buttons[1]).toHaveStyle({ color: "rgb(0, 0, 0)" });
+
+    expect(buttons[2]).toHaveTextContent("Neither");
+    expect(buttons[2]).toHaveStyle({ backgroundColor: "rgb(230, 185, 3)" });
+    expect(buttons[2]).toHaveStyle({ color: "rgb(0, 0, 0)" });
 
     expect(buttons[4]).toHaveTextContent("Strongly Disagree");
     expect(buttons[4]).toHaveStyle({ backgroundColor: "rgb(153, 6, 10)" });
+    expect(buttons[4]).toHaveStyle({ color: "rgb(255, 255, 255)" });
   });
 
   it("applies shape and button scale overrides to bars and labels", () => {

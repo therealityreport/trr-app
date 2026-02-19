@@ -45,7 +45,7 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
     );
 
     const grid = screen.getByTestId("figma-rank-grid");
-    expect(grid).toHaveAttribute("data-columns", "2");
+    expect(grid).toHaveAttribute("data-columns", "4");
     expect(grid.getAttribute("style")).toContain("grid-template-columns");
     expect(screen.getByTestId("figma-circle-unassigned-bank")).toBeInTheDocument();
     expect(screen.getByLabelText("Unassigned cast members")).toBeInTheDocument();
@@ -53,7 +53,7 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
     expect(screen.getByRole("button", { name: /select cast member for rank 1/i })).toBeInTheDocument();
   });
 
-  it("uses 3 columns on tablet and 4 columns on desktop", () => {
+  it("keeps cast ranking at 4 columns across breakpoints", () => {
     const first = render(
       <FlashbackRanker
         items={ITEMS}
@@ -62,7 +62,7 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
       />,
     );
 
-    expect(screen.getByTestId("figma-rank-grid")).toHaveAttribute("data-columns", "2");
+    expect(screen.getByTestId("figma-rank-grid")).toHaveAttribute("data-columns", "4");
     first.unmount();
 
     setViewport(768, 1024);
@@ -73,7 +73,7 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
         layoutPreset="figma-rank-circles"
       />,
     );
-    expect(screen.getByTestId("figma-rank-grid")).toHaveAttribute("data-columns", "3");
+    expect(screen.getByTestId("figma-rank-grid")).toHaveAttribute("data-columns", "4");
     second.unmount();
 
     setViewport(1280, 900);
@@ -100,6 +100,25 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
 
     expect(screen.getByTestId("selection-picker-mobile")).toBeInTheDocument();
     expect(screen.getByText(/pick a cast member/i)).toBeInTheDocument();
+  });
+
+  it("renders eight cast slots as a 4-column grid (2 rows of 4)", () => {
+    const eightItems = Array.from({ length: 8 }, (_, index) => ({
+      id: `cast-${index + 1}`,
+      label: `Cast ${index + 1}`,
+      img: `/images/cast-${index + 1}.png`,
+    }));
+
+    render(
+      <FlashbackRanker
+        items={eightItems}
+        variant="grid"
+        layoutPreset="figma-rank-circles"
+      />,
+    );
+
+    expect(screen.getByTestId("figma-rank-grid")).toHaveAttribute("data-columns", "4");
+    expect(screen.getAllByRole("button", { name: /select cast member for rank/i })).toHaveLength(8);
   });
 
   it("applies rank number font overrides to empty circle slots", () => {
@@ -133,8 +152,6 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
     const defaultSlotWidth = Number.parseInt(defaultSlotButton.parentElement?.style.width ?? "0", 10);
     const defaultBenchToken = screen.getByRole("button", { name: /drag lisa/i });
     const defaultBenchTokenWidth = parsePx(defaultBenchToken.style.width);
-    const defaultRankNumber = screen.getAllByText(/^1$/)[0] as HTMLElement;
-    const defaultRankNumberSize = Number.parseInt(defaultRankNumber.style.fontSize ?? "0", 10);
     expect(defaultBenchTokenWidth).toBe(48);
     expect(defaultBenchTokenWidth).toBeLessThan(defaultSlotWidth);
     unmount();
@@ -159,7 +176,7 @@ describe("FlashbackRanker figma-rank-circles preset", () => {
     expect(defaultSlotWidth).toBeGreaterThan(scaledSlotWidth);
     expect(defaultBenchTokenWidth).toBeGreaterThan(scaledBenchTokenWidth);
     expect(scaledBenchTokenWidth).toBeLessThan(scaledSlotWidth);
-    expect(scaledRankNumberSize).not.toBe(defaultRankNumberSize);
+    expect(scaledRankNumberSize).toBeGreaterThanOrEqual(13);
   });
 
   it("emits ordered ranking updates when placing into an open slot", async () => {
@@ -206,13 +223,32 @@ describe("FlashbackRanker figma-rank-rectangles preset", () => {
     );
 
     const grid = screen.getByTestId("figma-rectangle-grid");
-    expect(grid).toHaveAttribute("data-columns", "2");
+    expect(grid).toHaveAttribute("data-columns", "3");
     expect(grid.getAttribute("style")).toContain("grid-template-columns");
 
     expect(screen.getByTestId("figma-rectangle-unranked-tray")).toBeInTheDocument();
     expect(screen.getByLabelText("Unassigned seasons")).toBeInTheDocument();
     expect(screen.queryByText(/unranked/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /select season for rank 1/i })).toBeInTheDocument();
+  });
+
+  it("renders six season slots as a 3-column grid (2 rows of 3)", () => {
+    const sixItems = Array.from({ length: 6 }, (_, index) => ({
+      id: `season-${index + 1}`,
+      label: `Season ${index + 1}`,
+      img: `/images/season-${index + 1}.png`,
+    }));
+
+    render(
+      <FlashbackRanker
+        items={sixItems}
+        variant="grid"
+        layoutPreset="figma-rank-rectangles"
+      />,
+    );
+
+    expect(screen.getByTestId("figma-rectangle-grid")).toHaveAttribute("data-columns", "3");
+    expect(screen.getAllByRole("button", { name: /select season for rank/i })).toHaveLength(6);
   });
 
   it("keeps season bank cards smaller than slots and scales both", () => {

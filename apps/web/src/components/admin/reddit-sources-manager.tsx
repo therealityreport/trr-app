@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 
 type ManagerMode = "season" | "global";
 
@@ -32,6 +32,8 @@ interface RedditCommunity {
   display_name: string | null;
   notes: string | null;
   post_flares: string[];
+  analysis_flares: string[];
+  analysis_all_flares: string[];
   post_flares_updated_at: string | null;
   is_active: boolean;
   created_at: string;
@@ -55,10 +57,13 @@ interface DiscoveryThread {
   score: number;
   num_comments: number;
   posted_at: string | null;
+  link_flair_text: string | null;
   source_sorts: Array<"new" | "hot" | "top">;
   matched_terms: string[];
+  matched_cast_terms: string[];
   cross_show_terms: string[];
   is_show_match: boolean;
+  passes_flair_filter: boolean;
   match_score: number;
   suggested_include_terms: string[];
   suggested_exclude_terms: string[];
@@ -123,7 +128,7 @@ const isRedditHost = (hostname: string): boolean => {
   );
 };
 
-const normalizePostFlares = (value: unknown): string[] => {
+const normalizeFlairList = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const out: string[] = [];
@@ -136,7 +141,7 @@ const normalizePostFlares = (value: unknown): string[] => {
     seen.add(key);
     out.push(flair);
   }
-  return out;
+  return out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 };
 
 const toCommunityModel = (community: RedditCommunityResponse): RedditCommunity => ({
@@ -146,7 +151,9 @@ const toCommunityModel = (community: RedditCommunityResponse): RedditCommunity =
       ? community.assigned_thread_count
       : 0,
   assigned_threads: Array.isArray(community.assigned_threads) ? community.assigned_threads : [],
-  post_flares: normalizePostFlares(community.post_flares),
+  post_flares: normalizeFlairList(community.post_flares),
+  analysis_flares: normalizeFlairList(community.analysis_flares),
+  analysis_all_flares: normalizeFlairList(community.analysis_all_flares),
   post_flares_updated_at: community.post_flares_updated_at ?? null,
 });
 
@@ -223,18 +230,14 @@ export default function RedditSourcesManager({
   const [showOnlyMatches, setShowOnlyMatches] = useState(true);
   const isBusy = busyAction !== null;
 
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
 
   const fetchWithTimeout = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
-        return await fetch(input, { ...init, signal: controller.signal });
+        return await fetchAdminWithAuth(input, { ...init, signal: controller.signal });
       } catch (err) {
         if ((err as { name?: string } | null)?.name === "AbortError") {
           throw new Error("Request timed out. Please try again.");
@@ -259,6 +262,8 @@ export default function RedditSourcesManager({
                   assigned_threads: patch.assigned_threads ?? community.assigned_threads,
                   assigned_thread_count: patch.assigned_thread_count ?? community.assigned_thread_count,
                   post_flares: patch.post_flares ?? community.post_flares,
+                  analysis_flares: patch.analysis_flares ?? community.analysis_flares,
+                  analysis_all_flares: patch.analysis_all_flares ?? community.analysis_all_flares,
                   post_flares_updated_at: patch.post_flares_updated_at ?? community.post_flares_updated_at,
                 }
               : community,
@@ -295,7 +300,7 @@ export default function RedditSourcesManager({
 
         if (Array.isArray(payload.flares)) {
           mergeCommunityPatch(communityId, {
-            post_flares: normalizePostFlares(payload.flares),
+            post_flares: normalizeFlairList(payload.flares),
             post_flares_updated_at: new Date().toISOString(),
           });
         }
@@ -374,6 +379,60 @@ export default function RedditSourcesManager({
     [communities, selectedCommunityId],
   );
 
+  const persistAnalysisFlareModes = useCallback(
+    async (
+      communityId: string,
+      payload: { analysisFlares: string[]; analysisAllFlares: string[] },
+    ) => {
+      const previous = communities.find((community) => community.id === communityId);
+      if (!previous) return;
+
+      const nextScan = normalizeFlairList(payload.analysisFlares);
+      const nextAll = normalizeFlairList(payload.analysisAllFlares);
+      mergeCommunityPatch(communityId, {
+        analysis_flares: nextScan,
+        analysis_all_flares: nextAll,
+      });
+      setBusyAction("save-analysis-flares");
+      setBusyLabel("Saving analysis flares...");
+      setError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analysis_flares: nextScan,
+            analysis_all_flares: nextAll,
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          community?: RedditCommunityResponse;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to save analysis flares");
+        }
+        if (payload.community) {
+          mergeCommunityPatch(communityId, {
+            analysis_flares: toCommunityModel(payload.community).analysis_flares,
+            analysis_all_flares: toCommunityModel(payload.community).analysis_all_flares,
+          });
+        }
+      } catch (err) {
+        mergeCommunityPatch(communityId, {
+          analysis_flares: previous.analysis_flares,
+          analysis_all_flares: previous.analysis_all_flares,
+        });
+        setError(err instanceof Error ? err.message : "Failed to save analysis flares");
+      } finally {
+        setBusyAction(null);
+        setBusyLabel(null);
+      }
+    },
+    [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
+  );
+
   const groupedCommunities = useMemo(() => {
     const grouped = new Map<string, RedditCommunity[]>();
     for (const community of communities) {
@@ -388,8 +447,14 @@ export default function RedditSourcesManager({
   const visibleDiscoveryThreads = useMemo(() => {
     const items = discovery?.threads ?? [];
     if (!showOnlyMatches) return items;
-    return items.filter((thread) => thread.is_show_match);
-  }, [discovery, showOnlyMatches]);
+    const hasAllPostsFlairMode = (selectedCommunity?.analysis_all_flares.length ?? 0) > 0;
+    if (!hasAllPostsFlairMode) {
+      return items.filter((thread) => thread.is_show_match);
+    }
+    return items.filter(
+      (thread) => thread.is_show_match || Boolean(thread.passes_flair_filter),
+    );
+  }, [discovery, selectedCommunity, showOnlyMatches]);
 
   const communityGroups = useMemo<Array<[string, RedditCommunity[]]>>(
     () => (mode === "global" ? groupedCommunities : [[showName ?? "Show", communities]]),
@@ -982,6 +1047,108 @@ export default function RedditSourcesManager({
                       <p className="text-xs text-zinc-500">No post flairs available yet.</p>
                     )}
                   </div>
+                  <div className="mt-3">
+                    <div className="mb-1 flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                        Analysis Flares
+                      </p>
+                      <span className="text-[11px] font-semibold text-zinc-500">
+                        {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
+                        {selectedCommunity.analysis_flares.length} scan
+                      </span>
+                    </div>
+                    {selectedCommunity.post_flares.length === 0 ? (
+                      <p className="text-xs text-zinc-500">
+                        Refresh post flares first to assign analysis flares.
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        <div>
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            All Posts With Flair
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedCommunity.post_flares.map((flair) => {
+                              const flairKey = flair.toLowerCase();
+                              const isSelected = selectedCommunity.analysis_all_flares.some(
+                                (value) => value.toLowerCase() === flairKey,
+                              );
+                              return (
+                                <button
+                                  key={`analysis-all-flair-${selectedCommunity.id}-${flair}`}
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => {
+                                    const nextAll = isSelected
+                                      ? selectedCommunity.analysis_all_flares.filter(
+                                          (value) => value.toLowerCase() !== flairKey,
+                                        )
+                                      : [...selectedCommunity.analysis_all_flares, flair];
+                                    const nextScan = selectedCommunity.analysis_flares.filter(
+                                      (value) => value.toLowerCase() !== flairKey,
+                                    );
+                                    void persistAnalysisFlareModes(selectedCommunity.id, {
+                                      analysisAllFlares: nextAll,
+                                      analysisFlares: nextScan,
+                                    });
+                                  }}
+                                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
+                                    isSelected
+                                      ? "bg-indigo-100 text-indigo-700"
+                                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                                >
+                                  {isSelected ? "All posts · " : ""}{flair}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            Scan Flair For Relevant Terms
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedCommunity.post_flares.map((flair) => {
+                              const flairKey = flair.toLowerCase();
+                              const isSelected = selectedCommunity.analysis_flares.some(
+                                (value) => value.toLowerCase() === flairKey,
+                              );
+                              return (
+                                <button
+                                  key={`analysis-scan-flair-${selectedCommunity.id}-${flair}`}
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => {
+                                    const nextScan = isSelected
+                                      ? selectedCommunity.analysis_flares.filter(
+                                          (value) => value.toLowerCase() !== flairKey,
+                                        )
+                                      : [...selectedCommunity.analysis_flares, flair];
+                                    const nextAll = selectedCommunity.analysis_all_flares.filter(
+                                      (value) => value.toLowerCase() !== flairKey,
+                                    );
+                                    void persistAnalysisFlareModes(selectedCommunity.id, {
+                                      analysisAllFlares: nextAll,
+                                      analysisFlares: nextScan,
+                                    });
+                                  }}
+                                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
+                                    isSelected
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                                >
+                                  {isSelected ? "Scan terms · " : ""}{flair}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   {selectedCommunity.notes && (
                     <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                       {selectedCommunity.notes}
@@ -1129,6 +1296,11 @@ export default function RedditSourcesManager({
                                 <span>{fmtNum(thread.score)} score</span>
                                 <span>{fmtNum(thread.num_comments)} comments</span>
                                 <span>sort: {thread.source_sorts.join(", ")}</span>
+                                {thread.link_flair_text && (
+                                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                                    Flair: {thread.link_flair_text}
+                                  </span>
+                                )}
                               </div>
                               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                 {thread.is_show_match ? (
@@ -1140,7 +1312,7 @@ export default function RedditSourcesManager({
                                     Non-match
                                   </span>
                                 )}
-                                {thread.matched_terms.map((term) => (
+                                {(thread.matched_terms ?? []).map((term) => (
                                   <span
                                     key={`${thread.reddit_post_id}-m-${term}`}
                                     className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700"
@@ -1148,7 +1320,15 @@ export default function RedditSourcesManager({
                                     + {term}
                                   </span>
                                 ))}
-                                {thread.cross_show_terms.map((term) => (
+                                {(thread.matched_cast_terms ?? []).map((term) => (
+                                  <span
+                                    key={`${thread.reddit_post_id}-cast-${term}`}
+                                    className="rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] text-cyan-700"
+                                  >
+                                    cast: {term}
+                                  </span>
+                                ))}
+                                {(thread.cross_show_terms ?? []).map((term) => (
                                   <span
                                     key={`${thread.reddit_post_id}-x-${term}`}
                                     className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700"
@@ -1156,6 +1336,18 @@ export default function RedditSourcesManager({
                                     - {term}
                                   </span>
                                 ))}
+                                {(selectedCommunity.analysis_flares.length > 0 ||
+                                  selectedCommunity.analysis_all_flares.length > 0) && (
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                      (thread.passes_flair_filter ?? true)
+                                        ? "bg-emerald-50 text-emerald-700"
+                                        : "bg-rose-50 text-rose-700"
+                                    }`}
+                                  >
+                                    {(thread.passes_flair_filter ?? true) ? "Selected flair" : "Flair excluded"}
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <button

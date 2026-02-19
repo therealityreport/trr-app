@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { auth } from "@/lib/firebase";
 
 // ============================================================================
 // Types (duplicated from server service; keep additive + compatible)
@@ -229,7 +229,7 @@ function getReadinessBadge(ready: boolean) {
 // ============================================================================
 
 export default function DevDashboardPage() {
-  const { user, checking, hasAccess } = useAdminGuard();
+  const { user, userKey, checking, hasAccess } = useAdminGuard();
 
   const [data, setData] = useState<DevDashboardData | null>(null);
   const [authStatus, setAuthStatus] = useState<AuthStatusPayload | null>(null);
@@ -239,21 +239,22 @@ export default function DevDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<RepoName>("TRR-Backend");
 
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      fetchAdminWithAuth(input, init, {
+        preferredUser: user,
+      }),
+    [user],
+  );
 
   const load = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
 
-      const headers = await getAuthHeaders();
       const [dashboardRes, authStatusRes] = await Promise.all([
-        fetch("/api/admin/dev-dashboard", { headers }),
-        fetch("/api/admin/auth/status", { headers }),
+        fetchWithAuth("/api/admin/dev-dashboard"),
+        fetchWithAuth("/api/admin/auth/status"),
       ]);
       const dashboardPayload = await dashboardRes.json().catch(() => null);
       const authStatusPayload = await authStatusRes.json().catch(() => null);
@@ -275,16 +276,14 @@ export default function DevDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [getAuthHeaders]);
+  }, [fetchWithAuth]);
 
   const resetAuthDiagnosticsWindow = useCallback(async () => {
     try {
       setError(null);
       setResettingAuthWindow(true);
-      const headers = await getAuthHeaders();
-      const response = await fetch("/api/admin/auth/status/reset", {
+      const response = await fetchWithAuth("/api/admin/auth/status/reset", {
         method: "POST",
-        headers,
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -297,16 +296,14 @@ export default function DevDashboardPage() {
     } finally {
       setResettingAuthWindow(false);
     }
-  }, [getAuthHeaders]);
+  }, [fetchWithAuth]);
 
   const downloadAuthDrillReport = useCallback(async () => {
     try {
       setError(null);
       setDownloadingDrillReport(true);
-      const headers = await getAuthHeaders();
-      const response = await fetch("/api/admin/auth/status/drill-report?format=download", {
+      const response = await fetchWithAuth("/api/admin/auth/status/drill-report?format=download", {
         method: "GET",
-        headers,
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
@@ -331,13 +328,13 @@ export default function DevDashboardPage() {
     } finally {
       setDownloadingDrillReport(false);
     }
-  }, [getAuthHeaders]);
+  }, [fetchWithAuth]);
 
   useEffect(() => {
     if (checking) return;
-    if (!user || !hasAccess) return;
+    if (!userKey || !hasAccess) return;
     void load();
-  }, [checking, user, hasAccess, load]);
+  }, [checking, userKey, hasAccess, load]);
 
   const activeRepoData = useMemo(() => {
     return data?.repos.find((repo) => repo.name === activeRepo) ?? null;

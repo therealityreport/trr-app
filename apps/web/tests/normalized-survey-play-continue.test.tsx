@@ -67,6 +67,61 @@ function makeSurvey() {
   };
 }
 
+function makeCastMultiSelectSurvey() {
+  return {
+    id: "survey-2",
+    slug: "cast-multi",
+    title: "Cast Multi Survey",
+    description: "Demo",
+    is_active: true,
+    created_at: "",
+    updated_at: "",
+    questions: [
+      {
+        id: "q1",
+        survey_id: "survey-2",
+        question_key: "which_feud",
+        question_text: "Which FEUD did you enjoy the most?",
+        question_type: "multi_choice",
+        display_order: 1,
+        is_required: true,
+        config: { uiVariant: "cast-multi-select", minSelections: 2, maxSelections: 2 },
+        created_at: "",
+        updated_at: "",
+        options: [
+          {
+            id: "q1o1",
+            question_id: "q1",
+            option_key: "lisa",
+            option_text: "Lisa",
+            display_order: 1,
+            metadata: {},
+            created_at: "",
+          },
+          {
+            id: "q1o2",
+            question_id: "q1",
+            option_key: "meredith",
+            option_text: "Meredith",
+            display_order: 2,
+            metadata: {},
+            created_at: "",
+          },
+          {
+            id: "q1o3",
+            question_id: "q1",
+            option_key: "heather",
+            option_text: "Heather",
+            display_order: 3,
+            metadata: {},
+            created_at: "",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe("NormalizedSurveyPlay continue button", () => {
   beforeEach(() => {
     push.mockReset();
@@ -111,5 +166,27 @@ describe("NormalizedSurveyPlay continue button", () => {
 
     fireEvent.click(backQ2);
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+
+  it("uses inline continue for cast-multi-select after two picks", () => {
+    useNormalizedSurveyMock.mockReturnValue({
+      loading: false,
+      survey: makeCastMultiSelectSurvey(),
+      activeRun: { id: "run-2" },
+      canSubmit: true,
+      submitting: false,
+      error: null,
+      submit,
+    });
+
+    render(<NormalizedSurveyPlay surveySlug="cast-multi" />);
+
+    const lisa = screen.getByTestId("cast-multi-select-option-lisa");
+    const meredith = screen.getByTestId("cast-multi-select-option-meredith");
+    fireEvent.click(lisa);
+    fireEvent.click(meredith);
+
+    expect(screen.queryByTestId("survey-question-continue-q1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cast-multi-select-continue")).toBeInTheDocument();
   });
 });

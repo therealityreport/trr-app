@@ -5,8 +5,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { auth } from "@/lib/firebase";
 import { DEFAULT_SURVEY_THEME, type SurveyTheme } from "@/lib/surveys/types";
 
 // ============================================================================
@@ -127,7 +127,7 @@ export default function SurveyEditorPage({
   params: Promise<{ surveyKey: string }>;
 }) {
   const { surveyKey } = use(params);
-  const { user, checking, hasAccess } = useAdminGuard();
+  const { user, userKey, checking, hasAccess } = useAdminGuard();
   const searchParams = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<TabId>("settings");
@@ -205,30 +205,23 @@ export default function SurveyEditorPage({
     closes_at: "",
   });
 
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      fetchAdminWithAuth(input, init, {
+        preferredUser: user,
+      }),
+    [user],
+  );
 
   const fetchSurvey = useCallback(async () => {
-    if (!user) return;
+    if (!userKey) return;
 
     try {
       setLoading(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) {
-        setError("Not authenticated");
-        return;
-      }
-
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `/api/admin/surveys/${surveyKey}?includeCast=true&includeEpisodes=true&includeAssets=true`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
       );
 
       if (!response.ok) {
@@ -262,23 +255,22 @@ export default function SurveyEditorPage({
     } finally {
       setLoading(false);
     }
-  }, [user, surveyKey]);
+  }, [fetchWithAuth, surveyKey, userKey]);
 
   useEffect(() => {
-    if (hasAccess && user) {
+    if (hasAccess && userKey) {
       fetchSurvey();
     }
-  }, [hasAccess, user, fetchSurvey]);
+  }, [hasAccess, userKey, fetchSurvey]);
 
   const fetchRunsForResponses = useCallback(async () => {
-    if (!user) return;
+    if (!userKey) return;
 
     try {
       setRunsLoading(true);
       setResponsesError(null);
 
-      const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/normalized-surveys/${surveyKey}/runs`, { headers });
+      const response = await fetchWithAuth(`/api/admin/normalized-surveys/${surveyKey}/runs`);
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
@@ -297,11 +289,11 @@ export default function SurveyEditorPage({
     } finally {
       setRunsLoading(false);
     }
-  }, [getAuthHeaders, surveyKey, selectedRunId, user]);
+  }, [fetchWithAuth, surveyKey, selectedRunId, userKey]);
 
   const fetchResponsesForRun = useCallback(
     async (runId: string) => {
-      if (!user) return;
+      if (!userKey) return;
 
       try {
         setResponsesLoading(true);
@@ -309,10 +301,8 @@ export default function SurveyEditorPage({
         setResponsesPage(0);
         setResponseDetail(null);
 
-        const headers = await getAuthHeaders();
-        const response = await fetch(
+        const response = await fetchWithAuth(
           `/api/admin/normalized-surveys/${surveyKey}/runs/${runId}/responses`,
-          { headers }
         );
         const data = await response.json().catch(() => ({}));
 
@@ -327,12 +317,12 @@ export default function SurveyEditorPage({
         setResponsesLoading(false);
       }
     },
-    [getAuthHeaders, surveyKey, user]
+    [fetchWithAuth, surveyKey, userKey]
   );
 
   const openResponseDetail = useCallback(
     async (runId: string, responseId: string) => {
-      if (!user) return;
+      if (!userKey) return;
 
       setResponseModalOpen(true);
       setResponseDetail(null);
@@ -340,12 +330,10 @@ export default function SurveyEditorPage({
       setResponsesError(null);
 
       try {
-        const headers = await getAuthHeaders();
-        const response = await fetch(
+        const response = await fetchWithAuth(
           `/api/admin/normalized-surveys/${surveyKey}/runs/${runId}/responses?responseId=${encodeURIComponent(
             responseId
           )}`,
-          { headers }
         );
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -359,19 +347,17 @@ export default function SurveyEditorPage({
         setResponseDetailLoading(false);
       }
     },
-    [getAuthHeaders, surveyKey, user]
+    [fetchWithAuth, surveyKey, userKey]
   );
 
   const exportResponsesCsv = useCallback(async () => {
-    if (!user || !selectedRunId) return;
+    if (!userKey || !selectedRunId) return;
 
     setExportingResponses(true);
     setResponsesError(null);
     try {
-      const headers = await getAuthHeaders();
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `/api/admin/normalized-surveys/${surveyKey}/runs/${selectedRunId}/export`,
-        { headers }
       );
 
       const bodyText = await response.text();
@@ -402,20 +388,20 @@ export default function SurveyEditorPage({
     } finally {
       setExportingResponses(false);
     }
-  }, [getAuthHeaders, selectedRunId, surveyKey, user]);
+  }, [fetchWithAuth, selectedRunId, surveyKey, userKey]);
 
   useEffect(() => {
-    if (!hasAccess || !user) return;
+    if (!hasAccess || !userKey) return;
     if (activeTab !== "responses") return;
     fetchRunsForResponses();
-  }, [activeTab, fetchRunsForResponses, hasAccess, user]);
+  }, [activeTab, fetchRunsForResponses, hasAccess, userKey]);
 
   useEffect(() => {
-    if (!hasAccess || !user) return;
+    if (!hasAccess || !userKey) return;
     if (activeTab !== "responses") return;
     if (!selectedRunId) return;
     fetchResponsesForRun(selectedRunId);
-  }, [activeTab, fetchResponsesForRun, hasAccess, selectedRunId, user]);
+  }, [activeTab, fetchResponsesForRun, hasAccess, selectedRunId, userKey]);
 
   const saveSettings = async () => {
     if (!user || !survey) return;
@@ -425,13 +411,9 @@ export default function SurveyEditorPage({
       setError(null);
       setSuccess(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
-      const response = await fetch(`/api/admin/surveys/${surveyKey}`, {
+      const response = await fetchWithAuth(`/api/admin/surveys/${surveyKey}`, {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -475,13 +457,9 @@ export default function SurveyEditorPage({
       setError(null);
       setSuccess(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
-      const response = await fetch(`/api/admin/surveys/${surveyKey}/theme`, {
+      const response = await fetchWithAuth(`/api/admin/surveys/${surveyKey}/theme`, {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ theme: themeOverrides }),
@@ -508,14 +486,10 @@ export default function SurveyEditorPage({
       setSaving(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `/api/admin/surveys/${surveyKey}/episodes/${episodeId}/activate`,
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
         }
       );
 
@@ -577,17 +551,13 @@ export default function SurveyEditorPage({
       setSaving(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
       const url = editingCastMember
         ? `/api/admin/surveys/${surveyKey}/cast/${editingCastMember.id}`
         : `/api/admin/surveys/${surveyKey}/cast`;
 
-      const response = await fetch(url, {
+      const response = await fetchWithAuth(url, {
         method: editingCastMember ? "PUT" : "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -632,12 +602,8 @@ export default function SurveyEditorPage({
       setSaving(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
-      const response = await fetch(`/api/admin/surveys/${surveyKey}/cast/${memberId}`, {
+      const response = await fetchWithAuth(`/api/admin/surveys/${surveyKey}/cast/${memberId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!response.ok) {
@@ -694,17 +660,13 @@ export default function SurveyEditorPage({
       setSaving(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
       const url = editingEpisode
         ? `/api/admin/surveys/${surveyKey}/episodes/${editingEpisode.id}`
         : `/api/admin/surveys/${surveyKey}/episodes`;
 
-      const response = await fetch(url, {
+      const response = await fetchWithAuth(url, {
         method: editingEpisode ? "PUT" : "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -746,12 +708,8 @@ export default function SurveyEditorPage({
       setSaving(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) throw new Error("Not authenticated");
-
-      const response = await fetch(`/api/admin/surveys/${surveyKey}/episodes/${episodeId}`, {
+      const response = await fetchWithAuth(`/api/admin/surveys/${surveyKey}/episodes/${episodeId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!response.ok) {

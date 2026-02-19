@@ -4,6 +4,272 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-19)
 
+- February 19, 2026: Fixed show gallery default media sections, batch-job target scoping, and profile-picture false positives.
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/lib/admin/asset-sectioning.ts`
+    - `apps/web/tests/asset-sectioning.test.ts`
+  - Changes:
+    - Show gallery default section set (when no explicit content-type filter is selected) now focuses on:
+      - `Cast Photos` (OSA-scoped classifier),
+      - `Profile Pictures`,
+      - `Posters`,
+      - `Backdrops`.
+    - Batch Jobs default content-type checkboxes now match that same section set.
+    - Batch job target resolution now uses currently visible gallery section assets instead of all filtered assets, so Count/Crop/ID Text/Resize only runs on assets currently shown for selected sections.
+    - Profile-picture classification is now stricter: `PROFILE PICTURE` inferred from loose text alone no longer classifies into the Profile section without stronger profile signals (context/kind or explicit profile content type metadata).
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/asset-sectioning.test.ts` (`4 passed`)
+    - `pnpm -C apps/web exec vitest run tests/show-assets-batch-jobs-stream-route.test.ts tests/show-admin-routes.test.ts tests/show-section-redirect-page.test.ts` (`15 passed`)
+    - `pnpm -C apps/web exec tsc --noEmit` currently reports unrelated pre-existing errors in `apps/web/src/app/admin/networks/page.tsx` and `apps/web/src/app/admin/scrape-images/page.tsx`.
+
+- February 19, 2026: Added `/admin/networks` type pills and aligned summary aggregation to include all watch-provider availability rows.
+  - Files:
+    - `apps/web/src/lib/server/admin/networks-streaming-repository.ts`
+    - `apps/web/src/app/admin/networks/page.tsx`
+    - `apps/web/tests/admin-networks-page-auth.test.tsx`
+  - Changes:
+    - Summary provider aggregation now includes all rows from `core.show_watch_providers` (no `US/flatrate+ads` restriction), while preserving fallback from `core.shows.streaming_providers`.
+    - Added pill controls above the table on `/admin/networks`:
+      - `Both`
+      - `Network`
+      - `Streaming Services`
+    - Table now renders filtered rows based on selected pill.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/admin-networks-page-auth.test.tsx tests/networks-streaming-summary-route.test.ts tests/networks-streaming-sync-proxy-route.test.ts tests/use-admin-guard-stability.test.tsx tests/admin-surveys-userkey-fetch-stability.test.tsx` (`13 passed`)
+
+- February 19, 2026: Added a localhost-only dev admin auth bypass path so TRR admin pages can run without Firebase login during local development/debugging.
+  - Files:
+    - `apps/web/src/lib/server/auth.ts`
+    - `apps/web/src/lib/admin/dev-admin-bypass.ts` (new)
+    - `apps/web/src/lib/admin/useAdminGuard.ts`
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/tests/dev-admin-bypass.test.ts` (new)
+  - Changes:
+    - `requireAdmin(...)` now supports local bypass when hostname is `localhost`/`127.0.0.1`/`[::1]` and bypass is enabled.
+    - Bypass enablement behavior:
+      - default ON in `NODE_ENV=development`,
+      - explicit override via `TRR_DEV_ADMIN_BYPASS` (server) and `NEXT_PUBLIC_DEV_ADMIN_BYPASS` (client).
+    - Consolidated client bypass logic into shared `isDevAdminBypassEnabledClient(...)` helper and reused it in admin guard + TRR show/season/person admin pages.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/dev-admin-bypass.test.ts tests/use-admin-guard-stability.test.tsx tests/server-auth-adapter.test.ts tests/admin-networks-page-auth.test.tsx` (`15 passed`)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - Runtime sanity: `curl http://localhost:3000/api/admin/auth/status` returns `200` locally without bearer token.
+
+- February 19, 2026: Re-validated admin auth stability and networks/streaming admin flows against latest backend completion contract.
+  - Files:
+    - `apps/web/src/lib/admin/useAdminGuard.ts`
+    - `apps/web/src/app/admin/dev-dashboard/page.tsx`
+    - `apps/web/src/app/admin/survey-responses/page.tsx`
+    - `apps/web/src/app/admin/surveys/page.tsx`
+    - `apps/web/src/app/admin/surveys/normalized/page.tsx`
+    - `apps/web/src/app/admin/surveys/normalized/[surveySlug]/page.tsx`
+    - `apps/web/src/app/admin/surveys/[surveyKey]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/page.tsx`
+    - `apps/web/src/app/admin/networks/page.tsx`
+    - `apps/web/src/lib/server/admin/networks-streaming-repository.ts`
+    - `apps/web/src/app/api/admin/networks-streaming/sync/route.ts`
+    - `apps/web/tests/use-admin-guard-stability.test.tsx`
+    - `apps/web/tests/admin-surveys-userkey-fetch-stability.test.tsx`
+    - `apps/web/tests/admin-networks-page-auth.test.tsx`
+    - `apps/web/tests/networks-streaming-summary-route.test.ts`
+    - `apps/web/tests/networks-streaming-sync-proxy-route.test.ts`
+    - `apps/web/tests/networks-streaming-overrides-route.test.ts`
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/use-admin-guard-stability.test.tsx tests/admin-surveys-userkey-fetch-stability.test.tsx tests/admin-networks-page-auth.test.tsx tests/networks-streaming-summary-route.test.ts tests/networks-streaming-sync-proxy-route.test.ts tests/networks-streaming-overrides-route.test.ts` (`16 passed`)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web run lint` (pass; warnings only)
+    - `pnpm -C apps/web run test:ci` (1 unrelated pre-existing failing test: `tests/show-news-tab-google-wiring.test.ts`)
+
+- February 19, 2026: Reduced perceived load latency on season social Reddit tab and hardened auth-token readiness for admin fetches.
+  - Files:
+    - `apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - Changes:
+    - `getAuthHeaders()` in both components now awaits Firebase `authStateReady()` before requesting ID tokens, preventing early `currentUser` races that caused empty/failed initial loads.
+    - `SeasonSocialAnalyticsSection.refreshAll()` now short-circuits heavyweight analytics/targets/runs/jobs fetches when `platformTab === "reddit"`, so Reddit manager loads without waiting on non-Reddit social pipelines.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-discovery-service.test.ts tests/reddit-community-route.test.ts` (`30 passed`)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+
+- February 19, 2026: Added dual reddit flair gating modes per community (`all posts` vs `scan by show/cast terms`) for better multi-show subreddit handling.
+  - Files:
+    - `apps/web/db/migrations/026_add_analysis_all_flares_to_admin_reddit_communities.sql` (new)
+    - `apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+    - `apps/web/src/app/api/admin/reddit/communities/[communityId]/route.ts`
+    - `apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+    - `apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+    - `apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `apps/web/tests/reddit-discovery-service.test.ts`
+    - `apps/web/tests/reddit-sources-manager.test.tsx`
+    - `apps/web/tests/reddit-community-route.test.ts`
+  - Changes:
+    - Added persisted `analysis_all_flares` array on `admin.reddit_communities` (JSONB array + check constraint).
+    - Kept existing `analysis_flares` as `scan flare for relevant terms` mode.
+    - Discovery gating now supports both modes simultaneously:
+      - `analysis_all_flares`: include all posts with matched flair (term match not required).
+      - `analysis_flares`: include only posts with matched flair AND show/cast term matches.
+      - If either mode has selections, posts outside selected flairs are excluded.
+    - Updated Reddit manager UI with two separate chip groups:
+      - `All Posts With Flair`
+      - `Scan Flair For Relevant Terms`
+      - flare assignments are mutually exclusive per flair and persisted together via PATCH.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx tests/reddit-community-route.test.ts tests/reddit-flairs-service.test.ts tests/reddit-community-flares-refresh-route.test.ts` (`23 passed`)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+
+- February 19, 2026: Implemented social tab URL deep links, Reddit analysis flair persistence/gating, and RHOSLC flair normalization cleanup.
+  - Files:
+    - `apps/web/db/migrations/025_add_analysis_flares_to_admin_reddit_communities.sql` (new)
+    - `apps/web/src/lib/server/admin/reddit-flair-normalization.ts` (new)
+    - `apps/web/src/lib/server/admin/reddit-flairs-service.ts`
+    - `apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+    - `apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+    - `apps/web/src/app/api/admin/reddit/communities/[communityId]/route.ts`
+    - `apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+    - `apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/reddit-flairs-service.test.ts`
+    - `apps/web/tests/reddit-discovery-service.test.ts`
+    - `apps/web/tests/reddit-sources-manager.test.tsx`
+    - `apps/web/tests/reddit-community-route.test.ts` (new)
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+  - Changes:
+    - Added persisted `analysis_flares` array on admin reddit communities with migration + JSON array constraint.
+    - Added shared flair sanitizer with RHOSLC-specific cleanup rules (token removal, decorative cleanup, `:Whitney:` exclusion, case-insensitive dedupe, alphabetical sort).
+    - Applied sanitizer on flair refresh, repository parsing, and PATCH writes.
+    - Extended community PATCH route to accept/validate `analysis_flares: string[]` and return persisted normalized values.
+    - Extended discovery payload to include `link_flair_text`, `matched_cast_terms`, and `passes_flair_filter`.
+    - Discovery now supports cast-term matching and enforces flair + show/cast gating when analysis flares are configured.
+    - Reddit manager UI now supports show-community analysis flair chip selection with optimistic save/rollback and flair-aware discovery card badges.
+    - Season social platform tabs moved above filters and now deep-link via `social_platform` query param with reload/share support and invalid-value fallback to `overview`.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-discovery-service.test.ts tests/reddit-flairs-service.test.ts tests/reddit-community-flares-refresh-route.test.ts tests/reddit-community-route.test.ts` (`37 passed`)
+    - `pnpm -C apps/web run lint` / `pnpm -C apps/web exec next build --webpack` were blocked in current dirty worktree by unrelated pre-existing parse/type errors in untracked `apps/web/src/lib/admin/asset-sectioning.ts` (not part of this task scope).
+
+- February 19, 2026: Restored Season Social Analytics weekly-table hyperlinks to canonical week detail routes.
+  - Files:
+    - `apps/web/src/lib/admin/show-admin-routes.ts`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/show-admin-routes.test.ts`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+  - Changes:
+    - Added `buildSeasonSocialWeekUrl(...)` helper to generate canonical week-detail links:
+      - `/admin/trr-shows/{slug}/seasons/{season}/social/week/{week}`
+      - with optional query params via existing `appendQuery(...)`.
+    - Replaced malformed week link concatenation in season social analytics table that produced:
+      - `...?tab=social/week/{n}?...`
+      - now links correctly to `/social/week/{n}` and preserves `source_scope`.
+    - Added regression coverage for:
+      - week URL helper output + query preservation,
+      - weekly table `Week 1` href shape and negative assertion against `?tab=social/week`.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts tests/season-social-analytics-section.test.tsx` (`24 passed`)
+    - `pnpm -C apps/web exec eslint src/lib/admin/show-admin-routes.ts src/components/admin/season-social-analytics-section.tsx` (pass)
+
+- February 19, 2026: Redesigned the Season Social Analytics header container to improve hierarchy and readability while preserving all ingest/filter behavior.
+  - Files:
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - Changes:
+    - Reworked the top section into a two-tier layout:
+      - upper row now shows branded title block, live/idle status pill, and a dedicated current-run summary card.
+      - lower row now separates interactive filters (scope/week/run) from season metadata (season ID, last updated, and active window).
+    - Added a responsive card/grid structure and subtle gradient backdrop to reduce visual density and improve scanability on desktop and mobile widths.
+    - Kept existing select wiring, run label computation, and API-facing behavior unchanged.
+  - Validation:
+    - `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx` (pass)
+
+- February 19, 2026: Updated admin show link-discovery notice to reflect backend auto-approval of validated person sources.
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - Changes:
+    - Updated discovery success copy in `discoverShowLinks` to state that validated person sources are auto-approved and only remaining pending items require review.
+  - Validation:
+    - UI copy-only change; no API contract or route behavior changes.
+
+- February 19, 2026: Hardened News tab proxy error handling to replace opaque `fetch failed` with actionable backend diagnostics.
+  - Files:
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/news/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/google-news/sync/route.ts`
+  - Changes:
+    - Added explicit timeout protection (`20s`) with `AbortController` to unified news read and Google News sync proxy calls.
+    - Added network-error normalization:
+      - maps raw fetch failures to `502` with backend reachability guidance and `TRR_API_URL` context,
+      - maps proxy timeouts to `504` with clear timeout messaging.
+    - Preserved existing auth/config guards and backend error pass-through behavior.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/app/api/admin/trr-api/shows/[showId]/news/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/google-news/sync/route.ts'` (pass)
+
+- February 19, 2026: Stabilized admin auth guard identity to prevent cross-tab refetch cascades from equivalent Firebase auth emissions.
+  - Files:
+    - `apps/web/src/lib/admin/useAdminGuard.ts`
+    - `apps/web/src/app/admin/dev-dashboard/page.tsx`
+    - `apps/web/src/app/admin/survey-responses/page.tsx`
+    - `apps/web/src/app/admin/surveys/page.tsx`
+    - `apps/web/src/app/admin/surveys/normalized/page.tsx`
+    - `apps/web/src/app/admin/surveys/normalized/[surveySlug]/page.tsx`
+    - `apps/web/src/app/admin/surveys/[surveyKey]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/page.tsx`
+    - `apps/web/tests/use-admin-guard-stability.test.tsx` (new)
+    - `apps/web/tests/admin-surveys-userkey-fetch-stability.test.tsx` (new)
+  - Changes:
+    - `useAdminGuard` now computes and returns `userKey` (`uid|email|displayName`) and avoids `setUser` churn when auth emissions are identity-equivalent.
+    - Guard redirects are transition-based and evaluated after `authStateReady` + first auth emission, preventing transient churn from causing repeated route side effects.
+    - Admin data-loading effects in targeted pages now depend on `userKey` instead of mutable `user` object references.
+    - Added hook-level regression coverage for duplicate auth emissions and redirect paths (`/`, `/hub`, no redirect for admin).
+    - Added page-level regression coverage proving no refetch when user object identity changes but `userKey` remains unchanged.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/use-admin-guard-stability.test.tsx tests/admin-surveys-userkey-fetch-stability.test.tsx tests/admin-networks-page-auth.test.tsx` (`7 passed`)
+    - `pnpm -C apps/web exec tsc --noEmit` (fails due to pre-existing typed route errors in `admin/trr-shows/[showId]/page.tsx` and `admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`; unrelated to this change set)
+
+- February 19, 2026: Implemented social ingest run UI progress updates (scraped-primary counters, saved-secondary counters, activity metadata) and polling timeout resilience.
+  - Files:
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - `apps/web/src/lib/server/trr-api/social-admin-proxy.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts`
+  - Changes:
+    - Season panel + week detail sync UI now render scraped counts as primary live progress using job `stage_counters`/`items_found`.
+    - Added saved/upserted secondary counters (`metadata.persist_counters`) and activity diagnostics (`metadata.activity`) to run log and stage rows where available.
+    - Preserved backward compatibility fallbacks when additive metadata keys are absent.
+    - Increased TRR social admin read-route timeout budgets from 20s to 45s for jobs/runs/targets polling.
+    - Improved social admin proxy error normalization to preserve structured backend `detail` messages.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx tests/week-social-thumbnails.test.tsx tests/social-admin-proxy.test.ts` (`16 passed`)
+    - Note: `act(...)` warnings appear in `season-social-analytics-section` tests but suite passes.
+
+- February 19, 2026: Implemented `/admin/networks` completion-gate UX + override operations for per-entity metadata/logo recovery.
+  - Files:
+    - `apps/web/src/app/admin/networks/page.tsx`
+    - `apps/web/src/lib/server/admin/networks-streaming-repository.ts`
+    - `apps/web/src/app/api/admin/networks-streaming/sync/route.ts`
+    - `apps/web/src/app/api/admin/networks-streaming/overrides/route.ts` (new)
+    - `apps/web/src/app/api/admin/networks-streaming/overrides/[id]/route.ts` (new)
+    - `apps/web/tests/networks-streaming-summary-route.test.ts`
+    - `apps/web/tests/networks-streaming-sync-proxy-route.test.ts`
+    - `apps/web/tests/admin-networks-page-auth.test.tsx`
+    - `apps/web/tests/networks-streaming-overrides-route.test.ts` (new)
+  - Changes:
+    - Summary repository moved to strict schema reads (`admin.covered_shows.trr_show_id`) and now joins completion metadata:
+      - `resolution_status`, `resolution_reason`, `last_attempt_at`.
+    - Sync proxy now forwards `unresolved_only` for unresolved reruns.
+    - Added override proxy endpoints (GET/POST/PATCH/DELETE) to backend override APIs.
+    - `/admin/networks` now includes:
+      - completion gate progress bar and hard-gate state,
+      - schema health panel from sync response (`missing_columns[]`),
+      - unresolved table with CSV export,
+      - inline override editor per unresolved entity,
+      - `Re-run Unresolved Only` action,
+      - retained Firebase bearer auth headers on summary/sync/override requests.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/networks-streaming-summary-route.test.ts tests/networks-streaming-sync-proxy-route.test.ts tests/admin-networks-page-auth.test.tsx tests/networks-streaming-overrides-route.test.ts` (`11 passed`)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web run lint` (pass with pre-existing repo warnings only; no new errors)
+
 - February 19, 2026: Completed `/admin/networks` production sync UI/auth hardening and BW logo variant visibility.
   - Files:
     - `apps/web/src/app/admin/networks/page.tsx`
@@ -3109,3 +3375,303 @@ Continuation (same session, 2026-02-19) — CI lint unblock + survey input test 
   - `pnpm -C apps/web run lint` (pass; warnings only)
   - `pnpm -C apps/web exec tsc --noEmit` (pass)
   - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/matrix-likert-input.test.tsx tests/three-choice-slider-input.test.tsx tests/normalized-survey-play-continue.test.tsx tests/single-select-input.test.tsx` (`16 passed`)
+
+Continuation (same session, 2026-02-19) — show/season admin route canonicalization + stale-request guards:
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/[showSection]/page.tsx`
+  - `apps/web/src/lib/admin/show-admin-routes.ts`
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/tests/show-admin-routes.test.ts`
+  - `apps/web/tests/show-section-redirect-page.test.ts` (new)
+- Changes:
+  - Added missing show-section aliases for deep links: `overview -> tab=details`, `settings -> tab=settings`.
+  - Canonicalized show assets URLs from `/assets/{subtab}` to one-segment aliases: `/media-gallery`, `/media-videos`, `/media-brand` (parser still accepts legacy paths).
+  - Canonicalized season admin URL builder to query-based tabs only (`?tab=...`, optional `&assets=...`) on `/seasons/{n}` base route.
+  - Added stale-response guards for show-level async loaders (`fetchShow`, `fetchSeasons`, `fetchCast`, `checkCoverage`, `loadBravoData`, `loadUnifiedNews`, and `syncGoogleNews`) so old-show requests cannot overwrite current show state.
+  - Added auth-hydration retry/backoff for show and season slug resolution when token is transiently unavailable (`Not authenticated`).
+  - Added stale-request guards for season-level loading (`loadSeasonData`, `fetchSeasonBravoVideos`) plus reset of `showCastFetchAttemptedRef` and `trrShowCast` on show/season change.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts` (`10 passed`)
+  - `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts tests/show-section-redirect-page.test.ts` (`12 passed`)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C apps/web exec eslint src/app/admin/trr-shows/[showId]/page.tsx src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx src/lib/admin/show-admin-routes.ts src/app/admin/trr-shows/[showId]/[showSection]/page.tsx tests/show-admin-routes.test.ts tests/show-section-redirect-page.test.ts` (pass with existing `no-img-element` warnings in show page)
+
+Continuation (same session, 2026-02-19) — person gallery refresh clarity + media-view chip gating + show section loop fix:
+- Files:
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/[showSection]/page.tsx`
+  - `apps/web/src/lib/admin/person-gallery-media-view.ts` (new)
+  - `apps/web/src/lib/admin/person-refresh-summary.ts` (new)
+  - `apps/web/tests/show-section-redirect-page.test.ts`
+  - `apps/web/tests/person-gallery-media-view.test.ts` (new)
+  - `apps/web/tests/person-refresh-summary.test.ts` (new)
+- Changes:
+  - Person gallery refresh now requests backend stream with `enforce_show_source_policy: false` to avoid show-scoped source suppression.
+  - Person gallery photo loading now paginates `GET /people/{id}/photos` at `limit=500` until exhausted (replacing the previous single `limit=250` request).
+  - Refresh summary formatting now appends explicit text-overlay status notes:
+    - `Text overlay skipped (not configured).`
+    - `Text overlay already up to date (no pending images).`
+  - Added shared media-view helper logic for show bucket classification and filter fallback behavior.
+  - Media View chips are now conditional:
+    - Show `WWHL` only when matching photos exist.
+    - Show `Other Shows` only when matching photos exist.
+    - Show `All Media` only when non-this-show photos exist.
+  - Added automatic fallback from unavailable chip filters back to `this-show` in show context.
+  - Updated show section route behavior to render known sections directly (no `?tab=...` redirect), eliminating `/media-gallery` <-> query URL bounce loops.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/show-section-redirect-page.test.ts tests/show-admin-routes.test.ts` (`13 passed`)
+  - `pnpm -C apps/web exec vitest run tests/person-gallery-media-view.test.ts tests/person-refresh-summary.test.ts` (`5 passed`)
+  - `pnpm -C apps/web exec vitest run tests/person-refresh-images-stream-route.test.ts` (`2 passed`)
+
+Continuation (same session, 2026-02-19) — unified News tab featured image rendering fallback:
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Added unified news item image fields support in card rendering path (`hosted_image_url`, `image_url`, `original_image_url`).
+  - Reworked News tab card map rendering to a clean block body and image fallback priority:
+    1) `hosted_image_url`
+    2) `image_url`
+    3) `original_image_url`
+- Validation:
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C apps/web exec eslint src/app/admin/trr-shows/[showId]/page.tsx` (pass; existing `@next/next/no-img-element` warnings only)
+
+Continuation (same session, 2026-02-19) — social analytics weekly trend calendar heatmap + day-level platform schedule support:
+- Files:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `apps/web/tests/season-social-analytics-section.test.tsx`
+- Changes:
+  - Replaced weekly engagement-bar trend visualization with a daily-square calendar heatmap (`grid-cols-7`) grouped by week.
+  - Added heatmap metric toggle pills:
+    - `Post Count` (default)
+    - `Comment Count`
+  - Added day-value selection by active platform tab:
+    - `Overview` uses day totals (`total_posts` / `total_comments`)
+    - platform tabs (`Instagram`/`TikTok`/`Twitter/X`/`YouTube`) use platform-specific daily values.
+  - Added green stepped intensity scale for non-zero values and neutral gray for zeros (no artificial minimum widths).
+  - Added contextual sublabel `YouTube Posts Schedule` when `YouTube` tab + `Post Count` metric are active.
+  - Added compatibility fallback message when backend daily payload is missing:
+    - `Daily schedule unavailable for selected filters.`
+  - Extended analytics response typing to include additive backend field `weekly_daily_activity`.
+  - Updated targeted component tests for:
+    - day-square heatmap rendering and zero-day visibility,
+    - metric toggle behavior,
+    - YouTube-specific day-scope behavior + schedule label,
+    - compatibility fallback rendering.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'tests/season-social-analytics-section.test.tsx'` (pass)
+  - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx` (`12 passed`)
+
+Continuation (same session, 2026-02-19) — heatmap date labeling + YouTube day-placement bugfix:
+- Files:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `apps/web/tests/season-social-analytics-section.test.tsx`
+- Changes:
+  - Updated heatmap tile label text from day-only to month+day format (`OCT 9` style).
+  - Kept tile tooltips aligned with day metric values.
+  - Added/updated test coverage after backend day-index fix and tile-label updates.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'tests/season-social-analytics-section.test.tsx'` (pass)
+  - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx` (`13 passed`)
+
+Continuation (same session, 2026-02-19) — media admin stabilization (ownership hardening, batch jobs, season scope, URL loop):
+- Files:
+  - `apps/web/src/lib/server/trr-api/fandom-ownership.ts`
+  - `apps/web/src/lib/admin/asset-sectioning.ts` (new)
+  - `apps/web/src/app/admin/trr-shows/[showId]/[showSection]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/refresh-photos/stream/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/assets/batch-jobs/stream/route.ts` (new)
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/assets/batch-jobs/stream/route.ts` (new)
+  - `apps/web/tests/fandom-person-ownership.test.ts`
+  - `apps/web/tests/asset-sectioning.test.ts` (new)
+  - `apps/web/tests/show-refresh-photos-stream-route.test.ts`
+  - `apps/web/tests/show-assets-batch-jobs-stream-route.test.ts` (new)
+  - `apps/web/tests/season-assets-batch-jobs-stream-route.test.ts` (new)
+  - `apps/web/tests/show-section-redirect-page.test.ts`
+  - `apps/web/tests/show-admin-routes.test.ts`
+  - `apps/web/tests/person-refresh-summary.test.ts`
+  - `apps/web/tests/person-gallery-media-view.test.ts`
+- Changes:
+  - Hardened Fandom ownership checks for static Wikia file URLs (`static.wikia.nocookie.net`) using trusted filename owner extraction; trusted mismatch now blocks wrong-person display.
+  - Added shared season/show asset section classifier with strict OSA-only `cast_photos` policy and dedicated sections:
+    - `profile_pictures`, `cast_photos`, `confessionals`, `reunion`, `intro_card`, `episode_stills`, `posters`, `backdrops`, `other`.
+  - Season assets page now uses shared sectioning, includes new section renders, and adds Batch Jobs modal/workflow (operation + content-type multi-select, SSE progress/logging).
+  - Season refresh stream calls now pass `season_number` and removed broad show-level fallback behavior on season page failures.
+  - Show refresh-photos proxy normalizes `skip_mirror -> skip_s3` and forwards `season_number`.
+  - Added new proxy routes for show/season asset batch-job stream endpoints.
+  - Show section alias route now renders known sections directly (no query redirect), preventing `/media-gallery` URL ping-pong.
+  - Kept prior person refresh/media-chip/summary fixes in place and validated in same run.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/fandom-person-ownership.test.ts tests/person-refresh-summary.test.ts tests/person-gallery-media-view.test.ts tests/show-refresh-photos-stream-route.test.ts tests/show-section-redirect-page.test.ts tests/show-admin-routes.test.ts` (`29 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/asset-sectioning.test.ts tests/show-assets-batch-jobs-stream-route.test.ts tests/season-assets-batch-jobs-stream-route.test.ts` (`5 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit --pretty false` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx src/app/admin/trr-shows/[showId]/page.tsx src/app/api/admin/trr-api/shows/[showId]/refresh-photos/stream/route.ts src/app/api/admin/trr-api/shows/[showId]/assets/batch-jobs/stream/route.ts src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/assets/batch-jobs/stream/route.ts src/lib/server/trr-api/fandom-ownership.ts src/lib/admin/asset-sectioning.ts` (pass with existing `@next/next/no-img-element` warnings in show page)
+
+Continuation (same session, 2026-02-19) — season cast gallery scope cleanup (season roles + season episode counts only):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+- Changes:
+  - Removed series-level total episode display from season cast cards.
+  - Removed series-level total episode display from archive cast cards.
+  - Tightened role resolution on season cast tab to use season-scoped role members (no show-cast role fallback for displayed season role).
+  - Added explicit `Role: ...` text on cast/crew/archive cards with `Unspecified for season` fallback when no season role is available.
+  - Updated archive wording to season-scoped count: `archived episodes this season`.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit --pretty false` (pass)
+
+Continuation (same session, 2026-02-19) — social ingest UI reliability and proxy diagnostics pass-through:
+- Files:
+  - `apps/web/src/lib/server/trr-api/social-admin-proxy.ts`
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `apps/web/tests/social-admin-proxy.test.ts`
+  - `apps/web/tests/season-social-analytics-section.test.tsx`
+- Changes:
+  - Enhanced proxy standardized error envelope with additive upstream fields:
+    - `upstream_detail`
+    - `upstream_detail_code` (from backend `detail.code`)
+  - Preserved existing envelope fields (`error`, `code`, `retryable`, `upstream_status`).
+  - Updated ingest payload from season analytics run actions to include:
+    - `allow_inline_dev_fallback: true`
+  - Added ingest error formatter (exported helper) that turns worker-unavailable upstream details into actionable guidance for operators.
+  - Added/updated tests for:
+    - run payload carrying `allow_inline_dev_fallback`,
+    - worker-unavailable actionable message formatting,
+    - proxy pass-through of `upstream_detail` and `upstream_detail_code`,
+    - continued month-day heatmap tile labeling assertion (`JAN 14`).
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/lib/server/trr-api/social-admin-proxy.ts' 'src/components/admin/season-social-analytics-section.tsx' 'tests/season-social-analytics-section.test.tsx'` (pass)
+  - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx` (`16 passed`)
+  - Extra verification: `pnpm -C apps/web exec vitest run tests/social-admin-proxy.test.ts` (`2 passed`)
+- Notes:
+  - Vitest run emits existing React `act(...)` warnings from pre-existing async polling behavior in this component test suite; tests still pass.
+
+Continuation (same session, 2026-02-19) — media reliability + live job telemetry + season-cast scope hardening:
+- Files:
+  - `apps/web/src/lib/admin/image-url-candidates.ts` (new)
+  - `apps/web/src/lib/admin/job-live-counts.ts` (new)
+  - `apps/web/src/components/admin/ImageLightbox.tsx`
+  - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `apps/web/src/lib/server/trr-api/fandom-ownership.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route.ts`
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `apps/web/tests/image-url-candidates.test.ts` (new)
+  - `apps/web/tests/job-live-counts.test.ts` (new)
+  - `apps/web/tests/person-gallery-thumbnail-wiring.test.ts`
+  - `apps/web/tests/season-cast-route-fallback.test.ts`
+  - `apps/web/tests/fandom-person-ownership.test.ts`
+- Changes:
+  - Added ordered multi-URL candidate fallback utilities for gallery cards/detail views and person originals.
+  - Upgraded gallery/image rendering to retry through all known URL candidates before placeholder:
+    - show assets page,
+    - season assets page,
+    - person gallery tiles,
+    - `ImageLightbox` now supports sequential `fallbackSrcs`.
+  - Added diagnostics when all image URL candidates fail (`asset/origin + attempted count`).
+  - Added normalized live counter reducer/utilities (`synced`, `mirrored`, `counted`, `cropped`, `id_text`, `resized`) and wired them into stream progress/complete handling for:
+    - show refresh photos stream,
+    - show and season batch-job streams,
+    - person refresh/reprocess streams,
+    - person per-image pipeline completion logging.
+  - Hardened season-cast scoping:
+    - season repository response now keeps `total_episodes` season-scoped,
+    - season cast route fallback now reports season-only totals (`0` in show-fallback mode).
+  - Extended Fandom ownership trusted URL candidates to include metadata `original_url` / `url_original`.
+  - Tightened show page canonicalization effect to avoid unnecessary replaces unless path mismatch or legacy routing query keys are present.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/image-url-candidates.test.ts tests/job-live-counts.test.ts tests/person-gallery-thumbnail-wiring.test.ts tests/season-cast-route-fallback.test.ts tests/show-admin-routes.test.ts tests/show-section-redirect-page.test.ts tests/show-refresh-photos-stream-route.test.ts tests/show-assets-batch-jobs-stream-route.test.ts tests/season-assets-batch-jobs-stream-route.test.ts` (`29 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/fandom-person-ownership.test.ts tests/image-lightbox-metadata.test.tsx tests/person-refresh-summary.test.ts tests/person-gallery-media-view.test.ts` (`22 passed`; existing jsdom `scrollTo` warning logs)
+
+Continuation (same session, 2026-02-19) — show social UX refactor (neutral hero, external platform tabs, social sub-pages):
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `apps/web/tests/season-social-analytics-section.test.tsx`
+  - `apps/web/tests/show-social-subnav-wiring.test.ts` (new)
+- Changes:
+  - Added show-level social sub-view query model via `social_view=bravo|sentiment|hashtags|advanced` (default `bravo`) and second-row social sub-nav under main show tabs.
+  - Moved social platform tabs (`Overview/Instagram/TikTok/Twitter/X/YouTube/Reddit`) into the first social container above `Social Scope`.
+  - Wired show page to control season analytics platform/view state via props:
+    - `platformTab`, `onPlatformTabChange`, `hidePlatformTabs`, `analyticsView`.
+  - Added controlled/uncontrolled platform-tab behavior in `SeasonSocialAnalyticsSection`; internal tab row is suppressible with `hidePlatformTabs`.
+  - Removed gradient hero styling in season analytics and shifted top status styling to neutral grayscale while preserving readability.
+  - Added social sub-page rendering modes:
+    - `bravo`: full baseline analytics layout.
+    - `sentiment`: sentiment-focused sections.
+    - `hashtags`: configured target hashtags + observed hashtag extraction from leaderboard text with platform-aware aggregation/filtering.
+    - `advanced`: ingest/export + weekly count table + ingest job status + manual sources.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/components/admin/season-social-analytics-section.tsx' 'tests/season-social-analytics-section.test.tsx' 'tests/show-social-subnav-wiring.test.ts'` (pass; existing `@next/next/no-img-element` warnings in show page)
+  - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/show-social-subnav-wiring.test.ts` (`22 passed`; existing React `act(...)` warnings from legacy async polling patterns)
+
+Continuation (same session, 2026-02-19) — social/season reliability pass (25 bug plan: validation, auth readiness, routing context, UI guardrails):
+- Files:
+  - `apps/web/src/lib/server/validation/identifiers.ts` (new)
+  - `apps/web/src/lib/admin/client-auth.ts` (new)
+  - `apps/web/src/app/api/admin/reddit/communities/[communityId]/route.ts`
+  - `apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `apps/web/src/app/api/admin/reddit/communities/[communityId]/flares/refresh/route.ts`
+  - `apps/web/src/app/api/admin/reddit/communities/route.ts`
+  - `apps/web/src/app/api/admin/reddit/threads/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/social-posts/route.ts`
+  - `apps/web/src/app/api/admin/social-posts/[postId]/route.ts`
+  - `apps/web/src/lib/admin/show-admin-routes.ts`
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `apps/web/src/components/admin/social-posts-section.tsx`
+  - `apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/[showSection]/[seasonTab]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `apps/web/tests/reddit-communities-route.test.ts`
+  - `apps/web/tests/reddit-community-route.test.ts` (new in workspace state)
+  - `apps/web/tests/reddit-community-flares-refresh-route.test.ts`
+  - `apps/web/tests/reddit-threads-route.test.ts`
+  - `apps/web/tests/reddit-sources-manager.test.tsx`
+  - `apps/web/tests/season-social-analytics-section.test.tsx`
+  - `apps/web/tests/week-social-thumbnails.test.tsx`
+  - `apps/web/tests/show-admin-routes.test.ts`
+  - `apps/web/tests/social-posts-show-route.test.ts` (new)
+  - `apps/web/tests/social-posts-postid-route.test.ts` (new)
+  - `apps/web/tests/season-tab-alias-redirect.test.ts` (new)
+  - `apps/web/tests/show-social-subnav-no-season.test.tsx` (new)
+  - `apps/web/tests/season-page-error-reset.test.tsx` (new)
+- Changes:
+  - Added shared UUID validator and applied deterministic `400` handling across affected Reddit/admin routes.
+  - Added shared client auth-header helper that waits for auth readiness (`authStateReady`) and standardized `"Not authenticated"` behavior.
+  - Hardened social-post APIs:
+    - `GET /shows/[showId]/social-posts` now validates IDs and enforces season→show ownership before season-scoped reads.
+    - `POST /shows/[showId]/social-posts` validates `trr_season_id` and rejects cross-show assignments.
+    - `PUT /social-posts/[postId]` validates `postId` and rejects season reassignment outside the post’s show.
+  - Preserved query params in season tab alias redirects.
+  - Extended legacy query cleanup to remove stale social-only keys (`social_platform`, `social_view`, `source_scope`, `scope`) when changing non-social contexts.
+  - Replaced `window.history.replaceState` in season social platform-tab deep links with App Router `router.replace`.
+  - Fixed Reddit discovery UI filtering so all-flair inclusions are not hidden by “Show matched only”.
+  - Added week-page numeric path param validation (`seasonNumber`, `weekIndex`) before analytics/sync fetches and preserved `source_scope` on season-back navigation.
+  - Replaced blank unauthorized season page fallback with explicit access-required UI.
+  - Ensured season data load failures clear stale season slices (`season`, `episodes`, `assets`, `cast`, `archiveCast`).
+  - Gated show-level social platform tabs when no season context is selected (fallback `SocialPostsSection` mode).
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-communities-route.test.ts tests/reddit-community-route.test.ts tests/reddit-community-flares-refresh-route.test.ts tests/reddit-threads-route.test.ts tests/social-posts-show-route.test.ts tests/social-posts-postid-route.test.ts tests/reddit-sources-manager.test.tsx tests/season-social-analytics-section.test.tsx tests/week-social-thumbnails.test.tsx tests/show-social-subnav-no-season.test.tsx tests/season-tab-alias-redirect.test.ts tests/season-page-error-reset.test.tsx tests/show-admin-routes.test.ts` (`74 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass; existing non-blocking warnings only)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+
+Continuation (same session, 2026-02-19) — Instagram metadata UX + period leaderboard thumbnails:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+- Changes:
+  - Added leaderboard thumbnail support for period analytics cards in both `bravo_content` and `viewer_discussion` lists via additive `thumbnail_url` typing/rendering.
+  - Extended week-detail/post-detail Instagram client types with enriched metadata fields: `post_format`, `profile_tags`, `collaborators`, `hashtags`, `mentions`, and `duration_seconds`.
+  - Rendered Instagram metadata chips in week post cards and Post Stats drawer (format, duration, profile tags, collaborators) while preserving existing hashtags/mentions presentation.
+  - Kept all UI contract changes additive/backward-compatible with null-safe fallbacks.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'tests/season-social-analytics-section.test.tsx' 'tests/week-social-thumbnails.test.tsx'` (pass)
+  - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/week-social-thumbnails.test.tsx` (`25 passed`; existing non-blocking React `act(...)` warnings from prior async polling tests)

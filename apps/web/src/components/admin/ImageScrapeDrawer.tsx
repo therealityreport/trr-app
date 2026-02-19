@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
 
 function normalizePersonName(value: string): string {
@@ -272,11 +272,12 @@ export function ImageScrapeDrawer({
   const [error, setError] = useState<string | null>(null);
 
   // Get auth headers
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
+
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) => fetchAdminWithAuth(input, init),
+    [],
+  );
 
   const isFriendRole = useCallback((role: string | null | undefined): boolean => {
     const normalized = (role ?? "").toLowerCase();
@@ -305,7 +306,7 @@ export function ImageScrapeDrawer({
 
     try {
       const headers = await getAuthHeaders();
-      const seasonsResponse = await fetch(`/api/admin/trr-api/shows/${entityContext.showId}/seasons?limit=500`, {
+      const seasonsResponse = await fetchWithAuth(`/api/admin/trr-api/shows/${entityContext.showId}/seasons?limit=500`, {
         headers,
       });
       if (!seasonsResponse.ok) return null;
@@ -345,15 +346,15 @@ export function ImageScrapeDrawer({
       }
 
 
-      const showCastPromise = fetch(`/api/admin/trr-api/shows/${entityContext.showId}/cast?limit=500`, { headers });
+      const showCastPromise = fetchWithAuth(`/api/admin/trr-api/shows/${entityContext.showId}/cast?limit=500`, { headers });
       const seasonCastPromise =
         targetSeason !== null
-          ? fetch(
+          ? fetchWithAuth(
               `/api/admin/trr-api/shows/${entityContext.showId}/seasons/${targetSeason}/cast?limit=500`,
               { headers }
             )
           : null;
-      const seasonEpisodesPromise = fetch(`/api/admin/trr-api/seasons/${seasonId}/episodes?limit=500`, {
+      const seasonEpisodesPromise = fetchWithAuth(`/api/admin/trr-api/seasons/${seasonId}/episodes?limit=500`, {
         headers,
       });
 
@@ -554,7 +555,7 @@ export function ImageScrapeDrawer({
               )
             : null;
 
-        const response = await fetch("/api/admin/trr-api/media-links", {
+        const response = await fetchWithAuth("/api/admin/trr-api/media-links", {
           method: "POST",
           headers: {
             ...headers,
@@ -755,7 +756,7 @@ export function ImageScrapeDrawer({
         previewPayload.entity_type = "person";
         previewPayload.entity_id = entityContext.personId;
       }
-      const response = await fetch("/api/admin/scrape/preview", {
+      const response = await fetchWithAuth("/api/admin/scrape/preview", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify(previewPayload),
@@ -932,7 +933,7 @@ export function ImageScrapeDrawer({
       const headers = await getAuthHeaders();
 
       // Use streaming endpoint for progress updates
-      const response = await fetch("/api/admin/scrape/import/stream", {
+      const response = await fetchWithAuth("/api/admin/scrape/import/stream", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify(payload),

@@ -4,11 +4,14 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { auth } from "@/lib/firebase";
 import SocialPostsSection from "@/components/admin/social-posts-section";
-import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
+import SeasonSocialAnalyticsSection, {
+  type PlatformTab,
+  type SocialAnalyticsView,
+} from "@/components/admin/season-social-analytics-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import {
@@ -45,6 +48,8 @@ import {
   type AdvancedFilterState,
 } from "@/lib/admin/advanced-filters";
 import {
+  buildPersonAdminUrl,
+  buildPersonRouteSlug,
   buildSeasonAdminUrl,
   buildShowAdminUrl,
   cleanLegacyRoutingQuery,
@@ -63,9 +68,34 @@ import {
 } from "@/lib/gallery-filter-utils";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
 import {
+  contentTypeToAssetKind,
+  contentTypeToContextType,
+  normalizeContentTypeToken,
+} from "@/lib/media/content-type";
+import {
   isThumbnailCropMode,
   resolveThumbnailPresentation,
 } from "@/lib/thumbnail-crop";
+import {
+  ASSET_SECTION_LABELS,
+  ASSET_SECTION_ORDER,
+  ASSET_SECTION_TO_BATCH_CONTENT_TYPE,
+  classifySeasonAssetSection,
+  groupSeasonAssetsBySection,
+  type AssetSectionKey,
+} from "@/lib/admin/asset-sectioning";
+import {
+  firstImageUrlCandidate,
+  getSeasonAssetCardUrlCandidates,
+  getSeasonAssetDetailUrlCandidates,
+} from "@/lib/admin/image-url-candidates";
+import {
+  appendLiveCountsToMessage,
+  formatJobLiveCounts,
+  resolveJobLiveCounts,
+  type JobLiveCounts,
+} from "@/lib/admin/job-live-counts";
+import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -201,6 +231,8 @@ interface UnifiedNewsItem {
   headline?: string | null;
   article_url: string;
   image_url?: string | null;
+  hosted_image_url?: string | null;
+  original_image_url?: string | null;
   published_at?: string | null;
   publisher_name?: string | null;
   publisher_domain?: string | null;
@@ -295,6 +327,52 @@ const SHOW_PAGE_TABS: ShowTab[] = [
   { id: "social", label: "Social" },
 ];
 
+const SHOW_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
+  { id: "bravo", label: "BRAVO ANALYTICS" },
+  { id: "sentiment", label: "SENTIMENT ANALYSIS" },
+  { id: "hashtags", label: "HASHTAGS ANALYSIS" },
+  { id: "advanced", label: "ADVANCED ANALYTICS" },
+];
+
+const SHOW_SOCIAL_PLATFORM_TABS: Array<{ key: PlatformTab; label: string }> = [
+  { key: "overview", label: "Overview" },
+  { key: "instagram", label: "Instagram" },
+  { key: "tiktok", label: "TikTok" },
+  { key: "twitter", label: "Twitter/X" },
+  { key: "youtube", label: "YouTube" },
+  { key: "reddit", label: "Reddit" },
+];
+
+const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {
+  if (!value) return false;
+  return SHOW_SOCIAL_ANALYTICS_VIEWS.some((item) => item.id === value);
+};
+
+const isSocialPlatformTab = (value: string | null | undefined): value is PlatformTab => {
+  if (!value) return false;
+  return SHOW_SOCIAL_PLATFORM_TABS.some((item) => item.key === value);
+};
+
+const BATCH_JOB_OPERATION_LABELS = {
+  count: "Count",
+  crop: "Crop",
+  id_text: "ID Text",
+  resize: "Resize",
+} as const;
+
+type BatchJobOperation = keyof typeof BATCH_JOB_OPERATION_LABELS;
+
+const DEFAULT_BATCH_JOB_OPERATIONS: BatchJobOperation[] = ["count"];
+const DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS: AssetSectionKey[] = [
+  "cast_photos",
+  "profile_pictures",
+  "posters",
+  "backdrops",
+];
+const DEFAULT_BATCH_JOB_CONTENT_SECTIONS: AssetSectionKey[] = [
+  ...DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS,
+];
+
 const ENTITY_LINK_GROUP_LABELS: Record<EntityLinkGroup, string> = {
   official: "Official",
   social: "Social",
@@ -363,11 +441,18 @@ const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
   word_id: "Word Detection",
 };
 
+const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
+const SHOW_REFRESH_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
+const SHOW_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
+const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
+const GALLERY_ASSET_LOAD_TIMEOUT_MS = 60_000;
+const ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const BRAVO_LOAD_TIMEOUT_MS = 15_000;
 const ROLE_LOAD_TIMEOUT_MS = 30_000;
+const CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 75_000;
 
 const SEASON_PAGE_TABS = [
   { tab: "episodes", label: "Seasons & Episodes" },
@@ -495,6 +580,9 @@ const parseProgressNumber = (value: unknown): number | null => {
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";
+
+const isTransientNotAuthenticatedError = (error: unknown): boolean =>
+  error instanceof Error && error.message.toLowerCase().includes("not authenticated");
 
 const fetchWithTimeout = async (
   input: RequestInfo | URL,
@@ -637,6 +725,8 @@ const isRefreshTopicFailed = (entry: RefreshLogEntry | null): boolean => {
 // Generic gallery image with error handling - falls back to placeholder on broken images
 function GalleryImage({
   src,
+  srcCandidates,
+  diagnosticKey,
   alt,
   sizes = "200px",
   className = "object-cover",
@@ -644,13 +734,51 @@ function GalleryImage({
   children,
 }: {
   src: string;
+  srcCandidates?: string[];
+  diagnosticKey?: string;
   alt: string;
   sizes?: string;
   className?: string;
   style?: React.CSSProperties;
   children?: React.ReactNode;
 }) {
+  const fallbackCandidates = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const value of srcCandidates ?? []) {
+      if (typeof value !== "string") continue;
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === src || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      out.push(trimmed);
+    }
+    return out;
+  }, [src, srcCandidates]);
   const [hasError, setHasError] = useState(false);
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [fallbackIndex, setFallbackIndex] = useState(0);
+
+  useEffect(() => {
+    setHasError(false);
+    setCurrentSrc(src);
+    setFallbackIndex(0);
+  }, [src, fallbackCandidates]);
+
+  const handleError = () => {
+    const nextCandidate = fallbackCandidates[fallbackIndex] ?? null;
+    if (nextCandidate && nextCandidate !== currentSrc) {
+      setCurrentSrc(nextCandidate);
+      setFallbackIndex((prev) => prev + 1);
+      return;
+    }
+    if (diagnosticKey) {
+      console.warn("[show-gallery] all image URL candidates failed", {
+        asset: diagnosticKey,
+        attempted: fallbackCandidates.length + 1,
+      });
+    }
+    setHasError(true);
+  };
 
   if (hasError) {
     return (
@@ -667,14 +795,14 @@ function GalleryImage({
   return (
     <>
       <Image
-        src={src}
+        src={currentSrc}
         alt={alt}
         fill
         className={className}
         style={style}
         sizes={sizes}
         unoptimized
-        onError={() => setHasError(true)}
+        onError={handleError}
       />
       {children}
     </>
@@ -734,74 +862,11 @@ function CastPhoto({
   );
 }
 
-const getAssetDisplayUrl = (asset: SeasonAsset): string => {
-  const cropDisplay =
-    typeof asset.crop_display_url === "string" && asset.crop_display_url.trim().length > 0
-      ? asset.crop_display_url.trim()
-      : null;
-  const thumb =
-    typeof asset.thumb_url === "string" && asset.thumb_url.trim().length > 0
-      ? asset.thumb_url.trim()
-      : null;
-  const display =
-    typeof asset.display_url === "string" && asset.display_url.trim().length > 0
-      ? asset.display_url.trim()
-      : null;
-  return cropDisplay ?? thumb ?? display ?? asset.hosted_url;
-};
+const getAssetDisplayUrl = (asset: SeasonAsset): string =>
+  firstImageUrlCandidate(getSeasonAssetCardUrlCandidates(asset)) ?? asset.hosted_url;
 
-const getAssetDetailUrl = (asset: SeasonAsset): string => {
-  const cropDetail =
-    typeof asset.crop_detail_url === "string" && asset.crop_detail_url.trim().length > 0
-      ? asset.crop_detail_url.trim()
-      : null;
-  const detail =
-    typeof asset.detail_url === "string" && asset.detail_url.trim().length > 0
-      ? asset.detail_url.trim()
-      : null;
-  return cropDetail ?? detail ?? asset.hosted_url;
-};
-
-const normalizeContentTypeToken = (contentType: string): string =>
-  contentType.trim().toUpperCase().replace(/[_-]+/g, " ");
-
-const contentTypeToAssetKind = (contentType: string): string => {
-  const normalized = normalizeContentTypeToken(contentType);
-  switch (normalized) {
-    case "PROMO":
-      return "promo";
-    case "CONFESSIONAL":
-      return "confessional";
-    case "REUNION":
-      return "reunion";
-    case "INTRO":
-      return "intro";
-    case "EPISODE STILL":
-      return "episode_still";
-    case "CAST PHOTOS":
-      return "cast";
-    case "BACKDROP":
-      return "backdrop";
-    case "POSTER":
-      return "poster";
-    case "LOGO":
-      return "logo";
-    default:
-      return "other";
-  }
-};
-
-const contentTypeToContextType = (contentType: string): string => {
-  const normalized = normalizeContentTypeToken(contentType);
-  switch (normalized) {
-    case "EPISODE STILL":
-      return "episode still";
-    case "CAST PHOTOS":
-      return "cast photos";
-    default:
-      return normalized.toLowerCase();
-  }
-};
+const getAssetDetailUrl = (asset: SeasonAsset): string =>
+  firstImageUrlCandidate(getSeasonAssetDetailUrlCandidates(asset)) ?? asset.hosted_url;
 
 const isCrewCreditCategory = (value: string | null | undefined): boolean => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -968,6 +1033,15 @@ export default function TrrShowDetailPage() {
   const [slugResolutionError, setSlugResolutionError] = useState<string | null>(null);
   const showId = resolvedShowId ?? "";
   const { user, checking, hasAccess } = useAdminGuard();
+  const activeShowIdRef = useRef(showId);
+  const isCurrentShowId = useCallback(
+    (requestShowId: string) => activeShowIdRef.current === requestShowId,
+    []
+  );
+
+  useEffect(() => {
+    activeShowIdRef.current = showId;
+  }, [showId]);
 
   const [show, setShow] = useState<TrrShow | null>(null);
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
@@ -1085,6 +1159,18 @@ export default function TrrShowDetailPage() {
   const [galleryAssets, setGalleryAssets] = useState<SeasonAsset[]>([]);
   const [galleryVisibleCount, setGalleryVisibleCount] = useState(120);
   const [showOtherAssets, setShowOtherAssets] = useState(false);
+  const [batchJobsOpen, setBatchJobsOpen] = useState(false);
+  const [batchJobsRunning, setBatchJobsRunning] = useState(false);
+  const [batchJobsError, setBatchJobsError] = useState<string | null>(null);
+  const [batchJobsNotice, setBatchJobsNotice] = useState<string | null>(null);
+  const [batchJobsProgress, setBatchJobsProgress] = useState<RefreshProgressState | null>(null);
+  const [batchJobsLiveCounts, setBatchJobsLiveCounts] = useState<JobLiveCounts | null>(null);
+  const [batchJobOperations, setBatchJobOperations] = useState<BatchJobOperation[]>(
+    DEFAULT_BATCH_JOB_OPERATIONS
+  );
+  const [batchJobContentSections, setBatchJobContentSections] = useState<AssetSectionKey[]>(
+    DEFAULT_BATCH_JOB_CONTENT_SECTIONS
+  );
   const [selectedGallerySeason, setSelectedGallerySeason] = useState<
     number | "all"
   >("all");
@@ -1163,6 +1249,9 @@ export default function TrrShowDetailPage() {
       >
     >
   >({});
+  const [refreshTargetLiveCounts, setRefreshTargetLiveCounts] = useState<
+    Partial<Record<ShowRefreshTarget, JobLiveCounts | null>>
+  >({});
   const [refreshingShowAll, setRefreshingShowAll] = useState(false);
   const [refreshAllNotice, setRefreshAllNotice] = useState<string | null>(null);
   const [refreshAllError, setRefreshAllError] = useState<string | null>(null);
@@ -1221,6 +1310,56 @@ export default function TrrShowDetailPage() {
     [assetsView, router, searchParams, showSlugForRouting]
   );
 
+  const socialAnalyticsView = useMemo<SocialAnalyticsView>(() => {
+    const value = searchParams.get("social_view");
+    return isSocialAnalyticsView(value) ? value : "bravo";
+  }, [searchParams]);
+
+  const socialPlatformTab = useMemo<PlatformTab>(() => {
+    const value = searchParams.get("social_platform");
+    return isSocialPlatformTab(value) ? value : "overview";
+  }, [searchParams]);
+
+  const setSocialAnalyticsView = useCallback(
+    (view: SocialAnalyticsView) => {
+      const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      if (view === "bravo") {
+        nextQuery.delete("social_view");
+      } else {
+        nextQuery.set("social_view", view);
+      }
+      router.replace(
+        buildShowAdminUrl({
+          showSlug: showSlugForRouting,
+          tab: "social",
+          query: nextQuery,
+        }) as "/admin/trr-shows",
+        { scroll: false },
+      );
+    },
+    [router, searchParams, showSlugForRouting],
+  );
+
+  const setSocialPlatformTab = useCallback(
+    (tab: PlatformTab) => {
+      const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      if (tab === "overview") {
+        nextQuery.delete("social_platform");
+      } else {
+        nextQuery.set("social_platform", tab);
+      }
+      router.replace(
+        buildShowAdminUrl({
+          showSlug: showSlugForRouting,
+          tab: "social",
+          query: nextQuery,
+        }) as "/admin/trr-shows",
+        { scroll: false },
+      );
+    },
+    [router, searchParams, showSlugForRouting],
+  );
+
   const setAssetsSubTab = useCallback(
     (view: "images" | "videos" | "brand") => {
       setAssetsView(view);
@@ -1240,9 +1379,7 @@ export default function TrrShowDetailPage() {
 
   // Helper to get auth headers
   const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
+    return getClientAuthHeaders({ allowDevAdminBypass: true });
   }, []);
 
   useEffect(() => {
@@ -1266,25 +1403,41 @@ export default function TrrShowDetailPage() {
       setSlugResolutionLoading(true);
       setSlugResolutionError(null);
       try {
-        const headers = await getAuthHeaders();
-        const response = await fetch(
-          `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
-          { headers, cache: "no-store" }
-        );
-        const data = (await response.json().catch(() => ({}))) as {
-          error?: string;
-          resolved?: { show_id?: string | null };
-        };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to resolve show slug");
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          try {
+            const headers = await getAuthHeaders();
+            const response = await fetch(
+              `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
+              { headers, cache: "no-store" }
+            );
+            const data = (await response.json().catch(() => ({}))) as {
+              error?: string;
+              resolved?: { show_id?: string | null };
+            };
+            if (!response.ok) {
+              throw new Error(data.error || "Failed to resolve show slug");
+            }
+            const nextShowId =
+              typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
+                ? data.resolved.show_id
+                : null;
+            if (!nextShowId) throw new Error("Resolved show slug did not return a valid show id.");
+            if (cancelled) return;
+            setResolvedShowId(nextShowId);
+            return;
+          } catch (err) {
+            if (cancelled) return;
+            if (isTransientNotAuthenticatedError(err) && attempt < 3) {
+              await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 250));
+              continue;
+            }
+            setResolvedShowId(null);
+            setSlugResolutionError(
+              err instanceof Error ? err.message : "Could not resolve show URL slug."
+            );
+            return;
+          }
         }
-        const nextShowId =
-          typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
-            ? data.resolved.show_id
-            : null;
-        if (!nextShowId) throw new Error("Resolved show slug did not return a valid show id.");
-        if (cancelled) return;
-        setResolvedShowId(nextShowId);
       } catch (err) {
         if (cancelled) return;
         setResolvedShowId(null);
@@ -1300,53 +1453,36 @@ export default function TrrShowDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [checking, getAuthHeaders, hasAccess, showRouteParam]);
+  }, [checking, getAuthHeaders, hasAccess, showRouteParam, user]);
 
   useEffect(() => {
-    const canonicalSlug = show?.canonical_slug?.trim() || show?.slug?.trim();
-    if (!canonicalSlug) return;
-
-    const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
-    const canonicalUrl = buildShowAdminUrl({
-      showSlug: canonicalSlug,
-      tab: showRouteState.tab,
-      assetsSubTab: showRouteState.assetsSubTab,
-      query: preservedQuery,
-    });
-    const currentQuery = searchParams.toString();
-    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
-    if (currentUrl === canonicalUrl) return;
-    router.replace(canonicalUrl as "/admin/trr-shows", { scroll: false });
-  }, [
-    pathname,
-    router,
-    searchParams,
-    show?.canonical_slug,
-    show?.slug,
-    showRouteState.assetsSubTab,
-    showRouteState.tab,
-  ]);
-
-  useEffect(() => {
-    const routeSlug = showRouteParam.trim();
-    if (!routeSlug) return;
+    if (!showSlugForRouting) return;
 
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
     const canonicalRouteUrl = buildShowAdminUrl({
-      showSlug: routeSlug,
+      showSlug: showSlugForRouting,
       tab: showRouteState.tab,
       assetsSubTab: showRouteState.assetsSubTab,
       query: preservedQuery,
     });
-    const currentQuery = searchParams.toString();
-    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
-    if (currentUrl === canonicalRouteUrl) return;
+    const currentHasLegacyRoutingQuery =
+      searchParams.has("tab") || searchParams.has("assets");
+    const canonicalPath = canonicalRouteUrl.split("?")[0] ?? canonicalRouteUrl;
+    const currentPath = pathname;
+    const pathMismatch = currentPath !== canonicalPath;
+    if (!pathMismatch && !currentHasLegacyRoutingQuery) return;
+
+    const currentCleanedQuery = preservedQuery.toString();
+    const canonicalQuery = canonicalRouteUrl.includes("?")
+      ? (canonicalRouteUrl.split("?")[1] ?? "")
+      : "";
+    if (!pathMismatch && currentCleanedQuery === canonicalQuery) return;
     router.replace(canonicalRouteUrl as "/admin/trr-shows", { scroll: false });
   }, [
     pathname,
     router,
     searchParams,
-    showRouteParam,
+    showSlugForRouting,
     showRouteState.assetsSubTab,
     showRouteState.tab,
   ]);
@@ -1470,6 +1606,19 @@ export default function TrrShowDetailPage() {
           () => streamController.abort(),
           PERSON_REFRESH_STREAM_TIMEOUT_MS
         );
+        let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+        const bumpStreamIdleTimeout = () => {
+          if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+          streamIdleTimeout = setTimeout(
+            () => streamController.abort(),
+            PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS
+          );
+        };
+        const clearStreamIdleTimeout = () => {
+          if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+          streamIdleTimeout = null;
+        };
+        bumpStreamIdleTimeout();
         try {
           const streamResponse = await fetch(
             `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
@@ -1489,10 +1638,12 @@ export default function TrrShowDetailPage() {
           const decoder = new TextDecoder();
           let buffer = "";
           let completePayload: Record<string, unknown> | null = null;
+          let shouldStopReading = false;
 
           while (true) {
             const { value, done } = await reader.read();
             if (done) break;
+            bumpStreamIdleTimeout();
             buffer += decoder.decode(value, { stream: true });
             buffer = buffer.replace(/\r\n/g, "\n");
 
@@ -1554,14 +1705,31 @@ export default function TrrShowDetailPage() {
                   payload && typeof payload === "object"
                     ? (payload as Record<string, unknown>)
                     : {};
+                shouldStopReading = true;
               }
 
+              if (shouldStopReading) {
+                break;
+              }
               boundaryIndex = buffer.indexOf("\n\n");
+            }
+            if (shouldStopReading) {
+              break;
+            }
+          }
+
+          clearStreamIdleTimeout();
+          if (shouldStopReading) {
+            try {
+              await reader.cancel();
+            } catch {
+              // no-op
             }
           }
 
           return completePayload ?? {};
         } finally {
+          clearStreamIdleTimeout();
           clearTimeout(streamTimeout);
         }
       } catch (streamErr) {
@@ -1754,17 +1922,20 @@ export default function TrrShowDetailPage() {
 
   // Fetch show details
   const fetchShow = useCallback(async () => {
-    if (!showId) return;
+    const requestShowId = showId;
+    if (!requestShowId) return;
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${showId}`, { headers });
+      const response = await fetch(`/api/admin/trr-api/shows/${requestShowId}`, { headers });
       if (!response.ok) throw new Error("Failed to fetch show");
       const data = await response.json();
+      if (!isCurrentShowId(requestShowId)) return;
       setShow(data.show);
     } catch (err) {
+      if (!isCurrentShowId(requestShowId)) return;
       setError(err instanceof Error ? err.message : "Failed to load show");
     }
-  }, [showId, getAuthHeaders]);
+  }, [getAuthHeaders, isCurrentShowId, showId]);
 
   const saveShowDetails = useCallback(async () => {
     if (!show) return;
@@ -1859,11 +2030,12 @@ export default function TrrShowDetailPage() {
 
   // Fetch seasons
   const fetchSeasons = useCallback(async () => {
-    if (!showId) return;
+    const requestShowId = showId;
+    if (!requestShowId) return;
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/seasons?limit=50`,
+        `/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50`,
         { headers }
       );
       const data = await response.json().catch(() => ({}));
@@ -1876,13 +2048,15 @@ export default function TrrShowDetailPage() {
       }
       const seasons = (data as { seasons?: unknown }).seasons;
       const nextSeasons = Array.isArray(seasons) ? (seasons as TrrSeason[]) : [];
+      if (!isCurrentShowId(requestShowId)) return;
       setSeasons(nextSeasons);
     } catch (err) {
+      if (!isCurrentShowId(requestShowId)) return;
       const message = err instanceof Error ? err.message : "Failed to fetch seasons";
       console.warn("Failed to fetch seasons:", message);
       setError(message);
     }
-  }, [showId, getAuthHeaders]);
+  }, [getAuthHeaders, isCurrentShowId, showId]);
 
   const fetchSeasonEpisodeSummaries = useCallback(
     async (seasonList: TrrSeason[]) => {
@@ -1961,7 +2135,8 @@ export default function TrrShowDetailPage() {
         : rosterMode === "imdb_show_membership"
           ? 0
           : null;
-    if (!showId) return [];
+    const requestShowId = showId;
+    if (!requestShowId) return [];
     try {
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
@@ -1972,7 +2147,7 @@ export default function TrrShowDetailPage() {
       }
       // Fetch all cast without filters - photo filtering done client-side if needed.
       const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/cast?${params.toString()}`,
+        `/api/admin/trr-api/shows/${requestShowId}/cast?${params.toString()}`,
         { headers }
       );
       const data = await response.json().catch(() => ({}));
@@ -1991,6 +2166,7 @@ export default function TrrShowDetailPage() {
       const nextArchiveCast = Array.isArray(archiveCastRaw)
         ? (archiveCastRaw as TrrCastMember[])
         : [];
+      if (!isCurrentShowId(requestShowId)) return nextCast;
       setCast(nextCast);
       setArchiveFootageCast(nextArchiveCast);
       setCastSource(
@@ -2007,6 +2183,7 @@ export default function TrrShowDetailPage() {
       );
       return nextCast;
     } catch (err) {
+      if (!isCurrentShowId(requestShowId)) return [];
       const message = err instanceof Error ? err.message : "Failed to fetch cast";
       console.warn("Failed to fetch cast:", message);
       setError(message);
@@ -2015,7 +2192,7 @@ export default function TrrShowDetailPage() {
       setCastEligibilityWarning(null);
       return [];
     }
-  }, [showId, getAuthHeaders]);
+  }, [getAuthHeaders, isCurrentShowId, showId]);
 
   const fetchShowLinks = useCallback(async () => {
     if (!showId) return;
@@ -2058,7 +2235,7 @@ export default function TrrShowDetailPage() {
       };
       if (!response.ok) throw new Error(data.error || "Failed to discover links");
       setLinksNotice(
-        `Discovered ${typeof data.discovered === "number" ? data.discovered : 0} links. Review pending items before publish.`
+        `Discovered ${typeof data.discovered === "number" ? data.discovered : 0} links. Validated person sources were auto-approved; review any remaining pending items before publish.`
       );
       await fetchShowLinks();
     } catch (err) {
@@ -2317,7 +2494,7 @@ export default function TrrShowDetailPage() {
           const response = await fetchWithTimeout(
             `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
             { headers, cache: "no-store" },
-            ROLE_LOAD_TIMEOUT_MS
+            CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS
           );
           const data = (await response.json().catch(() => ({}))) as { error?: string };
           if (!response.ok) throw new Error(data.error || "Failed to load cast role members");
@@ -2361,7 +2538,7 @@ export default function TrrShowDetailPage() {
           setCastRoleMembersLoadedOnce(false);
           setCastRoleMembersError(
             isAbortError(err)
-              ? `Timed out loading cast role members after ${Math.round(ROLE_LOAD_TIMEOUT_MS / 1000)}s`
+              ? `Timed out loading cast role members after ${Math.round(CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS / 1000)}s`
               : err instanceof Error
                 ? err.message
                 : "Failed to load cast role members"
@@ -2539,7 +2716,8 @@ export default function TrrShowDetailPage() {
   );
 
   const loadBravoData = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    if (!showId) return;
+    const requestShowId = showId;
+    if (!requestShowId) return;
     if (!force && bravoLoaded) return;
     if (bravoLoadInFlightRef.current) {
       await bravoLoadInFlightRef.current;
@@ -2548,12 +2726,13 @@ export default function TrrShowDetailPage() {
 
     const request = (async () => {
       try {
+        if (!isCurrentShowId(requestShowId)) return;
         setBravoLoading(true);
         setBravoError(null);
         const headers = await getAuthHeaders();
 
         const videosResponse = await fetchWithTimeout(
-          `/api/admin/trr-api/shows/${showId}/bravo/videos?merge_person_sources=true`,
+          `/api/admin/trr-api/shows/${requestShowId}/bravo/videos?merge_person_sources=true`,
           {
             headers,
             cache: "no-store",
@@ -2570,9 +2749,11 @@ export default function TrrShowDetailPage() {
           throw new Error(videosData.error || "Failed to fetch Bravo videos");
         }
 
+        if (!isCurrentShowId(requestShowId)) return;
         setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
         setBravoLoaded(true);
       } catch (err) {
+        if (!isCurrentShowId(requestShowId)) return;
         const message = isAbortError(err)
           ? `Timed out loading Bravo data after ${Math.round(BRAVO_LOAD_TIMEOUT_MS / 1000)}s`
           : err instanceof Error
@@ -2581,6 +2762,7 @@ export default function TrrShowDetailPage() {
         setBravoLoaded(false);
         setBravoError(message);
       } finally {
+        if (!isCurrentShowId(requestShowId)) return;
         setBravoLoading(false);
       }
     })();
@@ -2593,11 +2775,12 @@ export default function TrrShowDetailPage() {
         bravoLoadInFlightRef.current = null;
       }
     }
-  }, [bravoLoaded, getAuthHeaders, showId]);
+  }, [bravoLoaded, getAuthHeaders, isCurrentShowId, showId]);
 
   const syncGoogleNews = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      if (!showId) return;
+      const requestShowId = showId;
+      if (!requestShowId) return;
       if (newsSyncInFlightRef.current) {
         await newsSyncInFlightRef.current;
         return;
@@ -2605,9 +2788,10 @@ export default function TrrShowDetailPage() {
 
       const request = (async () => {
         try {
+          if (!isCurrentShowId(requestShowId)) return;
           setNewsSyncing(true);
           const headers = await getAuthHeaders();
-          const response = await fetch(`/api/admin/trr-api/shows/${showId}/google-news/sync`, {
+          const response = await fetch(`/api/admin/trr-api/shows/${requestShowId}/google-news/sync`, {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
             body: JSON.stringify({ force }),
@@ -2616,17 +2800,20 @@ export default function TrrShowDetailPage() {
           if (!response.ok) {
             if (response.status === 409) {
               const message = data.error || "Google News URL is not configured for this show.";
+              if (!isCurrentShowId(requestShowId)) return;
               setNewsGoogleUrlMissing(true);
               setNewsNotice(message);
               return;
             }
             throw new Error(data.error || "Failed to sync Google News");
           }
+          if (!isCurrentShowId(requestShowId)) return;
           setNewsGoogleUrlMissing(false);
           setNewsNotice(null);
         } catch (err) {
           throw err;
         } finally {
+          if (!isCurrentShowId(requestShowId)) return;
           setNewsSyncing(false);
         }
       })();
@@ -2640,12 +2827,13 @@ export default function TrrShowDetailPage() {
         }
       }
     },
-    [getAuthHeaders, showId]
+    [getAuthHeaders, isCurrentShowId, showId]
   );
 
   const loadUnifiedNews = useCallback(
     async ({ force = false, forceSync = false }: { force?: boolean; forceSync?: boolean } = {}) => {
-      if (!showId) return;
+      const requestShowId = showId;
+      if (!requestShowId) return;
       if (!force && newsLoaded && newsLoadedSortRef.current === newsSort) return;
       if (newsLoadInFlightRef.current) {
         await newsLoadInFlightRef.current;
@@ -2654,12 +2842,14 @@ export default function TrrShowDetailPage() {
 
       const request = (async () => {
         try {
+          if (!isCurrentShowId(requestShowId)) return;
           setNewsLoading(true);
           setNewsError(null);
           if (forceSync || !newsAutoSyncAttemptedRef.current) {
             await syncGoogleNews({ force: forceSync });
             newsAutoSyncAttemptedRef.current = true;
           }
+          if (!isCurrentShowId(requestShowId)) return;
 
           const headers = await getAuthHeaders();
           const params = new URLSearchParams({
@@ -2667,7 +2857,7 @@ export default function TrrShowDetailPage() {
             sort: newsSort,
           });
           const response = await fetchWithTimeout(
-            `/api/admin/trr-api/shows/${showId}/news?${params.toString()}`,
+            `/api/admin/trr-api/shows/${requestShowId}/news?${params.toString()}`,
             {
               headers,
               cache: "no-store",
@@ -2681,10 +2871,12 @@ export default function TrrShowDetailPage() {
           if (!response.ok) {
             throw new Error(data.error || "Failed to fetch unified news");
           }
+          if (!isCurrentShowId(requestShowId)) return;
           setUnifiedNews(Array.isArray(data.news) ? data.news : []);
           setNewsLoaded(true);
           newsLoadedSortRef.current = newsSort;
         } catch (err) {
+          if (!isCurrentShowId(requestShowId)) return;
           const message = isAbortError(err)
             ? `Timed out loading news after ${Math.round(BRAVO_LOAD_TIMEOUT_MS / 1000)}s`
             : err instanceof Error
@@ -2694,6 +2886,7 @@ export default function TrrShowDetailPage() {
           newsLoadedSortRef.current = null;
           setNewsError(message);
         } finally {
+          if (!isCurrentShowId(requestShowId)) return;
           setNewsLoading(false);
         }
       })();
@@ -2707,7 +2900,7 @@ export default function TrrShowDetailPage() {
         }
       }
     },
-    [getAuthHeaders, newsLoaded, newsSort, showId, syncGoogleNews]
+    [getAuthHeaders, isCurrentShowId, newsLoaded, newsSort, showId, syncGoogleNews]
   );
 
   const syncBravoSeasonOptions = useMemo(() => {
@@ -3021,15 +3214,18 @@ export default function TrrShowDetailPage() {
 
   // Check if show is covered
   const checkCoverage = useCallback(async () => {
-    if (!showId) return;
+    const requestShowId = showId;
+    if (!requestShowId) return;
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/covered-shows/${showId}`, { headers });
+      const response = await fetch(`/api/admin/covered-shows/${requestShowId}`, { headers });
+      if (!isCurrentShowId(requestShowId)) return;
       setIsCovered(response.ok);
     } catch {
+      if (!isCurrentShowId(requestShowId)) return;
       setIsCovered(false);
     }
-  }, [showId, getAuthHeaders]);
+  }, [getAuthHeaders, isCurrentShowId, showId]);
 
   // Add show to covered shows
   const addToCoveredShows = async () => {
@@ -3078,20 +3274,24 @@ export default function TrrShowDetailPage() {
     if (!showId) return;
 
     const loadData = async () => {
+      const requestShowId = showId;
+      if (!isCurrentShowId(requestShowId)) return;
       setLoading(true);
       try {
         await fetchShow();
         // Keep initial render fast: load core show data first.
         await Promise.all([fetchSeasons(), fetchCast(), checkCoverage()]);
       } finally {
+        if (!isCurrentShowId(requestShowId)) return;
         setLoading(false);
       }
+      if (!isCurrentShowId(requestShowId)) return;
       // Bravo data can be slow/unavailable and should not block page load.
       void loadBravoData();
     };
 
     void loadData();
-  }, [hasAccess, showId, fetchShow, fetchSeasons, fetchCast, checkCoverage, loadBravoData]);
+  }, [hasAccess, showId, fetchShow, fetchSeasons, fetchCast, checkCoverage, isCurrentShowId, loadBravoData]);
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "settings") return;
@@ -3662,104 +3862,41 @@ export default function TrrShowDetailPage() {
   }, [galleryAssets, advancedFilters, selectedGallerySeason, show?.name]);
 
   const gallerySectionAssets = useMemo(() => {
-    const showBackdrops: SeasonAsset[] = [];
-    const posters: SeasonAsset[] = [];
-    const episodeStills: SeasonAsset[] = [];
-    const profilePictures: SeasonAsset[] = [];
-    const castAndPromos: SeasonAsset[] = [];
-    const other: SeasonAsset[] = [];
-
-    const classifyAsset = (
-      asset: SeasonAsset
-    ):
-      | "showBackdrops"
-      | "posters"
-      | "episodeStills"
-      | "profilePictures"
-      | "castAndPromos"
-      | "other"
-      | null => {
-      const normalizedKind = (asset.kind ?? "").toLowerCase().trim();
-      const normalizedContextSection = (asset.context_section ?? "").toLowerCase().trim();
-      const normalizedContextType = (asset.context_type ?? "").toLowerCase().trim();
-      const isBackdrop = normalizedKind === "backdrop";
-      const isPoster =
-        normalizedKind === "poster" && (asset.type === "show" || asset.type === "season");
-      const isLogo = normalizedKind === "logo";
-      const isCastOrPromo = normalizedKind === "cast" || normalizedKind === "promo";
-      const isProfilePicture =
-        normalizedContextType === "profile_picture" ||
-        normalizedContextType === "profile" ||
-        normalizedContextSection === "bravo_profile";
-
-      if (isProfilePicture) {
-        return "profilePictures";
-      }
-      if (isBackdrop) {
-        return "showBackdrops";
-      }
-      if (isPoster) {
-        return "posters";
-      }
-      if (asset.type === "episode") {
-        return "episodeStills";
-      }
-      if (isCastOrPromo) {
-        return "castAndPromos";
-      }
-      if (isLogo) return null;
-      return "other";
-    };
-
-    const classifiedAssets = filteredGalleryAssets.map((asset) => ({
-      asset,
-      bucket: classifyAsset(asset),
-    }));
-
-    const displayAssets = classifiedAssets.filter((row) => {
-      if (row.bucket === null) return false;
-      if (!showOtherAssets && row.bucket === "other") return false;
-      return true;
+    const hasExplicitContentTypeFilter = advancedFilters.contentTypes.length > 0;
+    const defaultVisibleSectionSet = new Set(DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS);
+    const classifiedAssets = filteredGalleryAssets.map((asset) => {
+      const section = classifySeasonAssetSection(asset, { showName: show?.name ?? undefined });
+      return { asset, section };
     });
 
-    for (const row of displayAssets.slice(0, galleryVisibleCount)) {
-      const { asset, bucket } = row;
-      if (bucket === "showBackdrops") {
-        showBackdrops.push(asset);
-        continue;
+    const displayAssets = classifiedAssets.filter((row) => {
+      if (!row.section) return false;
+      if (!hasExplicitContentTypeFilter && !defaultVisibleSectionSet.has(row.section)) {
+        if (!(row.section === "other" && showOtherAssets)) return false;
       }
-      if (bucket === "posters") {
-        posters.push(asset);
-        continue;
+      if (!showOtherAssets && row.section === "other") return false;
+      return true;
+    });
+    const grouped = groupSeasonAssetsBySection(
+      displayAssets.slice(0, galleryVisibleCount).map((row) => row.asset),
+      {
+        showName: show?.name ?? undefined,
+        includeOther: true,
       }
-      if (bucket === "episodeStills") {
-        episodeStills.push(asset);
-        continue;
-      }
-      if (bucket === "profilePictures") {
-        profilePictures.push(asset);
-        continue;
-      }
-      if (bucket === "castAndPromos") {
-        castAndPromos.push(asset);
-        continue;
-      }
-      if (bucket === "other") {
-        other.push(asset);
-      }
-    }
+    );
 
     return {
-      showBackdrops,
-      posters,
-      episodeStills,
-      profilePictures,
-      castAndPromos,
-      other,
+      ...grouped,
       hasMoreVisible: displayAssets.length > galleryVisibleCount,
-      hasHiddenOther: !showOtherAssets && classifiedAssets.some((row) => row.bucket === "other"),
+      hasHiddenOther: !showOtherAssets && classifiedAssets.some((row) => row.section === "other"),
     };
-  }, [filteredGalleryAssets, galleryVisibleCount, showOtherAssets]);
+  }, [
+    advancedFilters.contentTypes.length,
+    filteredGalleryAssets,
+    galleryVisibleCount,
+    show?.name,
+    showOtherAssets,
+  ]);
 
   const brandLogoAssets = useMemo(
     () =>
@@ -4009,46 +4146,46 @@ export default function TrrShowDetailPage() {
           return out;
         };
 
-        const fetchShowAssets = async (): Promise<SeasonAsset[]> => {
-          const res = await fetch(
-            `/api/admin/trr-api/shows/${showId}/assets?limit=250&offset=0${sourcesParam}`,
-            { headers }
-          );
+        const fetchAssetRows = async (url: string): Promise<SeasonAsset[]> => {
+          let res: Response;
+          try {
+            res = await fetchWithTimeout(url, { headers }, GALLERY_ASSET_LOAD_TIMEOUT_MS);
+          } catch (error) {
+            if (isAbortError(error)) {
+              throw new Error(
+                `Timed out loading gallery assets after ${Math.round(
+                  GALLERY_ASSET_LOAD_TIMEOUT_MS / 1000
+                )}s.`
+              );
+            }
+            throw error;
+          }
           if (!res.ok) return [];
           const data = await res.json().catch(() => ({}));
           const assets = (data as { assets?: unknown }).assets;
           return Array.isArray(assets) ? (assets as SeasonAsset[]) : [];
         };
 
+        const fetchShowAssets = async (): Promise<SeasonAsset[]> =>
+          fetchAssetRows(`/api/admin/trr-api/shows/${showId}/assets?limit=250&offset=0${sourcesParam}`);
+
         if (seasonNumber === "all") {
           // Fetch show-level assets once + season assets for all seasons.
           const [showAssets, ...seasonResults] = await Promise.all([
             fetchShowAssets(),
             ...visibleSeasons.map(async (season) => {
-              const res = await fetch(
-                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets?limit=250&offset=0${sourcesParam}`,
-                { headers }
+              return fetchAssetRows(
+                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets?limit=250&offset=0${sourcesParam}`
               );
-              if (!res.ok) return [];
-              const data = await res.json().catch(() => ({}));
-              const assets = (data as { assets?: unknown }).assets;
-              return Array.isArray(assets) ? (assets as SeasonAsset[]) : [];
             }),
           ]);
           setGalleryAssets(dedupe([...(showAssets ?? []), ...seasonResults.flat()]));
         } else {
           const [showAssets, seasonAssets] = await Promise.all([
             fetchShowAssets(),
-            (async () => {
-              const res = await fetch(
-                `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0${sourcesParam}`,
-                { headers }
-              );
-              if (!res.ok) return [];
-              const data = await res.json().catch(() => ({}));
-              const assets = (data as { assets?: unknown }).assets;
-              return Array.isArray(assets) ? (assets as SeasonAsset[]) : [];
-            })(),
+            fetchAssetRows(
+              `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0${sourcesParam}`
+            ),
           ]);
           setGalleryAssets(dedupe([...(showAssets ?? []), ...(seasonAssets ?? [])]));
         }
@@ -4058,6 +4195,187 @@ export default function TrrShowDetailPage() {
     },
     [showId, visibleSeasons, getAuthHeaders, advancedFilters.sources]
   );
+
+  const toggleBatchJobOperation = useCallback((operation: BatchJobOperation) => {
+    setBatchJobOperations((prev) =>
+      prev.includes(operation) ? prev.filter((item) => item !== operation) : [...prev, operation]
+    );
+  }, []);
+
+  const toggleBatchJobContentSection = useCallback((section: AssetSectionKey) => {
+    setBatchJobContentSections((prev) =>
+      prev.includes(section) ? prev.filter((item) => item !== section) : [...prev, section]
+    );
+  }, []);
+
+  const runBatchJobs = useCallback(async () => {
+    if (!showId) return;
+    if (batchJobsRunning) return;
+
+    if (batchJobOperations.length === 0) {
+      setBatchJobsError("Select at least one operation.");
+      return;
+    }
+    if (batchJobContentSections.length === 0) {
+      setBatchJobsError("Select at least one content type.");
+      return;
+    }
+
+    const selectedSections = new Set(batchJobContentSections);
+    const selectedVisibleAssets = ASSET_SECTION_ORDER.flatMap((section) =>
+      selectedSections.has(section) ? gallerySectionAssets[section] : []
+    );
+    const dedupeTargets = new Set<string>();
+    const targets = selectedVisibleAssets
+      .map((asset) => {
+        const section = classifySeasonAssetSection(asset, { showName: show?.name ?? undefined });
+        if (!section) return null;
+        const origin = asset.origin_table ?? "unknown";
+        const rawId = origin === "media_assets" ? asset.media_asset_id ?? asset.id : asset.id;
+        if (!rawId) return null;
+        const key = `${origin}:${rawId}`;
+        if (dedupeTargets.has(key)) return null;
+        dedupeTargets.add(key);
+        return {
+          origin,
+          id: rawId,
+          content_type: ASSET_SECTION_TO_BATCH_CONTENT_TYPE[section],
+        };
+      })
+      .filter((item): item is { origin: string; id: string; content_type: string } => item !== null);
+
+    if (targets.length === 0) {
+      setBatchJobsError("No matching visible gallery assets found for the selected content types.");
+      return;
+    }
+
+    setBatchJobsError(null);
+    setBatchJobsNotice(null);
+    setBatchJobsRunning(true);
+    setBatchJobsLiveCounts(null);
+    setBatchJobsProgress({
+      stage: "Batch Jobs",
+      message: "Starting batch jobs...",
+      current: 0,
+      total: targets.length * batchJobOperations.length,
+    });
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/assets/batch-jobs/stream`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operations: batchJobOperations,
+          content_types: batchJobContentSections.map(
+            (section) => ASSET_SECTION_TO_BATCH_CONTENT_TYPE[section]
+          ),
+          targets,
+          force: true,
+        }),
+      });
+      if (!response.ok || !response.body) {
+        throw new Error("Batch jobs stream unavailable.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completePayload: Record<string, unknown> | null = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n");
+
+        let boundaryIndex = buffer.indexOf("\n\n");
+        while (boundaryIndex !== -1) {
+          const rawEvent = buffer.slice(0, boundaryIndex);
+          buffer = buffer.slice(boundaryIndex + 2);
+
+          const lines = rawEvent.split("\n").filter(Boolean);
+          let eventType = "message";
+          const dataLines: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).trim());
+            }
+          }
+
+          const dataStr = dataLines.join("\n");
+          let payload: Record<string, unknown> | null = null;
+          try {
+            payload = JSON.parse(dataStr) as Record<string, unknown>;
+          } catch {
+            payload = null;
+          }
+
+          if (eventType === "progress" && payload) {
+            const current = parseProgressNumber(payload.current);
+            const total = parseProgressNumber(payload.total);
+            const stage = typeof payload.stage === "string" ? payload.stage : "Batch Jobs";
+            const baseMessage =
+              typeof payload.message === "string" && payload.message.trim()
+                ? payload.message
+                : "Running batch jobs...";
+            const nextLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, payload);
+            setBatchJobsLiveCounts(nextLiveCounts);
+            setBatchJobsProgress({
+              stage,
+              message: appendLiveCountsToMessage(baseMessage, nextLiveCounts),
+              current,
+              total,
+            });
+          } else if (eventType === "error") {
+            const errorText =
+              payload && typeof payload.error === "string" ? payload.error : "Batch jobs failed.";
+            const detailText =
+              payload && typeof payload.detail === "string" ? payload.detail : null;
+            throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+          } else if (eventType === "complete" && payload) {
+            completePayload = payload;
+          }
+
+          boundaryIndex = buffer.indexOf("\n\n");
+        }
+      }
+
+      const attempted = parseProgressNumber(completePayload?.attempted ?? null) ?? 0;
+      const succeeded = parseProgressNumber(completePayload?.succeeded ?? null) ?? 0;
+      const failed = parseProgressNumber(completePayload?.failed ?? null) ?? 0;
+      const skipped = parseProgressNumber(completePayload?.skipped ?? null) ?? 0;
+      const completeLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, completePayload);
+      setBatchJobsLiveCounts(completeLiveCounts);
+      const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+      setBatchJobsNotice(
+        `Batch jobs complete. Attempted ${attempted}, succeeded ${succeeded}, failed ${failed}, skipped ${skipped}${
+          liveCountSuffix ? `. ${liveCountSuffix}` : "."
+        }`
+      );
+      setBatchJobsOpen(false);
+      await loadGalleryAssets(selectedGallerySeason);
+    } catch (error) {
+      setBatchJobsError(error instanceof Error ? error.message : "Batch jobs failed.");
+    } finally {
+      setBatchJobsRunning(false);
+      setBatchJobsProgress(null);
+      setBatchJobsLiveCounts(null);
+    }
+  }, [
+    batchJobsLiveCounts,
+    batchJobContentSections,
+    batchJobOperations,
+    batchJobsRunning,
+    gallerySectionAssets,
+    getAuthHeaders,
+    loadGalleryAssets,
+    selectedGallerySeason,
+    show?.name,
+    showId,
+  ]);
 
   const refreshShow = useCallback(
     async (
@@ -4073,6 +4391,7 @@ export default function TrrShowDetailPage() {
         null;
 
       setRefreshingTargets((prev) => ({ ...prev, [target]: true }));
+      setRefreshTargetLiveCounts((prev) => ({ ...prev, [target]: null }));
       setRefreshTargetProgress((prev) => ({
         ...prev,
         [target]: {
@@ -4127,58 +4446,81 @@ export default function TrrShowDetailPage() {
                   skip_word_detection: fastPhotoMode,
                 }
               : { targets: [target] };
-          const response = await fetch(streamUrl, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify(streamBody),
-          });
+          const streamController = new AbortController();
+          let streamIdleTimer: ReturnType<typeof setTimeout> | null = null;
+          const bumpStreamIdleTimeout = () => {
+            if (streamIdleTimer) clearTimeout(streamIdleTimer);
+            streamIdleTimer = setTimeout(
+              () => streamController.abort(),
+              SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS
+            );
+          };
+          const clearStreamIdleTimeout = () => {
+            if (streamIdleTimer) clearTimeout(streamIdleTimer);
+            streamIdleTimer = null;
+          };
+          const streamTimeout = setTimeout(
+            () => streamController.abort(),
+            SHOW_REFRESH_STREAM_MAX_DURATION_MS
+          );
+          bumpStreamIdleTimeout();
+          let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+          let shouldStopReading = false;
+          try {
+            const response = await fetch(streamUrl, {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify(streamBody),
+              signal: streamController.signal,
+            });
 
-          if (!response.ok || !response.body) {
-            const data = await response.json().catch(() => ({}));
-            const message =
-              data.error && data.detail
-                ? `${data.error}: ${data.detail}`
-                : data.error || data.detail || "Refresh failed";
-            throw new Error(message);
-          }
+            if (!response.ok || !response.body) {
+              const data = await response.json().catch(() => ({}));
+              const message =
+                data.error && data.detail
+                  ? `${data.error}: ${data.detail}`
+                  : data.error || data.detail || "Refresh failed";
+              throw new Error(message);
+            }
 
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
+            reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
 
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            // Some environments send SSE with CRLF delimiters. Normalize to LF so our
-            // "\n\n" boundary detection works reliably and progress updates stream live.
-            buffer = buffer.replace(/\r\n/g, "\n");
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              bumpStreamIdleTimeout();
+              buffer += decoder.decode(value, { stream: true });
+              // Some environments send SSE with CRLF delimiters. Normalize to LF so our
+              // "\n\n" boundary detection works reliably and progress updates stream live.
+              buffer = buffer.replace(/\r\n/g, "\n");
 
-            let boundaryIndex = buffer.indexOf("\n\n");
-            while (boundaryIndex !== -1) {
-              const rawEvent = buffer.slice(0, boundaryIndex);
-              buffer = buffer.slice(boundaryIndex + 2);
+              let boundaryIndex = buffer.indexOf("\n\n");
+              while (boundaryIndex !== -1) {
+                const rawEvent = buffer.slice(0, boundaryIndex);
+                buffer = buffer.slice(boundaryIndex + 2);
 
-              const lines = rawEvent.split("\n").filter(Boolean);
-              let eventType = "message";
-              const dataLines: string[] = [];
-              for (const line of lines) {
-                if (line.startsWith("event:")) {
-                  eventType = line.slice(6).trim();
-                } else if (line.startsWith("data:")) {
-                  dataLines.push(line.slice(5).trim());
+                const lines = rawEvent.split("\n").filter(Boolean);
+                let eventType = "message";
+                const dataLines: string[] = [];
+                for (const line of lines) {
+                  if (line.startsWith("event:")) {
+                    eventType = line.slice(6).trim();
+                  } else if (line.startsWith("data:")) {
+                    dataLines.push(line.slice(5).trim());
+                  }
                 }
-              }
 
-              const dataStr = dataLines.join("\n");
-              let payload: Record<string, unknown> | string = dataStr;
-              try {
-                payload = JSON.parse(dataStr) as Record<string, unknown>;
-              } catch {
-                payload = dataStr;
-              }
+                const dataStr = dataLines.join("\n");
+                let payload: Record<string, unknown> | string = dataStr;
+                try {
+                  payload = JSON.parse(dataStr) as Record<string, unknown>;
+                } catch {
+                  payload = dataStr;
+                }
 
-              if (eventType === "progress" && payload && typeof payload === "object") {
+                if (eventType === "progress" && payload && typeof payload === "object") {
                 const stageKeyRaw =
                   (payload as { stage_key?: unknown }).stage_key
                   ?? (payload as { step?: unknown }).step;
@@ -4193,42 +4535,82 @@ export default function TrrShowDetailPage() {
                 const totalRaw = (payload as { total?: unknown }).total;
                 const topicRaw = (payload as { topic?: unknown }).topic;
                 const providerRaw = (payload as { provider?: unknown }).provider;
+                const sourceRaw = (payload as { source?: unknown }).source;
+                const skipReasonRaw = (payload as { skip_reason?: unknown }).skip_reason;
+                const heartbeat = (payload as { heartbeat?: unknown }).heartbeat === true;
+                const elapsedMsRaw = (payload as { elapsed_ms?: unknown }).elapsed_ms;
+                const elapsedMs = parseProgressNumber(elapsedMsRaw);
+                const sourceTotal = parseProgressNumber((payload as { source_total?: unknown }).source_total);
+                const mirroredCount = parseProgressNumber((payload as { mirrored_count?: unknown }).mirrored_count);
                 const current = parseProgressNumber(stageCurrentRaw ?? currentRaw);
                 const total = parseProgressNumber(stageTotalRaw ?? totalRaw);
                 const stageLabel = resolveStageLabel(stageRaw, SHOW_REFRESH_STAGE_LABELS);
-                const progressMessage = buildProgressMessage(
+                let progressMessage = buildProgressMessage(
                   stageLabel,
                   messageRaw,
                   `Refreshing ${label}...`
+                );
+                if (heartbeat && elapsedMs !== null && elapsedMs >= 0) {
+                  progressMessage = `${progressMessage} · ${Math.round(elapsedMs / 1000)}s elapsed`;
+                }
+                if (typeof skipReasonRaw === "string" && skipReasonRaw === "already_mirrored") {
+                  const counts =
+                    sourceTotal !== null && mirroredCount !== null
+                      ? ` (${mirroredCount}/${sourceTotal})`
+                      : "";
+                  progressMessage = `${progressMessage}${counts}`;
+                }
+                const nextLiveCounts = resolveJobLiveCounts(
+                  refreshTargetLiveCounts[target] ?? null,
+                  payload
+                );
+                setRefreshTargetLiveCounts((prev) => ({ ...prev, [target]: nextLiveCounts }));
+                const enrichedProgressMessage = appendLiveCountsToMessage(
+                  progressMessage,
+                  nextLiveCounts
                 );
 
                 setRefreshTargetProgress((prev) => ({
                   ...prev,
                   [target]: {
                     stage: stageLabel ?? prev[target]?.stage ?? null,
-                    message: progressMessage || prev[target]?.message || null,
+                    message: enrichedProgressMessage || prev[target]?.message || null,
                     current: typeof current === "number" && Number.isFinite(current) ? current : null,
                     total: typeof total === "number" && Number.isFinite(total) ? total : null,
                   },
                 }));
                 appendRefreshLog({
                   category: label,
-                  message: progressMessage,
+                  message: enrichedProgressMessage,
                   current: typeof current === "number" && Number.isFinite(current) ? current : null,
                   total: typeof total === "number" && Number.isFinite(total) ? total : null,
                   stageKey: typeof stageKeyRaw === "string" ? stageKeyRaw : null,
                   topic: typeof topicRaw === "string" ? topicRaw : null,
-                  provider: typeof providerRaw === "string" ? providerRaw : null,
+                  provider:
+                    typeof providerRaw === "string"
+                      ? providerRaw
+                      : typeof sourceRaw === "string"
+                        ? sourceRaw
+                        : null,
                 });
-              } else if (eventType === "complete") {
-                sawComplete = true;
+                } else if (eventType === "complete") {
+                  sawComplete = true;
+                  const completeLiveCounts = resolveJobLiveCounts(
+                    refreshTargetLiveCounts[target] ?? null,
+                    payload
+                  );
+                  setRefreshTargetLiveCounts((prev) => ({
+                    ...prev,
+                    [target]: completeLiveCounts,
+                  }));
+                  const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
 
-                if (
-                  target === "photos" &&
-                  payload &&
-                  typeof payload === "object" &&
-                  ("cast_photos_upserted" in payload || "cast_photos_fetched" in payload)
-                ) {
+                  if (
+                    target === "photos" &&
+                    payload &&
+                    typeof payload === "object" &&
+                    ("cast_photos_upserted" in payload || "cast_photos_fetched" in payload)
+                  ) {
                   const asNum = (value: unknown): number | null =>
                     typeof value === "number" && Number.isFinite(value) ? value : null;
                   const durationMs = asNum((payload as { duration_ms?: unknown }).duration_ms);
@@ -4237,6 +4619,7 @@ export default function TrrShowDetailPage() {
                   const castMirrored = asNum((payload as { cast_photos_mirrored?: unknown }).cast_photos_mirrored);
                   const castFailed = asNum((payload as { cast_photos_failed?: unknown }).cast_photos_failed);
                   const castPruned = asNum((payload as { cast_photos_pruned?: unknown }).cast_photos_pruned);
+                  const sourcesSkipped = asNum((payload as { sources_skipped?: unknown }).sources_skipped);
                   const autoSucceeded = asNum((payload as { auto_counts_succeeded?: unknown }).auto_counts_succeeded);
                   const autoFailed = asNum((payload as { auto_counts_failed?: unknown }).auto_counts_failed);
                   const wordSucceeded = asNum((payload as { text_overlay_succeeded?: unknown }).text_overlay_succeeded);
@@ -4251,6 +4634,9 @@ export default function TrrShowDetailPage() {
                     castUpserted !== null ? `photos upserted: ${castUpserted}` : null,
                     castMirrored !== null ? `photos mirrored: ${castMirrored}` : null,
                     castPruned !== null ? `photos pruned: ${castPruned}` : null,
+                    sourcesSkipped !== null && sourcesSkipped > 0
+                      ? `sources skipped: ${sourcesSkipped}`
+                      : null,
                     autoSucceeded !== null ? `auto counts set: ${autoSucceeded}` : null,
                     wordSucceeded !== null ? `text-overlay classified: ${wordSucceeded}` : null,
                   ].filter((part): part is string => Boolean(part));
@@ -4264,105 +4650,126 @@ export default function TrrShowDetailPage() {
                       : null,
                   ].filter((part): part is string => Boolean(part));
 
-                  setRefreshTargetNotice((prev) => ({
-                    ...prev,
-                    photos: [
-                      successParts.length > 0
-                        ? `SUCCESS: ${successParts.join(", ")}`
-                        : "SUCCESS: photos refresh complete",
-                      failParts.length > 0 ? `FAILS: ${failParts.join(", ")}` : null,
-                      durationMs !== null ? `duration: ${durationMs}ms` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" | "),
-                  }));
+                    setRefreshTargetNotice((prev) => ({
+                      ...prev,
+                      photos: [
+                        successParts.length > 0
+                          ? `SUCCESS: ${successParts.join(", ")}`
+                          : "SUCCESS: photos refresh complete",
+                        failParts.length > 0 ? `FAILS: ${failParts.join(", ")}` : null,
+                        liveCountSuffix ? liveCountSuffix : null,
+                        durationMs !== null ? `duration: ${durationMs}ms` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" | "),
+                    }));
+                    appendRefreshLog({
+                      category: label,
+                      message:
+                        successParts.length > 0
+                          ? `Photos refresh complete: ${successParts.join(", ")}.`
+                          : "Photos refresh complete.",
+                      current: null,
+                      total: null,
+                    });
+                  } else {
+                    const resultsRaw = (payload as { results?: unknown }).results;
+                    const results =
+                      resultsRaw && typeof resultsRaw === "object"
+                        ? (resultsRaw as Record<string, unknown>)
+                        : null;
+                    const stepRaw = results ? results[target] : null;
+                    const step =
+                      stepRaw && typeof stepRaw === "object"
+                        ? (stepRaw as { status?: unknown; duration_ms?: unknown; error?: unknown })
+                        : null;
+                    if (step?.status === "failed") {
+                      const stepError =
+                        typeof step.error === "string" && step.error
+                          ? step.error
+                          : "Refresh failed";
+                      throw new Error(stepError);
+                    }
+
+                    if (target === "details") {
+                      await fetchShow();
+                    } else if (target === "seasons_episodes") {
+                      await Promise.all([fetchShow(), fetchSeasons()]);
+                    } else if (target === "photos") {
+                      if (activeTab === "assets" && assetsView === "images") {
+                        await loadGalleryAssets(selectedGallerySeason);
+                      }
+                    } else if (target === "cast_credits") {
+                      if (includeCastProfiles) {
+                        const castMembers = await fetchCast({
+                          rosterMode: "imdb_show_membership",
+                          minEpisodes: 0,
+                        });
+                        castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
+                      }
+                      await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 });
+                    }
+
+                    const durationMs =
+                      typeof step?.duration_ms === "number" ? step.duration_ms : null;
+                    const castSuffix =
+                      target === "cast_credits" && castProfilesSummary
+                        ? `, cast profiles/media: ${castProfilesSummary.succeeded}/${castProfilesSummary.attempted}${
+                            castProfilesSummary.failed > 0
+                              ? ` (${castProfilesSummary.failed} failed)`
+                              : ""
+                          }`
+                        : "";
+                    setRefreshTargetNotice((prev) => ({
+                      ...prev,
+                      [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}${
+                        liveCountSuffix ? `. ${liveCountSuffix}` : "."
+                      }`,
+                    }));
+                    appendRefreshLog({
+                      category: label,
+                      message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
+                      current: null,
+                      total: null,
+                    });
+                  }
+                  shouldStopReading = true;
+                } else if (eventType === "error") {
+                  const message =
+                    payload && typeof payload === "object"
+                      ? (payload as { error?: string; detail?: string })
+                      : null;
+                  const errorText =
+                    message?.error && message?.detail
+                      ? `${message.error}: ${message.detail}`
+                      : message?.error || "Refresh failed";
                   appendRefreshLog({
                     category: label,
-                    message:
-                      successParts.length > 0
-                        ? `Photos refresh complete: ${successParts.join(", ")}.`
-                        : "Photos refresh complete.",
+                    message: `Failed: ${errorText}`,
                     current: null,
                     total: null,
                   });
-                } else {
-                  const resultsRaw = (payload as { results?: unknown }).results;
-                  const results =
-                    resultsRaw && typeof resultsRaw === "object"
-                      ? (resultsRaw as Record<string, unknown>)
-                      : null;
-                  const stepRaw = results ? results[target] : null;
-                  const step =
-                    stepRaw && typeof stepRaw === "object"
-                      ? (stepRaw as { status?: unknown; duration_ms?: unknown; error?: unknown })
-                      : null;
-                  if (step?.status === "failed") {
-                    const stepError =
-                      typeof step.error === "string" && step.error
-                        ? step.error
-                        : "Refresh failed";
-                    throw new Error(stepError);
-                  }
-
-                  if (target === "details") {
-                    await fetchShow();
-                  } else if (target === "seasons_episodes") {
-                    await Promise.all([fetchShow(), fetchSeasons()]);
-                  } else if (target === "photos") {
-                    if (activeTab === "assets" && assetsView === "images") {
-                      await loadGalleryAssets(selectedGallerySeason);
-                    }
-                  } else if (target === "cast_credits") {
-                    if (includeCastProfiles) {
-                      const castMembers = await fetchCast({
-                        rosterMode: "imdb_show_membership",
-                        minEpisodes: 0,
-                      });
-                      castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
-                    }
-                    await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 });
-                  }
-
-                  const durationMs =
-                    typeof step?.duration_ms === "number" ? step.duration_ms : null;
-                  const castSuffix =
-                    target === "cast_credits" && castProfilesSummary
-                      ? `, cast profiles/media: ${castProfilesSummary.succeeded}/${castProfilesSummary.attempted}${
-                          castProfilesSummary.failed > 0
-                            ? ` (${castProfilesSummary.failed} failed)`
-                            : ""
-                        }`
-                      : "";
-                  setRefreshTargetNotice((prev) => ({
-                    ...prev,
-                    [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
-                  }));
-                  appendRefreshLog({
-                    category: label,
-                    message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
-                    current: null,
-                    total: null,
-                  });
+                  throw new Error(errorText);
                 }
-              } else if (eventType === "error") {
-                const message =
-                  payload && typeof payload === "object"
-                    ? (payload as { error?: string; detail?: string })
-                    : null;
-                const errorText =
-                  message?.error && message?.detail
-                    ? `${message.error}: ${message.detail}`
-                    : message?.error || "Refresh failed";
-                appendRefreshLog({
-                  category: label,
-                  message: `Failed: ${errorText}`,
-                  current: null,
-                  total: null,
-                });
-                throw new Error(errorText);
-              }
 
-              boundaryIndex = buffer.indexOf("\n\n");
+                if (shouldStopReading) {
+                  break;
+                }
+                boundaryIndex = buffer.indexOf("\n\n");
+              }
+              if (shouldStopReading) {
+                break;
+              }
+            }
+          } finally {
+            clearStreamIdleTimeout();
+            clearTimeout(streamTimeout);
+            if (reader && shouldStopReading) {
+              try {
+                await reader.cancel();
+              } catch {
+                // no-op
+              }
             }
           }
         } catch (streamErr) {
@@ -4381,11 +4788,27 @@ export default function TrrShowDetailPage() {
             throw new Error("Photo refresh stream failed.");
           }
           const headers = await getAuthHeaders();
-          const response = await fetch(`/api/admin/trr-api/shows/${showId}/refresh`, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ targets: [target] }),
-          });
+          let response: Response;
+          try {
+            response = await fetchWithTimeout(
+              `/api/admin/trr-api/shows/${showId}/refresh`,
+              {
+                method: "POST",
+                headers: { ...headers, "Content-Type": "application/json" },
+                body: JSON.stringify({ targets: [target] }),
+              },
+              SHOW_REFRESH_FALLBACK_TIMEOUT_MS
+            );
+          } catch (error) {
+            if (isAbortError(error)) {
+              throw new Error(
+                `Timed out refreshing ${label} after ${Math.round(
+                  SHOW_REFRESH_FALLBACK_TIMEOUT_MS / 1000
+                )}s.`
+              );
+            }
+            throw error;
+          }
           const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
           if (!response.ok) {
@@ -4468,6 +4891,11 @@ export default function TrrShowDetailPage() {
         success = false;
       } finally {
         setRefreshingTargets((prev) => ({ ...prev, [target]: false }));
+        setRefreshTargetLiveCounts((prev) => {
+          const next = { ...prev };
+          delete next[target];
+          return next;
+        });
         setRefreshTargetProgress((prev) => {
           const next = { ...prev };
           delete next[target];
@@ -4487,6 +4915,7 @@ export default function TrrShowDetailPage() {
       fetchShow,
       getAuthHeaders,
       loadGalleryAssets,
+      refreshTargetLiveCounts,
       selectedGallerySeason,
       showId,
     ]
@@ -4582,9 +5011,13 @@ export default function TrrShowDetailPage() {
   }, [appendRefreshLog, refreshShow, refreshingShowAll, showId]);
 
   const refreshShowCast = useCallback(async () => {
-    if (refreshingShowAll || Object.values(refreshingTargets).some(Boolean)) return;
-    await refreshShow("cast_credits", { includeCastProfiles: true });
-  }, [refreshShow, refreshingShowAll, refreshingTargets]);
+    if (refreshingShowAll || Object.values(refreshingTargets).some(Boolean) || castMatrixSyncLoading) {
+      return;
+    }
+    const refreshed = await refreshShow("cast_credits", { includeCastProfiles: true });
+    if (!refreshed) return;
+    await syncCastMatrixRoles();
+  }, [castMatrixSyncLoading, refreshShow, refreshingShowAll, refreshingTargets, syncCastMatrixRoles]);
 
   const detectTextOverlayForUnknown = useCallback(async () => {
     const targets = galleryAssets
@@ -4759,75 +5192,169 @@ export default function TrrShowDetailPage() {
         throw new Error("Full pipeline refresh is only available for media assets and cast photos.");
       }
 
-      const callStep = async (endpoint: string, payload: Record<string, unknown>) => {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+      setRefreshLogOpen(true);
+      appendRefreshLog({
+        category: "Image Pipeline",
+        message: `Started image pipeline refresh (${base.kind}:${base.id}).`,
+        current: null,
+        total: null,
+      });
+
+      const callStep = async (
+        label: string,
+        endpoint: string,
+        payload: Record<string, unknown>
+      ) => {
+        appendRefreshLog({
+          category: "Image Pipeline",
+          message: `${label} started.`,
+          current: null,
+          total: null,
         });
+        let response: Response;
+        try {
+          response = await fetchWithTimeout(
+            endpoint,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            },
+            ASSET_PIPELINE_STEP_TIMEOUT_MS
+          );
+        } catch (error) {
+          if (isAbortError(error)) {
+            appendRefreshLog({
+              category: "Image Pipeline",
+              message: `${label} timed out after ${Math.round(ASSET_PIPELINE_STEP_TIMEOUT_MS / 1000)}s.`,
+              current: null,
+              total: null,
+            });
+            throw new Error(
+              `Pipeline step timed out (${Math.round(ASSET_PIPELINE_STEP_TIMEOUT_MS / 1000)}s)`
+            );
+          }
+          throw error;
+        }
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const message =
             data?.error && data?.detail
               ? `${data.error}: ${data.detail}`
               : data?.error || data?.detail || "Pipeline step failed";
+          appendRefreshLog({
+            category: "Image Pipeline",
+            message: `${label} failed: ${message}`,
+            current: null,
+            total: null,
+          });
           throw new Error(message);
         }
+        appendRefreshLog({
+          category: "Image Pipeline",
+          message: `${label} complete.`,
+          current: null,
+          total: null,
+        });
         return data as Record<string, unknown>;
       };
 
-      const prefix =
-        base.kind === "media"
-          ? `/api/admin/trr-api/media-assets/${base.id}`
-          : `/api/admin/trr-api/cast-photos/${base.id}`;
+      try {
+        const prefix =
+          base.kind === "media"
+            ? `/api/admin/trr-api/media-assets/${base.id}`
+            : `/api/admin/trr-api/cast-photos/${base.id}`;
 
-      await callStep(`${prefix}/mirror`, { force: true });
-      const countPayload = await callStep(`${prefix}/auto-count`, { force: true });
-      const textPayload = await callStep(`${prefix}/detect-text-overlay`, { force: true });
-      await callStep(`${prefix}/variants`, { force: true });
-      const hasTextOverlay =
-        typeof textPayload.has_text_overlay === "boolean"
-          ? textPayload.has_text_overlay
-          : typeof textPayload.hasTextOverlay === "boolean"
-            ? textPayload.hasTextOverlay
-            : null;
+        await callStep("Mirror", `${prefix}/mirror`, { force: true });
+        const countPayload = await callStep("People Count", `${prefix}/auto-count`, { force: true });
+        const textPayload = await callStep("Text Overlay", `${prefix}/detect-text-overlay`, { force: true });
+        await callStep("Variants", `${prefix}/variants`, { force: true });
+        const hasTextOverlay =
+          typeof textPayload.has_text_overlay === "boolean"
+            ? textPayload.has_text_overlay
+            : typeof textPayload.hasTextOverlay === "boolean"
+              ? textPayload.hasTextOverlay
+              : null;
 
-      const hasManualCrop =
-        asset.thumbnail_crop_mode === "manual" &&
-        typeof asset.thumbnail_focus_x === "number" &&
-        typeof asset.thumbnail_focus_y === "number" &&
-        typeof asset.thumbnail_zoom === "number";
-      if (hasManualCrop) {
-        await callStep(`${prefix}/variants`, {
-          force: true,
-          crop: {
-            x: asset.thumbnail_focus_x,
-            y: asset.thumbnail_focus_y,
-            zoom: asset.thumbnail_zoom,
-            mode: "manual",
+        const hasManualCrop =
+          asset.thumbnail_crop_mode === "manual" &&
+          typeof asset.thumbnail_focus_x === "number" &&
+          typeof asset.thumbnail_focus_y === "number" &&
+          typeof asset.thumbnail_zoom === "number";
+        if (hasManualCrop) {
+          await callStep("Variants (Manual Crop)", `${prefix}/variants`, {
+            force: true,
+            crop: {
+              x: asset.thumbnail_focus_x,
+              y: asset.thumbnail_focus_y,
+              zoom: asset.thumbnail_zoom,
+              mode: "manual",
+            },
+          });
+        }
+
+        applyGalleryAssetPatch(asset, {
+          people_count:
+            typeof countPayload.people_count === "number"
+              ? countPayload.people_count
+              : asset.people_count ?? null,
+          people_count_source:
+            countPayload.people_count_source === "auto" ||
+            countPayload.people_count_source === "manual"
+              ? countPayload.people_count_source
+              : asset.people_count_source ?? null,
+          metadata: {
+            ...((asset.metadata ?? {}) as Record<string, unknown>),
+            ...(hasTextOverlay === null ? {} : { has_text_overlay: hasTextOverlay }),
           },
         });
+
+        await loadGalleryAssets(selectedGallerySeason);
+        const summaryParts: string[] = [];
+        if (typeof countPayload.people_count === "number") {
+          summaryParts.push(`people_count: ${countPayload.people_count}`);
+        }
+        summaryParts.push(
+          hasTextOverlay === null
+            ? "text_overlay: unchanged"
+            : `text_overlay: ${hasTextOverlay ? "yes" : "no"}`
+        );
+        const summaryText = summaryParts.join(" | ");
+        setRefreshTargetNotice((prev) => ({
+          ...prev,
+          photos: `Image pipeline refreshed (${summaryText}).`,
+        }));
+        setRefreshTargetError((prev) => {
+          const next = { ...prev };
+          delete next.photos;
+          return next;
+        });
+        appendRefreshLog({
+          category: "Image Pipeline",
+          message: `Completed image pipeline refresh (${base.kind}:${base.id})${summaryText ? `: ${summaryText}` : "."}`,
+          current: null,
+          total: null,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Image pipeline refresh failed";
+        setRefreshTargetError((prev) => ({ ...prev, photos: message }));
+        appendRefreshLog({
+          category: "Image Pipeline",
+          message: `Failed image pipeline refresh (${base.kind}:${base.id}): ${message}`,
+          current: null,
+          total: null,
+        });
+        throw error;
       }
-
-      applyGalleryAssetPatch(asset, {
-        people_count:
-          typeof countPayload.people_count === "number"
-            ? countPayload.people_count
-            : asset.people_count ?? null,
-        people_count_source:
-          countPayload.people_count_source === "auto" ||
-          countPayload.people_count_source === "manual"
-            ? countPayload.people_count_source
-            : asset.people_count_source ?? null,
-        metadata: {
-          ...((asset.metadata ?? {}) as Record<string, unknown>),
-          ...(hasTextOverlay === null ? {} : { has_text_overlay: hasTextOverlay }),
-        },
-      });
-
-      await loadGalleryAssets(selectedGallerySeason);
     },
-    [applyGalleryAssetPatch, getAuthHeaders, loadGalleryAssets, selectedGallerySeason]
+    [
+      appendRefreshLog,
+      applyGalleryAssetPatch,
+      getAuthHeaders,
+      loadGalleryAssets,
+      selectedGallerySeason,
+    ]
   );
 
   const archiveGalleryAsset = useCallback(
@@ -4906,7 +5433,7 @@ export default function TrrShowDetailPage() {
 
       const normalizedContentType =
         typeof data.content_type === "string" && data.content_type.trim().length > 0
-          ? data.content_type.trim().toUpperCase()
+          ? normalizeContentTypeToken(data.content_type)
           : normalizeContentTypeToken(contentType);
       const nextKind =
         typeof data.kind === "string" && data.kind.trim().length > 0
@@ -5048,6 +5575,7 @@ export default function TrrShowDetailPage() {
   const networkLabel = show.networks?.slice(0, 2).join(" · ") || "TRR Core";
   const isShowRefreshBusy =
     refreshingShowAll || Object.values(refreshingTargets).some((value) => value);
+  const isCastRefreshBusy = isShowRefreshBusy || castMatrixSyncLoading;
   const activeRefreshTarget =
     (Object.entries(refreshingTargets).find(([, isRefreshing]) => isRefreshing)?.[0] as
       | ShowRefreshTarget
@@ -5570,6 +6098,23 @@ export default function TrrShowDetailPage() {
                   </button>
                 ))}
               </nav>
+              {activeTab === "social" && (
+                <nav className="mt-3 flex flex-wrap gap-2">
+                  {SHOW_SOCIAL_ANALYTICS_VIEWS.map((view) => (
+                    <button
+                      key={view.id}
+                      onClick={() => setSocialAnalyticsView(view.id)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                        socialAnalyticsView === view.id
+                          ? "border-zinc-800 bg-zinc-800 text-white"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
+                </nav>
+              )}
             </div>
           </div>
         </header>
@@ -5835,6 +6380,17 @@ export default function TrrShowDetailPage() {
                           Clear Filters ({activeAdvancedFilterCount})
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBatchJobsError(null);
+                          setBatchJobsNotice(null);
+                          setBatchJobsOpen(true);
+                        }}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Batch Jobs
+                      </button>
 
                       <button
                         onClick={() => {
@@ -5889,6 +6445,18 @@ export default function TrrShowDetailPage() {
                     current={refreshTargetProgress.photos?.current}
                     total={refreshTargetProgress.photos?.total}
                   />
+                  {(batchJobsNotice || batchJobsError) && (
+                    <p className={`mb-4 text-sm ${batchJobsError ? "text-red-600" : "text-zinc-500"}`}>
+                      {batchJobsError || batchJobsNotice}
+                    </p>
+                  )}
+                  <RefreshProgressBar
+                    show={batchJobsRunning}
+                    stage={batchJobsProgress?.stage}
+                    message={batchJobsProgress?.message}
+                    current={batchJobsProgress?.current}
+                    total={batchJobsProgress?.total}
+                  />
 
                   {galleryLoading ? (
                     <div className="flex items-center justify-center py-12">
@@ -5901,13 +6469,13 @@ export default function TrrShowDetailPage() {
                   ) : (
                     <div className="space-y-8">
                       {/* Backdrops */}
-                      {gallerySectionAssets.showBackdrops.length > 0 && (
+                      {gallerySectionAssets.backdrops.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Backdrops
                           </h4>
                           <div className="grid grid-cols-3 gap-4">
-                            {gallerySectionAssets.showBackdrops.map((asset, i, arr) => (
+                            {gallerySectionAssets.backdrops.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -5917,6 +6485,8 @@ export default function TrrShowDetailPage() {
                                 >
                                   <GalleryImage
                                     src={getAssetDisplayUrl(asset)}
+                                    srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                    diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                                     alt={asset.caption || "Backdrop"}
                                     sizes="300px"
                                     className="object-cover"
@@ -5944,6 +6514,8 @@ export default function TrrShowDetailPage() {
                                 >
                                   <GalleryImage
                                     src={getAssetDisplayUrl(asset)}
+                                    srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                    diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                                     alt={asset.caption || "Poster"}
                                     sizes="200px"
                                   />
@@ -5954,13 +6526,13 @@ export default function TrrShowDetailPage() {
                       )}
 
                       {/* Episode Stills */}
-                      {gallerySectionAssets.episodeStills.length > 0 && (
+                      {gallerySectionAssets.episode_stills.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Episode Stills
                           </h4>
                           <div className="grid grid-cols-6 gap-3">
-                            {gallerySectionAssets.episodeStills.map((asset, i, arr) => (
+                            {gallerySectionAssets.episode_stills.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -5970,6 +6542,8 @@ export default function TrrShowDetailPage() {
                                 >
                                   <GalleryImage
                                     src={getAssetDisplayUrl(asset)}
+                                    srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                    diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                                     alt={asset.caption || "Episode still"}
                                     sizes="150px"
                                   />
@@ -5980,13 +6554,13 @@ export default function TrrShowDetailPage() {
                       )}
 
                       {/* Profile Pictures */}
-                      {gallerySectionAssets.profilePictures.length > 0 && (
+                      {gallerySectionAssets.profile_pictures.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Profile Pictures
                           </h4>
                           <div className="grid grid-cols-5 gap-4">
-                            {gallerySectionAssets.profilePictures.map((asset, i, arr) => (
+                            {gallerySectionAssets.profile_pictures.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -5996,6 +6570,8 @@ export default function TrrShowDetailPage() {
                                 >
                                   <GalleryImage
                                     src={getAssetDisplayUrl(asset)}
+                                    srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                    diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                                     alt={asset.caption || "Profile picture"}
                                     sizes="180px"
                                   />
@@ -6012,14 +6588,14 @@ export default function TrrShowDetailPage() {
                         </section>
                       )}
 
-                      {/* Cast Photos / Promos */}
-                      {gallerySectionAssets.castAndPromos.length > 0 && (
+                      {/* Cast Photos (official season announcement only) */}
+                      {gallerySectionAssets.cast_photos.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Cast Photos & Promos
+                            Cast Photos
                           </h4>
                           <div className="grid grid-cols-5 gap-4">
-                            {gallerySectionAssets.castAndPromos.map((asset, i, arr) => (
+                            {gallerySectionAssets.cast_photos.map((asset, i, arr) => (
                                 <button
                                   key={`${asset.id}-${i}`}
                                   onClick={(e) =>
@@ -6029,6 +6605,8 @@ export default function TrrShowDetailPage() {
                                 >
                                   <GalleryImage
                                     src={getAssetDisplayUrl(asset)}
+                                    srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                    diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                                     alt={asset.caption || "Cast photo"}
                                     sizes="180px"
                                   />
@@ -6041,6 +6619,81 @@ export default function TrrShowDetailPage() {
                                   )}
                                 </button>
                               ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {gallerySectionAssets.confessionals.length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Confessionals
+                          </h4>
+                          <div className="grid grid-cols-5 gap-4">
+                            {gallerySectionAssets.confessionals.map((asset, i, arr) => (
+                              <button
+                                key={`${asset.id}-${i}`}
+                                onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                                className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <GalleryImage
+                                  src={getAssetDisplayUrl(asset)}
+                                  srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                  diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                                  alt={asset.caption || "Confessional"}
+                                  sizes="180px"
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {gallerySectionAssets.reunion.length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Reunion
+                          </h4>
+                          <div className="grid grid-cols-5 gap-4">
+                            {gallerySectionAssets.reunion.map((asset, i, arr) => (
+                              <button
+                                key={`${asset.id}-${i}`}
+                                onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                                className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <GalleryImage
+                                  src={getAssetDisplayUrl(asset)}
+                                  srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                  diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                                  alt={asset.caption || "Reunion"}
+                                  sizes="180px"
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {gallerySectionAssets.intro_card.length > 0 && (
+                        <section>
+                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
+                            Intro Card
+                          </h4>
+                          <div className="grid grid-cols-5 gap-4">
+                            {gallerySectionAssets.intro_card.map((asset, i, arr) => (
+                              <button
+                                key={`${asset.id}-${i}`}
+                                onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
+                                className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <GalleryImage
+                                  src={getAssetDisplayUrl(asset)}
+                                  srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                  diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                                  alt={asset.caption || "Intro card"}
+                                  sizes="180px"
+                                />
+                              </button>
+                            ))}
                           </div>
                         </section>
                       )}
@@ -6062,6 +6715,8 @@ export default function TrrShowDetailPage() {
                               >
                                 <GalleryImage
                                   src={getAssetDisplayUrl(asset)}
+                                  srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                  diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                                   alt={asset.caption || "Gallery image"}
                                   sizes="180px"
                                 />
@@ -6164,6 +6819,8 @@ export default function TrrShowDetailPage() {
                           >
                             <GalleryImage
                               src={getAssetDisplayUrl(asset)}
+                              srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                              diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                               alt={asset.caption || "Show logo"}
                               sizes="250px"
                               className="object-contain"
@@ -6330,86 +6987,94 @@ export default function TrrShowDetailPage() {
               )}
 
               <div className="grid gap-4 sm:grid-cols-2">
-                {filteredUnifiedNews.map((item, index) => (
-                  <article key={`${item.article_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                    <a
-                      href={item.article_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group block"
-                    >
-                      <div className="relative mb-3 aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200">
-                        {item.image_url ? (
-                          <GalleryImage
-                            src={item.image_url}
-                            alt={item.headline || "News item"}
-                            sizes="400px"
-                            className="object-cover transition group-hover:scale-105"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
+                {filteredUnifiedNews.map((item, index) => {
+                  const newsImageUrl =
+                    (typeof item.hosted_image_url === "string" && item.hosted_image_url.trim()) ||
+                    (typeof item.image_url === "string" && item.image_url.trim()) ||
+                    (typeof item.original_image_url === "string" && item.original_image_url.trim()) ||
+                    null;
+
+                  return (
+                    <article key={`${item.article_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                      <a
+                        href={item.article_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group block"
+                      >
+                        <div className="relative mb-3 aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200">
+                          {newsImageUrl ? (
+                            <GalleryImage
+                              src={newsImageUrl}
+                              alt={item.headline || "News item"}
+                              sizes="400px"
+                              className="object-cover transition group-hover:scale-105"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
+                          )}
+                        </div>
+                        <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
+                          {item.headline || "Untitled story"}
+                        </h4>
+                      </a>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700">
+                          {(item.publisher_name || item.publisher_domain || item.source_id || "Source").toString()}
+                        </span>
+                        {item.source_id === "google_news" && typeof item.feed_rank === "number" && (
+                          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
+                            Feed #{item.feed_rank + 1}
+                          </span>
                         )}
                       </div>
-                      <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
-                        {item.headline || "Untitled story"}
-                      </h4>
-                    </a>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700">
-                        {(item.publisher_name || item.publisher_domain || item.source_id || "Source").toString()}
-                      </span>
-                      {item.source_id === "google_news" && typeof item.feed_rank === "number" && (
-                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
-                          Feed #{item.feed_rank + 1}
-                        </span>
+                      {Array.isArray(item.person_tags) && item.person_tags.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {item.person_tags.map((tag, tagIndex) => (
+                            <span
+                              key={`${tag.person_id || tag.person_name || "tag"}-${tagIndex}`}
+                              className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700"
+                            >
+                              {tag.person_name || "Person"}
+                            </span>
+                          ))}
+                        </div>
                       )}
-                    </div>
-                    {Array.isArray(item.person_tags) && item.person_tags.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {item.person_tags.map((tag, tagIndex) => (
-                          <span
-                            key={`${tag.person_id || tag.person_name || "tag"}-${tagIndex}`}
-                            className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700"
-                          >
-                            {tag.person_name || "Person"}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {Array.isArray(item.topic_tags) && item.topic_tags.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {item.topic_tags.map((topicTag) => (
-                          <span
-                            key={`${item.article_url}-topic-${topicTag}`}
-                            className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700"
-                          >
-                            {topicTag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {Array.isArray(item.season_matches) && item.season_matches.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {item.season_matches.map((match, matchIndex) => (
-                          <span
-                            key={`${item.article_url}-season-${match?.season_number || "x"}-${matchIndex}`}
-                            className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700"
-                          >
-                            Season {match?.season_number || "?"}
-                            {Array.isArray(match?.match_types) && match.match_types.length > 0
-                              ? ` (${match.match_types.join("+")})`
-                              : ""}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {formatBravoPublishedDate(item.published_at) && (
-                      <p className="mt-2 text-xs text-zinc-500">
-                        Posted {formatBravoPublishedDate(item.published_at)}
-                      </p>
-                    )}
-                  </article>
-                ))}
+                      {Array.isArray(item.topic_tags) && item.topic_tags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {item.topic_tags.map((topicTag) => (
+                            <span
+                              key={`${item.article_url}-topic-${topicTag}`}
+                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700"
+                            >
+                              {topicTag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {Array.isArray(item.season_matches) && item.season_matches.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {item.season_matches.map((match, matchIndex) => (
+                            <span
+                              key={`${item.article_url}-season-${match?.season_number || "x"}-${matchIndex}`}
+                              className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700"
+                            >
+                              Season {match?.season_number || "?"}
+                              {Array.isArray(match?.match_types) && match.match_types.length > 0
+                                ? ` (${match.match_types.join("+")})`
+                                : ""}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {formatBravoPublishedDate(item.published_at) && (
+                        <p className="mt-2 text-xs text-zinc-500">
+                          Posted {formatBravoPublishedDate(item.published_at)}
+                        </p>
+                      )}
+                    </article>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -6433,10 +7098,10 @@ export default function TrrShowDetailPage() {
                   <button
                     type="button"
                     onClick={refreshShowCast}
-                    disabled={isShowRefreshBusy}
+                    disabled={isCastRefreshBusy}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                    {isCastRefreshBusy ? "Refreshing..." : "Refresh"}
                   </button>
                 </div>
               </div>
@@ -6628,7 +7293,14 @@ export default function TrrShowDetailPage() {
                         return (
                           <Link
                             key={member.id}
-                            href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}`}
+                            href={buildPersonAdminUrl({
+                              showSlug: showSlugForRouting,
+                              personSlug: buildPersonRouteSlug({
+                                personName: member.full_name || member.cast_member_name || null,
+                                personId: member.person_id,
+                              }),
+                              tab: "overview",
+                            }) as Route}
                             className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                           >
                             <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -6729,7 +7401,14 @@ export default function TrrShowDetailPage() {
                         return (
                           <Link
                             key={`crew-${member.id}`}
-                            href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}`}
+                            href={buildPersonAdminUrl({
+                              showSlug: showSlugForRouting,
+                              personSlug: buildPersonRouteSlug({
+                                personName: member.full_name || member.cast_member_name || null,
+                                personId: member.person_id,
+                              }),
+                              tab: "overview",
+                            }) as Route}
                             className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
                           >
                             <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -6829,7 +7508,14 @@ export default function TrrShowDetailPage() {
                         return (
                           <Link
                             key={`archive-${member.id}`}
-                            href={`/admin/trr-shows/people/${member.person_id}?showId=${encodeURIComponent(showSlugForRouting)}`}
+                            href={buildPersonAdminUrl({
+                              showSlug: showSlugForRouting,
+                              personSlug: buildPersonRouteSlug({
+                                personName: member.full_name || member.cast_member_name || null,
+                                personId: member.person_id,
+                              }),
+                              tab: "overview",
+                            }) as Route}
                             className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 transition hover:border-amber-300 hover:bg-amber-100/40"
                           >
                             <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
@@ -6888,6 +7574,28 @@ export default function TrrShowDetailPage() {
           {activeTab === "social" && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                {selectedSocialSeason ? (
+                  <nav className="mb-4 flex flex-wrap gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
+                    {SHOW_SOCIAL_PLATFORM_TABS.map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setSocialPlatformTab(tab.key)}
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                          socialPlatformTab === tab.key
+                            ? "bg-white text-zinc-900 shadow-sm"
+                            : "text-zinc-600 hover:bg-white/70 hover:text-zinc-800"
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </nav>
+                ) : (
+                  <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-medium text-zinc-600">
+                    Platform tabs are available after selecting a season.
+                  </div>
+                )}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
@@ -6930,6 +7638,10 @@ export default function TrrShowDetailPage() {
                   seasonNumber={selectedSocialSeason.season_number}
                   seasonId={selectedSocialSeason.id}
                   showName={show.name}
+                  platformTab={socialPlatformTab}
+                  onPlatformTabChange={setSocialPlatformTab}
+                  hidePlatformTabs={true}
+                  analyticsView={socialAnalyticsView}
                 />
               ) : (
                 <SocialPostsSection
@@ -7668,7 +8380,7 @@ export default function TrrShowDetailPage() {
         {assetLightbox && lightboxAssetCapabilities && (
           <ImageLightbox
             src={getAssetDetailUrl(assetLightbox.asset)}
-            fallbackSrc={assetLightbox.asset.original_url ?? assetLightbox.asset.hosted_url}
+            fallbackSrcs={getSeasonAssetDetailUrlCandidates(assetLightbox.asset)}
             alt={assetLightbox.asset.caption || "Gallery image"}
             isOpen={true}
             onClose={closeAssetLightbox}
@@ -8450,6 +9162,107 @@ export default function TrrShowDetailPage() {
                       ? "Syncing..."
                       : "Sync by Bravo"
                     : "Next"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {batchJobsOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"
+            onClick={() => {
+              if (!batchJobsRunning) setBatchJobsOpen(false);
+            }}
+          >
+            <div
+              className="w-full max-w-2xl rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Batch Jobs
+                  </p>
+                  <h4 className="text-lg font-semibold text-zinc-900">Run Image Jobs</h4>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Select one or more operations and content types. Jobs run on the currently visible gallery assets.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!batchJobsRunning) setBatchJobsOpen(false);
+                  }}
+                  className="rounded-lg border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
+                  disabled={batchJobsRunning}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Operations
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(Object.keys(BATCH_JOB_OPERATION_LABELS) as BatchJobOperation[]).map((operation) => (
+                      <label
+                        key={operation}
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={batchJobOperations.includes(operation)}
+                          onChange={() => toggleBatchJobOperation(operation)}
+                          disabled={batchJobsRunning}
+                        />
+                        {BATCH_JOB_OPERATION_LABELS[operation]}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Content Types
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {ASSET_SECTION_ORDER.map((section) => (
+                      <label
+                        key={section}
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={batchJobContentSections.includes(section)}
+                          onChange={() => toggleBatchJobContentSection(section)}
+                          disabled={batchJobsRunning}
+                        />
+                        {ASSET_SECTION_LABELS[section]}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBatchJobsOpen(false)}
+                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                  disabled={batchJobsRunning}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={runBatchJobs}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                  disabled={batchJobsRunning}
+                >
+                  {batchJobsRunning ? "Running..." : "Run Batch Jobs"}
                 </button>
               </div>
             </div>

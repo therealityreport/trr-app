@@ -23,4 +23,18 @@ describe("QuestionsTab ranking labels and paths", () => {
     expect(screen.getByText("components/survey/PersonRankingsInput.tsx")).toBeInTheDocument();
     expect(screen.getByText("components/survey/PosterRankingsInput.tsx")).toBeInTheDocument();
   });
+
+  it("keeps figma ranking heading fonts in preview cards", () => {
+    render(<QuestionsTab baseColors={["#111111", "#FFFFFF"]} />);
+
+    const heading = screen.getAllByText("Rank the Cast of RHOSLC S6.")[0];
+    const subheading = screen.getAllByText("Drag-and-Drop the Cast Members to their Rank.")[0];
+
+    expect(heading).toHaveStyle({
+      fontFamily: "\"Rude Slab Condensed\", var(--font-sans), sans-serif",
+    });
+    expect(subheading).toHaveStyle({
+      fontFamily: "\"Plymouth Serial\", var(--font-sans), sans-serif",
+    });
+  });
 });

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { IMAGE_PIPELINE_TIMEOUTS } from "@/lib/admin/image-pipeline-timeouts";
 
 export const dynamic = "force-dynamic";
+const DETECT_TEXT_OVERLAY_TIMEOUT_MS = IMAGE_PIPELINE_TIMEOUTS.detectTextOverlayMs;
 
 interface RouteParams {
   params: Promise<{ assetId: string }>;
@@ -67,7 +69,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           // Backend reads `force` from query param; still send a body for forward-compat.
           body: JSON.stringify({ force }),
         },
-        90_000
+        DETECT_TEXT_OVERLAY_TIMEOUT_MS
       );
       backendResponse = out.response;
       data = out.data;
@@ -76,7 +78,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return NextResponse.json(
           {
             error: "Detect text overlay timed out",
-            detail: "Timed out waiting for backend detect-text-overlay response (90s).",
+            detail: `Timed out waiting for backend detect-text-overlay response (${Math.round(DETECT_TEXT_OVERLAY_TIMEOUT_MS / 1000)}s).`,
           },
           { status: 504 }
         );

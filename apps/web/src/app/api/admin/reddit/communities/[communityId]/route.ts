@@ -8,6 +8,7 @@ import {
   normalizeSubreddit,
   updateRedditCommunity,
 } from "@/lib/server/admin/reddit-sources-repository";
+import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const { communityId } = await params;
     if (!communityId) {
       return NextResponse.json({ error: "communityId is required" }, { status: 400 });
+    }
+    if (!isValidUuid(communityId)) {
+      return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
     }
 
     const community = await getRedditCommunityById(communityId);
@@ -46,13 +50,42 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (!communityId) {
       return NextResponse.json({ error: "communityId is required" }, { status: 400 });
     }
+    if (!isValidUuid(communityId)) {
+      return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
+    }
 
     const body = (await request.json()) as {
       subreddit?: unknown;
       display_name?: unknown;
       notes?: unknown;
       is_active?: unknown;
+      analysis_flares?: unknown;
+      analysis_all_flares?: unknown;
     };
+
+    let analysisFlares: string[] | undefined;
+    if (body.analysis_flares !== undefined) {
+      if (!Array.isArray(body.analysis_flares)) {
+        return NextResponse.json({ error: "analysis_flares must be an array of strings" }, { status: 400 });
+      }
+      const hasInvalidValue = body.analysis_flares.some((value) => typeof value !== "string");
+      if (hasInvalidValue) {
+        return NextResponse.json({ error: "analysis_flares must be an array of strings" }, { status: 400 });
+      }
+      analysisFlares = body.analysis_flares as string[];
+    }
+
+    let analysisAllFlares: string[] | undefined;
+    if (body.analysis_all_flares !== undefined) {
+      if (!Array.isArray(body.analysis_all_flares)) {
+        return NextResponse.json({ error: "analysis_all_flares must be an array of strings" }, { status: 400 });
+      }
+      const hasInvalidValue = body.analysis_all_flares.some((value) => typeof value !== "string");
+      if (hasInvalidValue) {
+        return NextResponse.json({ error: "analysis_all_flares must be an array of strings" }, { status: 400 });
+      }
+      analysisAllFlares = body.analysis_all_flares as string[];
+    }
 
     let subreddit: string | undefined;
     if (body.subreddit !== undefined) {
@@ -75,6 +108,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         typeof body.display_name === "string" ? body.display_name.trim() || null : undefined,
       notes: typeof body.notes === "string" ? body.notes.trim() || null : undefined,
       isActive: typeof body.is_active === "boolean" ? body.is_active : undefined,
+      analysisFlares,
+      analysisAllFlares,
     });
 
     if (!community) {
@@ -105,6 +140,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const { communityId } = await params;
     if (!communityId) {
       return NextResponse.json({ error: "communityId is required" }, { status: 400 });
+    }
+    if (!isValidUuid(communityId)) {
+      return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
     }
 
     const deleted = await deleteRedditCommunity(authContext, communityId);

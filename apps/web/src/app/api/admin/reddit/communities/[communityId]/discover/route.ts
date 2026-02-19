@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getShowById } from "@/lib/server/trr-api/trr-shows-repository";
+import { getCastByShowId, getShowById } from "@/lib/server/trr-api/trr-shows-repository";
 import {
   type RedditListingSort,
   RedditDiscoveryError,
   discoverSubredditThreads,
 } from "@/lib/server/admin/reddit-discovery-service";
 import { getRedditCommunityById } from "@/lib/server/admin/reddit-sources-repository";
+import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!communityId) {
       return NextResponse.json({ error: "communityId is required" }, { status: 400 });
     }
+    if (!isValidUuid(communityId)) {
+      return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
+    }
 
     const community = await getRedditCommunityById(communityId);
     if (!community) {
@@ -46,6 +50,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const show = await getShowById(community.trr_show_id).catch(() => null);
+    const cast = await getCastByShowId(community.trr_show_id, { limit: 200 }).catch(() => []);
+    const castNames = cast
+      .map((member) => member.full_name ?? member.cast_member_name ?? "")
+      .filter((name): name is string => name.trim().length > 0);
     const sortModes = parseSortModes(request.nextUrl.searchParams.get("sort"));
     const limitPerMode = parseLimit(request.nextUrl.searchParams.get("limit"));
 
@@ -53,6 +61,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       subreddit: community.subreddit,
       showName: show?.name ?? community.trr_show_name,
       showAliases: show?.alternative_names ?? [],
+      castNames,
+      analysisFlares: community.analysis_flares ?? [],
+      analysisAllFlares: community.analysis_all_flares ?? [],
       sortModes,
       limitPerMode,
     });

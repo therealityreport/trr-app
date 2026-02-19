@@ -71,6 +71,28 @@ export const UI_TEMPLATES: UiTemplate[] = [
     },
   },
   {
+    uiVariant: "rank-text-fields",
+    label: "Rank Text Fields",
+    description: "Figma tagline rank template with bold text-field choices.",
+    questionType: "single_choice",
+    defaultConfig: {
+      uiVariant: "rank-text-fields",
+      questionTextFontFamily: "\"Rude Slab Condensed\", var(--font-sans), sans-serif",
+      optionTextFontFamily: "\"Plymouth Serial\", var(--font-sans), sans-serif",
+      componentBackgroundColor: "#E2C3E9",
+      selectedOptionBackgroundColor: "#5D3167",
+      questionTextColor: "#111111",
+      optionTextColor: "#111111",
+      selectedOptionTextColor: "#FFFFFF",
+    },
+    seedOptions: [
+      { option_key: "choice_1", option_text: "Answer Choice 1" },
+      { option_key: "choice_2", option_text: "Answer Choice 2" },
+      { option_key: "choice_3", option_text: "Answer Choice 3" },
+      { option_key: "choice_4", option_text: "Answer Choice 4" },
+    ],
+  },
+  {
     uiVariant: "image-multiple-choice",
     label: "Single select (image grid)",
     description: "Single-choice grid of options (supports option metadata imagePath/imageUrl).",
@@ -78,6 +100,58 @@ export const UI_TEMPLATES: UiTemplate[] = [
     defaultConfig: {
       uiVariant: "image-multiple-choice",
       columns: 3,
+    },
+  },
+  {
+    uiVariant: "poster-single-select",
+    label: "PosterSingleSelect",
+    description: "Single-choice 2x3 poster card selector for season prompts.",
+    questionType: "single_choice",
+    defaultConfig: {
+      uiVariant: "poster-single-select",
+      columns: 3,
+      componentBackgroundColor: "#000000",
+      placeholderShapeColor: "#D9D9D9",
+      placeholderShapeBorderColor: "#D9D9D9",
+      selectedOptionBorderColor: "#FFFFFF",
+      questionTextColor: "#F3F4F6",
+      questionTextFontFamily: "\"Geometric Slabserif 712\", var(--font-sans), serif",
+      questionTextLineHeight: 0.94,
+      questionTextLetterSpacing: 0.008,
+    },
+  },
+  {
+    uiVariant: "cast-single-select",
+    label: "SingleSelectCast",
+    description: "Single-choice cast-circle selector for superlatives.",
+    questionType: "single_choice",
+    defaultConfig: {
+      uiVariant: "cast-single-select",
+      columns: 4,
+      componentBackgroundColor: "#5D3167",
+      placeholderShapeColor: "#EEEEEF",
+      placeholderShapeBorderColor: "#DCDDDF",
+      selectedOptionBorderColor: "#FFFFFF",
+      questionTextColor: "#FFFFFF",
+      questionTextFontFamily: "\"Rude Slab Condensed\", var(--font-sans), sans-serif",
+      questionTextLineHeight: 0.95,
+      questionTextLetterSpacing: 0.01,
+    },
+  },
+  {
+    uiVariant: "reunion-seating-prediction",
+    label: "ReunionSeatingPrediction",
+    description: "Predict reunion couch seating around host with full-time-first flow.",
+    questionType: "likert",
+    defaultConfig: {
+      uiVariant: "reunion-seating-prediction",
+      hostName: "Andy Cohen",
+      hostImagePath: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Andy_Cohen_2012_Shankbone_2.jpg/320px-Andy_Cohen_2012_Shankbone_2.jpg",
+      questionTextColor: "#111111",
+      questionTextFontFamily: "\"Rude Slab Condensed\", var(--font-sans), sans-serif",
+      questionTextLineHeight: 1.02,
+      questionTextLetterSpacing: 0.008,
+      componentBackgroundColor: "#D9D9D9",
     },
   },
   {
@@ -99,6 +173,18 @@ export const UI_TEMPLATES: UiTemplate[] = [
       uiVariant: "multi-select-choice",
       minSelections: 0,
       maxSelections: undefined,
+    },
+  },
+  {
+    uiVariant: "cast-multi-select",
+    label: "Cast Multi-select",
+    description: "Figma cast-card multi-select grid (select two).",
+    questionType: "multi_choice",
+    defaultConfig: {
+      uiVariant: "cast-multi-select",
+      minSelections: 2,
+      maxSelections: 2,
+      subTextHeading: "SELECT TWO",
     },
   },
   {
@@ -214,6 +300,11 @@ export function uiVariantLabel(uiVariant: UiVariant): string {
   if (uiVariant === "circle-ranking") return "Person Rankings";
   if (uiVariant === "rectangle-ranking") return "Poster Rankings";
   if (uiVariant === "three-choice-slider") return "Cast decision card";
+  if (uiVariant === "cast-multi-select") return "Cast Multi-select";
+  if (uiVariant === "rank-text-fields") return "Rank Text Fields";
+  if (uiVariant === "poster-single-select") return "PosterSingleSelect";
+  if (uiVariant === "cast-single-select") return "SingleSelectCast";
+  if (uiVariant === "reunion-seating-prediction") return "ReunionSeatingPrediction";
   // Fallback for any variants not in the picker yet.
   return uiVariant;
 }

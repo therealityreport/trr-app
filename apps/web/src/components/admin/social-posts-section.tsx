@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { auth } from "@/lib/firebase";
+import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 
 // ============================================================================
 // Types
@@ -73,11 +73,7 @@ export default function SocialPostsSection({
   const [submitting, setSubmitting] = useState(false);
 
   // Helper to get auth headers
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
 
   // Fetch posts
   const fetchPosts = useCallback(async () => {

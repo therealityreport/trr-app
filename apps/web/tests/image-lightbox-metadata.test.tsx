@@ -6,6 +6,7 @@ import type { PhotoMetadata } from "@/lib/photo-metadata";
 const buildMetadata = (overrides?: Partial<PhotoMetadata>): PhotoMetadata => ({
   source: "fandom",
   sourceBadgeColor: "#00d6a3",
+  contentType: "PROMO",
   s3MirrorFileName: "4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
   sourcePageTitle: "Lisa Barlow",
   sourceUrl: "https://real-housewives.fandom.com/wiki/Lisa_Barlow",
@@ -78,6 +79,25 @@ describe("ImageLightbox metadata panel", () => {
     openMetadataPanel();
 
     expect(screen.getByText("EXAMPLE.COM | Unknown Page")).toBeInTheDocument();
+  });
+
+  it("shows unified Content Type control with Profile Picture option", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        canManage
+        onUpdateContentType={vi.fn(async () => {})}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByRole("option", { name: "Profile Picture" })).toBeInTheDocument();
+    expect(screen.queryByText("IMDb Type")).not.toBeInTheDocument();
   });
 
   it("shows Refresh Full Pipeline action when refresh is available", () => {

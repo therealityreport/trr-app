@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 
 // ============================================================================
 // Types (Client-facing mirrors of server records)
@@ -258,11 +258,11 @@ function BrandSeasonEditor({
     setError(null);
   }, [season.cast_members, season.colors, season.id, season.label, season.updated_at]);
 
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) => fetchAdminWithAuth(input, init),
+    [],
+  );
 
   const seedFromTrrCast = () => {
     const deduped = new Map<string, CastAsset>();
@@ -287,7 +287,7 @@ function BrandSeasonEditor({
     setError(null);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/shows/${showKey}/seasons/${season.id}`, {
+      const response = await fetchWithAuth(`/api/admin/shows/${showKey}/seasons/${season.id}`, {
         method: "PUT",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -459,17 +459,17 @@ export default function ShowBrandEditor({
   const [newSeasonNumber, setNewSeasonNumber] = useState<number>(1);
   const [newSeasonLabel, setNewSeasonLabel] = useState<string>("");
 
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) => fetchAdminWithAuth(input, init),
+    [],
+  );
 
   const fetchShowMediaAssets = useCallback(async () => {
     setShowMediaLoading(true);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${trrShowId}/assets`, {
+      const response = await fetchWithAuth(`/api/admin/trr-api/shows/${trrShowId}/assets`, {
         headers,
       });
       const data = await response.json().catch(() => ({}));
@@ -504,7 +504,7 @@ export default function ShowBrandEditor({
     setSuccess(null);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/shows/by-trr-show/${trrShowId}?includeSeasons=true`, {
+      const response = await fetchWithAuth(`/api/admin/shows/by-trr-show/${trrShowId}?includeSeasons=true`, {
         headers,
       });
       const data = await response.json().catch(() => ({}));
@@ -613,7 +613,7 @@ export default function ShowBrandEditor({
       const base = slugify(trrShowName) || "show";
       const key = `${base.slice(0, 24)}-${trrShowId.slice(0, 8)}`;
 
-      const response = await fetch("/api/admin/shows", {
+      const response = await fetchWithAuth("/api/admin/shows", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -643,7 +643,7 @@ export default function ShowBrandEditor({
     setSuccess(null);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/shows/${showRecord.key}`, {
+      const response = await fetchWithAuth(`/api/admin/shows/${showRecord.key}`, {
         method: "PUT",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -694,7 +694,7 @@ export default function ShowBrandEditor({
     setSuccess(null);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/shows/${showRecord.key}/seasons`, {
+      const response = await fetchWithAuth(`/api/admin/shows/${showRecord.key}/seasons`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({

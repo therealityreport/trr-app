@@ -1,6 +1,7 @@
 import "server-only";
 
 import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
+import { sanitizeRedditFlairList } from "@/lib/server/admin/reddit-flair-normalization";
 
 export interface RedditCommunityRow {
   id: string;
@@ -10,6 +11,8 @@ export interface RedditCommunityRow {
   display_name: string | null;
   notes: string | null;
   post_flares: string[];
+  analysis_flares: string[];
+  analysis_all_flares: string[];
   post_flares_updated_at: string | null;
   is_active: boolean;
   created_by_firebase_uid: string;
@@ -66,6 +69,8 @@ export interface UpdateRedditCommunityInput {
   displayName?: string | null;
   notes?: string | null;
   isActive?: boolean;
+  analysisFlares?: string[];
+  analysisAllFlares?: string[];
 }
 
 export interface ListRedditThreadsOptions {
@@ -111,8 +116,10 @@ const THREADS_TABLE = "admin.reddit_threads";
 
 const SUBREDDIT_RE = /^[A-Za-z0-9_]{2,21}$/;
 
-interface RedditCommunityRowRaw extends Omit<RedditCommunityRow, "post_flares"> {
+interface RedditCommunityRowRaw extends Omit<RedditCommunityRow, "post_flares" | "analysis_flares" | "analysis_all_flares"> {
   post_flares: unknown;
+  analysis_flares: unknown;
+  analysis_all_flares: unknown;
 }
 
 const toThreadsArray = (value: unknown): RedditThreadRow[] => {
@@ -120,20 +127,10 @@ const toThreadsArray = (value: unknown): RedditThreadRow[] => {
   return value as RedditThreadRow[];
 };
 
-const toPostFlaresArray = (value: unknown): string[] => {
+const toFlairArray = (subreddit: string, value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of value) {
-    if (typeof item !== "string") continue;
-    const flair = item.trim();
-    if (!flair) continue;
-    const key = flair.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(flair);
-  }
-  return out;
+  const raw = value.filter((item): item is string => typeof item === "string");
+  return sanitizeRedditFlairList(subreddit, raw);
 };
 
 const toNumberOrZero = (value: number | null | undefined): number => {
@@ -143,7 +140,9 @@ const toNumberOrZero = (value: number | null | undefined): number => {
 
 const toCommunityRow = (row: RedditCommunityRowRaw): RedditCommunityRow => ({
   ...row,
-  post_flares: toPostFlaresArray(row.post_flares),
+  post_flares: toFlairArray(row.subreddit, row.post_flares),
+  analysis_flares: toFlairArray(row.subreddit, row.analysis_flares),
+  analysis_all_flares: toFlairArray(row.subreddit, row.analysis_all_flares),
 });
 
 export const normalizeSubreddit = (value: string): string => {
@@ -261,6 +260,18 @@ export async function updateRedditCommunity(
     const sets: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
+    let subredditForFlairSanitization: string | null = input.subreddit ?? null;
+
+    if ((input.analysisFlares !== undefined || input.analysisAllFlares !== undefined) && !subredditForFlairSanitization) {
+      const communityLookup = await client.query<{ subreddit: string }>(
+        `SELECT subreddit
+           FROM ${COMMUNITIES_TABLE}
+          WHERE id = $1::uuid
+          LIMIT 1`,
+        [id],
+      );
+      subredditForFlairSanitization = communityLookup.rows[0]?.subreddit ?? null;
+    }
 
     if (input.subreddit !== undefined) {
       sets.push(`subreddit = $${idx++}`);
@@ -277,6 +288,20 @@ export async function updateRedditCommunity(
     if (input.isActive !== undefined) {
       sets.push(`is_active = $${idx++}`);
       values.push(input.isActive);
+    }
+    if (input.analysisFlares !== undefined) {
+      sets.push(`analysis_flares = $${idx++}::jsonb`);
+      values.push(
+        JSON.stringify(sanitizeRedditFlairList(subredditForFlairSanitization ?? "", input.analysisFlares)),
+      );
+    }
+    if (input.analysisAllFlares !== undefined) {
+      sets.push(`analysis_all_flares = $${idx++}::jsonb`);
+      values.push(
+        JSON.stringify(
+          sanitizeRedditFlairList(subredditForFlairSanitization ?? "", input.analysisAllFlares),
+        ),
+      );
     }
 
     if (sets.length === 0) {
@@ -303,13 +328,26 @@ export async function updateRedditCommunityPostFlares(
   postFlaresUpdatedAt: string,
 ): Promise<RedditCommunityRow | null> {
   return withAuthTransaction(authContext, async (client) => {
+    const communityLookup = await client.query<{ subreddit: string }>(
+      `SELECT subreddit
+         FROM ${COMMUNITIES_TABLE}
+        WHERE id = $1::uuid
+        LIMIT 1`,
+      [id],
+    );
+    const subreddit = communityLookup.rows[0]?.subreddit;
+    if (!subreddit) {
+      return null;
+    }
+
+    const sanitizedPostFlares = sanitizeRedditFlairList(subreddit, postFlares);
     const result = await client.query<RedditCommunityRowRaw>(
       `UPDATE ${COMMUNITIES_TABLE}
           SET post_flares = $1::jsonb,
               post_flares_updated_at = $2::timestamptz
         WHERE id = $3::uuid
       RETURNING *`,
-      [JSON.stringify(postFlares), postFlaresUpdatedAt, id],
+      [JSON.stringify(sanitizedPostFlares), postFlaresUpdatedAt, id],
     );
     const row = result.rows[0];
     return row ? toCommunityRow(row) : null;

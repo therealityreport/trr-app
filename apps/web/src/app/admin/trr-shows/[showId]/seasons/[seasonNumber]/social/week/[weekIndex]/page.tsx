@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildSeasonAdminUrl } from "@/lib/admin/show-admin-routes";
-import { auth } from "@/lib/firebase";
+import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -41,9 +41,14 @@ interface InstagramPost extends BasePost {
   comments_count: number;
   views: number;
   media_type?: string | null;
+  post_format?: "reel" | "post" | "carousel" | null;
   media_urls?: string[] | null;
   thumbnail_url?: string | null;
+  profile_tags?: string[];
+  collaborators?: string[];
+  hashtags?: string[];
   mentions: string[];
+  duration_seconds?: number | null;
 }
 
 interface TikTokPost extends BasePost {
@@ -122,6 +127,12 @@ interface PostDetailResponse {
   title?: string;
   display_name?: string;
   thumbnail_url?: string | null;
+  post_format?: "reel" | "post" | "carousel" | null;
+  profile_tags?: string[];
+  collaborators?: string[];
+  hashtags?: string[];
+  mentions?: string[];
+  duration_seconds?: number | null;
   stats: Record<string, number>;
   total_comments_in_db: number;
   comments: ThreadedComment[];
@@ -320,6 +331,59 @@ function getJobStage(job: SocialJob): string {
   return "posts";
 }
 
+function getJobStageCounters(job: SocialJob): { posts: number; comments: number } | null {
+  const counters = (job.metadata as Record<string, unknown> | undefined)?.stage_counters as
+    | Record<string, unknown>
+    | undefined;
+  const hasPosts = typeof counters?.posts === "number";
+  const hasComments = typeof counters?.comments === "number";
+  if (!hasPosts && !hasComments) return null;
+  return {
+    posts: Number(counters?.posts ?? 0),
+    comments: Number(counters?.comments ?? 0),
+  };
+}
+
+function getJobPersistCounters(job: SocialJob): { posts_upserted: number; comments_upserted: number } | null {
+  const counters = (job.metadata as Record<string, unknown> | undefined)?.persist_counters as
+    | Record<string, unknown>
+    | undefined;
+  const hasPosts = typeof counters?.posts_upserted === "number";
+  const hasComments = typeof counters?.comments_upserted === "number";
+  if (!hasPosts && !hasComments) return null;
+  return {
+    posts_upserted: Number(counters?.posts_upserted ?? 0),
+    comments_upserted: Number(counters?.comments_upserted ?? 0),
+  };
+}
+
+function getJobActivity(job: SocialJob): Record<string, unknown> | null {
+  const activity = (job.metadata as Record<string, unknown> | undefined)?.activity as
+    | Record<string, unknown>
+    | undefined;
+  if (!activity || typeof activity !== "object") return null;
+  return activity;
+}
+
+function getJobActivitySummary(job: SocialJob): string {
+  const activity = getJobActivity(job);
+  if (!activity) return "";
+  const parts: string[] = [];
+  if (typeof activity.phase === "string" && activity.phase.trim()) {
+    parts.push(activity.phase.replaceAll("_", " "));
+  }
+  if (typeof activity.pages_scanned === "number") {
+    parts.push(`${activity.pages_scanned}pg`);
+  }
+  if (typeof activity.posts_checked === "number") {
+    parts.push(`${activity.posts_checked}chk`);
+  }
+  if (typeof activity.matched_posts === "number") {
+    parts.push(`${activity.matched_posts}match`);
+  }
+  return parts.join(" · ");
+}
+
 function formatRunStatus(status: SocialRun["status"]): string {
   return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
 }
@@ -401,12 +465,10 @@ function PostStatsDrawer({
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
-    const user = auth.currentUser;
-    if (!user) throw new Error("Not authenticated");
-    const token = await user.getIdToken();
+    const headers = await getClientAuthHeaders();
     const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -448,14 +510,12 @@ function PostStatsDrawer({
     try {
       setRefreshing(true);
       setRefreshError(null);
-      const user = auth.currentUser;
-      if (!user) throw new Error("Not authenticated");
-      const token = await user.getIdToken();
+      const headers = await getClientAuthHeaders();
       const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
       const res = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
+          ...headers,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -565,6 +625,50 @@ function PostStatsDrawer({
                   <p className="text-sm text-gray-700 whitespace-pre-wrap break-words mb-3">
                     {data.text}
                   </p>
+                )}
+                {data.platform === "instagram" && (
+                  <div className="mb-3 space-y-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {data.post_format && (
+                        <span className="text-xs rounded bg-pink-50 px-1.5 py-0.5 text-pink-700">
+                          {data.post_format.toUpperCase()}
+                        </span>
+                      )}
+                      {typeof data.duration_seconds === "number" && data.duration_seconds > 0 && (
+                        <span className="text-xs rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
+                          {data.duration_seconds}s
+                        </span>
+                      )}
+                    </div>
+                    {(data.profile_tags?.length || data.collaborators?.length) ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(data.profile_tags ?? []).map((tag) => (
+                          <span key={`profile-${tag}`} className="text-xs rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-700">
+                            {tag}
+                          </span>
+                        ))}
+                        {(data.collaborators ?? []).map((collab) => (
+                          <span key={`collab-${collab}`} className="text-xs rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
+                            {collab}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {(data.hashtags?.length || data.mentions?.length) ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(data.hashtags ?? []).map((tag) => (
+                          <span key={`hashtag-${tag}`} className="text-xs rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">
+                            #{tag}
+                          </span>
+                        ))}
+                        {(data.mentions ?? []).map((mention) => (
+                          <span key={`mention-${mention}`} className="text-xs rounded bg-purple-50 px-1.5 py-0.5 text-purple-700">
+                            {mention}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 )}
                 {data.url && (
                   <a
@@ -688,6 +792,10 @@ function PostCard({
   const [statsOpen, setStatsOpen] = useState(false);
   const hashtags = getStrArr(post, "hashtags");
   const mentions = getStrArr(post, "mentions");
+  const profileTags = getStrArr(post, "profile_tags");
+  const collaborators = getStrArr(post, "collaborators");
+  const postFormat = getStr(post, "post_format");
+  const durationSeconds = getNum(post, "duration_seconds");
   const actualComments = getActualCommentsForPost(platform, post);
   const savedComments = getSavedCommentsForPost(post);
   const commentsCoverageIncomplete = isCommentsCoverageIncomplete(savedComments, actualComments);
@@ -772,6 +880,38 @@ function PostCard({
           </div>
         )}
 
+        {platform === "instagram" &&
+          (postFormat || durationSeconds > 0 || profileTags.length > 0 || collaborators.length > 0) && (
+            <div className="mt-2 space-y-1.5">
+              <div className="flex flex-wrap gap-1.5">
+                {postFormat && (
+                  <span className="text-xs rounded bg-pink-50 px-1.5 py-0.5 text-pink-700">
+                    {postFormat.toUpperCase()}
+                  </span>
+                )}
+                {durationSeconds > 0 && (
+                  <span className="text-xs rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
+                    {durationSeconds}s
+                  </span>
+                )}
+              </div>
+              {(profileTags.length > 0 || collaborators.length > 0) && (
+                <div className="flex flex-wrap gap-1.5">
+                  {profileTags.map((tag) => (
+                    <span key={`profile-${tag}`} className="text-xs rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-700">
+                      {tag}
+                    </span>
+                  ))}
+                  {collaborators.map((collab) => (
+                    <span key={`collab-${collab}`} className="text-xs rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
+                      {collab}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
         {/* Actions row */}
         <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
           <div className="flex items-center gap-3">
@@ -827,6 +967,16 @@ export default function WeekDetailPage() {
   const params = useParams<{ showId: string; seasonNumber: string; weekIndex: string }>();
   const searchParams = useSearchParams();
   const { showId: showRouteParam, seasonNumber, weekIndex } = params;
+  const seasonNumberInt = Number.parseInt(seasonNumber, 10);
+  const weekIndexInt = Number.parseInt(weekIndex, 10);
+  const hasValidNumericPathParams =
+    Number.isFinite(seasonNumberInt) &&
+    seasonNumberInt > 0 &&
+    Number.isFinite(weekIndexInt) &&
+    weekIndexInt >= 0;
+  const invalidPathParamsError = hasValidNumericPathParams
+    ? null
+    : "Invalid season/week URL. Season and week must be numeric values.";
   const [resolvedShowId, setResolvedShowId] = useState<string | null>(
     looksLikeUuid(showRouteParam) ? showRouteParam : null
   );
@@ -880,12 +1030,10 @@ export default function WeekDetailPage() {
       setSlugResolutionLoading(true);
       setSlugResolutionError(null);
       try {
-        const user = auth.currentUser;
-        if (!user) throw new Error("Not authenticated");
-        const token = await user.getIdToken();
+        const headers = await getClientAuthHeaders();
         const response = await fetch(
           `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
-          { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
+          { headers, cache: "no-store" }
         );
         const data = (await response.json().catch(() => ({}))) as {
           error?: string;
@@ -914,16 +1062,14 @@ export default function WeekDetailPage() {
   }, [authLoading, isAdmin, showRouteParam]);
 
   const fetchData = useCallback(async () => {
-    if (!showIdForApi || !seasonNumber || !weekIndex) return;
+    if (!showIdForApi || !seasonNumber || !weekIndex || !hasValidNumericPathParams) return;
     setLoading(true);
     setError(null);
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error("Not authenticated");
-      const token = await user.getIdToken();
+      const headers = await getClientAuthHeaders();
       const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}?source_scope=${sourceScope}`;
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -937,18 +1083,23 @@ export default function WeekDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [showIdForApi, seasonNumber, sourceScope, weekIndex]);
+  }, [hasValidNumericPathParams, showIdForApi, seasonNumber, sourceScope, weekIndex]);
 
   useEffect(() => {
+    if (!hasValidNumericPathParams) {
+      setLoading(false);
+      setError(invalidPathParamsError);
+      return;
+    }
     if (isAdmin) fetchData();
-  }, [isAdmin, fetchData]);
+  }, [fetchData, hasValidNumericPathParams, invalidPathParamsError, isAdmin]);
 
   const fetchSyncProgress = useCallback(
     async (runId: string, options?: { preserveLastGoodJobsIfEmpty?: boolean }) => {
-      const user = auth.currentUser;
-      if (!user) throw new Error("Not authenticated");
-      const token = await user.getIdToken();
-      const headers = { Authorization: `Bearer ${token}` };
+      if (!hasValidNumericPathParams) {
+        throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
+      }
+      const headers = await getClientAuthHeaders();
       const [runsResponse, jobsResponse] = await Promise.all([
         fetch(
           `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?source_scope=${sourceScope}&limit=100`,
@@ -982,7 +1133,7 @@ export default function WeekDetailPage() {
       });
       return { run: nextRun, jobs: nextJobs };
     },
-    [seasonNumber, showIdForApi, sourceScope],
+    [hasValidNumericPathParams, invalidPathParamsError, seasonNumber, showIdForApi, sourceScope],
   );
 
   const syncAllCommentsForWeek = useCallback(async () => {
@@ -992,9 +1143,10 @@ export default function WeekDetailPage() {
       setSyncError(null);
       setSyncPollError(null);
       setSyncMessage(null);
-      const user = auth.currentUser;
-      if (!user) throw new Error("Not authenticated");
-      const token = await user.getIdToken();
+      if (!hasValidNumericPathParams) {
+        throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
+      }
+      const headers = await getClientAuthHeaders();
 
       const selectedPlatformEntries =
         platformFilter === "all"
@@ -1063,7 +1215,7 @@ export default function WeekDetailPage() {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
+            ...headers,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(payload),
@@ -1102,7 +1254,16 @@ export default function WeekDetailPage() {
       setSyncError(err instanceof Error ? err.message : "Failed to sync comments");
       setSyncingComments(false);
     }
-  }, [data, fetchSyncProgress, platformFilter, seasonNumber, showIdForApi, sourceScope]);
+  }, [
+    data,
+    fetchSyncProgress,
+    hasValidNumericPathParams,
+    invalidPathParamsError,
+    platformFilter,
+    seasonNumber,
+    showIdForApi,
+    sourceScope,
+  ]);
 
   const syncRunStatus = syncRun?.status ?? null;
 
@@ -1138,7 +1299,7 @@ export default function WeekDetailPage() {
           if (totalJobs > 0) {
             message += ` of ${totalJobs}`;
           }
-          message += `, ${totalItems.toLocaleString()} items`;
+          message += `, ${totalItems.toLocaleString()} scraped`;
           if (failedJobs > 0) {
             message += ` · ${failedJobs} failed`;
           }
@@ -1181,7 +1342,7 @@ export default function WeekDetailPage() {
     if (totalJobs > 0) {
       message += ` of ${totalJobs}`;
     }
-    message += `, ${totalItems.toLocaleString()} items`;
+    message += `, ${totalItems.toLocaleString()} scraped`;
     if (failedJobs > 0) {
       message += ` · ${failedJobs} failed`;
     }
@@ -1304,16 +1465,15 @@ export default function WeekDetailPage() {
         completed: Number(stage.completed ?? 0),
         failed: Number(stage.failed ?? 0),
         active: Number(stage.active ?? 0),
+        scraped: 0,
+        saved: 0,
       };
     };
     let posts = parseStage("posts");
     let comments = parseStage("comments");
-    if (posts.total > 0 || comments.total > 0) {
-      return { posts, comments };
-    }
     const fallback = {
-      posts: { total: 0, completed: 0, failed: 0, active: 0 },
-      comments: { total: 0, completed: 0, failed: 0, active: 0 },
+      posts: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
+      comments: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
     };
     for (const job of syncJobs) {
       const stage = getJobStage(job) === "comments" ? "comments" : "posts";
@@ -1322,9 +1482,28 @@ export default function WeekDetailPage() {
       if (job.status === "completed") current.completed += 1;
       else if (job.status === "failed") current.failed += 1;
       else if (ACTIVE_RUN_STATUSES.has(job.status)) current.active += 1;
+
+      const stageCounters = getJobStageCounters(job);
+      if (stageCounters) {
+        current.scraped += stageCounters.posts + stageCounters.comments;
+      } else {
+        current.scraped += Number(job.items_found ?? 0);
+      }
+
+      const persistCounters = getJobPersistCounters(job);
+      if (persistCounters) {
+        current.saved += persistCounters.posts_upserted + persistCounters.comments_upserted;
+      }
     }
-    posts = fallback.posts;
-    comments = fallback.comments;
+    if (posts.total === 0 && comments.total === 0) {
+      posts = fallback.posts;
+      comments = fallback.comments;
+    } else {
+      posts.scraped = fallback.posts.scraped;
+      posts.saved = fallback.posts.saved;
+      comments.scraped = fallback.comments.scraped;
+      comments.saved = fallback.comments.saved;
+    }
     return { posts, comments };
   }, [syncJobs, syncRun?.summary?.stage_counts]);
 
@@ -1339,25 +1518,29 @@ export default function WeekDetailPage() {
       .map((job) => {
         const stage = getJobStage(job) === "comments" ? "comments" : "posts";
         const platform = PLATFORM_LABELS[job.platform] ?? job.platform;
+        const account =
+          typeof job.config?.account === "string" && job.config.account ? ` @${job.config.account}` : "";
         const timestampRaw = job.completed_at ?? job.started_at ?? job.created_at ?? null;
         const timestamp = timestampRaw ? new Date(timestampRaw).toLocaleTimeString() : "--:--:--";
-        const counters = (job.metadata as Record<string, unknown> | undefined)?.stage_counters as
-          | Record<string, number>
-          | undefined;
+        const counters = getJobStageCounters(job);
+        const persistCounters = getJobPersistCounters(job);
+        const activitySummary = getJobActivitySummary(job);
         const retrievalMeta = (job.metadata as Record<string, unknown> | undefined)?.retrieval_meta as
           | Record<string, unknown>
           | undefined;
         const refreshDecisions = retrievalMeta?.comment_refresh_decisions as Record<string, unknown> | undefined;
         const upToDateCount =
           refreshDecisions && typeof refreshDecisions.up_to_date === "number" ? Number(refreshDecisions.up_to_date) : 0;
-        const countersLabel =
-          counters && (typeof counters.posts === "number" || typeof counters.comments === "number")
-            ? ` · ${counters.posts ?? 0}p/${counters.comments ?? 0}c`
-            : "";
+        const countersLabel = counters ? ` · ${counters.posts}p/${counters.comments}c` : "";
+        const persistLabel = persistCounters
+          ? ` · saved ${persistCounters.posts_upserted}p/${persistCounters.comments_upserted}c`
+          : "";
+        const activityLabel = activitySummary ? ` · ${activitySummary}` : "";
         const skippedLabel = upToDateCount > 0 ? ` · ${upToDateCount} up-to-date skipped` : "";
-        const itemsLabel = typeof job.items_found === "number" ? ` · ${job.items_found.toLocaleString()} items` : "";
+        const itemsLabel =
+          !counters && typeof job.items_found === "number" ? ` · ${job.items_found.toLocaleString()} items` : "";
         const errorLabel = job.status === "failed" && job.error_message ? ` · ${job.error_message}` : "";
-        return `${timestamp} · ${platform} ${stage} ${job.status}${itemsLabel}${countersLabel}${skippedLabel}${errorLabel}`;
+        return `${timestamp} · ${platform}${account} ${stage} ${job.status}${countersLabel}${itemsLabel}${persistLabel}${activityLabel}${skippedLabel}${errorLabel}`;
       });
   }, [syncJobs]);
 
@@ -1396,6 +1579,7 @@ export default function WeekDetailPage() {
             showSlug: showSlugForRouting,
             seasonNumber,
             tab: "social",
+            query: new URLSearchParams({ source_scope: sourceScope }),
           }) as "/admin/trr-shows"}
           className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
         >
@@ -1550,7 +1734,7 @@ export default function WeekDetailPage() {
                 <div className="text-right">
                   <div className="text-sm font-semibold text-gray-900 tabular-nums">{syncProgress.pct}%</div>
                   <div className="text-xs text-gray-500 tabular-nums">
-                    {syncProgress.finished}/{syncProgress.total || "?"} jobs · {fmtNum(syncProgress.items)} items
+                    {syncProgress.finished}/{syncProgress.total || "?"} jobs · {fmtNum(syncProgress.items)} scraped
                   </div>
                 </div>
               </div>
@@ -1583,6 +1767,8 @@ export default function WeekDetailPage() {
                     {syncStageProgress.posts.completed + syncStageProgress.posts.failed}/
                     {syncStageProgress.posts.total || "?"} complete
                     {syncStageProgress.posts.active > 0 ? ` · ${syncStageProgress.posts.active} active` : ""}
+                    {` · ${fmtNum(syncStageProgress.posts.scraped)} scraped`}
+                    {syncStageProgress.posts.saved > 0 ? ` · saved ${fmtNum(syncStageProgress.posts.saved)}` : ""}
                   </div>
                 </div>
                 <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
@@ -1591,6 +1777,8 @@ export default function WeekDetailPage() {
                     {syncStageProgress.comments.completed + syncStageProgress.comments.failed}/
                     {syncStageProgress.comments.total || "?"} complete
                     {syncStageProgress.comments.active > 0 ? ` · ${syncStageProgress.comments.active} active` : ""}
+                    {` · ${fmtNum(syncStageProgress.comments.scraped)} scraped`}
+                    {syncStageProgress.comments.saved > 0 ? ` · saved ${fmtNum(syncStageProgress.comments.saved)}` : ""}
                   </div>
                 </div>
               </div>

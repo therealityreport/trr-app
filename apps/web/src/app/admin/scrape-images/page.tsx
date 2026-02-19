@@ -4,8 +4,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { auth } from "@/lib/firebase";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
 import {
   PeopleSearchMultiSelect,
@@ -180,12 +180,13 @@ export default function ScrapeImagesPage() {
   // Error state
   const [error, setError] = useState<string | null>(null);
 
-  // Get auth headers
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      fetchAdminWithAuth(input, init, {
+        preferredUser: user,
+      }),
+    [user],
+  );
 
   const peopleExactCacheRef = useRef<Map<string, PersonOption | null>>(new Map());
 
@@ -201,10 +202,8 @@ export default function ScrapeImagesPage() {
       }
 
       try {
-        const headers = await getAuthHeaders();
-        const response = await fetch(
+        const response = await fetchWithAuth(
           `/api/admin/trr-api/people?q=${encodeURIComponent(trimmed)}&limit=25`,
-          { headers }
         );
         if (!response.ok) {
           peopleExactCacheRef.current.set(cacheKey, null);
@@ -235,7 +234,7 @@ export default function ScrapeImagesPage() {
         return null;
       }
     },
-    [getAuthHeaders]
+    [fetchWithAuth]
   );
 
   const autoFillCastFromContext = useCallback(
@@ -300,10 +299,8 @@ export default function ScrapeImagesPage() {
 
       try {
         setSearchingShows(true);
-        const headers = await getAuthHeaders();
-        const response = await fetch(
+        const response = await fetchWithAuth(
           `/api/admin/trr-api/shows?q=${encodeURIComponent(query)}&limit=10`,
-          { headers }
         );
 
         if (!response.ok) {
@@ -319,7 +316,7 @@ export default function ScrapeImagesPage() {
         setSearchingShows(false);
       }
     },
-    [getAuthHeaders]
+    [fetchWithAuth]
   );
 
   // Debounced show search
@@ -372,10 +369,8 @@ export default function ScrapeImagesPage() {
 
       try {
         setSearchingPeople(true);
-        const headers = await getAuthHeaders();
-        const response = await fetch(
+        const response = await fetchWithAuth(
           `/api/admin/trr-api/people?q=${encodeURIComponent(trimmed)}&limit=10`,
-          { headers }
         );
 
         if (!response.ok) {
@@ -396,7 +391,7 @@ export default function ScrapeImagesPage() {
         setSearchingPeople(false);
       }
     },
-    [getAuthHeaders]
+    [fetchWithAuth]
   );
 
   // Debounced person search
@@ -434,7 +429,6 @@ export default function ScrapeImagesPage() {
       setBulkPeopleSelection([]);
       setImportResult(null);
 
-      const headers = await getAuthHeaders();
       const previewPayload: Record<string, unknown> = { url: url.trim() };
       if (entityMode === "season") {
         // Let TRR-Backend resolve season_id (and apply exclusion filtering) from show_id + season_number.
@@ -448,9 +442,9 @@ export default function ScrapeImagesPage() {
         previewPayload.entity_type = "person";
         previewPayload.entity_id = selectedPerson.id;
       }
-      const response = await fetch("/api/admin/scrape/preview", {
+      const response = await fetchWithAuth("/api/admin/scrape/preview", {
         method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(previewPayload),
       });
 
@@ -561,12 +555,10 @@ export default function ScrapeImagesPage() {
               images: imagesToImport,
             };
 
-      const headers = await getAuthHeaders();
-
       // Use streaming endpoint for progress updates
-      const response = await fetch("/api/admin/scrape/import/stream", {
+      const response = await fetchWithAuth("/api/admin/scrape/import/stream", {
         method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 

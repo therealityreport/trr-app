@@ -1,13 +1,20 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { buildSeasonAdminUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import {
+  buildPersonAdminUrl,
+  buildPersonRouteSlug,
+  buildSeasonAdminUrl,
+  buildShowAdminUrl,
+  cleanLegacyPersonRoutingQuery,
+  parsePersonRouteState,
+} from "@/lib/admin/show-admin-routes";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
 import ReassignImageModal from "@/components/admin/ReassignImageModal";
@@ -28,10 +35,36 @@ import {
   type AdvancedFilterState,
 } from "@/lib/admin/advanced-filters";
 import {
+  buildShowAcronym,
+  computePersonGalleryMediaViewAvailability,
+  computePersonPhotoShowBuckets,
+  isWwhlShowName,
+  resolveGalleryShowFilterFallback,
+  WWHL_LABEL,
+  type GalleryShowFilter,
+} from "@/lib/admin/person-gallery-media-view";
+import { formatPersonRefreshSummary } from "@/lib/admin/person-refresh-summary";
+import {
+  firstImageUrlCandidate,
+  getPersonPhotoCardUrlCandidates,
+  getPersonPhotoDetailUrlCandidates,
+  getPersonPhotoOriginalUrlCandidates,
+} from "@/lib/admin/image-url-candidates";
+import {
+  appendLiveCountsToMessage,
+  formatJobLiveCounts,
+  resolveJobLiveCounts,
+  type JobLiveCounts,
+} from "@/lib/admin/job-live-counts";
+import {
   inferHasTextOverlay,
   inferPeopleCountForPersonPhoto,
   matchesContentTypesForPersonPhoto,
 } from "@/lib/gallery-filter-utils";
+import {
+  contentTypeToContextType,
+  normalizeContentTypeToken,
+} from "@/lib/media/content-type";
 import {
   applyFacebankSeedUpdateToLightbox,
   applyFacebankSeedUpdateToPhotos,
@@ -79,6 +112,17 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const looksLikeUuid = (value: string): boolean => UUID_RE.test(value);
+
+const readRouteParamValue = (value: unknown): string | null => {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string") {
+    const first = value[0].trim();
+    return first.length > 0 ? first : null;
+  }
+  return null;
+};
 
 const isCanonicalSource = (value: string): value is CanonicalSource =>
   (DEFAULT_CANONICAL_SOURCE_ORDER as readonly string[]).includes(value);
@@ -217,7 +261,6 @@ interface FaceBoxTag {
 }
 
 type GallerySortOption = "newest" | "oldest" | "source" | "season-asc" | "season-desc";
-type GalleryShowFilter = "all" | "this-show" | "wwhl" | "other-shows";
 
 interface TrrPersonCredit {
   id: string;
@@ -362,27 +405,37 @@ const normalizeFaceBoxes = (value: unknown): FaceBoxTag[] => {
   return boxes;
 };
 
-const contentTypeToContextType = (contentType: string): string => {
-  const normalized = contentType.trim().toUpperCase();
-  switch (normalized) {
-    case "EPISODE STILL":
-      return "episode still";
-    case "CAST PHOTOS":
-      return "cast photos";
-    default:
-      return normalized.toLowerCase();
-  }
+const PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS = 600_000;
+const PERSON_PAGE_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
+const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
+const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError";
+
+const isSignalAbortedWithoutReasonError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("signal is aborted without reason");
 };
 
-const formatRefreshSummary = (summary: unknown): string | null => {
-  if (typeof summary === "string") return summary;
-  if (summary && typeof summary === "object") {
-    const parts = Object.entries(summary as Record<string, unknown>)
-      .filter(([, value]) => typeof value === "number")
-      .map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`);
-    return parts.length > 0 ? parts.join(", ") : null;
+const createNamedError = (name: string, message: string): Error => {
+  const error = new Error(message);
+  error.name = name;
+  return error;
+};
+
+const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return null;
 };
 
 type RefreshLogLevel = "info" | "success" | "error";
@@ -423,23 +476,14 @@ const resolvePhotoDimensions = (
   };
 };
 
-const pickNonEmptyUrl = (...values: Array<string | null | undefined>): string | null => {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
-  return null;
-};
-
 const getPersonPhotoCardUrl = (photo: TrrPersonPhoto): string | null =>
-  pickNonEmptyUrl(photo.crop_display_url, photo.thumb_url, photo.display_url, photo.hosted_url, photo.url);
+  firstImageUrlCandidate(getPersonPhotoCardUrlCandidates(photo));
 
 const getPersonPhotoDetailUrl = (photo: TrrPersonPhoto): string | null =>
-  pickNonEmptyUrl(photo.crop_detail_url, photo.detail_url, photo.hosted_url, photo.url);
+  firstImageUrlCandidate(getPersonPhotoDetailUrlCandidates(photo));
 
 const getPersonPhotoOriginalUrl = (photo: TrrPersonPhoto): string | null =>
-  pickNonEmptyUrl(photo.hosted_url, photo.original_url, photo.url);
+  firstImageUrlCandidate(getPersonPhotoOriginalUrlCandidates(photo));
 
 const buildThumbnailCropPreview = (
   photo: TrrPersonPhoto | null | undefined
@@ -491,43 +535,6 @@ type ThumbnailCropPreview = {
 type ThumbnailCropOverlayUpdate = ThumbnailCropPreview & {
   photoId: string;
   nonce: number;
-};
-
-const SHOW_ACRONYM_RE = /\bRH[A-Z0-9]{2,6}\b/g;
-const WWHL_LABEL = "WWHL";
-const WWHL_NAME_RE = /watch\s+what\s+happens\s+live|wwhl/i;
-
-const buildShowAcronym = (name: string | null | undefined): string | null => {
-  if (!name) return null;
-  const words = name
-    .replace(/[^a-z0-9 ]/gi, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-  if (words.length === 0) return null;
-  const filtered = words.filter(
-    (word) => !["the", "and", "a", "an", "to", "for"].includes(word.toLowerCase())
-  );
-  const acronym = (filtered.length > 0 ? filtered : words)
-    .map((word) => word[0]?.toUpperCase?.() ?? "")
-    .join("");
-  return acronym || null;
-};
-
-const extractShowAcronyms = (text: string): Set<string> => {
-  const matches = text.toUpperCase().match(SHOW_ACRONYM_RE) ?? [];
-  return new Set(matches);
-};
-
-const isWwhlShowName = (value: string | null | undefined): boolean => {
-  if (!value) return false;
-  return WWHL_NAME_RE.test(value);
-};
-
-const isLikelyImdbEpisodeCaption = (value: string | null | undefined): boolean => {
-  if (!value) return false;
-  const text = value.trim();
-  if (!text) return false;
-  return /\bin\s+.+\(\d{4}\)\s*$/i.test(text);
 };
 
 // Profile photo with error handling
@@ -658,16 +665,11 @@ function GalleryPhoto({
   settingCover?: boolean;
 }) {
   const [hasError, setHasError] = useState(false);
-  const primarySrc = useMemo(
-    () => getPersonPhotoCardUrl(photo),
-    [photo]
-  );
-  const originalSrc = useMemo(
-    () => getPersonPhotoOriginalUrl(photo),
-    [photo]
-  );
+  const cardCandidates = useMemo(() => getPersonPhotoCardUrlCandidates(photo), [photo]);
+  const primarySrc = cardCandidates[0] ?? null;
+  const fallbackCandidates = useMemo(() => cardCandidates.slice(1), [cardCandidates]);
   const [currentSrc, setCurrentSrc] = useState<string | null>(primarySrc);
-  const triedFallbackRef = useRef(false);
+  const [fallbackIndex, setFallbackIndex] = useState(0);
   const [naturalDimensions, setNaturalDimensions] = useState<{
     width: number;
     height: number;
@@ -698,10 +700,10 @@ function GalleryPhoto({
 
   useEffect(() => {
     setHasError(false);
-    triedFallbackRef.current = false;
     setCurrentSrc(primarySrc);
+    setFallbackIndex(0);
     setNaturalDimensions(null);
-  }, [primarySrc]);
+  }, [fallbackCandidates, primarySrc]);
 
   const focusPoint = useMemo(() => {
     const match = presentation.objectPosition.match(
@@ -747,11 +749,17 @@ function GalleryPhoto({
   }, [viewportRect]);
 
   const handleError = () => {
-    if (!triedFallbackRef.current && originalSrc && currentSrc !== originalSrc) {
-      triedFallbackRef.current = true;
-      setCurrentSrc(originalSrc);
+    const nextCandidate = fallbackCandidates[fallbackIndex] ?? null;
+    if (nextCandidate && nextCandidate !== currentSrc) {
+      setCurrentSrc(nextCandidate);
+      setFallbackIndex((prev) => prev + 1);
       return;
     }
+    console.warn("[person-gallery] all image URL candidates failed", {
+      photoId: photo.id,
+      origin: photo.origin,
+      attempted: cardCandidates.length,
+    });
     setHasError(true);
   };
 
@@ -1949,33 +1957,60 @@ function TagPeoplePanel({
 
 export default function PersonProfilePage() {
   const params = useParams();
+  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const personId = params.personId as string;
+  const personRouteParam = readRouteParamValue((params as Record<string, unknown>).personId);
+  const showRouteParam = readRouteParamValue((params as Record<string, unknown>).showId);
   const showIdParamRaw = searchParams.get("showId");
-  const showIdParam =
+  const legacyShowIdParam =
     typeof showIdParamRaw === "string" && showIdParamRaw.trim().length > 0
       ? showIdParamRaw.trim()
       : null;
+  const showIdParam = showRouteParam ?? legacyShowIdParam;
   const [resolvedShowIdParam, setResolvedShowIdParam] = useState<string | null>(
     showIdParam && looksLikeUuid(showIdParam) ? showIdParam : null
   );
+  const [resolvedShowSlugParam, setResolvedShowSlugParam] = useState<string | null>(
+    showIdParam && !looksLikeUuid(showIdParam) ? showIdParam : null
+  );
+  const [resolvedPersonIdParam, setResolvedPersonIdParam] = useState<string | null>(
+    personRouteParam && looksLikeUuid(personRouteParam) ? personRouteParam : null
+  );
+  const [resolvedPersonSlugParam, setResolvedPersonSlugParam] = useState<string | null>(
+    personRouteParam && !looksLikeUuid(personRouteParam) ? personRouteParam : null
+  );
+  const personId = resolvedPersonIdParam ?? "";
   const showIdForApi = resolvedShowIdParam;
+  const showSlugForRouting = useMemo(() => {
+    if (resolvedShowSlugParam && resolvedShowSlugParam.trim().length > 0) {
+      return resolvedShowSlugParam;
+    }
+    if (showIdParam && !looksLikeUuid(showIdParam)) {
+      return showIdParam;
+    }
+    return null;
+  }, [resolvedShowSlugParam, showIdParam]);
   const seasonNumberParam = searchParams.get("seasonNumber");
   const seasonNumberRaw = seasonNumberParam ? Number.parseInt(seasonNumberParam, 10) : Number.NaN;
   const seasonNumber = Number.isFinite(seasonNumberRaw) ? seasonNumberRaw : null;
-
-  const backHref = showIdParam
+  const backShowTarget = showSlugForRouting ?? showIdParam;
+  const backHref = backShowTarget
     ? seasonNumber !== null
-      ? buildSeasonAdminUrl({ showSlug: showIdParam, seasonNumber, tab: "cast" })
-      : buildShowAdminUrl({ showSlug: showIdParam })
+      ? buildSeasonAdminUrl({ showSlug: backShowTarget, seasonNumber, tab: "cast" })
+      : buildShowAdminUrl({ showSlug: backShowTarget })
     : "/admin/trr-shows";
-  const backLabel = showIdParam
+  const backLabel = backShowTarget
     ? seasonNumber !== null
       ? "← Back to Season Cast"
       : "← Back to Show"
     : "← Back to Shows";
   const { user, checking, hasAccess } = useAdminGuard();
+
+  const personRouteState = useMemo(
+    () => parsePersonRouteState(pathname, new URLSearchParams(searchParams.toString())),
+    [pathname, searchParams]
+  );
 
   const [person, setPerson] = useState<TrrPerson | null>(null);
   const [canonicalSourceOrder, setCanonicalSourceOrder] = useState<CanonicalSourceOrder>([
@@ -1995,7 +2030,7 @@ export default function PersonProfilePage() {
   const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
   const [bravoContentLoading, setBravoContentLoading] = useState(false);
   const [bravoContentError, setBravoContentError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [activeTab, setActiveTab] = useState<TabId>(personRouteState.tab);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -2039,6 +2074,7 @@ export default function PersonProfilePage() {
   } | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshLiveCounts, setRefreshLiveCounts] = useState<JobLiveCounts | null>(null);
   const [photosError, setPhotosError] = useState<string | null>(null);
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
@@ -2052,6 +2088,46 @@ export default function PersonProfilePage() {
       setRefreshLogEntries((prev) => [normalized, ...prev].slice(0, MAX_REFRESH_LOG_ENTRIES));
     },
     []
+  );
+
+  const personSlugForRouting = useMemo(() => {
+    if (resolvedPersonSlugParam && resolvedPersonSlugParam.trim().length > 0) {
+      return resolvedPersonSlugParam;
+    }
+    if (person?.id) {
+      return buildPersonRouteSlug({
+        personName: person.full_name,
+        personId: person.id,
+      });
+    }
+    if (personRouteParam && !looksLikeUuid(personRouteParam)) {
+      return personRouteParam;
+    }
+    return null;
+  }, [person?.full_name, person?.id, personRouteParam, resolvedPersonSlugParam]);
+
+  useEffect(() => {
+    setActiveTab(personRouteState.tab);
+  }, [personRouteState.tab]);
+
+  const setTab = useCallback(
+    (tab: TabId) => {
+      setActiveTab(tab);
+      if (!showSlugForRouting || !personSlugForRouting) return;
+      const preservedQuery = cleanLegacyPersonRoutingQuery(
+        new URLSearchParams(searchParams.toString())
+      );
+      router.replace(
+        buildPersonAdminUrl({
+          showSlug: showSlugForRouting,
+          personSlug: personSlugForRouting,
+          tab,
+          query: preservedQuery,
+        }) as "/admin/trr-shows",
+        { scroll: false }
+      );
+    },
+    [personSlugForRouting, router, searchParams, showSlugForRouting]
   );
 
   const advancedFilters = useMemo(
@@ -2145,6 +2221,54 @@ export default function PersonProfilePage() {
     setSelectedOtherShowKey("all");
   }, [otherShowOptions, selectedOtherShowKey]);
 
+  const mediaViewAvailability = useMemo(() => {
+    if (!showIdParam) {
+      return {
+        hasWwhlMatches: false,
+        hasOtherShowMatches: false,
+        hasNonThisShowMatches: false,
+      };
+    }
+    return computePersonGalleryMediaViewAvailability({
+      photos,
+      showIdForApi,
+      activeShowName,
+      activeShowAcronym,
+      otherShowNameMatches,
+      otherShowAcronymMatches,
+    });
+  }, [
+    activeShowAcronym,
+    activeShowName,
+    otherShowAcronymMatches,
+    otherShowNameMatches,
+    photos,
+    showIdForApi,
+    showIdParam,
+  ]);
+
+  const { hasWwhlMatches, hasOtherShowMatches, hasNonThisShowMatches } = mediaViewAvailability;
+
+  useEffect(() => {
+    if (!showIdParam) return;
+    const nextFilter = resolveGalleryShowFilterFallback({
+      currentFilter: galleryShowFilter,
+      showContextEnabled: true,
+      hasWwhlMatches,
+      hasOtherShowMatches,
+      hasNonThisShowMatches,
+    });
+    if (nextFilter !== galleryShowFilter) {
+      setGalleryShowFilter(nextFilter);
+    }
+  }, [
+    galleryShowFilter,
+    hasNonThisShowMatches,
+    hasOtherShowMatches,
+    hasWwhlMatches,
+    showIdParam,
+  ]);
+
   // Compute unique sources from photos
   const uniqueSources = useMemo(() => {
     const sources = new Set(photos.map(p => p.source).filter(Boolean));
@@ -2184,90 +2308,27 @@ export default function PersonProfilePage() {
 
     // Apply show filter (if coming from a show context)
     if (showIdParam && galleryShowFilter !== "all") {
-      const showNameLower = activeShowName?.toLowerCase?.() ?? null;
-      const showAcronym = activeShowAcronym?.toUpperCase?.() ?? null;
       result = result.filter((photo) => {
-        const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
-        const metaShowId = typeof metadata.show_id === "string" ? metadata.show_id : null;
-        const metaShowIdMatches = Boolean(showIdForApi && metaShowId && metaShowId === showIdForApi);
-        const text = [
-          photo.caption,
-          photo.context_section,
-          photo.context_type,
-          typeof metadata.fandom_section_label === "string"
-            ? metadata.fandom_section_label
-            : null,
-          ...(photo.title_names ?? []),
-        ]
-          .filter(Boolean)
-          .join(" ");
-        const textLower = text.toLowerCase();
-        const matchesShowName = showNameLower ? textLower.includes(showNameLower) : false;
-        const acronyms = extractShowAcronyms(text);
-        const matchesShowAcronym = showAcronym ? acronyms.has(showAcronym) : false;
-        const metadataShowNameRaw =
-          typeof metadata.show_name === "string" ? metadata.show_name : null;
-        const metadataShowName = metadataShowNameRaw?.toLowerCase() ?? null;
-        const metadataShowAcronym = buildShowAcronym(metadataShowNameRaw)?.toUpperCase() ?? null;
-        const matchesWwhl = isWwhlShowName(text) || isWwhlShowName(metadataShowNameRaw) || acronyms.has(WWHL_LABEL);
-        const metadataMatchesThisShow =
-          Boolean(metadataShowName && showNameLower && metadataShowName.includes(showNameLower));
-        const metadataMatchesOtherShow =
-          Boolean(
-            metadataShowName &&
-              showNameLower &&
-              !metadataShowName.includes(showNameLower) &&
-              !isWwhlShowName(metadataShowNameRaw)
-          );
-        const matchesOtherShowName = otherShowNameMatches.some((name) =>
-          textLower.includes(name.toLowerCase())
-        );
-        const matchesOtherShowAcronym = Array.from(acronyms).some((acro) =>
-          otherShowAcronymMatches.has(acro)
-        );
-        const isImdbSource = (photo.source ?? "").toLowerCase() === "imdb";
-        const imdbEpisodeTitleFallbackForThisShow =
-          isImdbSource &&
-          !metaShowId &&
-          !matchesWwhl &&
-          !matchesOtherShowName &&
-          !matchesOtherShowAcronym &&
-          !metadataMatchesOtherShow &&
-          isLikelyImdbEpisodeCaption(photo.caption);
+        const bucketMatches = computePersonPhotoShowBuckets({
+          photo,
+          showIdForApi,
+          activeShowName,
+          activeShowAcronym,
+          otherShowNameMatches,
+          otherShowAcronymMatches,
+          selectedOtherShow,
+        });
 
         if (galleryShowFilter === "this-show") {
-          return (
-            metaShowIdMatches ||
-            matchesShowName ||
-            matchesShowAcronym ||
-            metadataMatchesThisShow ||
-            imdbEpisodeTitleFallbackForThisShow
-          );
+          return bucketMatches.matchesThisShow;
         }
         if (galleryShowFilter === "wwhl") {
-          return matchesWwhl;
+          return bucketMatches.matchesWwhl;
         }
         if (galleryShowFilter === "other-shows") {
-          if (selectedOtherShow) {
-            const selectedOtherName = selectedOtherShow.showName.toLowerCase();
-            const selectedOtherAcronym = selectedOtherShow.acronym?.toUpperCase() ?? null;
-            const matchesSelectedById = Boolean(
-              selectedOtherShow.showId && metaShowId === selectedOtherShow.showId
-            );
-            const matchesSelectedByName =
-              textLower.includes(selectedOtherName) ||
-              Boolean(metadataShowName?.includes(selectedOtherName));
-            const matchesSelectedByAcronym = selectedOtherAcronym
-              ? acronyms.has(selectedOtherAcronym) || metadataShowAcronym === selectedOtherAcronym
-              : false;
-            return matchesSelectedById || matchesSelectedByName || matchesSelectedByAcronym;
-          }
-          return (
-            ((!metaShowIdMatches && Boolean(metaShowId)) && !matchesWwhl) ||
-            matchesOtherShowName ||
-            matchesOtherShowAcronym ||
-            metadataMatchesOtherShow
-          );
+          return selectedOtherShow
+            ? bucketMatches.matchesSelectedOtherShow
+            : bucketMatches.matchesOtherShows;
         }
         return true;
       });
@@ -2410,19 +2471,33 @@ export default function PersonProfilePage() {
   }, [galleryShowFilter, selectedOtherShowKey, advancedFilters]);
 
   // Helper to get auth headers
-  const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error("Not authenticated");
-    return { Authorization: `Bearer ${token}` };
-  }, []);
+  const getAuthHeaders = useCallback(
+    async () =>
+      getClientAuthHeaders({
+        preferredUser: user,
+        allowDevAdminBypass: true,
+      }),
+    [user],
+  );
+
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      fetchAdminWithAuth(input, init, {
+        preferredUser: user,
+        allowDevAdminBypass: true,
+      }),
+    [user],
+  );
 
   useEffect(() => {
     if (!showIdParam || !hasAccess) {
       setResolvedShowIdParam(null);
+      setResolvedShowSlugParam(null);
       return;
     }
     if (looksLikeUuid(showIdParam)) {
       setResolvedShowIdParam(showIdParam);
+      setResolvedShowSlugParam(null);
       return;
     }
 
@@ -2436,7 +2511,7 @@ export default function PersonProfilePage() {
         );
         const data = (await response.json().catch(() => ({}))) as {
           error?: string;
-          resolved?: { show_id?: string | null };
+          resolved?: { show_id?: string | null; canonical_slug?: string | null; slug?: string | null };
         };
         if (!response.ok) {
           throw new Error(data.error || "Failed to resolve show slug");
@@ -2450,9 +2525,17 @@ export default function PersonProfilePage() {
         }
         if (cancelled) return;
         setResolvedShowIdParam(resolvedId);
+        const resolvedSlug =
+          typeof data.resolved?.canonical_slug === "string" && data.resolved.canonical_slug.trim().length > 0
+            ? data.resolved.canonical_slug.trim()
+            : typeof data.resolved?.slug === "string" && data.resolved.slug.trim().length > 0
+              ? data.resolved.slug.trim()
+              : showIdParam;
+        setResolvedShowSlugParam(resolvedSlug);
       } catch {
         if (cancelled) return;
         setResolvedShowIdParam(null);
+        setResolvedShowSlugParam(null);
       }
     };
     void resolveSlug();
@@ -2460,6 +2543,93 @@ export default function PersonProfilePage() {
       cancelled = true;
     };
   }, [getAuthHeaders, hasAccess, showIdParam]);
+
+  useEffect(() => {
+    if (!hasAccess) return;
+    if (!personRouteParam) {
+      setResolvedPersonIdParam(null);
+      setResolvedPersonSlugParam(null);
+      setError("Missing person identifier.");
+      setLoading(false);
+      return;
+    }
+
+    if (looksLikeUuid(personRouteParam)) {
+      setResolvedPersonIdParam(personRouteParam);
+      setResolvedPersonSlugParam(null);
+      return;
+    }
+
+    let cancelled = false;
+    const resolvePersonSlug = async () => {
+      try {
+        setError(null);
+        setLoading(true);
+        const headers = await getAuthHeaders();
+        const query = new URLSearchParams({ slug: personRouteParam });
+        if (showIdParam) query.set("showId", showIdParam);
+        const response = await fetch(`/api/admin/trr-api/people/resolve-slug?${query.toString()}`, {
+          headers,
+          cache: "no-store",
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          resolved?: { person_id?: string | null; canonical_slug?: string | null; slug?: string | null };
+        };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to resolve person slug");
+        }
+        const resolvedId =
+          typeof data.resolved?.person_id === "string" && looksLikeUuid(data.resolved.person_id)
+            ? data.resolved.person_id
+            : null;
+        if (!resolvedId) {
+          throw new Error("Resolved person slug did not return a valid person id.");
+        }
+        if (cancelled) return;
+        setResolvedPersonIdParam(resolvedId);
+        const resolvedSlug =
+          typeof data.resolved?.canonical_slug === "string" && data.resolved.canonical_slug.trim().length > 0
+            ? data.resolved.canonical_slug.trim()
+            : typeof data.resolved?.slug === "string" && data.resolved.slug.trim().length > 0
+              ? data.resolved.slug.trim()
+              : personRouteParam;
+        setResolvedPersonSlugParam(resolvedSlug);
+      } catch (err) {
+        if (cancelled) return;
+        setResolvedPersonIdParam(null);
+        setError(err instanceof Error ? err.message : "Could not resolve person URL slug.");
+        setLoading(false);
+      }
+    };
+
+    void resolvePersonSlug();
+    return () => {
+      cancelled = true;
+    };
+  }, [getAuthHeaders, hasAccess, personRouteParam, showIdParam]);
+
+  useEffect(() => {
+    if (!showSlugForRouting || !personSlugForRouting) return;
+    const preservedQuery = cleanLegacyPersonRoutingQuery(new URLSearchParams(searchParams.toString()));
+    const canonicalUrl = buildPersonAdminUrl({
+      showSlug: showSlugForRouting,
+      personSlug: personSlugForRouting,
+      tab: personRouteState.tab,
+      query: preservedQuery,
+    });
+    const currentQuery = searchParams.toString();
+    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
+    if (currentUrl === canonicalUrl) return;
+    router.replace(canonicalUrl as "/admin/trr-shows", { scroll: false });
+  }, [
+    pathname,
+    personRouteState.tab,
+    personSlugForRouting,
+    router,
+    searchParams,
+    showSlugForRouting,
+  ]);
 
   useEffect(() => {
     if (!showIdForApi || !hasAccess) {
@@ -2471,16 +2641,8 @@ export default function PersonProfilePage() {
 
     const loadSeasonPremieres = async () => {
       try {
-        const token = await auth.currentUser?.getIdToken();
-        if (!token) {
-          if (!cancelled) {
-            setSeasonPremiereMap({});
-          }
-          return;
-        }
-        const response = await fetch(
+        const response = await fetchWithAuth(
           `/api/admin/trr-api/shows/${showIdForApi}/seasons?limit=50`,
-          { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!response.ok) throw new Error("Failed to fetch seasons");
         const data = await response.json();
@@ -2510,10 +2672,11 @@ export default function PersonProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [showIdForApi, hasAccess]);
+  }, [fetchWithAuth, showIdForApi, hasAccess]);
 
   // Fetch person details
   const fetchPerson = useCallback(async () => {
+    if (!personId) return;
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`/api/admin/trr-api/people/${personId}`, { headers });
@@ -2557,6 +2720,7 @@ export default function PersonProfilePage() {
   }, [initialCanonicalSourceOrder]);
 
   const saveCanonicalSourceOrder = useCallback(async () => {
+    if (!personId) return;
     if (!canonicalSourceOrderDirty || canonicalSourceOrderSaving) {
       return;
     }
@@ -2610,23 +2774,41 @@ export default function PersonProfilePage() {
 
   // Fetch photos
   const fetchPhotos = useCallback(async (): Promise<TrrPersonPhoto[]> => {
+    if (!personId) return [];
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/photos?limit=250&offset=0`,
-        { headers }
-      );
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message =
-          data.error && data.detail
-            ? `${data.error}: ${data.detail}`
-            : data.error || "Failed to fetch photos";
-        throw new Error(message);
+      const pageSize = 500;
+      const fetchedPhotos: TrrPersonPhoto[] = [];
+      let offset = 0;
+      while (true) {
+        let response: Response;
+        try {
+          response = await fetchWithTimeout(
+            `/api/admin/trr-api/people/${personId}/photos?limit=${pageSize}&offset=${offset}`,
+            { headers },
+            PHOTO_LIST_LOAD_TIMEOUT_MS
+          );
+        } catch (error) {
+          if (isAbortError(error)) {
+            throw new Error(
+              `Timed out loading person photos after ${Math.round(PHOTO_LIST_LOAD_TIMEOUT_MS / 1000)}s.`
+            );
+          }
+          throw error;
+        }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message =
+            data.error && data.detail
+              ? `${data.error}: ${data.detail}`
+              : data.error || "Failed to fetch photos";
+          throw new Error(message);
+        }
+        const pagePhotos = Array.isArray(data.photos) ? (data.photos as TrrPersonPhoto[]) : [];
+        fetchedPhotos.push(...pagePhotos);
+        if (pagePhotos.length < pageSize) break;
+        offset += pageSize;
       }
-      const fetchedPhotos = Array.isArray(data.photos)
-        ? (data.photos as TrrPersonPhoto[])
-        : [];
       setPhotos(fetchedPhotos);
       setPhotosError(null);
       return fetchedPhotos;
@@ -2699,6 +2881,7 @@ export default function PersonProfilePage() {
 
   // Fetch credits
   const fetchCredits = useCallback(async () => {
+    if (!personId) return;
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
@@ -2715,6 +2898,7 @@ export default function PersonProfilePage() {
 
   // Fetch cover photo
   const fetchCoverPhoto = useCallback(async () => {
+    if (!personId) return;
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
@@ -2731,6 +2915,7 @@ export default function PersonProfilePage() {
 
   // Fetch fandom data
   const fetchFandomData = useCallback(async () => {
+    if (!personId) return;
     try {
       const headers = await getAuthHeaders();
       const showIdQuery =
@@ -2750,7 +2935,7 @@ export default function PersonProfilePage() {
   }, [personId, getAuthHeaders, showIdForApi]);
 
   const fetchBravoContent = useCallback(async () => {
-    if (!showIdForApi) {
+    if (!personId || !showIdForApi) {
       setBravoVideos([]);
       setBravoNews([]);
       setBravoContentError(null);
@@ -2801,7 +2986,7 @@ export default function PersonProfilePage() {
 
   // Set cover photo
   const handleSetCover = async (photo: TrrPersonPhoto) => {
-    if (!photo.hosted_url) return;
+    if (!personId || !photo.hosted_url) return;
     setSettingCover(true);
     try {
       const headers = await getAuthHeaders();
@@ -2939,11 +3124,25 @@ export default function PersonProfilePage() {
   const runPhotoMetadataJob = useCallback(
     async (endpoint: string, payload?: Record<string, unknown>) => {
       const headers = await getAuthHeaders();
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(payload ?? { force: true }),
-      });
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(
+          endpoint,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify(payload ?? { force: true }),
+          },
+          PHOTO_PIPELINE_STEP_TIMEOUT_MS
+        );
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw new Error(
+            `Job timed out (${Math.round(PHOTO_PIPELINE_STEP_TIMEOUT_MS / 1000)}s)`
+          );
+        }
+        throw error;
+      }
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         const errorText =
@@ -2956,15 +3155,132 @@ export default function PersonProfilePage() {
     [getAuthHeaders]
   );
 
-  const handleRefreshLightboxPhotoMetadata = useCallback(
-    async (photo: TrrPersonPhoto) => {
+  type PhotoPipelineStepKey = "sync" | "count" | "crop" | "id_text" | "resize";
+
+  type PhotoPipelineStep = {
+    key: PhotoPipelineStepKey;
+    label: string;
+    endpoint: string;
+    payload: Record<string, unknown>;
+  };
+
+  const summarizePhotoStepResponse = (value: unknown): string | null => {
+    if (!value || typeof value !== "object") return null;
+    const data = value as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof data.people_count === "number") {
+      parts.push(`people_count=${data.people_count}`);
+    }
+    if (typeof data.has_text_overlay === "boolean") {
+      parts.push(`has_text_overlay=${data.has_text_overlay ? "yes" : "no"}`);
+    }
+    if (typeof data.mirrored === "number") {
+      parts.push(`mirrored=${data.mirrored}`);
+    }
+    if (typeof data.failed === "number" && data.failed > 0) {
+      parts.push(`failed=${data.failed}`);
+    }
+    if (typeof data.updated === "number") {
+      parts.push(`updated=${data.updated}`);
+    }
+    return parts.length > 0 ? parts.join(", ") : null;
+  };
+
+  const resolvePhotoPipelineSteps = useCallback((photo: TrrPersonPhoto): Record<PhotoPipelineStepKey, PhotoPipelineStep | null> => {
+    const cropPayload = buildThumbnailCropPayload(photo);
+    if (photo.origin === "media_links") {
+      if (!photo.media_asset_id) {
+        throw new Error("Cannot run image pipeline: media asset id is missing.");
+      }
+      const assetId = photo.media_asset_id;
+      return {
+        sync: {
+          key: "sync",
+          label: "Sync",
+          endpoint: `/api/admin/trr-api/media-assets/${assetId}/mirror`,
+          payload: { force: true },
+        },
+        count: {
+          key: "count",
+          label: "Count",
+          endpoint: `/api/admin/trr-api/media-assets/${assetId}/auto-count`,
+          payload: { force: true },
+        },
+        crop: cropPayload
+          ? {
+              key: "crop",
+              label: "Crop",
+              endpoint: `/api/admin/trr-api/media-assets/${assetId}/variants`,
+              payload: { force: true, crop: cropPayload },
+            }
+          : null,
+        id_text: {
+          key: "id_text",
+          label: "ID Text",
+          endpoint: `/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`,
+          payload: { force: true },
+        },
+        resize: {
+          key: "resize",
+          label: "Resize",
+          endpoint: `/api/admin/trr-api/media-assets/${assetId}/variants`,
+          payload: { force: true },
+        },
+      };
+    }
+
+    return {
+      sync: {
+        key: "sync",
+        label: "Sync",
+        endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/mirror`,
+        payload: { force: true },
+      },
+      count: {
+        key: "count",
+        label: "Count",
+        endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`,
+        payload: { force: true },
+      },
+      crop: cropPayload
+        ? {
+            key: "crop",
+            label: "Crop",
+            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/variants`,
+            payload: { force: true, crop: cropPayload },
+          }
+        : null,
+      id_text: {
+        key: "id_text",
+        label: "ID Text",
+        endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`,
+        payload: { force: true },
+      },
+      resize: {
+        key: "resize",
+        label: "Resize",
+        endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/variants`,
+        payload: { force: true },
+      },
+    };
+  }, []);
+
+  const runPhotoPipelineSteps = useCallback(
+    async (
+      photo: TrrPersonPhoto,
+      stepKeys: PhotoPipelineStepKey[],
+      options?: { allowPartialFailures?: boolean; successNotice?: string; runLabel?: string }
+    ) => {
+      const allowPartialFailures = options?.allowPartialFailures ?? false;
+      const runLabel = options?.runLabel ?? "image_pipeline";
       const errors: string[] = [];
-      const cropPayload = buildThumbnailCropPayload(photo);
+      let runCounts: JobLiveCounts | null = null;
+
       const logStep = (
         level: RefreshLogLevel,
         stage: string,
         message: string,
-        detail?: string | null,
+        detail?: string | null
       ) => {
         appendRefreshLog({
           source: "image_refresh",
@@ -2975,101 +3291,45 @@ export default function PersonProfilePage() {
         });
       };
 
-      const runStep = async (step: {
-        label: string;
-        endpoint: string;
-        payload?: Record<string, unknown>;
-      }) => {
-        logStep("info", "image_pipeline", `${step.label} started`);
+      const stepMap = resolvePhotoPipelineSteps(photo);
+      logStep("info", runLabel, `Started ${runLabel.replace(/_/g, " ")} for ${photo.id}`);
+
+      for (const key of stepKeys) {
+        const step = stepMap[key];
+        if (!step) {
+          const message = key === "crop" ? "Crop requires thumbnail crop metadata." : `Step ${key} unavailable.`;
+          if (allowPartialFailures) {
+            errors.push(message);
+            logStep("error", runLabel, message);
+            continue;
+          }
+          throw new Error(message);
+        }
+
+        logStep("info", runLabel, `${step.label} started`);
+        const startedAt = Date.now();
         try {
-          await runPhotoMetadataJob(step.endpoint, step.payload ?? { force: true });
-          logStep("success", "image_pipeline", `${step.label} complete`);
+          const responseData = await runPhotoMetadataJob(step.endpoint, step.payload);
+          runCounts = resolveJobLiveCounts(runCounts, responseData);
+          const durationMs = Date.now() - startedAt;
+          const summary = summarizePhotoStepResponse(responseData);
+          const countSummary = formatJobLiveCounts(runCounts);
+          logStep(
+            "success",
+            runLabel,
+            `${step.label} complete (${durationMs}ms${
+              summary ? `; ${summary}` : ""
+            }${countSummary ? `; ${countSummary}` : ""})`
+          );
         } catch (error) {
           const detail = error instanceof Error ? error.message : "failed";
-          errors.push(`${step.label}: ${detail}`);
-          logStep("error", "image_pipeline", `${step.label} failed`, detail);
-        }
-      };
-
-      logStep("info", "image_pipeline", `Refreshing full pipeline for ${photo.id}`);
-
-      if (photo.origin === "media_links") {
-        if (!photo.media_asset_id) {
-          throw new Error("Cannot refresh pipeline: media asset id is missing");
-        }
-        const assetId = photo.media_asset_id;
-        const steps: Array<{
-          label: string;
-          endpoint: string;
-          payload: Record<string, unknown>;
-        }> = [
-          {
-            label: "Mirror",
-            endpoint: `/api/admin/trr-api/media-assets/${assetId}/mirror`,
-            payload: { force: true },
-          },
-          {
-            label: "People count",
-            endpoint: `/api/admin/trr-api/media-assets/${assetId}/auto-count`,
-            payload: { force: true },
-          },
-          {
-            label: "Text overlay",
-            endpoint: `/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`,
-            payload: { force: true },
-          },
-          {
-            label: "Variants (base)",
-            endpoint: `/api/admin/trr-api/media-assets/${assetId}/variants`,
-            payload: { force: true },
-          },
-        ];
-        if (cropPayload) {
-          steps.push({
-            label: "Variants (crop)",
-            endpoint: `/api/admin/trr-api/media-assets/${assetId}/variants`,
-            payload: { force: true, crop: cropPayload },
-          });
-        }
-        for (const step of steps) {
-          await runStep(step);
-        }
-      } else {
-        const steps: Array<{
-          label: string;
-          endpoint: string;
-          payload: Record<string, unknown>;
-        }> = [
-          {
-            label: "Mirror",
-            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/mirror`,
-            payload: { force: true },
-          },
-          {
-            label: "People count",
-            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`,
-            payload: { force: true },
-          },
-          {
-            label: "Text overlay",
-            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`,
-            payload: { force: true },
-          },
-          {
-            label: "Variants (base)",
-            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/variants`,
-            payload: { force: true },
-          },
-        ];
-        if (cropPayload) {
-          steps.push({
-            label: "Variants (crop)",
-            endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/variants`,
-            payload: { force: true, crop: cropPayload },
-          });
-        }
-        for (const step of steps) {
-          await runStep(step);
+          if (allowPartialFailures) {
+            errors.push(`${step.label}: ${detail}`);
+            logStep("error", runLabel, `${step.label} failed`, detail);
+            continue;
+          }
+          logStep("error", runLabel, `${step.label} failed`, detail);
+          throw error;
         }
       }
 
@@ -3088,54 +3348,94 @@ export default function PersonProfilePage() {
         throw new Error(errors.join(" | "));
       }
 
-      setRefreshNotice("Photo full pipeline refreshed.");
+      if (options?.successNotice) {
+        const countSummary = formatJobLiveCounts(runCounts);
+        setRefreshNotice(
+          countSummary ? `${options.successNotice} ${countSummary}` : options.successNotice
+        );
+      }
       setRefreshError(null);
-      logStep("success", "image_pipeline", `Full pipeline complete for ${photo.id}`);
+      const completionCountSummary = formatJobLiveCounts(runCounts);
+      logStep(
+        "success",
+        runLabel,
+        `Completed ${runLabel.replace(/_/g, " ")} for ${photo.id}${
+          completionCountSummary ? ` (${completionCountSummary})` : ""
+        }`
+      );
     },
-    [appendRefreshLog, fetchPhotos, runPhotoMetadataJob]
+    [appendRefreshLog, fetchPhotos, resolvePhotoPipelineSteps, runPhotoMetadataJob]
+  );
+
+  const handleRefreshLightboxPhotoMetadata = useCallback(
+    async (photo: TrrPersonPhoto) => {
+      const orderedSteps: PhotoPipelineStepKey[] = ["sync", "count", "id_text", "resize"];
+      if (buildThumbnailCropPayload(photo)) {
+        orderedSteps.push("crop");
+      }
+      await runPhotoPipelineSteps(photo, orderedSteps, {
+        allowPartialFailures: true,
+        successNotice: "Photo full pipeline refreshed.",
+        runLabel: "image_pipeline",
+      });
+    },
+    [runPhotoPipelineSteps]
   );
 
   const handleRefreshAutoThumbnailCrop = useCallback(
     async (photo: TrrPersonPhoto) => {
-      const endpoint =
-        photo.origin === "media_links"
-          ? photo.media_asset_id
-            ? `/api/admin/trr-api/media-assets/${photo.media_asset_id}/auto-count`
-            : null
-          : `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`;
-
-      if (!endpoint) {
-        throw new Error("Cannot refresh auto crop: media asset id is missing");
-      }
-
-      appendRefreshLog({
-        source: "image_refresh",
-        stage: "auto_count",
-        message: `Auto crop refresh started for ${photo.id}`,
-        level: "info",
-      });
-      await runPhotoMetadataJob(endpoint);
-
-      const refreshedPhotos = await fetchPhotos();
-      const refreshedPhoto = refreshedPhotos.find((candidate) => candidate.id === photo.id) ?? null;
-      if (!refreshedPhoto) return;
-
-      setThumbnailCropPreview(buildThumbnailCropPreview(refreshedPhoto));
-      setLightboxPhoto((prev) => {
-        if (!prev) return prev;
-        if (prev.photo.id !== refreshedPhoto.id) return prev;
-        return { ...prev, photo: refreshedPhoto };
-      });
-      setRefreshNotice("Auto thumbnail crop refreshed.");
-      setRefreshError(null);
-      appendRefreshLog({
-        source: "image_refresh",
-        stage: "auto_count",
-        message: `Auto crop refresh complete for ${photo.id}`,
-        level: "success",
+      await runPhotoPipelineSteps(photo, ["count"], {
+        allowPartialFailures: false,
+        successNotice: "Auto thumbnail crop refreshed.",
+        runLabel: "auto_count",
       });
     },
-    [appendRefreshLog, fetchPhotos, runPhotoMetadataJob],
+    [runPhotoPipelineSteps],
+  );
+
+  const handleLightboxSyncStage = useCallback(
+    async (photo: TrrPersonPhoto) =>
+      runPhotoPipelineSteps(photo, ["sync"], {
+        successNotice: "Image sync complete.",
+        runLabel: "image_sync",
+      }),
+    [runPhotoPipelineSteps]
+  );
+
+  const handleLightboxCountStage = useCallback(
+    async (photo: TrrPersonPhoto) =>
+      runPhotoPipelineSteps(photo, ["count"], {
+        successNotice: "Image count complete.",
+        runLabel: "image_count",
+      }),
+    [runPhotoPipelineSteps]
+  );
+
+  const handleLightboxCropStage = useCallback(
+    async (photo: TrrPersonPhoto) =>
+      runPhotoPipelineSteps(photo, ["crop"], {
+        successNotice: "Image crop complete.",
+        runLabel: "image_crop",
+      }),
+    [runPhotoPipelineSteps]
+  );
+
+  const handleLightboxIdTextStage = useCallback(
+    async (photo: TrrPersonPhoto) =>
+      runPhotoPipelineSteps(photo, ["id_text"], {
+        successNotice: "Image text detection complete.",
+        runLabel: "image_id_text",
+      }),
+    [runPhotoPipelineSteps]
+  );
+
+  const handleLightboxResizeStage = useCallback(
+    async (photo: TrrPersonPhoto) =>
+      runPhotoPipelineSteps(photo, ["resize"], {
+        successNotice: "Image resize complete.",
+        runLabel: "image_resize",
+      }),
+    [runPhotoPipelineSteps]
   );
 
   const handleThumbnailCropUpdated = useCallback(
@@ -3155,6 +3455,7 @@ export default function PersonProfilePage() {
   );
 
   const handleRefreshImages = useCallback(async () => {
+    if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
 
     setRefreshingImages(true);
@@ -3170,6 +3471,7 @@ export default function PersonProfilePage() {
     });
     setRefreshNotice(null);
     setRefreshError(null);
+    setRefreshLiveCounts(null);
     setPhotosError(null);
     appendRefreshLog({
       source: "page_refresh",
@@ -3182,22 +3484,77 @@ export default function PersonProfilePage() {
       const runStreamAttempt = async () => {
         const syncProgressTracker = createSyncProgressTracker();
         const headers = await getAuthHeaders();
-        const response = await fetch(
-          `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
-          {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              skip_mirror: false,
-              force_mirror: true,
-              limit_per_source: 200,
-              show_id: showIdForApi ?? undefined,
-              show_name: activeShowName ?? undefined,
-            }),
-          }
+        const streamController = new AbortController();
+        let streamAbortReason: "max_duration" | "idle" | null = null;
+        const streamTimeout = setTimeout(
+          () => {
+            streamAbortReason = "max_duration";
+            streamController.abort();
+          },
+          PERSON_PAGE_STREAM_MAX_DURATION_MS
         );
+        let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+        const bumpStreamIdleTimeout = () => {
+          if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+          streamIdleTimeout = setTimeout(
+            () => {
+              streamAbortReason = "idle";
+              streamController.abort();
+            },
+            PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS
+          );
+        };
+        const clearStreamIdleTimeout = () => {
+          if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+          streamIdleTimeout = null;
+        };
+        bumpStreamIdleTimeout();
+        let response: Response;
+        try {
+          response = await fetch(
+            `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                skip_mirror: false,
+                force_mirror: false,
+                limit_per_source: 200,
+                enforce_show_source_policy: false,
+                show_id: showIdForApi ?? undefined,
+                show_name: activeShowName ?? undefined,
+              }),
+              signal: streamController.signal,
+            }
+          );
+        } catch (error) {
+          clearStreamIdleTimeout();
+          clearTimeout(streamTimeout);
+          if (streamAbortReason === "idle") {
+            throw createNamedError(
+              "StreamTimeoutError",
+              `No refresh updates received for ${Math.round(
+                PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS / 1000
+              )}s.`
+            );
+          }
+          if (streamAbortReason === "max_duration") {
+            throw createNamedError(
+              "StreamTimeoutError",
+              `Refresh stream reached max duration (${Math.round(
+                PERSON_PAGE_STREAM_MAX_DURATION_MS / 60000
+              )}m).`
+            );
+          }
+          if (isAbortError(error) || isSignalAbortedWithoutReasonError(error)) {
+            throw createNamedError("StreamAbortError", "Refresh stream request was aborted.");
+          }
+          throw error;
+        }
 
         if (!response.ok || !response.body) {
+          clearStreamIdleTimeout();
+          clearTimeout(streamTimeout);
           const data = await response.json().catch(() => ({}));
           const message =
             data.error && data.detail
@@ -3210,6 +3567,7 @@ export default function PersonProfilePage() {
         const decoder = new TextDecoder();
         let buffer = "";
         let sawComplete = false;
+        let shouldStopReading = false;
         let lastEventAt = Date.now();
         const staleInterval = setInterval(() => {
           const now = Date.now();
@@ -3231,6 +3589,7 @@ export default function PersonProfilePage() {
             const { value, done } = await reader.read();
             if (done) break;
             lastEventAt = Date.now();
+            bumpStreamIdleTimeout();
             buffer += decoder.decode(value, { stream: true });
             // Normalize CRLF to LF so "\n\n" boundary splitting works in all runtimes.
             buffer = buffer.replace(/\r\n/g, "\n");
@@ -3271,6 +3630,14 @@ export default function PersonProfilePage() {
                   typeof (payload as { message?: unknown }).message === "string"
                     ? ((payload as { message: string }).message)
                     : null;
+                const heartbeat = (payload as { heartbeat?: unknown }).heartbeat === true;
+                const elapsedMsRaw = (payload as { elapsed_ms?: unknown }).elapsed_ms;
+                const elapsedMs =
+                  typeof elapsedMsRaw === "number"
+                    ? elapsedMsRaw
+                    : typeof elapsedMsRaw === "string"
+                      ? Number.parseInt(elapsedMsRaw, 10)
+                      : null;
                 const runId =
                   typeof (payload as { run_id?: unknown }).run_id === "string"
                     ? ((payload as { run_id: string }).run_id)
@@ -3294,7 +3661,7 @@ export default function PersonProfilePage() {
                 const numericTotal =
                   typeof total === "number" && Number.isFinite(total) ? total : null;
                 const syncCounts =
-                  mappedPhase === PERSON_REFRESH_PHASES.syncing
+                  !heartbeat && mappedPhase === PERSON_REFRESH_PHASES.syncing
                     ? updateSyncProgressTracker(syncProgressTracker, {
                         rawStage,
                         message,
@@ -3302,36 +3669,61 @@ export default function PersonProfilePage() {
                         total: numericTotal,
                       })
                     : null;
+                const heartbeatMessage =
+                  heartbeat && elapsedMs !== null && elapsedMs >= 0
+                    ? `Still running${rawStage ? ` (${rawStage})` : ""} · ${Math.round(elapsedMs / 1000)}s elapsed`
+                    : heartbeat
+                      ? `Still running${rawStage ? ` (${rawStage})` : ""}`
+                      : null;
+                const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
+                setRefreshLiveCounts(nextLiveCounts);
+                const enrichedMessage = appendLiveCountsToMessage(
+                  message ?? heartbeatMessage ?? "",
+                  nextLiveCounts
+                );
                 setRefreshProgress({
                   current: syncCounts?.current ?? numericCurrent,
                   total: syncCounts?.total ?? numericTotal,
                   phase: mappedPhase ?? rawStage,
                   rawStage,
-                  message,
-                  detailMessage: message,
+                  message: enrichedMessage || message || heartbeatMessage || null,
+                  detailMessage: enrichedMessage || message || heartbeatMessage || null,
                   runId,
                   lastEventAt: Date.now(),
                 });
-                appendRefreshLog({
-                  source: "page_refresh",
-                  stage: rawStage ?? "progress",
-                  message: message ?? "Refresh progress update",
-                  level: "info",
-                  runId,
-                });
+                if (!heartbeat) {
+                  appendRefreshLog({
+                    source: "page_refresh",
+                    stage: rawStage ?? "progress",
+                    message: enrichedMessage || "Refresh progress update",
+                    level: "info",
+                    runId,
+                  });
+                }
               } else if (eventType === "complete") {
                 sawComplete = true;
+                const completeLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
+                setRefreshLiveCounts(completeLiveCounts);
                 const summary = payload && typeof payload === "object" && "summary" in payload
                   ? (payload as { summary?: unknown }).summary
                   : payload;
-                const summaryText = formatRefreshSummary(summary);
-                setRefreshNotice(summaryText || "Images refreshed.");
+                const summaryText = formatPersonRefreshSummary(summary);
+                const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+                setRefreshNotice(
+                  summaryText
+                    ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}`
+                    : liveCountSuffix
+                      ? `Images refreshed. ${liveCountSuffix}`
+                      : "Images refreshed."
+                );
                 appendRefreshLog({
                   source: "page_refresh",
                   stage: "complete",
                   message: summaryText || "Images refreshed.",
+                  detail: liveCountSuffix,
                   level: "success",
                 });
+                shouldStopReading = true;
               } else if (eventType === "error") {
                 const errorPayload =
                   payload && typeof payload === "object"
@@ -3355,11 +3747,48 @@ export default function PersonProfilePage() {
                 throw backendErr;
               }
 
+              if (shouldStopReading) {
+                break;
+              }
               boundaryIndex = buffer.indexOf("\n\n");
             }
+
+            if (shouldStopReading) {
+              break;
+            }
           }
+        } catch (error) {
+          if (streamAbortReason === "idle") {
+            throw createNamedError(
+              "StreamTimeoutError",
+              `No refresh updates received for ${Math.round(
+                PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS / 1000
+              )}s.`
+            );
+          }
+          if (streamAbortReason === "max_duration") {
+            throw createNamedError(
+              "StreamTimeoutError",
+              `Refresh stream reached max duration (${Math.round(
+                PERSON_PAGE_STREAM_MAX_DURATION_MS / 60000
+              )}m).`
+            );
+          }
+          if (isAbortError(error) || isSignalAbortedWithoutReasonError(error)) {
+            throw createNamedError("StreamAbortError", "Refresh stream request was aborted.");
+          }
+          throw error;
         } finally {
           clearInterval(staleInterval);
+          clearStreamIdleTimeout();
+          clearTimeout(streamTimeout);
+          if (shouldStopReading) {
+            try {
+              await reader.cancel();
+            } catch {
+              // no-op
+            }
+          }
         }
 
         if (!sawComplete) {
@@ -3380,8 +3809,11 @@ export default function PersonProfilePage() {
           // avoid duplicate refresh jobs.
           const isBackendError =
             streamErr instanceof Error && streamErr.name === "BackendError";
+          const isLocalTimeoutOrAbort =
+            streamErr instanceof Error &&
+            (streamErr.name === "StreamTimeoutError" || streamErr.name === "StreamAbortError");
           streamError = streamErr instanceof Error ? streamErr.message : String(streamErr);
-          if (isBackendError || attempt >= 2) {
+          if (isBackendError || isLocalTimeoutOrAbort || attempt >= 2) {
             break;
           }
           setRefreshProgress((prev) =>
@@ -3430,6 +3862,7 @@ export default function PersonProfilePage() {
     } finally {
       setRefreshingImages(false);
       setRefreshProgress(null);
+      setRefreshLiveCounts(null);
     }
   }, [
     refreshingImages,
@@ -3443,14 +3876,17 @@ export default function PersonProfilePage() {
     fetchCoverPhoto,
     getAuthHeaders,
     personId,
+    refreshLiveCounts,
     showIdForApi,
     activeShowName,
   ]);
 
   const handleReprocessImages = useCallback(async () => {
+    if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
 
     setReprocessingImages(true);
+    setRefreshLiveCounts(null);
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.counting,
       message: "Reprocessing existing images...",
@@ -3550,29 +3986,42 @@ export default function PersonProfilePage() {
               typeof current === "number" && Number.isFinite(current) ? current : null;
             const numericTotal =
               typeof total === "number" && Number.isFinite(total) ? total : null;
+            const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
+            setRefreshLiveCounts(nextLiveCounts);
+            const enrichedMessage = appendLiveCountsToMessage(message ?? "", nextLiveCounts);
             setRefreshProgress({
               current: numericCurrent,
               total: numericTotal,
               phase: mappedPhase ?? rawPhase,
-              message,
+              message: enrichedMessage || message || null,
             });
             appendRefreshLog({
               source: "page_refresh",
               stage: rawPhase ?? "reprocess_progress",
-              message: message ?? "Count & Crop progress update",
+              message: enrichedMessage || message || "Count & Crop progress update",
               level: "info",
             });
           } else if (eventType === "complete") {
             sawComplete = true;
+            const completeLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
+            setRefreshLiveCounts(completeLiveCounts);
             const summary = payload && typeof payload === "object" && "summary" in payload
               ? (payload as { summary?: unknown }).summary
               : payload;
-            const summaryText = formatRefreshSummary(summary);
-            setRefreshNotice(summaryText || "Reprocessing complete.");
+            const summaryText = formatPersonRefreshSummary(summary);
+            const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+            setRefreshNotice(
+              summaryText
+                ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}`
+                : liveCountSuffix
+                  ? `Reprocessing complete. ${liveCountSuffix}`
+                  : "Reprocessing complete."
+            );
             appendRefreshLog({
               source: "page_refresh",
               stage: "reprocess_complete",
               message: summaryText || "Reprocessing complete.",
+              detail: liveCountSuffix,
               level: "success",
             });
           } else if (eventType === "error") {
@@ -3626,6 +4075,7 @@ export default function PersonProfilePage() {
     } finally {
       setReprocessingImages(false);
       setRefreshProgress(null);
+      setRefreshLiveCounts(null);
     }
   }, [
     refreshingImages,
@@ -3634,11 +4084,13 @@ export default function PersonProfilePage() {
     fetchPhotos,
     getAuthHeaders,
     personId,
+    refreshLiveCounts,
   ]);
 
   // Initial load
   useEffect(() => {
     if (!hasAccess) return;
+    if (!personId) return;
 
     const loadData = async () => {
       setLoading(true);
@@ -3648,7 +4100,7 @@ export default function PersonProfilePage() {
     };
 
     loadData();
-  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, fetchFandomData, fetchBravoContent]);
+  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, fetchFandomData, fetchBravoContent, personId]);
 
   // Open lightbox with photo, index, and trigger element for focus restoration
   const openLightbox = (
@@ -3825,8 +4277,8 @@ export default function PersonProfilePage() {
 
       const normalizedContentType =
         typeof data.content_type === "string" && data.content_type.trim().length > 0
-          ? data.content_type.trim().toUpperCase()
-          : contentType.trim().toUpperCase();
+          ? normalizeContentTypeToken(data.content_type)
+          : normalizeContentTypeToken(contentType);
       const nextContextType =
         typeof data.context_type === "string" && data.context_type.trim().length > 0
           ? data.context_type.trim()
@@ -4088,7 +4540,7 @@ export default function PersonProfilePage() {
               ).map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => setTab(tab.id)}
                   className={`border-b-2 py-4 text-sm font-semibold transition ${
                     activeTab === tab.id
                       ? "border-zinc-900 text-zinc-900"
@@ -4128,7 +4580,7 @@ export default function PersonProfilePage() {
                   <h3 className="text-lg font-bold text-zinc-900">Photos</h3>
                   {photos.length > 6 && (
                     <button
-                      onClick={() => setActiveTab("gallery")}
+                      onClick={() => setTab("gallery")}
                       className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
                     >
                       View all →
@@ -4330,7 +4782,7 @@ export default function PersonProfilePage() {
                   <h3 className="text-lg font-bold text-zinc-900">Show Credits</h3>
                   {credits.length > 5 && (
                     <button
-                      onClick={() => setActiveTab("credits")}
+                      onClick={() => setTab("credits")}
                       className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
                     >
                       View all →
@@ -4409,7 +4861,7 @@ export default function PersonProfilePage() {
                   <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-lg font-bold text-zinc-900">Fandom Info</h3>
                     <button
-                      onClick={() => setActiveTab("fandom")}
+                      onClick={() => setTab("fandom")}
                       className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
                     >
                       View all →
@@ -4473,6 +4925,51 @@ export default function PersonProfilePage() {
                     </svg>
                     {reprocessingImages ? "Processing..." : "Count & Crop"}
                   </button>
+                  <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1">
+                    <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-500">
+                      Stages
+                    </span>
+                    <button
+                      onClick={handleRefreshImages}
+                      disabled={refreshingImages || reprocessingImages}
+                      title="Sync source + mirror stages."
+                      className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                    >
+                      Sync
+                    </button>
+                    <button
+                      onClick={handleReprocessImages}
+                      disabled={refreshingImages || reprocessingImages}
+                      title="Run count stage for existing images."
+                      className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                    >
+                      Count
+                    </button>
+                    <button
+                      onClick={handleReprocessImages}
+                      disabled={refreshingImages || reprocessingImages}
+                      title="Run crop stage for existing images."
+                      className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                    >
+                      Crop
+                    </button>
+                    <button
+                      onClick={handleReprocessImages}
+                      disabled={refreshingImages || reprocessingImages}
+                      title="Run ID Text stage for existing images."
+                      className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                    >
+                      ID Text
+                    </button>
+                    <button
+                      onClick={handleRefreshImages}
+                      disabled={refreshingImages || reprocessingImages}
+                      title="Run resize stage with full refresh pipeline."
+                      className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                    >
+                      Resize
+                    </button>
+                  </div>
                   <button
                     onClick={() => setAdvancedFiltersOpen(true)}
                     className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
@@ -4526,41 +5023,47 @@ export default function PersonProfilePage() {
                     >
                       {activeShowFilterLabel}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setGalleryShowFilter("wwhl")}
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                        galleryShowFilter === "wwhl"
-                          ? "border-zinc-900 bg-zinc-900 text-white"
-                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                      }`}
-                    >
-                      {WWHL_LABEL}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGalleryShowFilter("other-shows")}
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                        galleryShowFilter === "other-shows"
-                          ? "border-zinc-900 bg-zinc-900 text-white"
-                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                      }`}
-                    >
-                      Other Shows
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGalleryShowFilter("all")}
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                        galleryShowFilter === "all"
-                          ? "border-zinc-900 bg-zinc-900 text-white"
-                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                      }`}
-                    >
-                      All Media
-                    </button>
+                    {hasWwhlMatches && (
+                      <button
+                        type="button"
+                        onClick={() => setGalleryShowFilter("wwhl")}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          galleryShowFilter === "wwhl"
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        {WWHL_LABEL}
+                      </button>
+                    )}
+                    {hasOtherShowMatches && (
+                      <button
+                        type="button"
+                        onClick={() => setGalleryShowFilter("other-shows")}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          galleryShowFilter === "other-shows"
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        Other Shows
+                      </button>
+                    )}
+                    {hasNonThisShowMatches && (
+                      <button
+                        type="button"
+                        onClick={() => setGalleryShowFilter("all")}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          galleryShowFilter === "all"
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        All Media
+                      </button>
+                    )}
                   </div>
-                  {galleryShowFilter === "other-shows" && (
+                  {galleryShowFilter === "other-shows" && hasOtherShowMatches && (
                     <select
                       value={selectedOtherShowKey}
                       onChange={(event) => {
@@ -5000,7 +5503,7 @@ export default function PersonProfilePage() {
         {lightboxPhoto && (
           <ImageLightbox
             src={getPersonPhotoDetailUrl(lightboxPhoto.photo) || ""}
-            fallbackSrc={getPersonPhotoOriginalUrl(lightboxPhoto.photo)}
+            fallbackSrcs={getPersonPhotoDetailUrlCandidates(lightboxPhoto.photo)}
             alt={lightboxPhoto.photo.caption || person.full_name}
             isOpen={lightboxOpen}
             onClose={closeLightbox}
@@ -5041,6 +5544,11 @@ export default function PersonProfilePage() {
             }
             onThumbnailCropPreviewAdjust={handleThumbnailCropOverlayAdjust}
             onRefresh={() => handleRefreshLightboxPhotoMetadata(lightboxPhoto.photo)}
+            onSync={() => handleLightboxSyncStage(lightboxPhoto.photo)}
+            onCount={() => handleLightboxCountStage(lightboxPhoto.photo)}
+            onCrop={() => handleLightboxCropStage(lightboxPhoto.photo)}
+            onIdText={() => handleLightboxIdTextStage(lightboxPhoto.photo)}
+            onResize={() => handleLightboxResizeStage(lightboxPhoto.photo)}
             onReassign={
               lightboxPhoto.photo.origin === "cast_photos"
                 ? () =>

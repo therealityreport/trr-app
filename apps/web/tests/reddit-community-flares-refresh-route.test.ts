@@ -28,6 +28,8 @@ vi.mock("@/lib/server/admin/reddit-flairs-service", () => ({
 
 import { POST } from "@/app/api/admin/reddit/communities/[communityId]/flares/refresh/route";
 
+const COMMUNITY_ID = "33333333-3333-4333-8333-333333333333";
+
 describe("/api/admin/reddit/communities/[communityId]/flares/refresh route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
@@ -37,11 +39,11 @@ describe("/api/admin/reddit/communities/[communityId]/flares/refresh route", () 
 
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
     getRedditCommunityByIdMock.mockResolvedValue({
-      id: "community-1",
+      id: COMMUNITY_ID,
       subreddit: "BravoRealHousewives",
     });
     updateRedditCommunityPostFlaresMock.mockResolvedValue({
-      id: "community-1",
+      id: COMMUNITY_ID,
       subreddit: "BravoRealHousewives",
       post_flares: ["Episode Discussion"],
       post_flares_updated_at: "2026-02-17T00:00:00.000Z",
@@ -55,12 +57,12 @@ describe("/api/admin/reddit/communities/[communityId]/flares/refresh route", () 
       warning: null,
     });
 
-    const request = new NextRequest("http://localhost/api/admin/reddit/communities/community-1/flares/refresh", {
+    const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/flares/refresh`, {
       method: "POST",
     });
 
     const response = await POST(request, {
-      params: Promise.resolve({ communityId: "community-1" }),
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
     });
     const payload = await response.json();
 
@@ -69,7 +71,7 @@ describe("/api/admin/reddit/communities/[communityId]/flares/refresh route", () 
     expect(payload.source).toBe("api");
     expect(updateRedditCommunityPostFlaresMock).toHaveBeenCalledWith(
       { firebaseUid: "admin-uid", isAdmin: true },
-      "community-1",
+      COMMUNITY_ID,
       ["Episode Discussion", "Live Thread"],
       expect.any(String),
     );
@@ -82,18 +84,18 @@ describe("/api/admin/reddit/communities/[communityId]/flares/refresh route", () 
       warning: null,
     });
     updateRedditCommunityPostFlaresMock.mockResolvedValue({
-      id: "community-1",
+      id: COMMUNITY_ID,
       subreddit: "BravoRealHousewives",
       post_flares: [],
       post_flares_updated_at: "2026-02-17T00:00:00.000Z",
     });
 
-    const request = new NextRequest("http://localhost/api/admin/reddit/communities/community-1/flares/refresh", {
+    const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/flares/refresh`, {
       method: "POST",
     });
 
     const response = await POST(request, {
-      params: Promise.resolve({ communityId: "community-1" }),
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
     });
     const payload = await response.json();
 
@@ -106,12 +108,12 @@ describe("/api/admin/reddit/communities/[communityId]/flares/refresh route", () 
   it("returns 404 when community is missing", async () => {
     getRedditCommunityByIdMock.mockResolvedValue(null);
 
-    const request = new NextRequest("http://localhost/api/admin/reddit/communities/community-1/flares/refresh", {
+    const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/flares/refresh`, {
       method: "POST",
     });
 
     const response = await POST(request, {
-      params: Promise.resolve({ communityId: "community-1" }),
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
     });
     const payload = await response.json();
 
@@ -122,16 +124,31 @@ describe("/api/admin/reddit/communities/[communityId]/flares/refresh route", () 
   it("maps auth failures to 403", async () => {
     requireAdminMock.mockRejectedValue(new Error("forbidden"));
 
-    const request = new NextRequest("http://localhost/api/admin/reddit/communities/community-1/flares/refresh", {
+    const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/flares/refresh`, {
       method: "POST",
     });
 
     const response = await POST(request, {
-      params: Promise.resolve({ communityId: "community-1" }),
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
     });
     const payload = await response.json();
 
     expect(response.status).toBe(403);
     expect(payload.error).toBe("forbidden");
+  });
+
+  it("returns 400 for invalid communityId", async () => {
+    const request = new NextRequest("http://localhost/api/admin/reddit/communities/not-a-uuid/flares/refresh", {
+      method: "POST",
+    });
+
+    const response = await POST(request, {
+      params: Promise.resolve({ communityId: "not-a-uuid" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("communityId");
+    expect(getRedditCommunityByIdMock).not.toHaveBeenCalled();
   });
 });

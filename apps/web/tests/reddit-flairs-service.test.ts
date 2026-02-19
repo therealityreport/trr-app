@@ -73,6 +73,33 @@ describe("reddit-flairs-service", () => {
     expect(result.warning).toContain("Reddit request failed");
   });
 
+  it("normalizes and alphabetizes RHOSLC flairs while removing Whitney token flairs", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/link_flair_v2.json")) {
+        return jsonResponse([
+          { text: "Chat/Discussion 👄" },
+          { text: ":Meredith: Meredith Marksss 🛀" },
+          { text: ":Whitney: It's Whitney, B*tch 🙎🏼‍♀️" },
+          { text: "S7🧊" },
+          { text: "❄️General❄️" },
+        ]);
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await fetchSubredditPostFlares("realhousewivesofSLC");
+
+    expect(result.flares).toEqual([
+      "Chat/Discussion",
+      "General",
+      "Meredith Marksss",
+      "S7",
+    ]);
+    expect(result.flares.some((flair) => flair.toLowerCase().includes("whitney"))).toBe(false);
+  });
+
   it("returns empty flares when both API and fallback have none", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

@@ -19,6 +19,8 @@ export type SocialProxyErrorBody = {
   code?: ProxyErrorCode;
   retryable?: boolean;
   upstream_status?: number;
+  upstream_detail?: unknown;
+  upstream_detail_code?: string;
 };
 
 class SocialProxyError extends Error {
@@ -26,6 +28,8 @@ class SocialProxyError extends Error {
   code: ProxyErrorCode;
   retryable: boolean;
   upstreamStatus?: number;
+  upstreamDetail?: unknown;
+  upstreamDetailCode?: string;
 
   constructor(
     message: string,
@@ -34,6 +38,8 @@ class SocialProxyError extends Error {
       code: ProxyErrorCode;
       retryable?: boolean;
       upstreamStatus?: number;
+      upstreamDetail?: unknown;
+      upstreamDetailCode?: string;
     },
   ) {
     super(message);
@@ -41,6 +47,8 @@ class SocialProxyError extends Error {
     this.code = options.code;
     this.retryable = Boolean(options.retryable);
     this.upstreamStatus = options.upstreamStatus;
+    this.upstreamDetail = options.upstreamDetail;
+    this.upstreamDetailCode = options.upstreamDetailCode;
   }
 }
 
@@ -59,7 +67,30 @@ const normalizeBackendErrorMessage = (data: Record<string, unknown>, fallback: s
   if (typeof data.detail === "string" && data.detail.trim()) {
     return data.detail;
   }
+  if (data.detail && typeof data.detail === "object") {
+    const detail = data.detail as Record<string, unknown>;
+    if (typeof detail.message === "string" && detail.message.trim()) {
+      return detail.message;
+    }
+    if (typeof detail.error === "string" && detail.error.trim()) {
+      return detail.error;
+    }
+    if (typeof detail.code === "string" && detail.code.trim()) {
+      return `${fallback} (${detail.code})`;
+    }
+  }
   return fallback;
+};
+
+const readUpstreamDetail = (data: Record<string, unknown>): unknown => {
+  return data.detail;
+};
+
+const readUpstreamDetailCode = (data: Record<string, unknown>): string | undefined => {
+  if (!data.detail || typeof data.detail !== "object") return undefined;
+  const detail = data.detail as Record<string, unknown>;
+  if (typeof detail.code !== "string" || !detail.code.trim()) return undefined;
+  return detail.code.trim();
 };
 
 const sleep = async (ms: number): Promise<void> => {
@@ -194,6 +225,8 @@ async function fetchBackend(
         code: "UPSTREAM_ERROR",
         retryable: isRetryableUpstreamStatus(response.status),
         upstreamStatus: response.status,
+        upstreamDetail: readUpstreamDetail(data),
+        upstreamDetailCode: readUpstreamDetailCode(data),
       });
       if (!proxyError.retryable || attempt >= maxAttempts) {
         throw proxyError;
@@ -285,6 +318,12 @@ export const socialProxyErrorResponse = (
   };
   if (proxyError.upstreamStatus) {
     body.upstream_status = proxyError.upstreamStatus;
+  }
+  if (proxyError.upstreamDetail !== undefined) {
+    body.upstream_detail = proxyError.upstreamDetail;
+  }
+  if (proxyError.upstreamDetailCode) {
+    body.upstream_detail_code = proxyError.upstreamDetailCode;
   }
   return NextResponse.json(body, { status: proxyError.status });
 };

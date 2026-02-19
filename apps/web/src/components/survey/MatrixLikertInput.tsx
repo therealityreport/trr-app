@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { AgreeLikertScaleConfig, MatrixRow } from "@/lib/surveys/question-config-types";
+import SurveyContinueButton from "./SurveyContinueButton";
 import {
   isCloudfrontCdnFontCandidate,
   resolveCloudfrontCdnFont,
@@ -284,11 +285,11 @@ function resolveOptionTheme(
   const token = `${key}_${label}`;
 
   if (token.includes("strongly_agree")) return { bgColor: "#356A3B", textColor: "#FFFFFF", rank: 0 };
-  if (token.includes("somewhat_agree")) return { bgColor: "#76A34C", textColor: "#111111", rank: 1 };
+  if (token.includes("somewhat_agree")) return { bgColor: "#76A34C", textColor: "#000000", rank: 1 };
   if (token.includes("strongly_disagree")) return { bgColor: "#99060A", textColor: "#FFFFFF", rank: 4 };
   if (token.includes("somewhat_disagree")) return { bgColor: "#C76D00", textColor: "#FFFFFF", rank: 3 };
-  if (token.includes("agree")) return { bgColor: "#76A34C", textColor: "#111111", rank: 1 };
-  if (token.includes("neither") || token.includes("neutral")) return { bgColor: "#E6B903", textColor: "#111111", rank: 2 };
+  if (token.includes("agree")) return { bgColor: "#76A34C", textColor: "#000000", rank: 1 };
+  if (token.includes("neither") || token.includes("neutral")) return { bgColor: "#E6B903", textColor: "#000000", rank: 2 };
   if (token.includes("disagree")) return { bgColor: "#C76D00", textColor: "#FFFFFF", rank: 3 };
 
   const fallbackColor = FIGMA_SCALE_COLORS[Math.min(Math.max(fallbackIndex, 0), 4)] ?? "#4B5563";
@@ -368,21 +369,6 @@ export default function MatrixLikertInput({
       "#000000",
     [configRecord],
   );
-  const continueButtonColor = React.useMemo(
-    () =>
-      readColorValue(configRecord, ["continueButtonColor"]) ??
-      readColorValue(configRecord, ["styles", "continueButtonColor"]) ??
-      "#121212",
-    [configRecord],
-  );
-  const continueButtonTextColor = React.useMemo(
-    () =>
-      readColorValue(configRecord, ["continueButtonTextColor"]) ??
-      readColorValue(configRecord, ["styles", "continueButtonTextColor"]) ??
-      "#F8F8F8",
-    [configRecord],
-  );
-
   const shapeScaleFactor = React.useMemo(
     () => normalizeScalePercent(config.shapeScale, 100) / 100,
     [config.shapeScale],
@@ -429,16 +415,12 @@ export default function MatrixLikertInput({
     [containerWidth],
   );
 
-  const rootGap = React.useMemo(
-    () => Math.round(clampNumber(interpolate(12, 34, responsiveScale), 8, 40)),
-    [responsiveScale],
-  );
   const rowGap = React.useMemo(
-    () => Math.round(clampNumber(interpolate(18, 64, responsiveScale), 12, 72)),
+    () => Math.round(clampNumber(interpolate(20, 52, responsiveScale), 14, 64)),
     [responsiveScale],
   );
   const rowPaddingTop = React.useMemo(
-    () => Math.round(clampNumber(interpolate(12, 44, responsiveScale), 8, 64)),
+    () => Math.round(clampNumber(interpolate(14, 36, responsiveScale), 10, 48)),
     [responsiveScale],
   );
   const promptFontSize = React.useMemo(
@@ -450,11 +432,11 @@ export default function MatrixLikertInput({
     [responsiveScale],
   );
   const promptLineHeight = React.useMemo(
-    () => interpolate(1.28, 1.18, responsiveScale),
+    () => interpolate(1.38, 1.72, responsiveScale),
     [responsiveScale],
   );
   const promptToStatementGap = React.useMemo(
-    () => Math.round(clampNumber(interpolate(16, 40, responsiveScale), 12, 52)),
+    () => Math.round(clampNumber(interpolate(14, 30, responsiveScale), 10, 38)),
     [responsiveScale],
   );
   const statementFontSize = React.useMemo(
@@ -462,15 +444,15 @@ export default function MatrixLikertInput({
     [responsiveScale],
   );
   const statementLineHeight = React.useMemo(
-    () => interpolate(0.98, 0.87, responsiveScale),
+    () => interpolate(1.02, 0.87, responsiveScale),
     [responsiveScale],
   );
   const optionStackMarginTop = React.useMemo(
-    () => Math.round(clampNumber(interpolate(20, 44, responsiveScale), 14, 56)),
+    () => Math.round(clampNumber(interpolate(18, 46, responsiveScale), 14, 56)),
     [responsiveScale],
   );
   const optionStackGap = React.useMemo(
-    () => Math.round(clampNumber(interpolate(8, 18, responsiveScale), 6, 24)),
+    () => Math.round(clampNumber(interpolate(10, 18, responsiveScale), 8, 24)),
     [responsiveScale],
   );
   const optionLabelFontSize = React.useMemo(
@@ -497,21 +479,9 @@ export default function MatrixLikertInput({
     () => Math.round(clampNumber(interpolate(8, 17, responsiveScale) * buttonScaleFactor, 6, 30)),
     [buttonScaleFactor, responsiveScale],
   );
-  const continueButtonHeight = React.useMemo(
-    () => Math.round(clampNumber(interpolate(42, 66, responsiveScale) * buttonScaleFactor, 36, 92)),
-    [buttonScaleFactor, responsiveScale],
-  );
-  const continueButtonWidth = React.useMemo(
-    () => Math.round(clampNumber(interpolate(138, 212, responsiveScale) * buttonScaleFactor, 116, 300)),
-    [buttonScaleFactor, responsiveScale],
-  );
-  const continueButtonFontSize = React.useMemo(
-    () => Math.round(clampNumber(interpolate(18, 30, responsiveScale) * buttonScaleFactor, 13, 40)),
-    [buttonScaleFactor, responsiveScale],
-  );
-  const continueButtonRadius = React.useMemo(
-    () => Math.round(clampNumber(interpolate(24, 96, responsiveScale) * shapeScaleFactor, 18, 116)),
-    [responsiveScale, shapeScaleFactor],
+  const continueButtonMarginTop = React.useMemo(
+    () => Math.round(clampNumber(interpolate(18, 34, responsiveScale), 14, 42)),
+    [responsiveScale],
   );
   const hasAnySelection = React.useMemo(
     () => rows.some((row) => Boolean(value?.[row.id])),
@@ -566,11 +536,11 @@ export default function MatrixLikertInput({
     <div
       ref={containerRef}
       className="flex flex-col rounded-[18px] bg-[#D9D9D9] px-3 py-4 sm:px-6 sm:py-8"
-      style={{ gap: `${rootGap}px`, backgroundColor: componentBackgroundColor }}
+      style={{ backgroundColor: componentBackgroundColor }}
     >
       {fontOverrides.missingFonts.length > 0 && (
         <p
-          className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
           data-testid="matrix-likert-missing-fonts"
         >
           Missing CloudFront CDN fonts: {fontOverrides.missingFonts.join(", ")}
@@ -594,6 +564,7 @@ export default function MatrixLikertInput({
 
       <div
         className="flex flex-col"
+        data-testid="agree-likert-rows"
         style={{ marginTop: `${promptToStatementGap}px`, gap: `${rowGap}px` }}
       >
         {rows.map((row: MatrixRow, rowIndex) => (
@@ -604,7 +575,7 @@ export default function MatrixLikertInput({
             data-testid={`agree-likert-row-${row.id}`}
           >
             <h3
-              className="mx-auto max-w-[28ch] text-center leading-[0.95] text-black"
+              className="mx-auto max-w-[34ch] text-center leading-[0.95] text-black"
               style={{
                 fontFamily: fontOverrides.statementFontFamily,
                 fontWeight: 800,
@@ -618,6 +589,7 @@ export default function MatrixLikertInput({
 
             <div
               className="mx-auto flex w-full max-w-[913px] flex-col"
+              data-testid={`agree-likert-option-stack-${row.id}`}
               style={{
                 marginTop: `${optionStackMarginTop}px`,
                 gap: `${optionStackGap}px`,
@@ -669,25 +641,14 @@ export default function MatrixLikertInput({
       </div>
 
       {hasAnySelection && !disabled && (
-        <button
-          type="button"
+        <SurveyContinueButton
           onClick={handleContinue}
-          className="mx-auto inline-flex items-center justify-center bg-[#121212] text-[#F8F8F8] transition hover:bg-black focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/30"
+          className="mx-auto"
           style={{
-            minWidth: `${continueButtonWidth}px`,
-            height: `${continueButtonHeight}px`,
-            borderRadius: `${continueButtonRadius}px`,
-            fontFamily: fontOverrides.optionFontFamily,
-            fontWeight: 700,
-            fontSize: `${continueButtonFontSize}px`,
-            letterSpacing: "0.03em",
-            backgroundColor: continueButtonColor,
-            color: continueButtonTextColor,
+            marginTop: `${continueButtonMarginTop}px`,
           }}
           data-testid="agree-likert-continue"
-        >
-          Continue
-        </button>
+        />
       )}
     </div>
   );

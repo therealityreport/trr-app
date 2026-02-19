@@ -53,7 +53,7 @@ const BASE_COLUMNS = ["id", "created_at", "app_user_id", "app_username", "source
 
 export default function AdminSurveyResponsesPage() {
   const router = useRouter();
-  const { user, checking, hasAccess } = useAdminGuard();
+  const { user, userKey, checking, hasAccess } = useAdminGuard();
   const [surveys, setSurveys] = useState<SurveyMetadata[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>({});
@@ -86,7 +86,7 @@ export default function AdminSurveyResponsesPage() {
   }, []);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess) return;
+    if (checking || !userKey || !hasAccess) return;
     const loadMetadata = async () => {
       setMetadataLoading(true);
       setMetadataError(null);
@@ -108,7 +108,7 @@ export default function AdminSurveyResponsesPage() {
       }
     };
     void loadMetadata();
-  }, [checking, hasAccess, user, withAuthFetch]);
+  }, [checking, hasAccess, userKey, withAuthFetch]);
 
   const activeSurvey = useMemo(() => surveys.find((survey) => survey.key === selectedKey) ?? null, [surveys, selectedKey]);
 

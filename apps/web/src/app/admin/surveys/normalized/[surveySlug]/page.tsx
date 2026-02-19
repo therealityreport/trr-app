@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { auth } from "@/lib/firebase";
 import { SurveyQuestionsEditor } from "@/components/admin/SurveyQuestionsEditor";
 import { SurveyRunManager } from "@/components/admin/SurveyRunManager";
 import type { SurveyWithQuestions } from "@/lib/surveys/normalized-types";
@@ -15,7 +15,7 @@ export default function NormalizedSurveyEditorPage() {
   const params = useParams();
   const router = useRouter();
   const surveySlug = params.surveySlug as string;
-  const { user, checking, hasAccess } = useAdminGuard();
+  const { user, userKey, checking, hasAccess } = useAdminGuard();
 
   const [survey, setSurvey] = useState<SurveyWithQuestions | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,21 +30,16 @@ export default function NormalizedSurveyEditorPage() {
   const [saving, setSaving] = useState(false);
 
   const fetchSurvey = useCallback(async () => {
-    if (!user) return;
+    if (!userKey) return;
 
     try {
       setLoading(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) {
-        setError("Not authenticated");
-        return;
-      }
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        undefined,
+        { preferredUser: user },
       );
 
       if (!response.ok) {
@@ -68,28 +63,24 @@ export default function NormalizedSurveyEditorPage() {
     } finally {
       setLoading(false);
     }
-  }, [user, surveySlug]);
+  }, [surveySlug, user, userKey]);
 
   useEffect(() => {
-    if (hasAccess && user) {
+    if (hasAccess && userKey) {
       fetchSurvey();
     }
-  }, [hasAccess, user, fetchSurvey]);
+  }, [hasAccess, userKey, fetchSurvey]);
 
   const handleSaveSettings = async () => {
     try {
       setSaving(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}`,
         {
           method: "PUT",
           headers: {
-            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -99,6 +90,7 @@ export default function NormalizedSurveyEditorPage() {
             metadata: { autoCreateRuns },
           }),
         },
+        { preferredUser: user },
       );
 
       if (!response.ok) {
@@ -118,15 +110,12 @@ export default function NormalizedSurveyEditorPage() {
     if (!confirm("Are you sure you want to delete this survey?")) return;
 
     try {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
         },
+        { preferredUser: user },
       );
 
       if (!response.ok) {

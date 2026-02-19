@@ -1,8 +1,20 @@
 "use client";
 
-import { useEffect, useState, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  useRef,
+  useMemo,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import Image from "next/image";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
+import {
+  CONTENT_TYPE_OPTIONS,
+  formatContentTypeLabel,
+  normalizeContentTypeToken,
+} from "@/lib/media/content-type";
 import {
   THUMBNAIL_CROP_LIMITS,
   resolveThumbnailViewportRect,
@@ -89,32 +101,6 @@ const ChevronDownIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-function formatContentTypeLabel(raw: string): string {
-  const normalized = raw.trim().toUpperCase();
-  switch (normalized) {
-    case "CAST PHOTOS":
-      return "Cast Photos";
-    case "PROMO":
-      return "Promo Portraits";
-    case "CONFESSIONAL":
-      return "Confessional";
-    case "INTRO":
-      return "Intro";
-    case "REUNION":
-      return "Reunion";
-    case "BACKDROP":
-      return "Backdrop";
-    case "POSTER":
-      return "Poster";
-    case "EPISODE STILL":
-      return "Episode Still";
-    case "OTHER":
-      return "Other";
-    default:
-      return raw;
-  }
-}
-
 function formatSourceBadgeLabel(source: string, sourceUrl?: string | null): string {
   const raw = (source || "").trim();
   if (!raw) return "unknown";
@@ -165,19 +151,6 @@ function formatFoundOnSourceLabel(source: string, sourceUrl?: string | null): st
   return raw ? raw.toUpperCase() : "UNKNOWN";
 }
 
-const CONTENT_TYPE_OPTIONS = [
-  "PROMO",
-  "CONFESSIONAL",
-  "REUNION",
-  "INTRO",
-  "EPISODE STILL",
-  "CAST PHOTOS",
-  "BACKDROP",
-  "POSTER",
-  "LOGO",
-  "OTHER",
-] as const;
-
 const clampPercent = (value: number, min = 0, max = 100): number =>
   Math.min(max, Math.max(min, value));
 const clampZoom = (value: number): number =>
@@ -213,6 +186,11 @@ interface ImageManagementProps {
   isStarred?: boolean;
   canManage?: boolean;
   onRefresh?: () => Promise<void>;
+  onSync?: () => Promise<void>;
+  onCount?: () => Promise<void>;
+  onCrop?: () => Promise<void>;
+  onIdText?: () => Promise<void>;
+  onResize?: () => Promise<void>;
   onArchive?: () => Promise<void>;
   onUnarchive?: () => Promise<void>;
   onToggleStar?: (starred: boolean) => Promise<void>;
@@ -220,12 +198,13 @@ interface ImageManagementProps {
   onDelete?: () => Promise<void>;
   onReassign?: () => void;
   actionDisabledReasons?: Partial<
-    Record<"refresh" | "archive" | "star" | "delete" | "edit", string>
+    Record<"refresh" | "sync" | "count" | "crop" | "idText" | "resize" | "archive" | "star" | "delete" | "edit", string>
   >;
 }
 
 interface ImageLightboxProps extends ImageManagementProps {
   src: string;
+  fallbackSrcs?: string[];
   fallbackSrc?: string | null;
   alt: string;
   isOpen: boolean;
@@ -265,6 +244,11 @@ interface MetadataPanelProps {
     isStarred?: boolean;
     canManage?: boolean;
     onRefresh?: () => Promise<void>;
+    onSync?: () => Promise<void>;
+    onCount?: () => Promise<void>;
+    onCrop?: () => Promise<void>;
+    onIdText?: () => Promise<void>;
+    onResize?: () => Promise<void>;
     onArchive?: () => Promise<void>;
     onUnarchive?: () => Promise<void>;
     onToggleStar?: (starred: boolean) => Promise<void>;
@@ -272,7 +256,7 @@ interface MetadataPanelProps {
     onDelete?: () => Promise<void>;
     onReassign?: () => void;
     actionDisabledReasons?: Partial<
-      Record<"refresh" | "archive" | "star" | "delete" | "edit", string>
+      Record<"refresh" | "sync" | "count" | "crop" | "idText" | "resize" | "archive" | "star" | "delete" | "edit", string>
     >;
   };
   extras?: ReactNode;
@@ -294,21 +278,17 @@ function MetadataPanel({
   const [starLoading, setStarLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [copyMirrorFileNotice, setCopyMirrorFileNotice] = useState<string | null>(null);
+  const currentContentType = normalizeContentTypeToken(
+    metadata.contentType ?? metadata.sectionTag ?? "OTHER"
+  );
   const [contentTypeValue, setContentTypeValue] = useState<string>(
-    metadata.sectionTag ? metadata.sectionTag.toUpperCase() : "OTHER"
+    currentContentType
   );
   const [contentTypeSaving, setContentTypeSaving] = useState(false);
   const [contentTypeError, setContentTypeError] = useState<string | null>(null);
   const captionTruncateLength = 200;
   const needsTruncation =
     metadata.caption && metadata.caption.length > captionTruncateLength;
-  const normalizedContextType = metadata.contextType?.toLowerCase?.() ?? null;
-  const normalizedSectionTag = metadata.sectionTag?.toLowerCase?.() ?? null;
-  const normalizedImdbType = metadata.imdbType?.toLowerCase?.() ?? null;
-  const showContextType =
-    Boolean(metadata.contextType) &&
-    normalizedContextType !== normalizedSectionTag &&
-    normalizedContextType !== normalizedImdbType;
   const sourcePageLabel = metadata.sourcePageTitle || metadata.sourceUrl || null;
   const sourceBadgeLabel = formatSourceBadgeLabel(metadata.source, metadata.sourceUrl);
   const foundOnSourceLabel = formatFoundOnSourceLabel(metadata.source, metadata.sourceUrl);
@@ -336,11 +316,9 @@ function MetadataPanel({
     { label: "Original URL", value: metadata.originalImageUrl ?? "—" },
     {
       label: "Content Type",
-      value: metadata.sectionTag ? formatContentTypeLabel(metadata.sectionTag) : "—",
+      value: formatContentTypeLabel(metadata.contentType ?? metadata.sectionTag ?? "OTHER"),
     },
     { label: "Section", value: metadata.sectionLabel ?? "—" },
-    { label: "Context Type", value: metadata.contextType ?? "—" },
-    { label: "IMDb Type", value: metadata.imdbType ?? "—" },
     { label: "Episode", value: metadata.episodeLabel ?? "—" },
     { label: "Season", value: metadata.season ? `Season ${metadata.season}` : "—" },
     { label: "Dimensions", value: dimensionsLabel },
@@ -382,10 +360,7 @@ function MetadataPanel({
     { label: "Fetched", value: formatDateLabel(metadata.fetchedAt) },
   ];
 
-  const handleAction = async (
-    action: "refresh" | "archive" | "unarchive" | "delete",
-    handler?: () => Promise<void>
-  ) => {
+  const handleAction = async (action: string, handler?: () => Promise<void>) => {
     if (!handler || actionLoading) return;
     setActionLoading(action);
     setActionError(null);
@@ -400,6 +375,11 @@ function MetadataPanel({
 
   const disabledReasons = management?.actionDisabledReasons ?? {};
   const canRefresh = Boolean(management?.onRefresh);
+  const canSync = Boolean(management?.onSync);
+  const canCount = Boolean(management?.onCount);
+  const canCrop = Boolean(management?.onCrop);
+  const canIdText = Boolean(management?.onIdText);
+  const canResize = Boolean(management?.onResize);
   const canArchive = Boolean(management?.onArchive) || Boolean(management?.onUnarchive);
   const canReassign = Boolean(management?.onReassign);
   const canDelete = Boolean(management?.onDelete);
@@ -412,6 +392,21 @@ function MetadataPanel({
   const archiveDisabledReason = !canArchive
     ? disabledReasons.archive ?? "Archive is unavailable for this image."
     : disabledReasons.archive ?? null;
+  const syncDisabledReason = !canSync
+    ? disabledReasons.sync ?? "Sync is unavailable for this image."
+    : disabledReasons.sync ?? null;
+  const countDisabledReason = !canCount
+    ? disabledReasons.count ?? "Count is unavailable for this image."
+    : disabledReasons.count ?? null;
+  const cropDisabledReason = !canCrop
+    ? disabledReasons.crop ?? "Crop is unavailable for this image."
+    : disabledReasons.crop ?? null;
+  const idTextDisabledReason = !canIdText
+    ? disabledReasons.idText ?? "ID Text is unavailable for this image."
+    : disabledReasons.idText ?? null;
+  const resizeDisabledReason = !canResize
+    ? disabledReasons.resize ?? "Resize is unavailable for this image."
+    : disabledReasons.resize ?? null;
   const starDisabledReason = !canStar
     ? disabledReasons.star ?? "Star/Flag is unavailable for this image."
     : disabledReasons.star ?? null;
@@ -427,9 +422,9 @@ function MetadataPanel({
   }, [mirrorFileName]);
 
   useEffect(() => {
-    setContentTypeValue(metadata.sectionTag ? metadata.sectionTag.toUpperCase() : "OTHER");
+    setContentTypeValue(currentContentType);
     setContentTypeError(null);
-  }, [metadata.sectionTag]);
+  }, [currentContentType]);
 
   return (
     <div
@@ -667,7 +662,7 @@ function MetadataPanel({
                   type="button"
                   disabled={
                     contentTypeSaving ||
-                    contentTypeValue === (metadata.sectionTag?.toUpperCase() ?? "OTHER")
+                    contentTypeValue === currentContentType
                   }
                   onClick={async () => {
                     if (!management?.onUpdateContentType) return;
@@ -694,7 +689,7 @@ function MetadataPanel({
             </div>
           ) : (
             <p className="mt-1 text-sm text-white/90">
-              {formatContentTypeLabel(metadata.sectionTag ?? "OTHER")}
+              {formatContentTypeLabel(currentContentType)}
             </p>
           )}
         </div>
@@ -763,23 +758,6 @@ function MetadataPanel({
             Episode
           </span>
           <p className="mt-1 text-sm text-white/90">{metadata.episodeLabel ?? "—"}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            IMDb Type
-          </span>
-          <p className="mt-1 text-sm text-white/90">{metadata.imdbType ?? "—"}</p>
-        </div>
-
-        {/* Context Type */}
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Type
-          </span>
-          <p className="mt-1 text-sm text-white/90 capitalize">
-            {showContextType ? metadata.contextType : metadata.contextType ?? "—"}
-          </p>
         </div>
 
         {/* Caption */}
@@ -879,6 +857,50 @@ function MetadataPanel({
             Actions
           </span>
           <div className="mt-2 space-y-2">
+            {(canSync || canCount || canCrop || canIdText || canResize) && (
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => handleAction("sync", management.onSync)}
+                  disabled={actionLoading !== null || Boolean(syncDisabledReason)}
+                  title={syncDisabledReason ?? undefined}
+                  className="rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+                >
+                  {actionLoading === "sync" ? "Syncing..." : "Sync"}
+                </button>
+                <button
+                  onClick={() => handleAction("count", management.onCount)}
+                  disabled={actionLoading !== null || Boolean(countDisabledReason)}
+                  title={countDisabledReason ?? undefined}
+                  className="rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+                >
+                  {actionLoading === "count" ? "Counting..." : "Count"}
+                </button>
+                <button
+                  onClick={() => handleAction("crop", management.onCrop)}
+                  disabled={actionLoading !== null || Boolean(cropDisabledReason)}
+                  title={cropDisabledReason ?? undefined}
+                  className="rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+                >
+                  {actionLoading === "crop" ? "Cropping..." : "Crop"}
+                </button>
+                <button
+                  onClick={() => handleAction("id_text", management.onIdText)}
+                  disabled={actionLoading !== null || Boolean(idTextDisabledReason)}
+                  title={idTextDisabledReason ?? undefined}
+                  className="rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+                >
+                  {actionLoading === "id_text" ? "Detecting..." : "ID Text"}
+                </button>
+                <button
+                  onClick={() => handleAction("resize", management.onResize)}
+                  disabled={actionLoading !== null || Boolean(resizeDisabledReason)}
+                  title={resizeDisabledReason ?? undefined}
+                  className="col-span-2 rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+                >
+                  {actionLoading === "resize" ? "Resizing..." : "Resize"}
+                </button>
+              </div>
+            )}
             <button
               onClick={() => handleAction("refresh", management.onRefresh)}
               disabled={actionLoading !== null || starLoading || Boolean(refreshDisabledReason)}
@@ -986,6 +1008,7 @@ type CropResizeHandle = "nw" | "ne" | "sw" | "se";
 
 export function ImageLightbox({
   src,
+  fallbackSrcs,
   fallbackSrc,
   alt,
   isOpen,
@@ -1009,6 +1032,11 @@ export function ImageLightbox({
   onToggleStar,
   onUpdateContentType,
   onRefresh,
+  onSync,
+  onCount,
+  onCrop,
+  onIdText,
+  onResize,
   onDelete,
   onReassign,
   actionDisabledReasons,
@@ -1019,7 +1047,19 @@ export function ImageLightbox({
     width: number;
     height: number;
   } | null>(null);
-  const triedFallbackRef = useRef(false);
+  const retryCandidates = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const candidate of [...(fallbackSrcs ?? []), fallbackSrc ?? null]) {
+      if (typeof candidate !== "string") continue;
+      const trimmed = candidate.trim();
+      if (!trimmed || trimmed === src || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      out.push(trimmed);
+    }
+    return out;
+  }, [fallbackSrc, fallbackSrcs, src]);
+  const [retryIndex, setRetryIndex] = useState(0);
   const [showMetadata, setShowMetadata] = useState(false);
   const [showEditTools, setShowEditTools] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -1030,15 +1070,16 @@ export function ImageLightbox({
   useEffect(() => {
     setCurrentSrc(src);
     setImageFailed(false);
-    triedFallbackRef.current = false;
+    setRetryIndex(0);
     setPreviewImageSize(null);
     setShowEditTools(false);
-  }, [src, fallbackSrc]);
+  }, [retryCandidates, src]);
 
   const handleImageError = () => {
-    if (!triedFallbackRef.current && fallbackSrc && fallbackSrc !== currentSrc) {
-      triedFallbackRef.current = true;
-      setCurrentSrc(fallbackSrc);
+    const nextCandidate = retryCandidates[retryIndex] ?? null;
+    if (nextCandidate && nextCandidate !== currentSrc) {
+      setCurrentSrc(nextCandidate);
+      setRetryIndex((prev) => prev + 1);
       return;
     }
     setImageFailed(true);
@@ -1624,6 +1665,11 @@ export function ImageLightbox({
                         isStarred,
                         canManage,
                         onRefresh,
+                        onSync,
+                        onCount,
+                        onCrop,
+                        onIdText,
+                        onResize,
                         onArchive,
                         onUnarchive,
                         onToggleStar,

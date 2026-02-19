@@ -44,7 +44,7 @@ interface CatalogEntry {
 }
 
 type PreviewViewport = "phone" | "tablet" | "desktop";
-type DefaultViewport = "mobile" | "desktop";
+type DefaultViewport = "mobile" | "tablet" | "desktop";
 
 interface TemplatePreviewEditorState {
   titleText: string;
@@ -62,6 +62,10 @@ interface TemplatePreviewEditorState {
   subTextFontFamily: string;
   titleFontSize: number;
   subTextFontSize: number;
+  questionTextLineHeight: number;
+  questionTextLetterSpacing: number;
+  optionTextLineHeight: number;
+  optionTextLetterSpacing: number;
   shapeScale: number;
   buttonScale: number;
   unassignedCastCircleSize: number;
@@ -84,6 +88,10 @@ type TemplateStyleKey =
   | "subTextFontFamily"
   | "titleFontSize"
   | "subTextFontSize"
+  | "questionTextLineHeight"
+  | "questionTextLetterSpacing"
+  | "optionTextLineHeight"
+  | "optionTextLetterSpacing"
   | "shapeScale"
   | "buttonScale"
   | "unassignedCastCircleSize"
@@ -106,6 +114,10 @@ const TEMPLATE_STYLE_FIELDS: TemplateStyleKey[] = [
   "subTextFontFamily",
   "titleFontSize",
   "subTextFontSize",
+  "questionTextLineHeight",
+  "questionTextLetterSpacing",
+  "optionTextLineHeight",
+  "optionTextLetterSpacing",
   "shapeScale",
   "buttonScale",
   "unassignedCastCircleSize",
@@ -116,6 +128,7 @@ const TEMPLATE_STYLE_FIELDS: TemplateStyleKey[] = [
 
 interface SurveyQuestionDefaultsState {
   mobile: TemplateStyleDefaults;
+  tablet: TemplateStyleDefaults;
   desktop: TemplateStyleDefaults;
 }
 
@@ -147,6 +160,10 @@ type TemplateEditorStringKey =
 type TemplateEditorNumberKey =
   | "titleFontSize"
   | "subTextFontSize"
+  | "questionTextLineHeight"
+  | "questionTextLetterSpacing"
+  | "optionTextLineHeight"
+  | "optionTextLetterSpacing"
   | "shapeScale"
   | "buttonScale"
   | "unassignedCastCircleSize";
@@ -262,6 +279,21 @@ const RHOSLC_S6_CAST_OPTIONS: Array<{ key: string; text: string; metadata: { ima
   { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } },
 ];
 
+const RHOSLC_S6_REUNION_OPTIONS: Array<{
+  key: string;
+  text: string;
+  metadata: { imagePath: string; castRole: "main" | "friend_of" };
+}> = [
+  { key: "angie", text: "Angie Katsanevas", metadata: { imagePath: "/images/cast/rhoslc-s6/angie.png", castRole: "main" } },
+  { key: "bronwyn", text: "Bronwyn Newport", metadata: { imagePath: "/images/cast/rhoslc-s6/bronwyn.png", castRole: "main" } },
+  { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png", castRole: "main" } },
+  { key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png", castRole: "main" } },
+  { key: "mary", text: "Mary Cosby", metadata: { imagePath: "/images/cast/rhoslc-s6/mary.png", castRole: "main" } },
+  { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png", castRole: "main" } },
+  { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png", castRole: "main" } },
+  { key: "britani", text: "Britani Bateman", metadata: { imagePath: "/images/cast/rhoslc-s6/britani.png", castRole: "friend_of" } },
+];
+
 /* ------------------------------------------------------------------ */
 /*  Catalog data – real survey questions with multiple examples         */
 /* ------------------------------------------------------------------ */
@@ -271,26 +303,29 @@ const SURVEY_CATALOG: CatalogEntry[] = [
     { label: "Episode Rating", source: "RHOP S10 Survey", mockQuestion: mkQ("star_ep", "Rate this week's episode of RHOP", "numeric", { uiVariant: "numeric-ranking", min: 0, max: 10, step: 0.1 }), mockValue: 7.5 },
     { label: "Season Rating", source: "RHOSLC S6 Survey", mockQuestion: mkQ("star_season", "Rate RHOSLC Season 6 overall", "numeric", { uiVariant: "numeric-ranking", min: 0, max: 10, step: 0.1 }), mockValue: null },
   ]},
-  { key: "numeric-slider", displayName: "Numeric Slider", description: "Horizontal range slider with min/max labels for cast or subject ratings.", componentPath: "components/survey/SliderInput.tsx", category: "survey", examples: [
-    { label: "Entertainment Factor", source: "Cast Rating Survey", mockQuestion: mkQ("slider_ent", "How entertaining was Lisa Barlow this episode?", "numeric", { uiVariant: "numeric-scale-slider", min: 0, max: 100, step: 1, minLabel: "Boring", maxLabel: "Entertaining", subject: { name: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" } }), mockValue: 65 },
-  ]},
   { key: "single-select", displayName: "Single Select (Radio)", description: "Vertical radio button list for single-choice questions.", componentPath: "components/survey/SingleSelectInput.tsx", category: "survey", examples: [
-    { label: "Favorite Housewife", source: "RHOSLC Survey", mockQuestion: mkQ("fav_hw", "Who is your favorite RHOSLC housewife this season?", "single_choice", { uiVariant: "text-multiple-choice" }, [{ key: "lisa", text: "Lisa Barlow" }, { key: "heather", text: "Heather Gay" }, { key: "meredith", text: "Meredith Marks" }, { key: "whitney", text: "Whitney Rose" }, { key: "angie", text: "Angie Katsanevas" }]), mockValue: null },
-    { label: "Yes / No Question", source: "General Survey", mockQuestion: mkQ("yes_no", "Do you watch the show live or on streaming?", "single_choice", { uiVariant: "text-multiple-choice" }, [{ key: "live", text: "Live on Bravo" }, { key: "streaming", text: "Streaming (Peacock)" }, { key: "both", text: "Both" }]), mockValue: null },
+    { label: "Streaming or Live", source: "General Survey", mockQuestion: mkQ("streaming_or_live", "When did you typically watch each week's episode?", "single_choice", { uiVariant: "text-multiple-choice" }, [{ key: "live_night_of", text: "Live (Night of)" }, { key: "next_day_or_later", text: "Next Day (or Later)" }, { key: "depends_on_night", text: "Depends on the Night" }]), mockValue: null },
+  ]},
+  { key: "rank-text-fields", displayName: "Rank Text Fields", description: "Tagline ranking text-field template from Figma.", componentPath: "components/survey/RankTextFields.tsx", category: "survey", examples: [
+    { label: "Rank the Taglines", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_taglines", "Rank the Taglines", "single_choice", { uiVariant: "rank-text-fields" }, [{ key: "answer_1", text: "Answer Choice 1" }, { key: "answer_2", text: "Answer Choice 2" }, { key: "answer_3", text: "Selected Answer/Hovered Answer" }, { key: "answer_4", text: "Answer Choice 4" }]), mockValue: "answer_3" },
   ]},
   { key: "image-select", displayName: "Image Select (Grid)", description: "Grid of circular image buttons for cast/image-based selection.", componentPath: "components/survey/SingleSelectInput.tsx (grid)", category: "survey", examples: [
     { label: "Cast Member Select", source: "RHOSLC S6 Survey", mockQuestion: mkQ("cast_img", "Which RHOSLC cast member had the best confessional look?", "single_choice", { uiVariant: "image-multiple-choice" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }, { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } }]), mockValue: null },
   ]},
+  { key: "single-select-cast", displayName: "Single Select Cast (Superlative)", description: "Single-choice cast-circle selector for superlative prompts.", componentPath: "components/survey/SingleSelectCastInput.tsx", category: "survey", examples: [
+    { label: "Who was the Funniest?", source: "RHOSLC S6 Survey", mockQuestion: mkQ("who_funniest", "Who was the Funniest this season?", "single_choice", { uiVariant: "cast-single-select", columns: 4, componentBackgroundColor: "#5D3167", placeholderShapeColor: "#EEEEEF", placeholderShapeBorderColor: "#DCDDDF", selectedOptionBorderColor: "#FFFFFF", questionTextColor: "#FFFFFF", questionTextFontFamily: "\"Rude Slab Condensed\", var(--font-sans), sans-serif", questionTextLineHeight: 0.95, questionTextLetterSpacing: 0.01 }, RHOSLC_S6_CAST_OPTIONS), mockValue: null },
+  ]},
   { key: "multi-select", displayName: "Multi-Select (Checkbox)", description: "Checkbox group with optional min/max selection constraints.", componentPath: "components/survey/MultiSelectInput.tsx", category: "survey", examples: [
     { label: "Select Shows", source: "Signup / Onboarding", mockQuestion: mkQ("select_shows", "Which Real Housewives shows do you watch?", "multi_choice", { uiVariant: "multi-select-choice", minSelections: 1, maxSelections: 5 }, [{ key: "rhoslc", text: "RHOSLC" }, { key: "rhobh", text: "RHOBH" }, { key: "rhoa", text: "RHOA" }, { key: "rhop", text: "RHOP" }, { key: "rhonj", text: "RHONJ" }, { key: "rhony", text: "RHONY" }, { key: "rhod", text: "RHOD" }]), mockValue: ["rhoslc", "rhop"] },
     { label: "Favorite Moments", source: "Episode Survey", mockQuestion: mkQ("fav_moments", "Select all the scenes that stood out to you", "multi_choice", { uiVariant: "multi-select-choice", minSelections: 1 }, [{ key: "dinner", text: "The group dinner confrontation" }, { key: "confessional", text: "Lisa's confessional breakdown" }, { key: "trip", text: "The cast trip reveal" }, { key: "reunion", text: "The reunion preview" }]), mockValue: [] },
+    { label: "Which Feud (Select Two)", source: "RHOSLC S6 Survey", mockQuestion: mkQ("which_feud", "Which FEUD did you enjoy the most?", "multi_choice", { uiVariant: "cast-multi-select", minSelections: 2, maxSelections: 2, subTextHeading: "SELECT TWO" }, RHOSLC_S6_CAST_OPTIONS), mockValue: [] },
+    { label: "Which Friendship (Select Two)", source: "RHOSLC S6 Survey", mockQuestion: mkQ("which_friendship", "Which FRIENDSHIP did you enjoy the most?", "multi_choice", { uiVariant: "cast-multi-select", minSelections: 2, maxSelections: 2, subTextHeading: "SELECT TWO" }, RHOSLC_S6_CAST_OPTIONS), mockValue: [] },
   ]},
   { key: "text-entry", displayName: "Text Entry", description: "Single-line text input with optional validation (pattern, length).", componentPath: "components/survey/TextEntryInput.tsx", category: "survey", examples: [
     { label: "Free Text Response", source: "General Survey", mockQuestion: mkQ("thoughts", "What would you like to see next season?", "free_text", { uiVariant: "text-entry", placeholder: "Share your thoughts...", inputType: "text" }), mockValue: "" },
   ]},
-  { key: "whose-side", displayName: "Whose Side (Head-to-Head)", description: "Two-choice comparison with VS divider and optional neutral option.", componentPath: "components/survey/WhoseSideInput.tsx", category: "survey", examples: [
+  { key: "whose-side", displayName: "Whose Side (Head-to-Head)", description: "Two-choice comparison with VS divider and optional neutral option.", componentPath: "components/survey/TwoChoiceCast.tsx", category: "survey", examples: [
     { label: "Feud: Lisa vs Meredith", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_lm", "Whose side are you on in the Lisa vs. Meredith feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neutral" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }]), mockValue: null },
-    { label: "Feud: Whitney vs Heather", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_wh", "Whose side are you on in the Whitney vs. Heather feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neither" }, [{ key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } }]), mockValue: null },
   ]},
   { key: "matrix-likert", displayName: "Matrix / Likert Scale", description: "Statement-based agree/disagree bars with a 5-point sentiment scale.", componentPath: "components/survey/MatrixLikertInput.tsx", category: "survey", examples: [
     { label: "Agree / Disagree", source: "RHOSLC S6 Survey", mockQuestion: mkQ("agree", "Heather and Whitney are telling the truth about Meredith on the Plane.", "likert", { uiVariant: "agree-likert-scale", promptText: "How much do you agree with the following statement:", rows: [{ id: "s1", label: "Heather and Whitney are telling the truth about Meredith on the Plane." }] }, [{ key: "strongly_disagree", text: "Strongly Disagree" }, { key: "somewhat_disagree", text: "Somewhat Disagree" }, { key: "neutral", text: "Neither" }, { key: "somewhat_agree", text: "Somewhat Agree" }, { key: "strongly_agree", text: "Strongly Agree" }]), mockValue: {} },
@@ -301,12 +336,22 @@ const SURVEY_CATALOG: CatalogEntry[] = [
   ]},
   { key: "poster-rankings", displayName: "Poster Rankings", description: "Drag-and-drop ranked season/poster slots with an unassigned bank.", componentPath: "components/survey/PosterRankingsInput.tsx", category: "survey", examples: [
     { label: "RHOSLC Season Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_seasons", "Rank the Seasons of RHOSLC.", "ranking", { uiVariant: "poster-rankings", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, [{ key: "s1", text: "SEASON 1" }, { key: "s2", text: "SEASON 2" }, { key: "s3", text: "SEASON 3" }, { key: "s4", text: "SEASON 4" }, { key: "s5", text: "SEASON 5" }, { key: "s6", text: "SEASON 6" }]), mockValue: [] },
+    { label: "PosterSingleSelect", source: "RHOSLC S6 Survey", mockQuestion: mkQ("season_live_start", "During which season did you start watching RHOSLC 'live', or as it was airing?", "single_choice", { uiVariant: "poster-single-select", columns: 3, componentBackgroundColor: "#000000", placeholderShapeColor: "#D9D9D9", placeholderShapeBorderColor: "#D9D9D9", selectedOptionBorderColor: "#FFFFFF", questionTextColor: "#F3F4F6", questionTextFontFamily: "\"Geometric Slabserif 712\", var(--font-sans), serif", questionTextLineHeight: 0.94, questionTextLetterSpacing: 0.008 }, [{ key: "s1", text: "SEASON 1" }, { key: "s2", text: "SEASON 2" }, { key: "s3", text: "SEASON 3" }, { key: "s4", text: "SEASON 4" }, { key: "s5", text: "SEASON 5" }, { key: "s6", text: "SEASON 6" }]), mockValue: null },
+  ]},
+  { key: "reunion-seating-prediction", displayName: "Reunion Seating Prediction", description: "Place full-time cast first, then set friend side at couch ends around Andy.", componentPath: "components/survey/ReunionSeatingPredictionInput.tsx", category: "survey", examples: [
+    { label: "RHOSLC Reunion Seating", source: "RHOSLC S6 Survey", mockQuestion: mkQ("reunion_seating", "Predict the RHOSLC reunion seating chart.", "likert", { uiVariant: "reunion-seating-prediction", hostName: "Andy Cohen", hostImagePath: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Andy_Cohen_2012_Shankbone_2.jpg/320px-Andy_Cohen_2012_Shankbone_2.jpg", fullTimePrompt: "Seat the full-time cast first", friendPrompt: "Which side should Britani sit on?", questionTextLineHeight: 1.02, questionTextLetterSpacing: 0.008 }, RHOSLC_S6_REUNION_OPTIONS), mockValue: null },
   ]},
   { key: "person-rankings", displayName: "Person Rankings", description: "Drag-and-drop ranked cast slots with an unassigned cast bank.", componentPath: "components/survey/PersonRankingsInput.tsx", category: "survey", examples: [
     { label: "RHOSLC Cast Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_rhoslc", "Rank the Cast of RHOSLC S6.", "ranking", { uiVariant: "person-rankings", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, RHOSLC_S6_CAST_OPTIONS), mockValue: [] },
   ]},
   { key: "two-axis-grid", displayName: "Two-Axis Grid (2D Map)", description: "Draggable tokens on a 2D grid with labeled axes. Snap-to-grid.", componentPath: "components/survey/TwoAxisGridInput.tsx", category: "survey", examples: [
     { label: "Cast Perception Map", source: "RHOSLC S6 Survey", mockQuestion: mkQ("perception", "Place each housewife on the grid", "likert", { uiVariant: "two-axis-grid", extent: 3, xLabelLeft: "VILLAIN", xLabelRight: "HERO", yLabelTop: "ENTERTAINING", yLabelBottom: "BORING", rows: [{ id: "lisa", label: "Lisa B.", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather G.", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith M.", img: "/images/cast/rhoslc-s6/meredith.png" }] }), mockValue: {} },
+  ]},
+];
+
+const ARCHIVED_SURVEY_CATALOG: CatalogEntry[] = [
+  { key: "numeric-slider", displayName: "Numeric Slider", description: "Horizontal range slider with min/max labels for cast or subject ratings.", componentPath: "components/survey/SliderInput.tsx", category: "survey", examples: [
+    { label: "Entertainment Factor", source: "Cast Rating Survey", mockQuestion: mkQ("slider_ent", "How entertaining was Lisa Barlow this episode?", "numeric", { uiVariant: "numeric-scale-slider", min: 0, max: 100, step: 1, minLabel: "Boring", maxLabel: "Entertaining", subject: { name: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" } }), mockValue: 65 },
   ]},
 ];
 
@@ -359,6 +404,12 @@ const PREVIEW_VIEWPORT_FRAME: Record<PreviewViewport, { width: number; height: n
   desktop: { width: 1280, height: 800, maxWidthClass: "max-w-[1280px]" },
 };
 
+function getDefaultViewportFromPreview(viewport: PreviewViewport): DefaultViewport {
+  if (viewport === "phone") return "mobile";
+  if (viewport === "tablet") return "tablet";
+  return "desktop";
+}
+
 const TEMPLATE_FONT_OPTIONS: Array<{ label: string; value: string }> = DESIGN_SYSTEM_CDN_FONT_OPTIONS.map((font) => ({
   label: font.name,
   value: font.fontFamily,
@@ -404,6 +455,36 @@ const DEFAULT_SURVEY_STYLE_MOBILE: TemplateStyleDefaults = {
   subTextFontFamily: DEFAULT_SUBTEXT_FONT,
   titleFontSize: 20,
   subTextFontSize: 14,
+  questionTextLineHeight: 1.06,
+  questionTextLetterSpacing: 0.008,
+  optionTextLineHeight: 1.1,
+  optionTextLetterSpacing: 0.008,
+  shapeScale: 100,
+  buttonScale: 100,
+  unassignedCastCircleSize: 100,
+  canvasBackground: "#FFFFFF",
+  frameBackground: "#FFFFFF",
+  frameBorderColor: "#E4E4E7",
+};
+
+const DEFAULT_SURVEY_STYLE_TABLET: TemplateStyleDefaults = {
+  titleColor: "#111111",
+  subTextColor: "#111111",
+  questionColor: "#111111",
+  componentBackgroundColor: "#D9D9D9",
+  placeholderShapeColor: "#111111",
+  placeholderShapeBorderColor: "#E4E4E7",
+  unassignedContainerColor: "#F4F4F5",
+  unassignedContainerBorderColor: "#D4D4D8",
+  unassignedCastCircleBorderColor: "#D4D4D8",
+  titleFontFamily: DEFAULT_TITLE_FONT,
+  subTextFontFamily: DEFAULT_SUBTEXT_FONT,
+  titleFontSize: 22,
+  subTextFontSize: 15,
+  questionTextLineHeight: 1.08,
+  questionTextLetterSpacing: 0.009,
+  optionTextLineHeight: 1.12,
+  optionTextLetterSpacing: 0.009,
   shapeScale: 100,
   buttonScale: 100,
   unassignedCastCircleSize: 100,
@@ -426,6 +507,10 @@ const DEFAULT_SURVEY_STYLE_DESKTOP: TemplateStyleDefaults = {
   subTextFontFamily: DEFAULT_SUBTEXT_FONT,
   titleFontSize: 24,
   subTextFontSize: 16,
+  questionTextLineHeight: 1.1,
+  questionTextLetterSpacing: 0.01,
+  optionTextLineHeight: 1.14,
+  optionTextLetterSpacing: 0.01,
   shapeScale: 100,
   buttonScale: 100,
   unassignedCastCircleSize: 100,
@@ -480,6 +565,10 @@ function buildTemplateEditorDefaults(
       : DEFAULT_SUBTEXT_FONT,
     titleFontSize: isFigmaRankPreview ? 70 : 24,
     subTextFontSize: isFigmaRankPreview ? 35 : 16,
+    questionTextLineHeight: isFigmaRankPreview ? 1.06 : 1.1,
+    questionTextLetterSpacing: isFigmaRankPreview ? 0.01 : 0.008,
+    optionTextLineHeight: isFigmaRankPreview ? 1.06 : 1.1,
+    optionTextLetterSpacing: isFigmaRankPreview ? 0.01 : 0.008,
     shapeScale: 100,
     buttonScale: 100,
     unassignedCastCircleSize: 100,
@@ -489,9 +578,21 @@ function buildTemplateEditorDefaults(
   };
 }
 
-function responsiveFontSize(sizePx: number, enabled: boolean, minPx: number): string {
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function responsiveFontSize(
+  sizePx: number,
+  enabled: boolean,
+  minPx: number,
+  viewportWidth = 1440,
+): string {
   if (!enabled) return `${sizePx}px`;
-  return `clamp(${minPx}px, 6vw, ${sizePx}px)`;
+  const scaled = Math.round(
+    clampNumber(sizePx * (viewportWidth / 1440), minPx, sizePx),
+  );
+  return `${scaled}px`;
 }
 
 function sanitizeTemplateEditorState(
@@ -521,6 +622,10 @@ function sanitizeTemplateEditorState(
   const numericFields: TemplateEditorNumberKey[] = [
     "titleFontSize",
     "subTextFontSize",
+    "questionTextLineHeight",
+    "questionTextLetterSpacing",
+    "optionTextLineHeight",
+    "optionTextLetterSpacing",
     "shapeScale",
     "buttonScale",
     "unassignedCastCircleSize",
@@ -552,7 +657,7 @@ function sanitizeTemplateStyleDefaults(value: unknown): Partial<TemplateStyleDef
   const candidate = value as Record<string, unknown>;
   const sanitized: Partial<TemplateStyleDefaults> = {};
 
-  const stringFields: Array<Exclude<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale" | "unassignedCastCircleSize">> = [
+  const stringFields: Array<Exclude<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "questionTextLineHeight" | "questionTextLetterSpacing" | "optionTextLineHeight" | "optionTextLetterSpacing" | "shapeScale" | "buttonScale" | "unassignedCastCircleSize">> = [
     "titleColor",
     "subTextColor",
     "questionColor",
@@ -568,9 +673,13 @@ function sanitizeTemplateStyleDefaults(value: unknown): Partial<TemplateStyleDef
     "frameBackground",
     "frameBorderColor",
   ];
-  const numberFields: Array<Extract<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "shapeScale" | "buttonScale" | "unassignedCastCircleSize">> = [
+  const numberFields: Array<Extract<TemplateStyleKey, "titleFontSize" | "subTextFontSize" | "questionTextLineHeight" | "questionTextLetterSpacing" | "optionTextLineHeight" | "optionTextLetterSpacing" | "shapeScale" | "buttonScale" | "unassignedCastCircleSize">> = [
     "titleFontSize",
     "subTextFontSize",
+    "questionTextLineHeight",
+    "questionTextLetterSpacing",
+    "optionTextLineHeight",
+    "optionTextLetterSpacing",
     "shapeScale",
     "buttonScale",
     "unassignedCastCircleSize",
@@ -598,24 +707,30 @@ function sanitizeTemplateStyleDefaults(value: unknown): Partial<TemplateStyleDef
 }
 
 function sanitizeSurveyQuestionDefaultsState(value: unknown): SurveyQuestionDefaultsState {
+  const valueRecord = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
   const mobile = {
     ...DEFAULT_SURVEY_STYLE_MOBILE,
     ...sanitizeTemplateStyleDefaults(
-      value && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>).mobile
-        : null,
+      valueRecord?.mobile ?? null,
+    ),
+  };
+  const tablet = {
+    ...DEFAULT_SURVEY_STYLE_TABLET,
+    ...sanitizeTemplateStyleDefaults(
+      valueRecord?.tablet ?? valueRecord?.mobile ?? valueRecord?.desktop ?? null,
     ),
   };
   const desktop = {
     ...DEFAULT_SURVEY_STYLE_DESKTOP,
     ...sanitizeTemplateStyleDefaults(
-      value && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>).desktop
-        : null,
+      valueRecord?.desktop ?? null,
     ),
   };
 
-  return { mobile, desktop };
+  return { mobile, tablet, desktop };
 }
 
 function asConfigRecord(value: unknown): Record<string, unknown> {
@@ -640,6 +755,10 @@ function withEditorFontOverridesForQuestion(
         buttonScale: editorState.buttonScale,
         questionTextColor: editorState.questionColor,
         subTextHeadingColor: editorState.subTextColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
         componentBackgroundColor: editorState.componentBackgroundColor,
         placeholderShapeColor: editorState.placeholderShapeColor,
         placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
@@ -673,6 +792,10 @@ function withEditorFontOverridesForQuestion(
         shapeScale: editorState.shapeScale,
         buttonScale: editorState.buttonScale,
         questionTextColor: editorState.questionColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
         componentBackgroundColor: editorState.componentBackgroundColor,
         placeholderShapeColor: editorState.placeholderShapeColor,
         placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
@@ -681,6 +804,8 @@ function withEditorFontOverridesForQuestion(
         titleFontFamily: editorState.titleFontFamily,
         neutralOptionFontFamily: editorState.subTextFontFamily,
         optionTextFontFamily: editorState.subTextFontFamily,
+        continueButtonFontFamily: editorState.subTextFontFamily,
+        nextButtonFontFamily: editorState.subTextFontFamily,
         fonts: {
           ...existingFonts,
           questionText: editorState.titleFontFamily,
@@ -688,6 +813,111 @@ function withEditorFontOverridesForQuestion(
           title: editorState.titleFontFamily,
           neutralOption: editorState.subTextFontFamily,
           optionText: editorState.subTextFontFamily,
+          continueButton: editorState.subTextFontFamily,
+          nextButton: editorState.subTextFontFamily,
+        },
+      },
+    };
+  }
+
+  if (uiVariant === "text-multiple-choice" || uiVariant === "rank-text-fields") {
+    const existingFonts = asConfigRecord(baseConfig.fonts);
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        optionTextColor: editorState.questionColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
+        componentBackgroundColor: editorState.componentBackgroundColor,
+        selectedOptionBackgroundColor: editorState.placeholderShapeColor,
+        questionTextFontFamily: editorState.titleFontFamily,
+        headingFontFamily: editorState.titleFontFamily,
+        titleFontFamily: editorState.titleFontFamily,
+        optionTextFontFamily: editorState.subTextFontFamily,
+        choiceFontFamily: editorState.subTextFontFamily,
+        fonts: {
+          ...existingFonts,
+          questionText: editorState.titleFontFamily,
+          heading: editorState.titleFontFamily,
+          title: editorState.titleFontFamily,
+          optionText: editorState.subTextFontFamily,
+          choice: editorState.subTextFontFamily,
+        },
+      },
+    };
+  }
+
+  if (uiVariant === "poster-single-select") {
+    const existingFonts = asConfigRecord(baseConfig.fonts);
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        optionTextColor: editorState.questionColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
+        componentBackgroundColor: editorState.componentBackgroundColor,
+        placeholderShapeColor: editorState.placeholderShapeColor,
+        placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
+        selectedOptionBorderColor: editorState.unassignedCastCircleBorderColor,
+        questionTextFontFamily: editorState.titleFontFamily,
+        headingFontFamily: editorState.titleFontFamily,
+        titleFontFamily: editorState.titleFontFamily,
+        optionTextFontFamily: editorState.subTextFontFamily,
+        choiceFontFamily: editorState.subTextFontFamily,
+        fonts: {
+          ...existingFonts,
+          questionText: editorState.titleFontFamily,
+          heading: editorState.titleFontFamily,
+          title: editorState.titleFontFamily,
+          optionText: editorState.subTextFontFamily,
+          choice: editorState.subTextFontFamily,
+        },
+      },
+    };
+  }
+
+  if (uiVariant === "cast-single-select") {
+    const existingFonts = asConfigRecord(baseConfig.fonts);
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        optionTextColor: editorState.questionColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
+        componentBackgroundColor: editorState.componentBackgroundColor,
+        placeholderShapeColor: editorState.placeholderShapeColor,
+        placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
+        selectedOptionBorderColor: editorState.unassignedCastCircleBorderColor,
+        questionTextFontFamily: editorState.titleFontFamily,
+        headingFontFamily: editorState.titleFontFamily,
+        titleFontFamily: editorState.titleFontFamily,
+        optionTextFontFamily: editorState.subTextFontFamily,
+        choiceFontFamily: editorState.subTextFontFamily,
+        fonts: {
+          ...existingFonts,
+          questionText: editorState.titleFontFamily,
+          heading: editorState.titleFontFamily,
+          title: editorState.titleFontFamily,
+          optionText: editorState.subTextFontFamily,
+          choice: editorState.subTextFontFamily,
         },
       },
     };
@@ -707,6 +937,10 @@ function withEditorFontOverridesForQuestion(
         shapeScale: editorState.shapeScale,
         buttonScale: editorState.buttonScale,
         questionTextColor: editorState.questionColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
         placeholderShapeColor: editorState.placeholderShapeColor,
         placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
         placeholderTextColor: editorState.questionColor,
@@ -741,6 +975,10 @@ function withEditorFontOverridesForQuestion(
         buttonScale: editorState.buttonScale,
         questionTextColor: editorState.questionColor,
         subTextHeadingColor: editorState.subTextColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
         componentBackgroundColor: editorState.componentBackgroundColor,
         optionTextColor: editorState.subTextColor,
         placeholderShapeColor: editorState.placeholderShapeColor,
@@ -781,6 +1019,10 @@ function withEditorFontOverridesForQuestion(
         shapeScale: editorState.shapeScale,
         buttonScale: editorState.buttonScale,
         questionTextColor: editorState.questionColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
         componentBackgroundColor: editorState.componentBackgroundColor,
         placeholderShapeColor: editorState.placeholderShapeColor,
         placeholderShapeBorderColor: editorState.placeholderShapeBorderColor,
@@ -788,6 +1030,35 @@ function withEditorFontOverridesForQuestion(
         unassignedContainerBorderColor: editorState.unassignedContainerBorderColor,
         unassignedCircleBorderColor: editorState.unassignedCastCircleBorderColor,
         unassignedCircleSize: editorState.unassignedCastCircleSize,
+      },
+    };
+  }
+
+  if (uiVariant === "reunion-seating-prediction") {
+    const existingFonts = asConfigRecord(baseConfig.fonts);
+    return {
+      ...question,
+      config: {
+        ...baseConfig,
+        shapeScale: editorState.shapeScale,
+        buttonScale: editorState.buttonScale,
+        questionTextColor: editorState.questionColor,
+        questionTextLineHeight: editorState.questionTextLineHeight,
+        questionTextLetterSpacing: editorState.questionTextLetterSpacing,
+        optionTextLineHeight: editorState.optionTextLineHeight,
+        optionTextLetterSpacing: editorState.optionTextLetterSpacing,
+        componentBackgroundColor: editorState.componentBackgroundColor,
+        questionTextFontFamily: editorState.titleFontFamily,
+        headingFontFamily: editorState.titleFontFamily,
+        titleFontFamily: editorState.titleFontFamily,
+        optionTextFontFamily: editorState.subTextFontFamily,
+        fonts: {
+          ...existingFonts,
+          questionText: editorState.titleFontFamily,
+          heading: editorState.titleFontFamily,
+          title: editorState.titleFontFamily,
+          optionText: editorState.subTextFontFamily,
+        },
       },
     };
   }
@@ -925,10 +1196,12 @@ function TemplateFontSizeInput({
   label,
   value,
   onChange,
+  step = "any",
 }: {
   label: string;
   value: number;
   onChange: (next: number) => void;
+  step?: number | "any";
 }) {
   return (
     <div>
@@ -938,6 +1211,7 @@ function TemplateFontSizeInput({
       <input
         type="number"
         value={value}
+        step={step}
         onChange={(event) => {
           const parsed = Number(event.target.value);
           if (Number.isFinite(parsed)) {
@@ -1085,6 +1359,16 @@ function SurveyDefaultSettingsPanel({
             </button>
             <button
               type="button"
+              onClick={() => setActiveViewport("tablet")}
+              className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                activeViewport === "tablet" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100"
+              }`}
+              aria-pressed={activeViewport === "tablet"}
+            >
+              Tablet
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveViewport("desktop")}
               className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
                 activeViewport === "desktop" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100"
@@ -1118,6 +1402,32 @@ function SurveyDefaultSettingsPanel({
               label="Sub-Text Size"
               value={activeDefaults.subTextFontSize}
               onChange={(subTextFontSize) => updateActiveDefaults({ subTextFontSize })}
+            />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-xl">
+            <TemplateFontSizeInput
+              label="Question Line Height"
+              value={activeDefaults.questionTextLineHeight}
+              step={0.01}
+              onChange={(questionTextLineHeight) => updateActiveDefaults({ questionTextLineHeight })}
+            />
+            <TemplateFontSizeInput
+              label="Question Letter Spacing (em)"
+              value={activeDefaults.questionTextLetterSpacing}
+              step={0.001}
+              onChange={(questionTextLetterSpacing) => updateActiveDefaults({ questionTextLetterSpacing })}
+            />
+            <TemplateFontSizeInput
+              label="Option Line Height"
+              value={activeDefaults.optionTextLineHeight}
+              step={0.01}
+              onChange={(optionTextLineHeight) => updateActiveDefaults({ optionTextLineHeight })}
+            />
+            <TemplateFontSizeInput
+              label="Option Letter Spacing (em)"
+              value={activeDefaults.optionTextLetterSpacing}
+              step={0.001}
+              onChange={(optionTextLetterSpacing) => updateActiveDefaults({ optionTextLetterSpacing })}
             />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-md">
@@ -1251,7 +1561,10 @@ function SurveyPreviewCard({
   const safeExampleIdx = Math.min(exampleIdx, Math.max(examples.length - 1, 0));
   const example = examples[safeExampleIdx] as QuestionExample;
   const activeVariant = (example.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
-  const suppressTemplateHeading = activeVariant === "agree-likert-scale";
+  const suppressTemplateHeading =
+    activeVariant === "agree-likert-scale" ||
+    activeVariant === "poster-single-select" ||
+    activeVariant === "cast-single-select";
   const isRankingVariant =
     activeVariant === "person-rankings" ||
     activeVariant === "poster-rankings" ||
@@ -1270,8 +1583,23 @@ function SurveyPreviewCard({
   const shouldUseGlobalDefaultsForExample = useCallback(
     (exampleValue: QuestionExample) => {
       const variant = (exampleValue.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
-      // Keep Figma matrix previews on template fonts by default.
-      return variant !== "agree-likert-scale";
+      // Keep Figma-owned templates on their own typography/spacing defaults.
+      if (variant === "agree-likert-scale") return false;
+      if (
+        variant === "two-choice-slider" ||
+        variant === "text-multiple-choice" ||
+        variant === "rank-text-fields" ||
+        variant === "poster-single-select" ||
+        variant === "cast-single-select" ||
+        variant === "reunion-seating-prediction" ||
+        variant === "person-rankings" ||
+        variant === "poster-rankings" ||
+        variant === "circle-ranking" ||
+        variant === "rectangle-ranking"
+      ) {
+        return false;
+      }
+      return true;
     },
     [],
   );
@@ -1315,6 +1643,94 @@ function SurveyPreviewCard({
           frameBorderColor: "#D9D9D9",
         };
       }
+      if (variant === "two-choice-slider") {
+        return {
+          ...defaults,
+          titleText: "",
+          subText: "",
+          titleFontFamily: FIGMA_TITLE_FONT,
+          subTextFontFamily: FIGMA_SUBTEXT_FONT,
+          componentBackgroundColor: "#C8C8CB",
+          questionColor: "#111111",
+          subTextColor: "#F3F4F6",
+          placeholderShapeColor: "#CBCBCD",
+          placeholderShapeBorderColor: "#2A2A2D",
+          frameBackground: "#F8F8F8",
+          frameBorderColor: "#D4D4D8",
+        };
+      }
+      if (variant === "text-multiple-choice" || variant === "rank-text-fields") {
+        return {
+          ...defaults,
+          titleText: exampleValue.mockQuestion.question_text,
+          subText: "",
+          titleFontFamily: FIGMA_TITLE_FONT,
+          subTextFontFamily: FIGMA_SUBTEXT_FONT,
+          questionColor: "#111111",
+          subTextColor: "#111111",
+          componentBackgroundColor: "#E2C3E9",
+          placeholderShapeColor: "#5D3167",
+          placeholderShapeBorderColor: "#D4D4D8",
+          frameBackground: "#F8F8F8",
+          frameBorderColor: "#D4D4D8",
+        };
+      }
+      if (variant === "poster-single-select") {
+        return {
+          ...defaults,
+          titleText: "",
+          subText: "",
+          titleFontFamily: "\"Geometric Slabserif 712\", var(--font-sans), serif",
+          subTextFontFamily: FIGMA_SUBTEXT_FONT,
+          titleColor: "#F3F4F6",
+          questionColor: "#F3F4F6",
+          subTextColor: "#F3F4F6",
+          componentBackgroundColor: "#000000",
+          placeholderShapeColor: "#D9D9D9",
+          placeholderShapeBorderColor: "#D9D9D9",
+          unassignedCastCircleBorderColor: "#FFFFFF",
+          questionTextLineHeight: 0.94,
+          questionTextLetterSpacing: 0.008,
+          frameBackground: "#000000",
+          frameBorderColor: "#171717",
+        };
+      }
+      if (variant === "cast-single-select") {
+        return {
+          ...defaults,
+          titleText: "",
+          subText: "",
+          titleFontFamily: "\"Rude Slab Condensed\", var(--font-sans), sans-serif",
+          subTextFontFamily: FIGMA_SUBTEXT_FONT,
+          titleColor: "#FFFFFF",
+          questionColor: "#FFFFFF",
+          subTextColor: "#FFFFFF",
+          componentBackgroundColor: "#5D3167",
+          placeholderShapeColor: "#EEEEEF",
+          placeholderShapeBorderColor: "#DCDDDF",
+          unassignedCastCircleBorderColor: "#FFFFFF",
+          questionTextLineHeight: 0.95,
+          questionTextLetterSpacing: 0.01,
+          frameBackground: "#5D3167",
+          frameBorderColor: "#4B2753",
+        };
+      }
+      if (variant === "reunion-seating-prediction") {
+        return {
+          ...defaults,
+          titleText: "",
+          subText: "",
+          titleFontFamily: FIGMA_TITLE_FONT,
+          subTextFontFamily: FIGMA_SUBTEXT_FONT,
+          questionColor: "#111111",
+          subTextColor: "#111111",
+          questionTextLineHeight: 1.02,
+          questionTextLetterSpacing: 0.008,
+          componentBackgroundColor: "#D9D9D9",
+          frameBackground: "#F8F8F8",
+          frameBorderColor: "#D4D4D8",
+        };
+      }
       return defaults;
     },
     [entry.key],
@@ -1353,7 +1769,7 @@ function SurveyPreviewCard({
             ...saved,
           };
           const variant = (exampleValue.mockQuestion.config as { uiVariant?: string } | null | undefined)?.uiVariant;
-          if (variant === "agree-likert-scale") {
+          if (variant === "agree-likert-scale" || variant === "two-choice-slider") {
             const savedTitleFont = typeof saved.titleFontFamily === "string"
               ? normalizeTemplateFontFamily(saved.titleFontFamily)
               : "";
@@ -1369,9 +1785,22 @@ function SurveyPreviewCard({
             merged.subTextFontFamily = !savedSubTextFont || savedSubTextFont === defaultSubTextFont
               ? FIGMA_SUBTEXT_FONT
               : savedSubTextFont;
-            // The Figma likert template owns its own heading and statement copy.
-            merged.titleText = "";
-            merged.subText = "";
+            if (variant === "agree-likert-scale") {
+              // The Figma likert template owns its own heading and statement copy.
+              merged.titleText = "";
+              merged.subText = "";
+            }
+            if (variant === "two-choice-slider") {
+              merged.titleText = "";
+              merged.subText = "";
+              merged.componentBackgroundColor = "#C8C8CB";
+              merged.questionColor = "#111111";
+              merged.subTextColor = "#F3F4F6";
+              merged.placeholderShapeColor = "#CBCBCD";
+              merged.placeholderShapeBorderColor = "#2A2A2D";
+              merged.frameBackground = "#F8F8F8";
+              merged.frameBorderColor = "#D4D4D8";
+            }
           }
           next[index] = merged;
         });
@@ -1421,9 +1850,10 @@ function SurveyPreviewCard({
   }, [safeExampleIdx]);
   const editorState =
     editorStateByExample[safeExampleIdx] ?? buildDefaults(example);
+  const defaultsViewport = useMemo(() => getDefaultViewportFromPreview(viewport), [viewport]);
   const activeSurveyDefaults = useMemo(
-    () => (viewport === "phone" ? surveyDefaults.mobile : surveyDefaults.desktop),
-    [surveyDefaults.desktop, surveyDefaults.mobile, viewport],
+    () => surveyDefaults[defaultsViewport],
+    [defaultsViewport, surveyDefaults],
   );
   const isUsingGlobalDefaults =
     useGlobalDefaultsByExample[safeExampleIdx] ?? shouldUseGlobalDefaultsForExample(example);
@@ -1441,6 +1871,8 @@ function SurveyPreviewCard({
     [effectiveEditorState, example.mockQuestion],
   );
   const viewportFrame = PREVIEW_VIEWPORT_FRAME[viewport];
+  const rankPreviewTitleMin = viewport === "phone" ? 18 : viewport === "tablet" ? 20 : 22;
+  const rankPreviewSubTextMin = viewport === "phone" ? 12 : viewport === "tablet" ? 13 : 14;
   const updateEditorState = useCallback(
     (partial: Partial<TemplatePreviewEditorState>) => {
       const touchesStyleDefaults = Object.keys(partial).some((field) =>
@@ -1501,7 +1933,12 @@ function SurveyPreviewCard({
                     style={{
                       color: effectiveEditorState.titleColor,
                       fontFamily: effectiveEditorState.titleFontFamily,
-                      fontSize: responsiveFontSize(effectiveEditorState.titleFontSize, isRankOrderPreview, 22),
+                      fontSize: responsiveFontSize(
+                        effectiveEditorState.titleFontSize,
+                        isRankOrderPreview,
+                        rankPreviewTitleMin,
+                        viewportFrame.width,
+                      ),
                       fontWeight: isRankOrderPreview ? 800 : 600,
                     }}
                   >
@@ -1514,7 +1951,12 @@ function SurveyPreviewCard({
                     style={{
                       color: effectiveEditorState.subTextColor,
                       fontFamily: effectiveEditorState.subTextFontFamily,
-                      fontSize: responsiveFontSize(effectiveEditorState.subTextFontSize, isRankOrderPreview, 14),
+                      fontSize: responsiveFontSize(
+                        effectiveEditorState.subTextFontSize,
+                        isRankOrderPreview,
+                        rankPreviewSubTextMin,
+                        viewportFrame.width,
+                      ),
                       fontWeight: isRankOrderPreview ? 400 : 500,
                     }}
                   >
@@ -1688,6 +2130,32 @@ function SurveyPreviewCard({
                       label="Sub-Text Size"
                       value={effectiveEditorState.subTextFontSize}
                       onChange={(subTextFontSize) => updateEditorState({ subTextFontSize })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <TemplateFontSizeInput
+                      label="Question Line Height"
+                      value={effectiveEditorState.questionTextLineHeight}
+                      step={0.01}
+                      onChange={(questionTextLineHeight) => updateEditorState({ questionTextLineHeight })}
+                    />
+                    <TemplateFontSizeInput
+                      label="Question Letter Spacing (em)"
+                      value={effectiveEditorState.questionTextLetterSpacing}
+                      step={0.001}
+                      onChange={(questionTextLetterSpacing) => updateEditorState({ questionTextLetterSpacing })}
+                    />
+                    <TemplateFontSizeInput
+                      label="Option Line Height"
+                      value={effectiveEditorState.optionTextLineHeight}
+                      step={0.01}
+                      onChange={(optionTextLineHeight) => updateEditorState({ optionTextLineHeight })}
+                    />
+                    <TemplateFontSizeInput
+                      label="Option Letter Spacing (em)"
+                      value={effectiveEditorState.optionTextLetterSpacing}
+                      step={0.001}
+                      onChange={(optionTextLetterSpacing) => updateEditorState({ optionTextLetterSpacing })}
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -2110,7 +2578,12 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
                     style={{
                       color: editorState.titleColor,
                       fontFamily: editorState.titleFontFamily,
-                      fontSize: responsiveFontSize(editorState.titleFontSize, isFigmaRankPreview, 22),
+                      fontSize: responsiveFontSize(
+                        editorState.titleFontSize,
+                        isFigmaRankPreview,
+                        22,
+                        viewportFrame.width,
+                      ),
                       fontWeight: isFigmaRankPreview ? 800 : 600,
                     }}
                   >
@@ -2123,7 +2596,12 @@ function StandalonePreviewCard({ entry, baseColors }: { entry: CatalogEntry; bas
                     style={{
                       color: editorState.subTextColor,
                       fontFamily: editorState.subTextFontFamily,
-                      fontSize: responsiveFontSize(editorState.subTextFontSize, isFigmaRankPreview, 14),
+                      fontSize: responsiveFontSize(
+                        editorState.subTextFontSize,
+                        isFigmaRankPreview,
+                        14,
+                        viewportFrame.width,
+                      ),
                       fontWeight: isFigmaRankPreview ? 400 : 500,
                     }}
                   >
@@ -2425,6 +2903,7 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
   const [storedBaseColors, setStoredBaseColors] = useState<string[]>([]);
   const [surveyDefaults, setSurveyDefaults] = useState<SurveyQuestionDefaultsState>(() => ({
     mobile: { ...DEFAULT_SURVEY_STYLE_MOBILE },
+    tablet: { ...DEFAULT_SURVEY_STYLE_TABLET },
     desktop: { ...DEFAULT_SURVEY_STYLE_DESKTOP },
   }));
   const [selectedPreviewSource, setSelectedPreviewSource] = useState(DEFAULT_SURVEY_PREVIEW_SOURCE);
@@ -2474,6 +2953,7 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
     } catch {
       setSurveyDefaults({
         mobile: { ...DEFAULT_SURVEY_STYLE_MOBILE },
+        tablet: { ...DEFAULT_SURVEY_STYLE_TABLET },
         desktop: { ...DEFAULT_SURVEY_STYLE_DESKTOP },
       });
     }
@@ -2513,7 +2993,7 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
     }
   }, [selectedPreviewSource]);
 
-  const totalCount = SURVEY_CATALOG.length + AUTH_CATALOG.length + STANDALONE_CATALOG.length;
+  const totalCount = SURVEY_CATALOG.length + AUTH_CATALOG.length + STANDALONE_CATALOG.length + ARCHIVED_SURVEY_CATALOG.length;
 
   return (
     <div className="space-y-10">
@@ -2583,6 +3063,39 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
             <AuthPreviewCard key={entry.key} entry={entry} />
           ))}
         </div>
+      </section>
+
+      {/* Archived Survey Templates */}
+      <section>
+        <details className="group rounded-2xl border border-zinc-200 bg-zinc-50/70">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-bold text-zinc-900">Archive Container</h2>
+              <span className="rounded-full bg-zinc-200 px-2.5 py-0.5 text-xs font-semibold text-zinc-700">
+                {ARCHIVED_SURVEY_CATALOG.length}
+              </span>
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500 group-open:hidden">
+              Collapsed
+            </span>
+            <span className="hidden text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500 group-open:inline">
+              Expanded
+            </span>
+          </summary>
+          <div className="border-t border-zinc-200 p-4">
+            <div className="grid grid-cols-1 gap-6">
+              {ARCHIVED_SURVEY_CATALOG.map((entry) => (
+                <SurveyPreviewCard
+                  key={`${entry.key}-${selectedPreviewSource}`}
+                  entry={entry}
+                  baseColors={editorBaseColors}
+                  surveyDefaults={surveyDefaults}
+                  selectedPreviewSource={selectedPreviewSource}
+                />
+              ))}
+            </div>
+          </div>
+        </details>
       </section>
 
       <p className="text-center text-xs text-zinc-300">{totalCount} components cataloged</p>

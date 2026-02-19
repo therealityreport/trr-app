@@ -10,6 +10,7 @@ interface SyncRequestBody {
   force?: boolean;
   skip_s3?: boolean;
   dry_run?: boolean;
+  unresolved_only?: boolean;
   limit?: number;
 }
 
@@ -43,6 +44,7 @@ const sanitizeBody = (body: unknown): SyncRequestBody => {
     ...(typeof source.force === "boolean" ? { force: source.force } : {}),
     ...(typeof source.skip_s3 === "boolean" ? { skip_s3: source.skip_s3 } : {}),
     ...(typeof source.dry_run === "boolean" ? { dry_run: source.dry_run } : {}),
+    ...(typeof source.unresolved_only === "boolean" ? { unresolved_only: source.unresolved_only } : {}),
     ...(limit !== undefined ? { limit } : {}),
   };
 };

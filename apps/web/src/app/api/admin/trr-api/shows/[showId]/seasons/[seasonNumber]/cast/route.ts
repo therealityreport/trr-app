@@ -64,7 +64,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           person_id: member.person_id,
           person_name: member.full_name ?? member.cast_member_name ?? null,
           episodes_in_season: 0,
-          total_episodes: member.total_episodes ?? null,
+          total_episodes: 0,
           photo_url: member.photo_url,
           thumbnail_focus_x: member.thumbnail_focus_x ?? null,
           thumbnail_focus_y: member.thumbnail_focus_y ?? null,

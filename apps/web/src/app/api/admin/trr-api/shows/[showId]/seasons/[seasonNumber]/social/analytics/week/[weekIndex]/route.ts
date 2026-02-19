@@ -4,6 +4,11 @@ import {
   fetchSeasonBackendJson,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
+import {
+  isValidNonNegativeIntegerString,
+  isValidPositiveIntegerString,
+  isValidUuid,
+} from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +22,24 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const { showId, seasonNumber, weekIndex } = await params;
     if (!showId) {
       return NextResponse.json({ error: "showId is required", code: "BAD_REQUEST", retryable: false }, { status: 400 });
+    }
+    if (!isValidUuid(showId)) {
+      return NextResponse.json(
+        { error: "showId must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    if (!isValidPositiveIntegerString(seasonNumber)) {
+      return NextResponse.json(
+        { error: "seasonNumber must be a valid positive integer", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    if (!isValidNonNegativeIntegerString(weekIndex)) {
+      return NextResponse.json(
+        { error: "weekIndex must be a valid non-negative integer", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
     }
 
     const data = await fetchSeasonBackendJson(

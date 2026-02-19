@@ -39,6 +39,24 @@ function makeQuestion() {
 }
 
 describe("SingleSelectInput", () => {
+  it("renders figma-style text options for text-multiple-choice", () => {
+    render(
+      <SingleSelectInput
+        question={makeQuestion() as never}
+        value={null}
+        onChange={() => {}}
+      />,
+    );
+
+    const lisa = screen.getByTestId("single-select-option-lisa");
+    expect(lisa).toHaveStyle({
+      backgroundColor: "rgb(226, 195, 233)",
+      color: "rgb(17, 17, 17)",
+      fontFamily: '"Plymouth Serial", var(--font-sans), sans-serif',
+      textTransform: "uppercase",
+    });
+  });
+
   it("clears selection when clicking the currently selected option", () => {
     function Harness() {
       const [value, setValue] = React.useState<string | null>(null);
@@ -56,9 +74,12 @@ describe("SingleSelectInput", () => {
     const lisa = screen.getByRole("button", { name: /lisa/i });
     fireEvent.click(lisa);
     expect(lisa).toHaveAttribute("aria-pressed", "true");
+    expect(lisa).toHaveStyle({
+      backgroundColor: "rgb(93, 49, 103)",
+      color: "rgb(255, 255, 255)",
+    });
 
     fireEvent.click(lisa);
     expect(lisa).toHaveAttribute("aria-pressed", "false");
   });
 });
-

@@ -33,6 +33,7 @@ describe("reddit-discovery-service", () => {
                 score: 250,
                 num_comments: 120,
                 created_utc: 1_706_000_000,
+                link_flair_text: "Episode Discussion",
               },
             ]),
           ),
@@ -53,6 +54,7 @@ describe("reddit-discovery-service", () => {
                 score: 175,
                 num_comments: 64,
                 created_utc: 1_706_000_500,
+                link_flair_text: "Promo",
               },
             ]),
           ),
@@ -73,6 +75,7 @@ describe("reddit-discovery-service", () => {
                 score: 260,
                 num_comments: 130,
                 created_utc: 1_706_001_000,
+                link_flair_text: "Episode Discussion",
               },
             ]),
           ),
@@ -94,6 +97,7 @@ describe("reddit-discovery-service", () => {
 
     const matched = result.threads.find((thread) => thread.reddit_post_id === "post1");
     expect(matched?.is_show_match).toBe(true);
+    expect(matched?.passes_flair_filter).toBe(true);
     expect(matched?.source_sorts.sort()).toEqual(["new", "top"]);
 
     expect(result.hints.suggested_include_terms.some((term) => term.includes("rhoslc"))).toBe(
@@ -102,6 +106,91 @@ describe("reddit-discovery-service", () => {
     expect(
       result.hints.suggested_exclude_terms.some((term) => term.includes("wife swap")),
     ).toBe(true);
+  });
+
+  it("supports all-post and scan-by-terms flare modes", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(".json")) {
+        return new Response(
+          JSON.stringify(
+            makeListing([
+              {
+                id: "flair-match-cast",
+                title: "Thoughts on Meredith this week",
+                selftext: "Meredith had a strong showing.",
+                url: "https://www.reddit.com/r/realhousewivesofSLC/comments/flair-match-cast/example/",
+                permalink: "/r/realhousewivesofSLC/comments/flair-match-cast/example/",
+                author: "user1",
+                score: 90,
+                num_comments: 20,
+                created_utc: 1_706_001_000,
+                link_flair_text: ":Meredith: Meredith Marksss 🛀",
+              },
+              {
+                id: "flair-match-no-cast",
+                title: "General housewives off-topic chat",
+                selftext: "No Salt Lake or cast names here.",
+                url: "https://www.reddit.com/r/realhousewivesofSLC/comments/flair-match-no-cast/example/",
+                permalink: "/r/realhousewivesofSLC/comments/flair-match-no-cast/example/",
+                author: "user2",
+                score: 70,
+                num_comments: 10,
+                created_utc: 1_706_001_001,
+                link_flair_text: "Chat/Discussion 👄",
+              },
+              {
+                id: "all-post-selected-no-match",
+                title: "BravoCon check-in",
+                selftext: "No cast names or SLC references in this thread.",
+                url: "https://www.reddit.com/r/realhousewivesofSLC/comments/all-post-selected-no-match/example/",
+                permalink: "/r/realhousewivesofSLC/comments/all-post-selected-no-match/example/",
+                author: "user4",
+                score: 65,
+                num_comments: 8,
+                created_utc: 1_706_001_003,
+                link_flair_text: "Salt Lake City",
+              },
+              {
+                id: "flair-miss",
+                title: "RHOSLC but wrong flair",
+                selftext: "Talks RHOSLC but flair is not selected.",
+                url: "https://www.reddit.com/r/realhousewivesofSLC/comments/flair-miss/example/",
+                permalink: "/r/realhousewivesofSLC/comments/flair-miss/example/",
+                author: "user3",
+                score: 95,
+                num_comments: 32,
+                created_utc: 1_706_001_002,
+                link_flair_text: "S4 ❄️",
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverSubredditThreads({
+      subreddit: "realhousewivesofSLC",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      castNames: ["Meredith Marks", "Lisa Barlow"],
+      analysisFlares: ["Chat/Discussion 👄", ":Meredith: Meredith Marksss 🛀"],
+      analysisAllFlares: ["Salt Lake City"],
+      sortModes: ["new"],
+    });
+
+    expect(result.threads.map((thread) => thread.reddit_post_id)).toEqual([
+      "flair-match-cast",
+      "all-post-selected-no-match",
+    ]);
+    expect(result.threads[0]?.passes_flair_filter).toBe(true);
+    expect(result.threads[0]?.matched_cast_terms.length).toBeGreaterThan(0);
+    expect(result.threads[0]?.link_flair_text).toBe("Meredith Marksss");
+    expect(result.threads[1]?.is_show_match).toBe(false);
+    expect(result.threads[1]?.passes_flair_filter).toBe(true);
   });
 
   it("throws 404 when subreddit is missing", async () => {

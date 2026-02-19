@@ -3,7 +3,7 @@
 import * as React from "react";
 
 import QuestionRenderer from "@/components/survey/QuestionRenderer";
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import type { QuestionOption, SurveyQuestion, SurveyWithQuestions } from "@/lib/surveys/normalized-types";
 import type { UiVariant } from "@/lib/surveys/question-config-types";
 import { groupBySection } from "@/lib/surveys/section-grouping";
@@ -94,16 +94,12 @@ function withUpdatedRows(config: unknown, nextRows: RowItem[]): Record<string, u
 }
 
 async function getAuthToken(): Promise<string> {
-  const token = await auth.currentUser?.getIdToken();
-  if (!token) throw new Error("Not authenticated");
-  return token;
+  const authHeaders = await getClientAuthHeaders();
+  return authHeaders.Authorization.replace(/^Bearer\s+/i, "");
 }
 
 async function fetchSurveyWithQuestions(surveySlug: string): Promise<SurveyWithQuestions> {
-  const token = await getAuthToken();
-  const response = await fetch(`/api/admin/normalized-surveys/${surveySlug}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await fetchAdminWithAuth(`/api/admin/normalized-surveys/${surveySlug}`);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error((data as { error?: string }).error ?? "Failed to fetch survey");
@@ -329,7 +325,7 @@ export function SurveyQuestionsEditor({
       };
 
       const token = await getAuthToken();
-      const response = await fetch(`/api/admin/normalized-surveys/${surveySlug}/questions`, {
+      const response = await fetchAdminWithAuth(`/api/admin/normalized-surveys/${surveySlug}/questions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -353,7 +349,7 @@ export function SurveyQuestionsEditor({
       const created = data.question;
 
       for (const opt of input.seedOptions) {
-        const optRes = await fetch(
+        const optRes = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${created.id}/options`,
           {
             method: "POST",
@@ -389,7 +385,7 @@ export function SurveyQuestionsEditor({
       }
 
       const token = await getAuthToken();
-      const res = await fetch(
+      const res = await fetchAdminWithAuth(
         `/api/admin/trr-api/shows/${encodeURIComponent(showId)}/seasons/${encodeURIComponent(
           String(seasonNumber),
         )}/survey-cast?selectedOnly=true`,
@@ -437,7 +433,7 @@ export function SurveyQuestionsEditor({
     }
 
     const token = await getAuthToken();
-    const res = await fetch(
+    const res = await fetchAdminWithAuth(
       `/api/admin/trr-api/shows/${encodeURIComponent(showId)}/seasons?limit=100`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
@@ -472,7 +468,7 @@ export function SurveyQuestionsEditor({
         const existing = existingOptions.find((o) => o.option_key === opt.option_key);
         if (existing) {
           const nextMetadata = mergeOptionMetadata(existing.metadata, opt.metadata);
-          const res = await fetch(
+          const res = await fetchAdminWithAuth(
             `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options`,
             {
               method: "PUT",
@@ -495,7 +491,7 @@ export function SurveyQuestionsEditor({
           continue;
         }
 
-        const res = await fetch(
+        const res = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options`,
           {
             method: "POST",
@@ -698,7 +694,7 @@ export function SurveyQuestionsEditor({
         else delete nextConfig.section;
 
         const token = await getAuthToken();
-        const response = await fetch(
+        const response = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${q.id}`,
           {
             method: "PUT",
@@ -745,7 +741,7 @@ export function SurveyQuestionsEditor({
         setBusy(true);
         setError(null);
         const token = await getAuthToken();
-        const response = await fetch(`/api/admin/normalized-surveys/${surveySlug}/questions/${q.id}`, {
+        const response = await fetchAdminWithAuth(`/api/admin/normalized-surveys/${surveySlug}/questions/${q.id}`, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -778,7 +774,7 @@ export function SurveyQuestionsEditor({
         setError(null);
         const token = await getAuthToken();
 
-        const resA = await fetch(
+        const resA = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${a.id}`,
           {
             method: "PUT",
@@ -794,7 +790,7 @@ export function SurveyQuestionsEditor({
           throw new Error((data as { error?: string }).error ?? "Failed to reorder question");
         }
 
-        const resB = await fetch(
+        const resB = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${b.id}`,
           {
             method: "PUT",
@@ -854,7 +850,7 @@ export function SurveyQuestionsEditor({
         }
 
         const token = await getAuthToken();
-        const response = await fetch(
+        const response = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options`,
           {
             method: "PUT",
@@ -893,7 +889,7 @@ export function SurveyQuestionsEditor({
         setBusy(true);
         setError(null);
         const token = await getAuthToken();
-        const response = await fetch(
+        const response = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options`,
           {
             method: "POST",
@@ -934,7 +930,7 @@ export function SurveyQuestionsEditor({
         setBusy(true);
         setError(null);
         const token = await getAuthToken();
-        const response = await fetch(
+        const response = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options?optionId=${encodeURIComponent(optionId)}`,
           {
             method: "DELETE",
@@ -972,7 +968,7 @@ export function SurveyQuestionsEditor({
         setError(null);
         const token = await getAuthToken();
 
-        const resA = await fetch(
+        const resA = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options`,
           {
             method: "PUT",
@@ -988,7 +984,7 @@ export function SurveyQuestionsEditor({
           throw new Error((data as { error?: string }).error ?? "Failed to reorder option");
         }
 
-        const resB = await fetch(
+        const resB = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}/options`,
           {
             method: "PUT",
@@ -1020,7 +1016,7 @@ export function SurveyQuestionsEditor({
         setBusy(true);
         setError(null);
         const token = await getAuthToken();
-        const response = await fetch(
+        const response = await fetchAdminWithAuth(
           `/api/admin/normalized-surveys/${surveySlug}/questions/${questionId}`,
           {
             method: "PUT",

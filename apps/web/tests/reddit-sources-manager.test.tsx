@@ -13,6 +13,8 @@ const baseCommunity = {
   notes: null,
   is_active: true,
   post_flares: ["Episode Discussion", "Live Thread"],
+  analysis_flares: ["Episode Discussion"],
+  analysis_all_flares: [],
   post_flares_updated_at: "2026-01-01T00:00:00.000Z",
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -48,6 +50,8 @@ const secondaryCommunity = {
   notes: null,
   is_active: true,
   post_flares: [],
+  analysis_flares: [],
+  analysis_all_flares: [],
   post_flares_updated_at: null,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -83,10 +87,13 @@ const discoveryPayload = {
         score: 90,
         num_comments: 33,
         posted_at: "2026-01-11T00:00:00.000Z",
+        link_flair_text: "Episode Discussion",
         source_sorts: ["hot"],
         matched_terms: ["rhoslc"],
+        matched_cast_terms: ["meredith"],
         cross_show_terms: [],
         is_show_match: true,
+        passes_flair_filter: true,
         match_score: 2,
         suggested_include_terms: ["rhoslc"],
         suggested_exclude_terms: [],
@@ -141,8 +148,8 @@ describe("RedditSourcesManager", () => {
     expect(screen.getByRole("button", { name: "Add Thread" })).toBeEnabled();
     expect(screen.getAllByText("The Real Housewives of Salt Lake City").length).toBeGreaterThan(0);
     expect(screen.getAllByText("The Real Housewives of Potomac").length).toBeGreaterThan(0);
-    expect(screen.getByText("Episode Discussion")).toBeInTheDocument();
-    expect(screen.getByText("Live Thread")).toBeInTheDocument();
+    expect(screen.getAllByText("Episode Discussion").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Live Thread").length).toBeGreaterThan(0);
   });
 
   it("shows discovery filter hints and show-match badge after discover", async () => {
@@ -180,6 +187,118 @@ describe("RedditSourcesManager", () => {
     expect(screen.getByText("rhoslc")).toBeInTheDocument();
     expect(screen.getByText("wife swap")).toBeInTheDocument();
     expect(screen.getByText("Show Match · score 2")).toBeInTheDocument();
+    expect(screen.getByText("Flair: Episode Discussion")).toBeInTheDocument();
+    expect(screen.getByText("cast: meredith")).toBeInTheDocument();
+    expect(screen.getByText("Selected flair")).toBeInTheDocument();
+  });
+
+  it("keeps all-flair discovered threads visible when Show matched only is enabled", async () => {
+    const allFlairCommunity = {
+      ...baseCommunity,
+      analysis_flares: [],
+      analysis_all_flares: ["Salt Lake City"],
+    };
+    const allFlairDiscoveryPayload = {
+      discovery: {
+        ...discoveryPayload.discovery,
+        threads: [
+          ...discoveryPayload.discovery.threads,
+          {
+            reddit_post_id: "post-discover-2",
+            title: "WWHL open thread",
+            text: "General Bravo chatter",
+            url: "https://www.reddit.com/r/BravoRealHousewives/comments/post-discover-2/test/",
+            permalink: "/r/BravoRealHousewives/comments/post-discover-2/test/",
+            author: "user3",
+            score: 44,
+            num_comments: 10,
+            posted_at: "2026-01-11T01:00:00.000Z",
+            link_flair_text: "Salt Lake City",
+            source_sorts: ["new"],
+            matched_terms: [],
+            matched_cast_terms: [],
+            cross_show_terms: [],
+            is_show_match: false,
+            passes_flair_filter: true,
+            match_score: 0,
+            suggested_include_terms: [],
+            suggested_exclude_terms: [],
+          },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        return jsonResponse(allFlairDiscoveryPayload);
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [allFlairCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Bravo RH").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+    expect(screen.getByRole("checkbox", { name: /Show matched only/i })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Discover Threads" }));
+
+    expect(await screen.findByText("WWHL open thread")).toBeInTheDocument();
+  });
+
+  it("persists analysis flare mode chip toggles per selected community", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/admin/reddit/communities/community-1") && init?.method === "PATCH") {
+        const payload = JSON.parse(String(init.body ?? "{}")) as {
+          analysis_flares?: string[];
+          analysis_all_flares?: string[];
+        };
+        return jsonResponse({
+          community: {
+            ...baseCommunity,
+            analysis_flares: payload.analysis_flares ?? [],
+            analysis_all_flares: payload.analysis_all_flares ?? [],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Bravo RH").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+    const selectedScanChip = await screen.findByRole("button", {
+      name: "Scan terms · Episode Discussion",
+    });
+    fireEvent.click(selectedScanChip);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/admin/reddit/communities/community-1"),
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.stringContaining("analysis_all_flares"),
+        }),
+      );
+    });
   });
 
   it("optimistically adds a created community and asynchronously loads post flares", async () => {
@@ -193,6 +312,8 @@ describe("RedditSourcesManager", () => {
       notes: null,
       is_active: true,
       post_flares: [],
+      analysis_flares: [],
+      analysis_all_flares: [],
       post_flares_updated_at: null,
       created_at: "2026-02-17T00:00:00.000Z",
       updated_at: "2026-02-17T00:00:00.000Z",
@@ -206,6 +327,8 @@ describe("RedditSourcesManager", () => {
           assigned_thread_count: 0,
           assigned_threads: [],
           post_flares: ["Episode Thread", "Live Discussion"],
+          analysis_flares: [],
+          analysis_all_flares: [],
           post_flares_updated_at: "2026-02-17T00:02:00.000Z",
         });
         return jsonResponse({ community: createdCommunity }, 201);
@@ -217,6 +340,8 @@ describe("RedditSourcesManager", () => {
             assigned_thread_count: 0,
             assigned_threads: [],
             post_flares: ["Episode Thread", "Live Discussion"],
+            analysis_flares: [],
+            analysis_all_flares: [],
             post_flares_updated_at: "2026-02-17T00:02:00.000Z",
           },
           flares: ["Episode Thread", "Live Discussion"],
@@ -252,8 +377,8 @@ describe("RedditSourcesManager", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Episode Thread")).toBeInTheDocument();
-      expect(screen.getByText("Live Discussion")).toBeInTheDocument();
+      expect(screen.getAllByText("Episode Thread").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Live Discussion").length).toBeGreaterThan(0);
     });
   });
 
@@ -268,6 +393,8 @@ describe("RedditSourcesManager", () => {
       notes: null,
       is_active: true,
       post_flares: [],
+      analysis_flares: [],
+      analysis_all_flares: [],
       post_flares_updated_at: null,
       created_at: "2026-02-17T00:00:00.000Z",
       updated_at: "2026-02-17T00:00:00.000Z",
@@ -290,6 +417,8 @@ describe("RedditSourcesManager", () => {
             assigned_thread_count: 0,
             assigned_threads: [],
             post_flares: [],
+            analysis_flares: [],
+            analysis_all_flares: [],
             post_flares_updated_at: "2026-02-17T00:03:00.000Z",
           },
           flares: [],

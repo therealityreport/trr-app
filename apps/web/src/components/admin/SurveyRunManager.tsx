@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { auth } from "@/lib/firebase";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import type { SurveyRun } from "@/lib/surveys/normalized-types";
 
 interface RunWithCount extends SurveyRun {
@@ -30,12 +30,8 @@ export function SurveyRunManager({ surveySlug }: SurveyRunManagerProps) {
       setLoading(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}/runs`,
-        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       if (!response.ok) {
@@ -64,15 +60,11 @@ export function SurveyRunManager({ surveySlug }: SurveyRunManagerProps) {
       setCreating(true);
       setError(null);
 
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}/runs`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -105,15 +97,11 @@ export function SurveyRunManager({ surveySlug }: SurveyRunManagerProps) {
 
   const handleToggleActive = async (run: RunWithCount) => {
     try {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}/runs/${run.id}`,
         {
           method: "PUT",
           headers: {
-            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ is_active: !run.is_active }),
@@ -135,14 +123,10 @@ export function SurveyRunManager({ surveySlug }: SurveyRunManagerProps) {
     if (!confirm("Delete this run?")) return;
 
     try {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch(
+      const response = await fetchAdminWithAuth(
         `/api/admin/normalized-surveys/${surveySlug}/runs/${runId}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
         },
       );
 

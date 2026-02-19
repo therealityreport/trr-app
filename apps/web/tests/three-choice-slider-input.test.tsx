@@ -73,7 +73,7 @@ describe("CastDecisionCardInput", () => {
       />,
     );
 
-    expect(screen.getByText("KEEP, FIRE OR DEMOTE")).toBeInTheDocument();
+    expect(screen.getByText("WOULD YOU KEEP, FIRE OR DEMOTE")).toBeInTheDocument();
     expect(screen.getByText("Whitney Rose")).toBeInTheDocument();
     expect(screen.getByTestId("three-choice-fire")).toBeInTheDocument();
     expect(screen.getByTestId("three-choice-demote")).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe("CastDecisionCardInput", () => {
       />,
     );
 
-    expect(screen.getByText("KEEP, FIRE OR DEMOTE")).toBeInTheDocument();
+    expect(screen.getByText("WOULD YOU KEEP, FIRE OR DEMOTE")).toBeInTheDocument();
     expect(screen.getByTestId("three-choice-fire")).toBeInTheDocument();
   });
 
@@ -114,6 +114,7 @@ describe("CastDecisionCardInput", () => {
     fireEvent.click(screen.getByTestId("three-choice-fire"));
 
     expect(handleChange).toHaveBeenCalledWith({ whitney: "fire" });
+    expect(screen.getByText("KEEP, FIRE OR DEMOTE")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Whitney Rose" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
 
@@ -209,6 +210,29 @@ describe("CastDecisionCardInput", () => {
     expect(screen.getByText("BRING BACK OR KEEP GONE")).toBeInTheDocument();
     expect(screen.getByTestId("three-choice-bring-back")).toBeInTheDocument();
     expect(screen.getByTestId("three-choice-keep-gone")).toBeInTheDocument();
+  });
+
+  it("shows Continue for single-row keep/fire/demote after a selection", () => {
+    const singleRow = makeQuestion({
+      rows: [{ id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" }],
+    });
+
+    function Harness() {
+      const [value, setValue] = React.useState<Record<string, string> | null>({});
+      return (
+        <CastDecisionCardInput
+          question={singleRow as never}
+          value={value}
+          onChange={setValue}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByTestId("three-choice-fire"));
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
   });
 
   it("uses Canva template fonts when they exist in CloudFront CDN list", () => {

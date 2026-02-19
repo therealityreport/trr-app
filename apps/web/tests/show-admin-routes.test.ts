@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPersonAdminUrl,
+  buildPersonRouteSlug,
   buildSeasonAdminUrl,
+  buildSeasonSocialWeekUrl,
   buildShowAdminUrl,
+  cleanLegacyPersonRoutingQuery,
   cleanLegacyRoutingQuery,
+  parsePersonRouteState,
   parseSeasonRouteState,
   parseShowRouteState,
+  toPersonSlug,
 } from "@/lib/admin/show-admin-routes";
 
 describe("show-admin-routes", () => {
@@ -50,7 +56,22 @@ describe("show-admin-routes", () => {
         tab: "assets",
         assetsSubTab: "brand",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/assets/brand");
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/media-brand");
+
+    expect(
+      buildShowAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        tab: "assets",
+        assetsSubTab: "videos",
+      })
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/media-videos");
+
+    expect(
+      buildShowAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        tab: "assets",
+      })
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/media-gallery");
   });
 
   it("parses season path tabs and query fallback", () => {
@@ -90,7 +111,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "cast",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4/cast");
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=cast");
 
     expect(
       buildSeasonAdminUrl({
@@ -99,14 +120,101 @@ describe("show-admin-routes", () => {
         tab: "assets",
         assetsSubTab: "brand",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4/assets/brand");
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=assets&assets=brand");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonNumber: 4,
+        tab: "assets",
+      })
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=assets&assets=media");
+  });
+
+  it("builds canonical season social week URLs", () => {
+    expect(
+      buildSeasonSocialWeekUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonNumber: 4,
+        weekIndex: 3,
+      })
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4/social/week/3");
+
+    expect(
+      buildSeasonSocialWeekUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonNumber: 4,
+        weekIndex: 3,
+        query: new URLSearchParams("source_scope=bravo&platform=youtube"),
+      })
+    ).toBe(
+      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4/social/week/3?source_scope=bravo&platform=youtube"
+    );
   });
 
   it("removes legacy tab query keys and preserves unrelated params", () => {
     const cleaned = cleanLegacyRoutingQuery(
-      new URLSearchParams("tab=social&assets=brand&source_scope=bravo&platform=youtube")
+      new URLSearchParams(
+        "tab=social&assets=brand&source_scope=bravo&scope=creator&social_view=advanced&social_platform=reddit&platform=youtube",
+      ),
     );
 
-    expect(cleaned.toString()).toBe("source_scope=bravo&platform=youtube");
+    expect(cleaned.toString()).toBe("platform=youtube");
+  });
+
+  it("parses person path tabs and legacy query fallback", () => {
+    expect(
+      parsePersonRouteState(
+        "/admin/trr-shows/the-real-housewives-of-salt-lake-city/people/meredith-marks/overview",
+        new URLSearchParams()
+      )
+    ).toMatchObject({ tab: "overview", source: "path" });
+
+    expect(
+      parsePersonRouteState(
+        "/admin/trr-shows/people/7f528757-5017-4599-8252-c02f0d0736cf",
+        new URLSearchParams("tab=fandom")
+      )
+    ).toMatchObject({ tab: "fandom", source: "query" });
+  });
+
+  it("builds canonical person URLs", () => {
+    expect(
+      buildPersonAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        personSlug: "meredith-marks--7f528757",
+      })
+    ).toBe(
+      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/people/meredith-marks--7f528757/overview"
+    );
+
+    expect(
+      buildPersonAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        personSlug: "meredith-marks--7f528757",
+        tab: "gallery",
+      })
+    ).toBe(
+      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/people/meredith-marks--7f528757/gallery"
+    );
+  });
+
+  it("slugifies people names and appends person id prefix", () => {
+    expect(toPersonSlug("Meredith Marks")).toBe("meredith-marks");
+    expect(toPersonSlug("Jax & Brittany")).toBe("jax-and-brittany");
+    expect(
+      buildPersonRouteSlug({
+        personName: "Meredith Marks",
+        personId: "7f528757-5017-4599-8252-c02f0d0736cf",
+      })
+    ).toBe("meredith-marks--7f528757");
+  });
+
+  it("cleans legacy person routing query params", () => {
+    const cleaned = cleanLegacyPersonRoutingQuery(
+      new URLSearchParams("showId=the-real-housewives-of-salt-lake-city&tab=gallery&seasonNumber=4")
+    );
+
+    expect(cleaned.toString()).toBe("seasonNumber=4");
   });
 });
