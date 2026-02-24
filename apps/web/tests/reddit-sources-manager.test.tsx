@@ -127,12 +127,36 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     json: async () => body,
   }) as Response;
 
-const seasonLookup: Record<string, Array<{ id: string; season_number: number }>> = {
+const seasonLookup: Record<
+  string,
+  Array<{
+    id: string;
+    season_number: number;
+    has_scheduled_or_aired_episode?: boolean;
+    episode_airdate_count?: number;
+  }>
+> = {
   "show-1": [
-    { id: "season-1", season_number: 6 },
-    { id: "season-older-1", season_number: 5 },
+    {
+      id: "season-2",
+      season_number: 7,
+      has_scheduled_or_aired_episode: false,
+      episode_airdate_count: 0,
+    },
+    {
+      id: "season-1",
+      season_number: 6,
+      has_scheduled_or_aired_episode: true,
+      episode_airdate_count: 18,
+    },
+    {
+      id: "season-older-1",
+      season_number: 5,
+      has_scheduled_or_aired_episode: true,
+      episode_airdate_count: 20,
+    },
   ],
-  "show-2": [{ id: "season-2", season_number: 8 }],
+  "show-2": [{ id: "season-9", season_number: 8, has_scheduled_or_aired_episode: true, episode_airdate_count: 12 }],
 };
 
 const defaultAnalyticsPayload = {
@@ -155,6 +179,26 @@ const defaultAnalyticsPayload = {
 const maybeHandleSeasonPeriodRequests = (url: string): Response | null => {
   if (url.includes("/social/analytics")) {
     return jsonResponse(defaultAnalyticsPayload);
+  }
+  const showDetailsMatch = url.match(/\/api\/admin\/trr-api\/shows\/([^/?]+)(?:\?|$)/);
+  if (showDetailsMatch && !url.includes("/seasons")) {
+    const showId = showDetailsMatch[1] ?? "";
+    if (showId === "show-1") {
+      return jsonResponse({
+        show: {
+          id: "show-1",
+          slug: "the-real-housewives-of-salt-lake-city",
+          alternative_names: ["RHOSLC"],
+        },
+      });
+    }
+    return jsonResponse({
+      show: {
+        id: showId,
+        slug: "the-real-housewives-of-potomac",
+        alternative_names: ["RHOP"],
+      },
+    });
   }
   const showSeasonsMatch = url.match(/\/api\/admin\/trr-api\/shows\/([^/]+)\/seasons(?:\?|$)/);
   if (!showSeasonsMatch) return null;
@@ -205,8 +249,8 @@ describe("RedditSourcesManager", () => {
     expect(screen.getByRole("button", { name: "Add Thread" })).toBeEnabled();
     expect(screen.getAllByText("The Real Housewives of Salt Lake City").length).toBeGreaterThan(0);
     expect(screen.getAllByText("The Real Housewives of Potomac").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Episode Discussion").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Live Thread").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Episode Discussion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live Thread")).not.toBeInTheDocument();
   });
 
   it("renders Community heading with community view actions", async () => {
@@ -388,6 +432,7 @@ describe("RedditSourcesManager", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
     const selectedScanChip = await screen.findByRole("button", {
       name: "Scan terms · Episode Discussion",
     });
@@ -402,6 +447,37 @@ describe("RedditSourcesManager", () => {
         }),
       );
     });
+  });
+
+  it("opens Community Settings modal and keeps flair/focus controls inside it", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Bravo RH").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+
+    expect(screen.queryByText("Community Focus")).not.toBeInTheDocument();
+    expect(screen.queryByText("All Posts With Flair")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+
+    expect(await screen.findByText("Community Settings")).toBeInTheDocument();
+    expect(screen.getByText("Community Focus")).toBeInTheDocument();
+    expect(screen.getAllByText("All Posts With Flair").length).toBeGreaterThan(0);
   });
 
   it("optimistically adds a created community and asynchronously loads post flares", async () => {
@@ -487,6 +563,8 @@ describe("RedditSourcesManager", () => {
       expect(screen.getAllByText("RHOSLC Main").length).toBeGreaterThan(0);
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+
     await waitFor(() => {
       expect(screen.getAllByText("Episode Thread").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Live Discussion").length).toBeGreaterThan(0);
@@ -571,6 +649,7 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Another Sub").length).toBeGreaterThan(0);
     });
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
     await waitFor(() => {
       expect(screen.getByText("No post flairs available yet.")).toBeInTheDocument();
     });
@@ -607,6 +686,7 @@ describe("RedditSourcesManager", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
 
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
     expect(screen.queryByText("All Posts With Flair")).not.toBeInTheDocument();
     expect(
       await screen.findByText("Show-focused mode enabled. All discovered posts are eligible (including no-flair posts)."),
@@ -707,12 +787,13 @@ describe("RedditSourcesManager", () => {
       expect(screen.getAllByText("Bravo RH").length).toBeGreaterThan(0);
     });
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "Season" })).toHaveValue("season-1");
       expect(screen.getByRole("combobox", { name: "Period" })).toHaveValue("all-periods");
     });
-
-    fireEvent.click(screen.getByRole("button", { name: "REFRESH" }));
+    expect(screen.queryByRole("button", { name: "REFRESH" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Episode Discussions" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -764,6 +845,32 @@ describe("RedditSourcesManager", () => {
           body: expect.stringContaining("\"reddit_post_id\":\"episode-1\""),
         }),
       );
+    });
+  });
+
+  it("defaults episode season to newest season with scheduled or aired episodes", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Bravo RH").length).toBeGreaterThan(0);
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Season" })).toHaveValue("season-1");
     });
   });
 

@@ -15,6 +15,8 @@
 
 # next.js
 /.next/
+/.next-e2e/
+/.next-e2e-debug/
 /out/
 
 # production
@@ -23,6 +25,7 @@
 # misc
 .DS_Store
 *.pem
+/test-results/
 
 # debug
 npm-debug.log*

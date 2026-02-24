@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 
 const {
   useParamsMock,
@@ -68,6 +68,38 @@ describe("reddit community view page", () => {
         hideCommunityList: true,
       }),
     );
+
+    const managerProps = redditSourcesManagerMock.mock.calls.at(-1)?.[0] as
+      | { onCommunityContextChange?: (value: unknown) => void }
+      | undefined;
+    act(() => {
+      managerProps?.onCommunityContextChange?.({
+        communityLabel: "r/BravoRealHousewives",
+        showLabel: "RHOSLC",
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonLabel: "S6",
+        showId: "show-1",
+        seasonId: "season-1",
+        seasonNumber: 6,
+      });
+    });
+
+    expect(screen.getByRole("heading", { name: "r/BravoRealHousewives" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByRole("link", { name: "RHOSLC" })).toHaveAttribute(
+      "href",
+      "/admin/trr-shows/the-real-housewives-of-salt-lake-city",
+    );
+    expect(screen.getByRole("link", { name: "S6" })).toHaveAttribute(
+      "href",
+      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/6?tab=social",
+    );
+    expect(screen.getByRole("link", { name: "Social Analytics" })).toHaveAttribute(
+      "href",
+      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/6?tab=social&social_platform=reddit",
+    );
+    expect(screen.getByText("Reddit")).toBeInTheDocument();
+    expect(screen.getAllByText("r/BravoRealHousewives").length).toBeGreaterThan(0);
   });
 
   it("falls back to default back href without query params", () => {

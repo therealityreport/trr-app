@@ -1,6 +1,0 @@
-{
-  "/page": "app/page.js",
-  "/admin/page": "app/admin/page.js",
-  "/admin/trr-shows/[showId]/seasons/[seasonNumber]/page": "app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.js",
-  "/admin/trr-shows/[showId]/page": "app/admin/trr-shows/[showId]/page.js"
-}

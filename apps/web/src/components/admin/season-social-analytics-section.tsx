@@ -737,6 +737,30 @@ const isTransientBackendSectionError = (message: string | null | undefined): boo
   );
 };
 
+const TRANSIENT_DEV_RESTART_PATTERNS = [
+  "failed to fetch",
+  "networkerror when attempting to fetch resource",
+  "fetch failed",
+  "unexpected end of json input",
+  "invalid json",
+  "load failed",
+  "connection closed",
+] as const;
+
+const isTransientDevRestartMessage = (message: string | null | undefined): boolean => {
+  const normalized = String(message ?? "").toLowerCase();
+  if (!normalized) return false;
+  return TRANSIENT_DEV_RESTART_PATTERNS.some((pattern) => normalized.includes(pattern));
+};
+
+const parseResponseJson = async <T>(response: Response, fallbackMessage: string): Promise<T> => {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new Error(`${fallbackMessage}. Response payload unavailable.`);
+  }
+};
+
 const fetchAdminWithTimeout = async (
   input: RequestInfo | URL,
   init: RequestInit,
@@ -1325,7 +1349,7 @@ export default function SeasonSocialAnalyticsSection({
         if (!response.ok) {
           throw new Error(await readErrorMessage(response, "Failed to load social analytics"));
         }
-        const data = (await response.json()) as AnalyticsResponse;
+        const data = await parseResponseJson<AnalyticsResponse>(response, "Failed to load social analytics");
         const now = new Date();
         setAnalytics(data);
         setLastUpdated(now);
@@ -1377,7 +1401,7 @@ export default function SeasonSocialAnalyticsSection({
       if (!response.ok) {
         throw new Error(await readErrorMessage(response, "Failed to load social runs"));
       }
-      const data = (await response.json()) as { runs?: SocialRun[] };
+      const data = await parseResponseJson<{ runs?: SocialRun[] }>(response, "Failed to load social runs");
       const nextRuns = data.runs ?? [];
       if (!runId) {
         setRuns(nextRuns);
@@ -1427,7 +1451,10 @@ export default function SeasonSocialAnalyticsSection({
       if (!response.ok) {
         throw new Error(await readErrorMessage(response, "Failed to load social run summary"));
       }
-      const data = (await response.json()) as { summaries?: SocialRunSummary[] };
+      const data = await parseResponseJson<{ summaries?: SocialRunSummary[] }>(
+        response,
+        "Failed to load social run summary",
+      );
       const nextSummaries = data.summaries ?? [];
       setRunSummaries(nextSummaries);
       setRunSummaryError(null);
@@ -1457,7 +1484,7 @@ export default function SeasonSocialAnalyticsSection({
       if (!response.ok) {
         throw new Error(await readErrorMessage(response, "Failed to load social targets"));
       }
-      const data = (await response.json()) as { targets?: SocialTarget[] };
+      const data = await parseResponseJson<{ targets?: SocialTarget[] }>(response, "Failed to load social targets");
       setTargets(data.targets ?? []);
       setSectionLastSuccessAt((current) => ({ ...current, targets: new Date() }));
       return data.targets ?? [];
@@ -1502,7 +1529,7 @@ export default function SeasonSocialAnalyticsSection({
     if (!response.ok) {
       throw new Error(await readErrorMessage(response, "Failed to load social jobs"));
     }
-    const data = (await response.json()) as { jobs?: SocialJob[] };
+    const data = await parseResponseJson<{ jobs?: SocialJob[] }>(response, "Failed to load social jobs");
     const nextJobs = data.jobs ?? [];
     setJobs((current) => {
       if (options?.preserveLastGoodIfEmpty && nextJobs.length === 0) {
@@ -1552,7 +1579,7 @@ export default function SeasonSocialAnalyticsSection({
       if (!response.ok) {
         throw new Error(await readErrorMessage(response, "Failed to load comments coverage"));
       }
-      return (await response.json()) as CommentsCoverageResponse;
+      return await parseResponseJson<CommentsCoverageResponse>(response, "Failed to load comments coverage");
     },
     [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId],
   );
@@ -2090,19 +2117,26 @@ export default function SeasonSocialAnalyticsSection({
         ]);
         if (cancelled || generation !== pollGenerationRef.current) return;
 
-        const runsError =
+        const runsErrorRaw =
           runsResult.status === "rejected"
             ? runsResult.reason instanceof Error
               ? runsResult.reason.message
               : "Failed to refresh social runs"
             : null;
-        const jobsError =
+        const jobsErrorRaw =
           jobsResult.status === "rejected"
             ? jobsResult.reason instanceof Error
               ? jobsResult.reason.message
               : "Failed to refresh social jobs"
             : null;
+        const runsError = isTransientDevRestartMessage(runsErrorRaw) ? null : runsErrorRaw;
+        const jobsError = isTransientDevRestartMessage(jobsErrorRaw) ? null : jobsErrorRaw;
         const runAndJobsSucceeded = runsResult.status === "fulfilled" && jobsResult.status === "fulfilled";
+        const failureMessages = [runsErrorRaw, jobsErrorRaw].filter(
+          (message): message is string => Boolean(message && message.trim()),
+        );
+        const transientRestartWindowFailure =
+          failureMessages.length > 0 && failureMessages.every((message) => isTransientDevRestartMessage(message));
 
         setSectionErrors((current) => ({
           ...current,
@@ -2132,7 +2166,11 @@ export default function SeasonSocialAnalyticsSection({
           pollFailureCountRef.current = 0;
           setPollingStatus((current) => (current === "retrying" ? "recovered" : current));
         } else {
-          pollFailureCountRef.current += 1;
+          if (transientRestartWindowFailure) {
+            pollFailureCountRef.current = Math.max(1, pollFailureCountRef.current);
+          } else {
+            pollFailureCountRef.current += 1;
+          }
           if (shouldSetPollingRetry(pollFailureCountRef.current)) {
             setPollingStatus("retrying");
           }
