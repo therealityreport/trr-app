@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useState, useCallback, useRef, useMemo } f
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
@@ -16,6 +17,7 @@ import SeasonSocialAnalyticsSection, {
 } from "@/components/admin/season-social-analytics-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import ShowSurveysTab from "@/components/admin/show-tabs/ShowSurveysTab";
+import ShowOverviewTab from "@/components/admin/show-tabs/ShowOverviewTab";
 import {
   CastMatrixSyncPanel,
   type CastMatrixSyncResult,
@@ -115,6 +117,7 @@ import {
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
   AdminRequestError,
+  adminStream,
   adminGetJson,
   adminMutation,
   fetchWithTimeout,
@@ -122,6 +125,7 @@ import {
 import {
   fetchAllPaginatedGalleryRowsWithMeta,
 } from "@/lib/admin/paginated-gallery-fetch";
+import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -425,6 +429,32 @@ type PersonLinkCoverageCard = {
 };
 
 type ShowGalleryVisibleBySection = Partial<Record<AssetSectionKey, number>>;
+
+const TabLoadingFallback = ({ label }: { label: string }) => (
+  <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">{label}</p>
+    <p className="mt-2 text-sm text-zinc-500">Loading tab...</p>
+  </div>
+);
+
+const ShowSeasonsTab = dynamic(() => import("@/components/admin/show-tabs/ShowSeasonsTab"), {
+  loading: () => <TabLoadingFallback label="Seasons" />,
+});
+const ShowAssetsTab = dynamic(() => import("@/components/admin/show-tabs/ShowAssetsTab"), {
+  loading: () => <TabLoadingFallback label="Assets" />,
+});
+const ShowNewsTab = dynamic(() => import("@/components/admin/show-tabs/ShowNewsTab"), {
+  loading: () => <TabLoadingFallback label="News" />,
+});
+const ShowCastTab = dynamic(() => import("@/components/admin/show-tabs/ShowCastTab"), {
+  loading: () => <TabLoadingFallback label="Cast" />,
+});
+const ShowSocialTab = dynamic(() => import("@/components/admin/show-tabs/ShowSocialTab"), {
+  loading: () => <TabLoadingFallback label="Social" />,
+});
+const ShowSettingsTab = dynamic(() => import("@/components/admin/show-tabs/ShowSettingsTab"), {
+  loading: () => <TabLoadingFallback label="Settings" />,
+});
 
 const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
   { key: "shows", label: "SHOWS", description: "Show info, entities, providers" },
@@ -1343,22 +1373,16 @@ export default function TrrShowDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showRouteParam = params.showId as string;
-  const [resolvedShowId, setResolvedShowId] = useState<string | null>(
-    looksLikeUuid(showRouteParam) ? showRouteParam : null
-  );
-  const [slugResolutionLoading, setSlugResolutionLoading] = useState(!looksLikeUuid(showRouteParam));
-  const [slugResolutionError, setSlugResolutionError] = useState<string | null>(null);
-  const showId = resolvedShowId ?? "";
+  const {
+    setResolvedShowId,
+    slugResolutionLoading,
+    setSlugResolutionLoading,
+    slugResolutionError,
+    setSlugResolutionError,
+    showId,
+    isCurrentShowId,
+  } = useShowCore<TrrShow, TrrSeason>(showRouteParam);
   const { user, checking, hasAccess } = useAdminGuard();
-  const activeShowIdRef = useRef(showId);
-  const isCurrentShowId = useCallback(
-    (requestShowId: string) => activeShowIdRef.current === requestShowId,
-    []
-  );
-
-  useEffect(() => {
-    activeShowIdRef.current = showId;
-  }, [showId]);
 
   const [show, setShow] = useState<TrrShow | null>(null);
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
@@ -1484,6 +1508,39 @@ export default function TrrShowDetailPage() {
   const [detailsNotice, setDetailsNotice] = useState<string | null>(null);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsEditing, setDetailsEditing] = useState(false);
+  const detailsBaseline = useMemo(() => {
+    if (!show) {
+      return {
+        displayName: "",
+        nickname: "",
+        altNamesText: "",
+        description: "",
+        premiereDate: "",
+      };
+    }
+    const alternatives = Array.isArray(show.alternative_names)
+      ? show.alternative_names.filter((name) => typeof name === "string" && name.trim().length > 0)
+      : [];
+    const [nickname = "", ...restAlt] = alternatives;
+    return {
+      displayName: show.name ?? "",
+      nickname,
+      altNamesText: restAlt.join("\n"),
+      description: show.description ?? "",
+      premiereDate: show.premiere_date ?? "",
+    };
+  }, [show]);
+  const hasUnsavedDetailsChanges = useMemo(() => {
+    if (!detailsEditing) return false;
+    return (
+      detailsForm.displayName.trim() !== detailsBaseline.displayName.trim() ||
+      detailsForm.nickname.trim() !== detailsBaseline.nickname.trim() ||
+      detailsForm.description.trim() !== detailsBaseline.description.trim() ||
+      detailsForm.premiereDate.trim() !== detailsBaseline.premiereDate.trim() ||
+      parseAltNamesText(detailsForm.altNamesText).join("\n") !==
+        parseAltNamesText(detailsBaseline.altNamesText).join("\n")
+    );
+  }, [detailsBaseline, detailsEditing, detailsForm]);
 
   const [showLinks, setShowLinks] = useState<EntityLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
@@ -1506,11 +1563,20 @@ export default function TrrShowDetailPage() {
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
   const [rolesWarning, setRolesWarning] = useState<string | null>(null);
+  const [castRoleEditorDeepLinkWarning, setCastRoleEditorDeepLinkWarning] = useState<string | null>(
+    null
+  );
   const [lastSuccessfulRolesAt, setLastSuccessfulRolesAt] = useState<number | null>(null);
   const [newRoleName, setNewRoleName] = useState("");
+  const showRolesAutoLoadAttemptedRef = useRef<string | null>(null);
   const showRolesLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const showRolesSnapshotRef = useRef<ShowRole[]>([]);
+  const showRolesLoadedOnceRef = useRef(false);
+  const castRoleMembersAutoLoadAttemptedRef = useRef<string | null>(null);
   const castRoleMembersLoadInFlightRef = useRef<Promise<void> | null>(null);
   const castRoleMembersLoadKeyRef = useRef<string | null>(null);
+  const castRoleMembersSnapshotRef = useRef<CastRoleMember[]>([]);
+  const castRoleMembersLoadedOnceRef = useRef(false);
   const [lastSuccessfulCastRoleMembersAt, setLastSuccessfulCastRoleMembersAt] = useState<number | null>(
     null
   );
@@ -1534,6 +1600,9 @@ export default function TrrShowDetailPage() {
   const [galleryAssets, setGalleryAssets] = useState<SeasonAsset[]>([]);
   const [galleryVisibleBySection, setGalleryVisibleBySection] = useState<ShowGalleryVisibleBySection>(
     () => buildShowGalleryVisibleDefaults()
+  );
+  const [galleryAutoAdvanceMode, setGalleryAutoAdvanceMode] = useState<"manual" | "auto">(
+    "manual"
   );
   const [batchJobsOpen, setBatchJobsOpen] = useState(false);
   const [batchJobsRunning, setBatchJobsRunning] = useState(false);
@@ -1706,6 +1775,22 @@ export default function TrrShowDetailPage() {
   }, []);
 
   useEffect(() => {
+    showRolesSnapshotRef.current = showRoles;
+  }, [showRoles]);
+
+  useEffect(() => {
+    showRolesLoadedOnceRef.current = showRolesLoadedOnce;
+  }, [showRolesLoadedOnce]);
+
+  useEffect(() => {
+    castRoleMembersSnapshotRef.current = castRoleMembers;
+  }, [castRoleMembers]);
+
+  useEffect(() => {
+    castRoleMembersLoadedOnceRef.current = castRoleMembersLoadedOnce;
+  }, [castRoleMembersLoadedOnce]);
+
+  useEffect(() => {
     setActiveTab(showRouteState.tab);
     if (showRouteState.tab === "assets") {
       setAssetsView(showRouteState.assetsSubTab);
@@ -1746,6 +1831,13 @@ export default function TrrShowDetailPage() {
 
   const setTab = useCallback(
     (tab: TabId) => {
+      if (
+        tab !== "details" &&
+        hasUnsavedDetailsChanges &&
+        !window.confirm("You have unsaved show detail changes. Leave this tab?")
+      ) {
+        return;
+      }
       setActiveTab(tab);
       const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
       router.replace(
@@ -1758,8 +1850,18 @@ export default function TrrShowDetailPage() {
         { scroll: false }
       );
     },
-    [assetsView, router, searchParams, showSlugForRouting]
+    [assetsView, hasUnsavedDetailsChanges, router, searchParams, showSlugForRouting]
   );
+
+  useEffect(() => {
+    if (!hasUnsavedDetailsChanges) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedDetailsChanges]);
 
   useEffect(() => {
     if (activeTab !== "cast") return;
@@ -1938,7 +2040,15 @@ export default function TrrShowDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [checking, getAuthHeaders, hasAccess, showRouteParam]);
+  }, [
+    checking,
+    getAuthHeaders,
+    hasAccess,
+    setResolvedShowId,
+    setSlugResolutionError,
+    setSlugResolutionLoading,
+    showRouteParam,
+  ]);
 
   useEffect(() => {
     if (!showSlugForRouting) return;
@@ -3540,7 +3650,7 @@ export default function TrrShowDetailPage() {
   const fetchShowRoles = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       if (!showId) return;
-      if (!force && showRolesLoadedOnce) return;
+      if (!force && showRolesLoadedOnceRef.current) return;
       if (showRolesLoadInFlightRef.current) {
         await showRolesLoadInFlightRef.current;
         return;
@@ -3564,6 +3674,8 @@ export default function TrrShowDetailPage() {
               if (!response.ok) throw new Error(data.error || "Failed to load roles");
               setShowRoles(Array.isArray(data) ? (data as ShowRole[]) : []);
               setShowRolesLoadedOnce(true);
+              showRolesLoadedOnceRef.current = true;
+              showRolesSnapshotRef.current = Array.isArray(data) ? (data as ShowRole[]) : [];
               setLastSuccessfulRolesAt(Date.now());
               setRolesWarning(null);
               return;
@@ -3581,13 +3693,16 @@ export default function TrrShowDetailPage() {
             : lastError instanceof Error
               ? lastError.message
               : "Failed to load roles";
-          const hasPriorData = showRolesLoadedOnce || showRoles.length > 0;
+          const hasPriorData =
+            showRolesLoadedOnceRef.current || showRolesSnapshotRef.current.length > 0;
           if (hasPriorData) {
             setRolesWarning(`${message}. Showing last successful role catalog snapshot.`);
             setRolesError(null);
           } else {
             setShowRoles([]);
             setShowRolesLoadedOnce(false);
+            showRolesLoadedOnceRef.current = false;
+            showRolesSnapshotRef.current = [];
             setRolesError(message);
           }
         } finally {
@@ -3604,7 +3719,7 @@ export default function TrrShowDetailPage() {
         }
       }
     },
-    [getAuthHeaders, showId, showRoles, showRolesLoadedOnce]
+    [getAuthHeaders, showId]
   );
 
   const createShowRole = useCallback(async () => {
@@ -3656,12 +3771,16 @@ export default function TrrShowDetailPage() {
       if (!showId) return;
       const seasonsParam = [...castSeasonFilters].sort((a, b) => a - b).join(",");
       const fetchKey = `${showId}|${seasonsParam}`;
-      if (!force && castRoleMembersLoadKeyRef.current === fetchKey && castRoleMembersLoadedOnce) {
+      if (!force && castRoleMembersLoadKeyRef.current === fetchKey && castRoleMembersLoadedOnceRef.current) {
         return;
       }
       if (castRoleMembersLoadInFlightRef.current) {
         await castRoleMembersLoadInFlightRef.current;
-        if (!force && castRoleMembersLoadKeyRef.current === fetchKey && castRoleMembersLoadedOnce) {
+        if (
+          !force &&
+          castRoleMembersLoadKeyRef.current === fetchKey &&
+          castRoleMembersLoadedOnceRef.current
+        ) {
           return;
         }
       }
@@ -3719,6 +3838,7 @@ export default function TrrShowDetailPage() {
           );
           castRoleMembersLoadKeyRef.current = fetchKey;
           setCastRoleMembersLoadedOnce(true);
+          castRoleMembersLoadedOnceRef.current = true;
           setLastSuccessfulCastRoleMembersAt(Date.now());
           setCastRoleMembersWarning(null);
         } catch (err) {
@@ -3727,7 +3847,8 @@ export default function TrrShowDetailPage() {
             : err instanceof Error
               ? err.message
               : "Failed to load cast role members";
-          const hasPriorData = castRoleMembersLoadedOnce || castRoleMembers.length > 0;
+          const hasPriorData =
+            castRoleMembersLoadedOnceRef.current || castRoleMembersSnapshotRef.current.length > 0;
           if (hasPriorData) {
             setCastRoleMembersWarning(
               `${message}. Showing last successful cast intelligence snapshot.`
@@ -3736,6 +3857,7 @@ export default function TrrShowDetailPage() {
           } else {
             setCastRoleMembers([]);
             setCastRoleMembersLoadedOnce(false);
+            castRoleMembersLoadedOnceRef.current = false;
             setCastRoleMembersError(message);
           }
         } finally {
@@ -3752,7 +3874,7 @@ export default function TrrShowDetailPage() {
         }
       }
     },
-    [castRoleMembers, castRoleMembersLoadedOnce, castSeasonFilters, getAuthHeaders, showId]
+    [castSeasonFilters, getAuthHeaders, showId]
   );
 
   const syncCastMatrixRoles = useCallback(
@@ -3901,12 +4023,25 @@ export default function TrrShowDetailPage() {
     if (activeTab !== "cast") return;
     const shouldOpen = searchParams.get("cast_open_role_editor");
     const personId = searchParams.get("cast_person");
-    if (shouldOpen !== "1" || !personId) return;
+    if (shouldOpen !== "1" || !personId) {
+      setCastRoleEditorDeepLinkWarning(null);
+      return;
+    }
 
     const castMember = cast.find((member) => member.person_id === personId);
     const roleMember = castRoleMembers.find((member) => member.person_id === personId);
     const roleDataReady = castRoleMembersLoadedOnce || Boolean(roleMember);
-    if (!roleDataReady) return;
+    if (!roleDataReady) {
+      if (!castRoleMembersLoading && !rolesLoading && (Boolean(castRoleMembersError) || Boolean(rolesError))) {
+        setCastRoleEditorDeepLinkWarning(
+          "Role editor deep-link is waiting for cast intelligence. Retry roles and cast intelligence, then reopen."
+        );
+      } else {
+        setCastRoleEditorDeepLinkWarning(null);
+      }
+      return;
+    }
+    setCastRoleEditorDeepLinkWarning(null);
     const personName =
       castMember?.full_name ||
       castMember?.cast_member_name ||
@@ -3929,9 +4064,13 @@ export default function TrrShowDetailPage() {
     activeTab,
     cast,
     castRoleMembers,
+    castRoleMembersError,
     castRoleMembersLoadedOnce,
+    castRoleMembersLoading,
     openCastRoleEditor,
     pathname,
+    rolesError,
+    rolesLoading,
     router,
     searchParams,
     showSlugForRouting,
@@ -5692,9 +5831,11 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (!hasAccess || !showId || (activeTab !== "cast" && activeTab !== "settings")) return;
-    if (showRolesLoadedOnce) return;
+    const autoLoadKey = `${showId}:roles`;
+    if (showRolesAutoLoadAttemptedRef.current === autoLoadKey) return;
+    showRolesAutoLoadAttemptedRef.current = autoLoadKey;
     void fetchShowRoles();
-  }, [activeTab, fetchShowRoles, hasAccess, showId, showRolesLoadedOnce]);
+  }, [activeTab, fetchShowRoles, hasAccess, showId]);
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "cast") return;
@@ -5704,8 +5845,12 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "cast") return;
+    const seasonsKey = [...castSeasonFilters].sort((a, b) => a - b).join(",");
+    const autoLoadKey = `${showId}|${seasonsKey}`;
+    if (castRoleMembersAutoLoadAttemptedRef.current === autoLoadKey) return;
+    castRoleMembersAutoLoadAttemptedRef.current = autoLoadKey;
     void fetchCastRoleMembers();
-  }, [activeTab, fetchCastRoleMembers, hasAccess, showId]);
+  }, [activeTab, castSeasonFilters, fetchCastRoleMembers, hasAccess, showId]);
 
   useEffect(() => {
     castRefreshAbortControllerRef.current?.abort();
@@ -5783,16 +5928,23 @@ export default function TrrShowDetailPage() {
     setCastPhotoEnrichNotice(null);
     setShowRoles([]);
     setShowRolesLoadedOnce(false);
+    showRolesSnapshotRef.current = [];
+    showRolesLoadedOnceRef.current = false;
+    showRolesAutoLoadAttemptedRef.current = null;
     setRolesWarning(null);
     setLastSuccessfulRolesAt(null);
     setCastRoleMembers([]);
     setCastRoleMembersLoadedOnce(false);
+    castRoleMembersSnapshotRef.current = [];
+    castRoleMembersLoadedOnceRef.current = false;
+    castRoleMembersAutoLoadAttemptedRef.current = null;
     showRolesLoadInFlightRef.current = null;
     castRoleMembersLoadInFlightRef.current = null;
     castRoleMembersLoadKeyRef.current = null;
     setCastRoleMembersError(null);
     setCastRoleMembersWarning(null);
     setLastSuccessfulCastRoleMembersAt(null);
+    setCastRoleEditorDeepLinkWarning(null);
     setCastMatrixSyncError(null);
     setCastMatrixSyncResult(null);
     setCastRefreshPipelineRunning(false);
@@ -7121,92 +7273,63 @@ export default function TrrShowDetailPage() {
 
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${showId}/assets/batch-jobs/stream`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operations: batchJobOperations,
-          content_types: batchJobContentSections.map(
-            (section) => ASSET_SECTION_TO_BATCH_CONTENT_TYPE[section]
-          ),
-          targets,
-          force: true,
-        }),
-      });
-      if (!response.ok || !response.body) {
-        throw new Error("Batch jobs stream unavailable.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let completePayload: Record<string, unknown> | null = null;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        buffer = buffer.replace(/\r\n/g, "\n");
-
-        let boundaryIndex = buffer.indexOf("\n\n");
-        while (boundaryIndex !== -1) {
-          const rawEvent = buffer.slice(0, boundaryIndex);
-          buffer = buffer.slice(boundaryIndex + 2);
-
-          const lines = rawEvent.split("\n").filter(Boolean);
-          let eventType = "message";
-          const dataLines: string[] = [];
-          for (const line of lines) {
-            if (line.startsWith("event:")) {
-              eventType = line.slice(6).trim();
-            } else if (line.startsWith("data:")) {
-              dataLines.push(line.slice(5).trim());
+      const completePayloadRef: { current: Record<string, unknown> | null } = { current: null };
+      await adminStream(
+        `/api/admin/trr-api/shows/${showId}/assets/batch-jobs/stream`,
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operations: batchJobOperations,
+            content_types: batchJobContentSections.map(
+              (section) => ASSET_SECTION_TO_BATCH_CONTENT_TYPE[section]
+            ),
+            targets,
+            force: true,
+          }),
+          timeoutMs: ASSET_PIPELINE_STEP_TIMEOUT_MS,
+          onEvent: async ({ event, payload }) => {
+            if (!payload || typeof payload !== "object") return;
+            if (event === "progress") {
+              const current = parseProgressNumber(payload.current);
+              const total = parseProgressNumber(payload.total);
+              const stage = typeof payload.stage === "string" ? payload.stage : "Batch Jobs";
+              const baseMessage =
+                typeof payload.message === "string" && payload.message.trim()
+                  ? payload.message
+                  : "Running batch jobs...";
+              setBatchJobsLiveCounts((prev) => {
+                const nextLiveCounts = resolveJobLiveCounts(prev, payload);
+                setBatchJobsProgress({
+                  stage,
+                  message: appendLiveCountsToMessage(baseMessage, nextLiveCounts),
+                  current,
+                  total,
+                });
+                return nextLiveCounts;
+              });
+              return;
             }
-          }
-
-          const dataStr = dataLines.join("\n");
-          let payload: Record<string, unknown> | null = null;
-          try {
-            payload = JSON.parse(dataStr) as Record<string, unknown>;
-          } catch {
-            payload = null;
-          }
-
-          if (eventType === "progress" && payload) {
-            const current = parseProgressNumber(payload.current);
-            const total = parseProgressNumber(payload.total);
-            const stage = typeof payload.stage === "string" ? payload.stage : "Batch Jobs";
-            const baseMessage =
-              typeof payload.message === "string" && payload.message.trim()
-                ? payload.message
-                : "Running batch jobs...";
-            const nextLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, payload);
-            setBatchJobsLiveCounts(nextLiveCounts);
-            setBatchJobsProgress({
-              stage,
-              message: appendLiveCountsToMessage(baseMessage, nextLiveCounts),
-              current,
-              total,
-            });
-          } else if (eventType === "error") {
-            const errorText =
-              payload && typeof payload.error === "string" ? payload.error : "Batch jobs failed.";
-            const detailText =
-              payload && typeof payload.detail === "string" ? payload.detail : null;
-            throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
-          } else if (eventType === "complete" && payload) {
-            completePayload = payload;
-          }
-
-          boundaryIndex = buffer.indexOf("\n\n");
+            if (event === "error") {
+              const errorText =
+                typeof payload.error === "string" ? payload.error : "Batch jobs failed.";
+              const detailText =
+                typeof payload.detail === "string" ? payload.detail : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            }
+            if (event === "complete") {
+              completePayloadRef.current = payload;
+            }
+          },
         }
-      }
+      );
 
+      const completePayload = completePayloadRef.current;
       const attempted = parseProgressNumber(completePayload?.attempted ?? null) ?? 0;
       const succeeded = parseProgressNumber(completePayload?.succeeded ?? null) ?? 0;
       const failed = parseProgressNumber(completePayload?.failed ?? null) ?? 0;
       const skipped = parseProgressNumber(completePayload?.skipped ?? null) ?? 0;
-      const completeLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, completePayload);
+      const completeLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, completePayload ?? {});
       setBatchJobsLiveCounts(completeLiveCounts);
       const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
       setBatchJobsNotice(
@@ -9072,6 +9195,12 @@ export default function TrrShowDetailPage() {
     castRoleMembersWarning,
     lastSuccessfulCastRoleMembersAt
   );
+  const showCastIntelligenceUnavailable =
+    activeTab === "cast" &&
+    castSource === "show_fallback" &&
+    !castRoleMembersLoading &&
+    !rolesLoading &&
+    (Boolean(castRoleMembersError) || Boolean(rolesError));
   const activeRefreshTarget =
     (Object.entries(refreshingTargets).find(([, isRefreshing]) => isRefreshing)?.[0] as
       | ShowRefreshTarget
@@ -9635,6 +9764,7 @@ export default function TrrShowDetailPage() {
         <main className="mx-auto max-w-6xl px-6 py-8">
           {/* Seasons Tab */}
           {activeTab === "seasons" && (
+            <ShowSeasonsTab>
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -9696,10 +9826,12 @@ export default function TrrShowDetailPage() {
                 />
               )}
             </div>
+            </ShowSeasonsTab>
           )}
 
           {/* ASSETS Tab */}
           {activeTab === "assets" && (
+            <ShowAssetsTab>
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -9797,6 +9929,17 @@ export default function TrrShowDetailPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
                         </svg>
                         Filters
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setGalleryAutoAdvanceMode((prev) =>
+                            prev === "manual" ? "auto" : "manual"
+                          )
+                        }
+                        className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Auto-Load: {galleryAutoAdvanceMode === "auto" ? "On" : "Off"}
                       </button>
                       {hasActiveAdvancedFilters && (
                         <button
@@ -9908,6 +10051,7 @@ export default function TrrShowDetailPage() {
                         posters={gallerySectionAssets.posters}
                         featuredBackdropImageId={show.primary_backdrop_image_id}
                         featuredPosterImageId={show.primary_poster_image_id}
+                        autoAdvanceMode={galleryAutoAdvanceMode}
                         hasMoreBackdrops={Boolean(gallerySectionAssets.hasMoreBySection.backdrops)}
                         hasMorePosters={Boolean(gallerySectionAssets.hasMoreBySection.posters)}
                         onLoadMoreBackdrops={() => increaseGallerySectionVisible("backdrops")}
@@ -10118,10 +10262,12 @@ export default function TrrShowDetailPage() {
                 </div>
               )}
             </div>
+            </ShowAssetsTab>
           )}
 
           {/* NEWS Tab */}
           {activeTab === "news" && (
+            <ShowNewsTab>
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -10367,10 +10513,12 @@ export default function TrrShowDetailPage() {
                 </div>
               )}
             </div>
+            </ShowNewsTab>
           )}
 
           {/* Cast Tab */}
           {activeTab === "cast" && (
+            <ShowCastTab>
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
                 <div>
@@ -10514,18 +10662,6 @@ export default function TrrShowDetailPage() {
                   </button>
                 </div>
               )}
-              {castRoleMembersError && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  <span>{castRoleMembersError}</span>
-                  <button
-                    type="button"
-                    onClick={() => void fetchCastRoleMembers({ force: true })}
-                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
               {rolesWarningWithSnapshotAge && (
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   <span>{rolesWarningWithSnapshotAge}</span>
@@ -10538,16 +10674,37 @@ export default function TrrShowDetailPage() {
                   </button>
                 </div>
               )}
-              {rolesError && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  <span>{rolesError}</span>
-                  <button
-                    type="button"
-                    onClick={() => void fetchShowRoles({ force: true })}
-                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                  >
-                    Retry Roles
-                  </button>
+              {showCastIntelligenceUnavailable && (
+                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                  <p className="font-semibold">
+                    Cast intelligence unavailable; showing base cast snapshot.
+                  </p>
+                  {(castRoleMembersError || rolesError) && (
+                    <p className="mt-1 text-xs">
+                      {[castRoleMembersError, rolesError].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void fetchCastRoleMembers({ force: true })}
+                      className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
+                    >
+                      Retry Cast Intelligence
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void fetchShowRoles({ force: true })}
+                      className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
+                    >
+                      Retry Roles
+                    </button>
+                  </div>
+                </div>
+              )}
+              {castRoleEditorDeepLinkWarning && (
+                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {castRoleEditorDeepLinkWarning}
                 </div>
               )}
               {castSource === "show_fallback" && castEligibilityWarning && (
@@ -11044,19 +11201,27 @@ export default function TrrShowDetailPage() {
                 )}
               </div>
             </div>
+            </ShowCastTab>
           )}
 
           {/* Surveys Tab */}
           {activeTab === "surveys" && (
-            <ShowSurveysTab
-              showId={showId}
-              showName={show.name}
-              totalSeasons={visibleSeasons.length || show.show_total_seasons || null}
-            />
+            <section
+              id="show-tabpanel-surveys"
+              role="tabpanel"
+              aria-labelledby="show-tab-surveys"
+            >
+              <ShowSurveysTab
+                showId={showId}
+                showName={show.name}
+                totalSeasons={visibleSeasons.length || show.show_total_seasons || null}
+              />
+            </section>
           )}
 
           {/* Social Media Tab */}
           {activeTab === "social" && (
+            <ShowSocialTab>
             <div className="space-y-4">
               {socialDependencyError && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
@@ -11141,10 +11306,12 @@ export default function TrrShowDetailPage() {
                 />
               )}
             </div>
+            </ShowSocialTab>
           )}
 
           {/* Settings Tab */}
           {activeTab === "settings" && (
+            <ShowSettingsTab>
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -11518,10 +11685,12 @@ export default function TrrShowDetailPage() {
                 </section>
               </div>
             </div>
+            </ShowSettingsTab>
           )}
 
           {/* Details Tab - External IDs */}
           {activeTab === "details" && (
+            <ShowOverviewTab>
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -11862,6 +12031,7 @@ export default function TrrShowDetailPage() {
                 </div>
               </div>
             </div>
+            </ShowOverviewTab>
           )}
         </main>
 
@@ -11929,6 +12099,12 @@ export default function TrrShowDetailPage() {
               canSetFeaturedBackdrop
                 ? () => setFeaturedShowImage("backdrop", assetLightbox.asset.id)
                 : undefined
+            }
+            onClearFeaturedPoster={
+              isFeaturedPoster ? () => setFeaturedShowImage("poster", null) : undefined
+            }
+            onClearFeaturedBackdrop={
+              isFeaturedBackdrop ? () => setFeaturedShowImage("backdrop", null) : undefined
             }
             isFeaturedPoster={isFeaturedPoster}
             isFeaturedBackdrop={isFeaturedBackdrop}

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { axe } from "vitest-axe";
 import AdminModal from "@/components/admin/AdminModal";
 
 describe("AdminModal", () => {
@@ -72,5 +73,17 @@ describe("AdminModal", () => {
     fireEvent.click(screen.getByLabelText("Close dialog"));
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("has no basic axe violations", async () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <AdminModal isOpen={true} onClose={onClose} ariaLabel="Accessible dialog">
+        <button type="button">Primary action</button>
+      </AdminModal>
+    );
+
+    const results = await axe(container);
+    expect(results.violations).toHaveLength(0);
   });
 });

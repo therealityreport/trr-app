@@ -16,12 +16,15 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 
 import { POST } from "@/app/api/admin/trr-api/shows/[showId]/refresh-photos/stream/route";
 
-const makeRequest = () =>
+const makeRequest = (requestId?: string) =>
   new NextRequest(
     "http://localhost/api/admin/trr-api/shows/show-1/refresh-photos/stream",
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(requestId ? { "x-trr-request-id": requestId } : {}),
+      },
       body: JSON.stringify({ skip_mirror: true, season_number: 6 }),
     },
   );
@@ -50,7 +53,7 @@ describe("show refresh-photos stream proxy route", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await POST(makeRequest(), {
+    const response = await POST(makeRequest("req-route-123"), {
       params: Promise.resolve({ showId: "show-1" }),
     });
     const payload = await response.text();
@@ -63,5 +66,25 @@ describe("show refresh-photos stream proxy route", () => {
     const parsedBody = JSON.parse(String(finalBody)) as Record<string, unknown>;
     expect(parsedBody.skip_s3).toBe(true);
     expect(parsedBody.season_number).toBe(6);
+    const callHeaders = (fetchMock.mock.calls[1]?.[1] as RequestInit | undefined)?.headers as
+      | Record<string, string>
+      | undefined;
+    expect(callHeaders?.["x-trr-request-id"]).toBe("req-route-123");
+  });
+
+  it("includes request_id in SSE proxy error payload", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockRejectedValueOnce(new Error("fetch failed"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest("req-route-error-1"), {
+      params: Promise.resolve({ showId: "show-1" }),
+    });
+    const payload = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(payload).toContain("\"request_id\":\"req-route-error-1\"");
   });
 });

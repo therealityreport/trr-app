@@ -1,10 +1,12 @@
 import type { NextConfig } from "next";
 
 const IS_DEV = process.env.NODE_ENV === "development";
+const DIST_DIR = process.env.NEXT_DIST_DIR?.trim() || ".next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
+  distDir: DIST_DIR,
   turbopack: {
     root: __dirname, // ensure Turbopack uses this app as root
   },

@@ -79,6 +79,23 @@ describe("Admin networks page auth + sync UI", () => {
           has_bw_variants: true,
           has_links: true,
         },
+        {
+          type: "production",
+          name: "Shed Media",
+          available_show_count: 4,
+          added_show_count: 1,
+          hosted_logo_url: null,
+          hosted_logo_black_url: null,
+          hosted_logo_white_url: null,
+          wikidata_id: null,
+          wikipedia_url: null,
+          resolution_status: "manual_required",
+          resolution_reason: "incomplete_metadata",
+          last_attempt_at: "2026-02-19T00:00:00Z",
+          has_logo: false,
+          has_bw_variants: false,
+          has_links: false,
+        },
       ],
       generated_at: "2026-02-19T00:00:00.000Z",
     };
@@ -98,9 +115,12 @@ describe("Admin networks page auth + sync UI", () => {
       completion_percent: 50,
       completion_gate_passed: false,
       missing_columns: [],
-      unresolved_logos_count: 1,
+      unresolved_logos_count: 2,
       unresolved_logos_truncated: true,
-      unresolved_logos: [{ type: "network", id: "77", name: "Bravo", reason: "no_logo_claim" }],
+      unresolved_logos: [
+        { type: "network", id: "77", name: "Bravo", reason: "no_logo_claim" },
+        { type: "production", id: "501", name: "Shed Media", reason: "incomplete_metadata" },
+      ],
       failures: 0,
     };
     const overridesPayload: unknown[] = [];
@@ -143,7 +163,7 @@ describe("Admin networks page auth + sync UI", () => {
       String(call[0]).endsWith("/api/admin/networks-streaming/summary"),
     );
     expect(summaryCall).toBeTruthy();
-    expect(screen.getByText(/Missing B\/W Variants: 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Missing B\/W Variants: 2/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Sync/Mirror Networks & Streaming" }));
 
@@ -163,6 +183,31 @@ describe("Admin networks page auth + sync UI", () => {
         refresh_external_sources: false,
         batch_size: 25,
         max_runtime_sec: 840,
+      }),
+    });
+    expect(screen.getByText("Unresolved production entities: 1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-run Unresolved Production Only" }));
+
+    await waitFor(() => {
+      const calls = mocks.fetchAdminWithAuth.mock.calls.filter((call: unknown[]) =>
+        String(call[0]).endsWith("/api/admin/networks-streaming/sync"),
+      );
+      expect(calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    const syncCalls = mocks.fetchAdminWithAuth.mock.calls.filter((call: unknown[]) =>
+      String(call[0]).endsWith("/api/admin/networks-streaming/sync"),
+    );
+    const productionSyncCall = syncCalls[syncCalls.length - 1];
+    expect(productionSyncCall?.[1]).toMatchObject({
+      body: JSON.stringify({
+        unresolved_only: true,
+        refresh_external_sources: false,
+        batch_size: 25,
+        max_runtime_sec: 840,
+        entity_type: "production",
+        entity_keys: ["shed media"],
       }),
     });
 

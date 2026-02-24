@@ -146,8 +146,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         );
       }
     } else {
-      const latest = await getSeasonsByShowId(showId, { limit: 1, offset: 0 });
-      resolvedSeason = latest[0] ?? null;
+      const seasons = await getSeasonsByShowId(showId, {
+        limit: 100,
+        offset: 0,
+        includeEpisodeSignal: true,
+      });
+      resolvedSeason =
+        seasons.find((season) => season.has_scheduled_or_aired_episode === true) ??
+        seasons[0] ??
+        null;
       if (!resolvedSeason) {
         return NextResponse.json(
           { error: "No seasons found for the selected show" },

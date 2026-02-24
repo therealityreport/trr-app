@@ -3,5 +3,13 @@
 import type { ReactNode } from "react";
 
 export default function SeasonEpisodesTab({ children }: { children: ReactNode }) {
-  return <>{children}</>;
+  return (
+    <section
+      id="season-tabpanel-episodes"
+      role="tabpanel"
+      aria-labelledby="season-tab-episodes"
+    >
+      {children}
+    </section>
+  );
 }

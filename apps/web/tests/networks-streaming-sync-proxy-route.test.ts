@@ -81,6 +81,8 @@ describe("networks-streaming sync proxy route", () => {
         batch_size: 50,
         max_runtime_sec: 1200,
         resume_run_id: "network-streaming-20260224T200000Z",
+        entity_type: "production",
+        entity_keys: ["Shed Media", " Big Head Productions "],
       }),
     );
     const payload = await response.json();
@@ -109,6 +111,8 @@ describe("networks-streaming sync proxy route", () => {
       batch_size: 50,
       max_runtime_sec: 1200,
       resume_run_id: "network-streaming-20260224T200000Z",
+      entity_type: "production",
+      entity_keys: ["shed media", "big head productions"],
       limit: 100,
     });
   });

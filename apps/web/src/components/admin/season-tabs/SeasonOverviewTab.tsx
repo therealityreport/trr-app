@@ -20,7 +20,12 @@ type SeasonOverviewTabProps = {
 
 export default function SeasonOverviewTab({ show, season, showId }: SeasonOverviewTabProps) {
   return (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+    <section
+      id="season-tabpanel-overview"
+      role="tabpanel"
+      aria-labelledby="season-tab-overview"
+      className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm"
+    >
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Overview</p>
@@ -62,6 +67,6 @@ export default function SeasonOverviewTab({ show, season, showId }: SeasonOvervi
           <ExternalLinks externalIds={null} tmdbId={show.tmdb_id} imdbId={show.imdb_id} type="show" />
         </div>
       </div>
-    </div>
+    </section>
   );
 }

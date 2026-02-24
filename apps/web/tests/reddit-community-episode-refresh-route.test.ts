@@ -6,7 +6,6 @@ const {
   getRedditCommunityByIdMock,
   getShowByIdMock,
   getSeasonByIdMock,
-  getSeasonByShowAndNumberMock,
   getSeasonsByShowIdMock,
   discoverEpisodeDiscussionThreadsMock,
 } = vi.hoisted(() => ({
@@ -14,7 +13,6 @@ const {
   getRedditCommunityByIdMock: vi.fn(),
   getShowByIdMock: vi.fn(),
   getSeasonByIdMock: vi.fn(),
-  getSeasonByShowAndNumberMock: vi.fn(),
   getSeasonsByShowIdMock: vi.fn(),
   discoverEpisodeDiscussionThreadsMock: vi.fn(),
 }));
@@ -30,7 +28,6 @@ vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getShowById: getShowByIdMock,
   getSeasonById: getSeasonByIdMock,
-  getSeasonByShowAndNumber: getSeasonByShowAndNumberMock,
   getSeasonsByShowId: getSeasonsByShowIdMock,
 }));
 
@@ -58,7 +55,6 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     getRedditCommunityByIdMock.mockReset();
     getShowByIdMock.mockReset();
     getSeasonByIdMock.mockReset();
-    getSeasonByShowAndNumberMock.mockReset();
     getSeasonsByShowIdMock.mockReset();
     discoverEpisodeDiscussionThreadsMock.mockReset();
 
@@ -73,10 +69,19 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       analysis_all_flares: ["Salt Lake City"],
     });
     getSeasonByIdMock.mockResolvedValue({ id: SEASON_ID, show_id: SHOW_ID, season_number: 6 });
-    getSeasonByShowAndNumberMock.mockResolvedValue({ id: SEASON_ID, show_id: SHOW_ID, season_number: 6 });
     getSeasonsByShowIdMock.mockResolvedValue([
-      { id: SEASON_ID, show_id: SHOW_ID, season_number: 6 },
-      { id: "99999999-9999-4999-8999-999999999999", show_id: SHOW_ID, season_number: 5 },
+      {
+        id: "99999999-9999-4999-8999-999999999999",
+        show_id: SHOW_ID,
+        season_number: 7,
+        has_scheduled_or_aired_episode: false,
+      },
+      {
+        id: SEASON_ID,
+        show_id: SHOW_ID,
+        season_number: 6,
+        has_scheduled_or_aired_episode: true,
+      },
     ]);
     getShowByIdMock.mockResolvedValue({
       id: SHOW_ID,
@@ -142,7 +147,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     });
   });
 
-  it("defaults to the latest season when no season params are supplied", async () => {
+  it("defaults to the most recent season with aired/scheduled episodes when no season params are supplied", async () => {
     const request = new NextRequest(
       `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh`,
       { method: "GET" },
@@ -173,6 +178,42 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
           "Weekly Episode Discussion",
         ],
         episodeRequiredFlares: ["Salt Lake City"],
+      }),
+    );
+    expect(getSeasonsByShowIdMock).toHaveBeenCalledWith(
+      SHOW_ID,
+      expect.objectContaining({
+        includeEpisodeSignal: true,
+      }),
+    );
+  });
+
+  it("falls back to highest season number when none have episode air_date signal", async () => {
+    getSeasonsByShowIdMock.mockResolvedValueOnce([
+      {
+        id: "77777777-7777-4777-8777-777777777777",
+        show_id: SHOW_ID,
+        season_number: 7,
+        has_scheduled_or_aired_episode: false,
+      },
+      {
+        id: SEASON_ID,
+        show_id: SHOW_ID,
+        season_number: 6,
+        has_scheduled_or_aired_episode: false,
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    expect(response.status).toBe(200);
+    expect(discoverEpisodeDiscussionThreadsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        seasonNumber: 7,
       }),
     );
   });

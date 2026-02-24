@@ -35,8 +35,13 @@ const normalizeRefreshPhotosBody = (
   return next;
 };
 
-const buildSseErrorResponse = (payload: Record<string, unknown>, status = 200): Response =>
-  new Response(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, {
+const buildSseErrorResponse = (
+  payload: Record<string, unknown>,
+  status = 200,
+  requestId?: string | null
+): Response => {
+  const responsePayload = requestId ? { ...payload, request_id: requestId } : payload;
+  return new Response(`event: error\ndata: ${JSON.stringify(responsePayload)}\n\n`, {
     status,
     headers: {
       "Content-Type": "text/event-stream",
@@ -45,6 +50,7 @@ const buildSseErrorResponse = (payload: Record<string, unknown>, status = 200): 
       "X-Accel-Buffering": "no",
     },
   });
+};
 
 const isRetryableNetworkError = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false;
@@ -79,12 +85,14 @@ const getErrorDetail = (error: unknown): string => {
  * Proxies show gallery refresh request to TRR-Backend with SSE streaming.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
+  let requestId: string | null = null;
   try {
     await requireAdmin(request);
+    requestId = request.headers.get("x-trr-request-id")?.trim() || null;
 
     const { showId } = await params;
     if (!showId) {
-      return buildSseErrorResponse({ stage: "proxy", error: "showId is required", status: 400 });
+      return buildSseErrorResponse({ stage: "proxy", error: "showId is required", status: 400 }, 200, requestId);
     }
 
     let body: Record<string, unknown> | undefined;
@@ -100,12 +108,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/refresh-photos/stream`);
     if (!backendUrl) {
-      return buildSseErrorResponse({ stage: "proxy", error: "Backend API not configured", status: 500 });
+      return buildSseErrorResponse({ stage: "proxy", error: "Backend API not configured", status: 500 }, 200, requestId);
     }
 
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      return buildSseErrorResponse({ stage: "proxy", error: "Backend auth not configured", status: 500 });
+      return buildSseErrorResponse({ stage: "proxy", error: "Backend auth not configured", status: 500 }, 200, requestId);
     }
 
     let backendResponse: Response | null = null;
@@ -119,6 +127,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${serviceRoleKey}`,
+            ...(requestId ? { "x-trr-request-id": requestId } : {}),
           },
           body: JSON.stringify(normalizedBody),
           signal: controller.signal,
@@ -144,7 +153,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         error: "Backend fetch failed",
         detail: `${getErrorDetail(lastError)} (TRR_API_URL=${process.env.TRR_API_URL ?? "unset"})`,
         status: 502,
-      });
+      }, 200, requestId);
     }
 
     if (!backendResponse.ok) {
@@ -154,11 +163,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         error: "Backend refresh failed",
         detail: errorText || `HTTP ${backendResponse.status}`,
         status: backendResponse.status,
-      });
+      }, 200, requestId);
     }
 
     if (!backendResponse.body) {
-      return buildSseErrorResponse({ stage: "backend", error: "No response body from backend", status: 502 });
+      return buildSseErrorResponse({ stage: "backend", error: "No response body from backend", status: 502 }, 200, requestId);
     }
 
     return new Response(backendResponse.body, {
@@ -175,6 +184,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       error: "Refresh stream request failed",
       detail: getErrorDetail(error),
       status: 500,
-    });
+    }, 200, requestId);
   }
 }

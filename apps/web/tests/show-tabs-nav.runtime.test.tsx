@@ -19,15 +19,17 @@ describe("ShowTabsNav runtime", () => {
       />
     );
 
-    const buttons = screen.getAllByRole("button");
-    expect(buttons.map((button) => button.textContent)).toEqual([
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
       "Overview",
       "Seasons",
       "Assets",
       "Settings",
     ]);
+    expect(screen.getByRole("tablist", { name: "Show tabs" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
     expect(onSelect).toHaveBeenCalledWith("settings");
   });
 
@@ -43,7 +45,29 @@ describe("ShowTabsNav runtime", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Social" }).className).toContain("bg-zinc-900");
-    expect(screen.getByRole("button", { name: "Overview" }).className).toContain("bg-white");
+    expect(screen.getByRole("tab", { name: "Social" }).className).toContain("bg-zinc-900");
+    expect(screen.getByRole("tab", { name: "Overview" }).className).toContain("bg-white");
+  });
+
+  it("supports keyboard tab navigation", () => {
+    const onSelect = vi.fn();
+    render(
+      <ShowTabsNav
+        tabs={[
+          { id: "details", label: "Overview" },
+          { id: "seasons", label: "Seasons" },
+          { id: "assets", label: "Assets" },
+          { id: "news", label: "News" },
+        ]}
+        activeTab="details"
+        onSelect={onSelect}
+      />
+    );
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), { key: "ArrowRight" });
+    expect(onSelect).toHaveBeenCalledWith("seasons");
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), { key: "End" });
+    expect(onSelect).toHaveBeenCalledWith("news");
   });
 });

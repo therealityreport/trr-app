@@ -11,9 +11,10 @@ import {
 export const dynamic = "force-dynamic";
 const BACKEND_TIMEOUT_MS = parseCacheTtlMs(
   process.env.TRR_ADMIN_CAST_ROLE_MEMBERS_TIMEOUT_MS,
-  20_000,
+  120_000,
 );
 const MAX_ATTEMPTS = 2;
+const RETRY_BACKOFF_MS = 250;
 const CAST_ROLE_MEMBERS_CACHE_NAMESPACE = "admin-show-cast-role-members";
 const CAST_ROLE_MEMBERS_CACHE_TTL_MS = parseCacheTtlMs(
   process.env.TRR_ADMIN_CAST_ROLE_MEMBERS_CACHE_TTL_MS,
@@ -66,7 +67,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const user = await requireAdmin(request);
     const { showId } = await params;
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/cast-role-members`);
-    if (!backendUrl) return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
+    if (!backendUrl) {
+      return NextResponse.json(
+        {
+          error: "Backend API not configured",
+          code: "INTERNAL_ERROR",
+          retryable: false,
+          upstream_status: 500,
+        } satisfies ProxyErrorPayload,
+        { status: 500 }
+      );
+    }
 
     const { searchParams } = new URL(request.url);
     const cacheKey = buildUserScopedRouteCacheKey(
@@ -85,7 +96,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     searchParams.forEach((value, key) => url.searchParams.set(key, value));
 
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
-    if (!serviceRoleKey) return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
+    if (!serviceRoleKey) {
+      return NextResponse.json(
+        {
+          error: "Backend auth not configured",
+          code: "INTERNAL_ERROR",
+          retryable: false,
+          upstream_status: 500,
+        } satisfies ProxyErrorPayload,
+        { status: 500 }
+      );
+    }
 
     let lastNetworkError: Error | null = null;
 
@@ -113,7 +134,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
         const retryable = shouldRetryStatus(response.status);
         if (retryable && attempt < MAX_ATTEMPTS) {
-          await sleep(200);
+          await sleep(RETRY_BACKOFF_MS);
           continue;
         }
 
@@ -129,7 +150,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           if (attempt < MAX_ATTEMPTS) {
-            await sleep(200);
+            await sleep(RETRY_BACKOFF_MS);
             continue;
           }
           return timeoutJson();
@@ -138,7 +159,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           lastNetworkError = error;
         }
         if (attempt < MAX_ATTEMPTS) {
-          await sleep(200);
+          await sleep(RETRY_BACKOFF_MS);
           continue;
         }
         return NextResponse.json(
@@ -162,12 +183,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         error: "Failed to list cast role members",
         code: "INTERNAL_ERROR",
         retryable: false,
+        upstream_status: 500,
       } satisfies ProxyErrorPayload,
       { status: 500 }
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
     const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json(
+      {
+        error: message,
+        code: "INTERNAL_ERROR",
+        retryable: false,
+        upstream_status: status,
+      } satisfies ProxyErrorPayload,
+      { status }
+    );
   }
 }

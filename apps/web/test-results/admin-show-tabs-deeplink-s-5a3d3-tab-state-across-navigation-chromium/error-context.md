@@ -1,0 +1,112 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - paragraph [ref=e5]: Loading admin access...
+  - button "DEBUG" [ref=e6]
+  - navigation:
+    - generic:
+      - generic:
+        - button: ×
+        - generic:
+          - generic: Games
+        - button: + Expand All
+      - list:
+        - region:
+          - generic: News
+          - link:
+            - /url: https://www.nytimes.com/
+            - generic: The New York Times
+        - region:
+          - generic: New York Times Games
+          - generic:
+            - generic:
+              - generic:
+                - link:
+                  - /url: /realitease/cover
+                  - generic: Realitease
+                - button
+            - generic:
+              - generic:
+                - link:
+                  - /url: /bravodle/cover
+                  - generic: Bravodle
+                - button
+            - generic:
+              - generic:
+                - link:
+                  - /url: /realations
+                  - generic: Realations
+                - button
+            - generic:
+              - generic:
+                - link:
+                  - /url: /hub
+                  - generic: RealTime
+                - button
+          - link:
+            - /url: /hub
+            - text: View all Games
+        - region:
+          - generic: Surveys
+          - generic:
+            - generic:
+              - link:
+                - /url: /hub/surveys
+                - generic: Weekly Check-Ins
+            - generic:
+              - paragraph: Jump into surveys for your favorite Housewives cities.
+              - list:
+                - listitem:
+                  - link:
+                    - /url: /hub/surveys?show=rhobh
+                    - text: RHOBH
+                - listitem:
+                  - link:
+                    - /url: /hub/surveys?show=rhoslc
+                    - text: RHOSLC
+                - listitem:
+                  - link:
+                    - /url: /hub/surveys?show=rhoa
+                    - text: RHOA
+                - listitem:
+                  - link:
+                    - /url: /hub/surveys?show=rhop
+                    - text: RHOP
+        - region:
+          - generic: Profile
+          - link:
+            - /url: /profile
+            - generic: Account details
+          - button: Log Out
+        - region:
+          - generic: Privacy Settings
+          - list:
+            - listitem:
+              - link:
+                - /url: /privacy-policy
+                - text: Privacy Policy
+            - listitem:
+              - link:
+                - /url: /privacy-policy#cookies
+                - text: Cookie Policy
+            - listitem:
+              - link:
+                - /url: /privacy-policy#faq
+                - text: Privacy FAQ
+            - listitem:
+              - link:
+                - /url: /privacy-policy#delete
+                - text: Delete My Account
+            - listitem:
+              - link:
+                - /url: /privacy-policy#choices
+                - text: Your Privacy Choices
+  - button "Open Next.js Dev Tools" [ref=e12] [cursor=pointer]:
+    - generic [ref=e15]:
+      - text: Compiling
+      - generic [ref=e16]:
+        - generic [ref=e17]: .
+        - generic [ref=e18]: .
+        - generic [ref=e19]: .
+```

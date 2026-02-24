@@ -61,6 +61,7 @@ describe("season cast tab quality wiring", () => {
   it("splits season cast actions into sync and enrich, with per-card actions", () => {
     expect(contents).toMatch(/Sync Cast/);
     expect(contents).toMatch(/Enrich Cast & Crew Media/);
+    expect(contents).not.toMatch(/Cast intelligence unavailable; showing base cast snapshot\./);
     expect(contents).toMatch(/handleRefreshSeasonCastMember/);
     expect(contents).toMatch(/Edit Roles/);
     expect(contents).toMatch(/cast_open_role_editor/);

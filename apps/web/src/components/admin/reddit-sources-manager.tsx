@@ -165,6 +165,24 @@ interface ShowSeasonOption {
   season_number: number;
   title?: string | null;
   name?: string | null;
+  has_scheduled_or_aired_episode?: boolean;
+  episode_airdate_count?: number;
+}
+
+interface TrrShowMetadata {
+  id: string;
+  slug: string;
+  alternative_names?: string[];
+}
+
+export interface RedditCommunityContext {
+  communityLabel: string;
+  showLabel: string;
+  showSlug: string | null;
+  seasonLabel: string | null;
+  showId: string;
+  seasonId: string | null;
+  seasonNumber: number | null;
 }
 
 interface SocialAnalyticsPeriodRow {
@@ -198,6 +216,7 @@ export interface RedditSourcesManagerProps {
   initialCommunityId?: string;
   hideCommunityList?: boolean;
   backHref?: string;
+  onCommunityContextChange?: (context: RedditCommunityContext | null) => void;
 }
 
 const fmtDateTime = (value: string | null | undefined): string => {
@@ -260,6 +279,23 @@ const toIsoDate = (value: string | null | undefined): string | null => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString();
+};
+
+const SHOW_ACRONYM_STOP_WORDS = new Set(["the", "of", "and", "&", "a", "an"]);
+
+const resolveShowLabel = (showName: string, alternatives: string[] | null | undefined): string => {
+  const alias = (alternatives ?? [])
+    .map((value) => value.trim())
+    .find((value) => /^[A-Z0-9]{3,}$/.test(value));
+  if (alias) return alias;
+
+  const parts = showName
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter((part) => part && !SHOW_ACRONYM_STOP_WORDS.has(part));
+  if (parts.length === 0) return showName;
+  const acronym = parts.map((part) => part[0]).join("").toUpperCase();
+  return acronym || showName;
 };
 
 const formatDiscussionTypeLabel = (type: "live" | "post" | "weekly"): string => {
@@ -365,6 +401,7 @@ export default function RedditSourcesManager({
   initialCommunityId,
   hideCommunityList = false,
   backHref,
+  onCommunityContextChange,
 }: RedditSourcesManagerProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -415,12 +452,18 @@ export default function RedditSourcesManager({
   const [episodeSelectedPostIds, setEpisodeSelectedPostIds] = useState<string[]>([]);
   const [episodeRefreshing, setEpisodeRefreshing] = useState(false);
   const [episodeSaving, setEpisodeSaving] = useState(false);
+  const [showCommunitySettingsModal, setShowCommunitySettingsModal] = useState(false);
+  const [selectedShowLabel, setSelectedShowLabel] = useState<string | null>(null);
+  const [selectedShowSlug, setSelectedShowSlug] = useState<string | null>(null);
   const [episodeMeta, setEpisodeMeta] = useState<EpisodeDiscussionRefreshPayload["meta"] | null>(
     null,
   );
   const isBusy = busyAction !== null;
   const seasonOptionsCacheRef = useRef<Map<string, ShowSeasonOption[]>>(new Map());
   const periodOptionsCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
+  const showMetadataCacheRef = useRef<Map<string, { showLabel: string; showSlug: string | null }>>(
+    new Map(),
+  );
   const episodeContextRequestTokenRef = useRef(0);
   const episodeContextAbortRef = useRef<AbortController | null>(null);
 
@@ -612,6 +655,9 @@ export default function RedditSourcesManager({
     setEpisodeSeasonId(null);
     setEpisodeContextWarning(null);
     setEpisodeMatrix([]);
+    setShowCommunitySettingsModal(false);
+    setSelectedShowLabel(null);
+    setSelectedShowSlug(null);
   }, [selectedCommunityId]);
 
   const selectedCommunity = useMemo(
@@ -619,10 +665,35 @@ export default function RedditSourcesManager({
     [communities, selectedCommunityId],
   );
 
+  useEffect(() => {
+    if (!showCommunitySettingsModal) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowCommunitySettingsModal(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showCommunitySettingsModal]);
+
   const selectedPeriod = useMemo(
     () => periodOptions.find((option) => option.key === selectedPeriodKey) ?? periodOptions[0] ?? null,
     [periodOptions, selectedPeriodKey],
   );
+
+  const selectedSeasonNumber = useMemo(() => {
+    const fromOption = seasonOptions.find((season) => season.id === episodeSeasonId)?.season_number;
+    if (typeof fromOption === "number" && Number.isFinite(fromOption)) {
+      return fromOption;
+    }
+    const fromMeta = episodeMeta?.season_context?.season_number;
+    if (typeof fromMeta === "number" && Number.isFinite(fromMeta)) {
+      return fromMeta;
+    }
+    return null;
+  }, [episodeMeta?.season_context?.season_number, episodeSeasonId, seasonOptions]);
 
   const isEpisodeContextRequestActive = useCallback(
     (requestToken: number, signal?: AbortSignal) =>
@@ -716,18 +787,71 @@ export default function RedditSourcesManager({
     [fetchWithTimeout, getAuthHeaders, isEpisodeContextRequestActive],
   );
 
+  const loadShowMetadataForCommunity = useCallback(
+    async (
+      community: RedditCommunity,
+      options?: { signal?: AbortSignal; requestToken?: number },
+    ): Promise<{ showLabel: string; showSlug: string | null }> => {
+      const cached = showMetadataCacheRef.current.get(community.trr_show_id);
+      if (cached) {
+        if (isEpisodeContextRequestActive(options?.requestToken ?? 0, options?.signal)) {
+          setSelectedShowLabel(cached.showLabel);
+          setSelectedShowSlug(cached.showSlug);
+        }
+        return cached;
+      }
+
+      let fallback = {
+        showLabel: resolveShowLabel(community.trr_show_name, []),
+        showSlug: null as string | null,
+      };
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(`/api/admin/trr-api/shows/${community.trr_show_id}`, {
+          headers,
+          cache: "no-store",
+          signal: options?.signal,
+          timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+        });
+        if (response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as {
+            show?: TrrShowMetadata;
+          };
+          const show = payload.show;
+          if (show?.id) {
+            fallback = {
+              showLabel: resolveShowLabel(community.trr_show_name, show.alternative_names),
+              showSlug: typeof show.slug === "string" && show.slug.trim().length > 0 ? show.slug : null,
+            };
+          }
+        }
+      } catch {
+        // Fallback label is acceptable when show metadata fetch fails.
+      }
+
+      showMetadataCacheRef.current.set(community.trr_show_id, fallback);
+      if (isEpisodeContextRequestActive(options?.requestToken ?? 0, options?.signal)) {
+        setSelectedShowLabel(fallback.showLabel);
+        setSelectedShowSlug(fallback.showSlug);
+      }
+      return fallback;
+    },
+    [fetchWithTimeout, getAuthHeaders, isEpisodeContextRequestActive],
+  );
+
   const loadSeasonAndPeriodContext = useCallback(
     async (community: RedditCommunity, options?: { signal?: AbortSignal; requestToken?: number }) => {
       const requestToken = options?.requestToken ?? episodeContextRequestTokenRef.current;
       setPeriodsLoading(true);
       setEpisodeContextWarning(null);
       try {
+        await loadShowMetadataForCommunity(community, { ...options, requestToken });
         const seasonCacheKey = community.trr_show_id;
         let seasons = seasonOptionsCacheRef.current.get(seasonCacheKey) ?? null;
         if (!seasons) {
           const headers = await getAuthHeaders();
           const seasonsResponse = await fetchWithTimeout(
-            `/api/admin/trr-api/shows/${community.trr_show_id}/seasons?limit=100`,
+            `/api/admin/trr-api/shows/${community.trr_show_id}/seasons?limit=100&include_episode_signal=true`,
             {
               headers,
               cache: "no-store",
@@ -766,7 +890,10 @@ export default function RedditSourcesManager({
           (seasonNumber
             ? seasons.find((season) => season.season_number === seasonNumber)
             : null);
-        const resolvedSeason = explicitSeason ?? seasons[0];
+        const resolvedSeason =
+          explicitSeason ??
+          seasons.find((season) => season.has_scheduled_or_aired_episode === true) ??
+          seasons[0];
         if (!resolvedSeason) {
           throw new Error("No season could be resolved for this community");
         }
@@ -785,6 +912,7 @@ export default function RedditSourcesManager({
       fetchWithTimeout,
       getAuthHeaders,
       isEpisodeContextRequestActive,
+      loadShowMetadataForCommunity,
       loadPeriodOptionsForSeason,
       seasonId,
       seasonNumber,
@@ -841,6 +969,33 @@ export default function RedditSourcesManager({
     const qs = params.toString();
     return `/admin/social-media/reddit/communities/${selectedCommunity.id}${qs ? `?${qs}` : ""}`;
   }, [hideCommunityList, mode, returnToValue, selectedCommunity]);
+
+  useEffect(() => {
+    if (!onCommunityContextChange) return;
+    if (!selectedCommunity) {
+      onCommunityContextChange(null);
+      return;
+    }
+    onCommunityContextChange({
+      communityLabel: `r/${selectedCommunity.subreddit}`,
+      showLabel: selectedShowLabel ?? resolveShowLabel(selectedCommunity.trr_show_name, []),
+      showSlug: selectedShowSlug,
+      seasonLabel:
+        typeof selectedSeasonNumber === "number" && selectedSeasonNumber > 0
+          ? `S${selectedSeasonNumber}`
+          : null,
+      showId: selectedCommunity.trr_show_id,
+      seasonId: episodeSeasonId,
+      seasonNumber: selectedSeasonNumber,
+    });
+  }, [
+    onCommunityContextChange,
+    selectedCommunity,
+    selectedSeasonNumber,
+    episodeSeasonId,
+    selectedShowLabel,
+    selectedShowSlug,
+  ]);
 
   const persistAnalysisFlareModes = useCallback(
     async (
@@ -1907,6 +2062,26 @@ export default function RedditSourcesManager({
                       <p className="text-sm text-zinc-500">{selectedCommunity.trr_show_name}</p>
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => setShowCommunitySettingsModal(true)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label="Open community settings"
+                      >
+                        <svg
+                          aria-hidden
+                          viewBox="0 0 20 20"
+                          className="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                        >
+                          <path d="M10 3.3 11.1 5.5l2.4.35.6 2.35 2 .9-.9 2 .9 2-2 .9-.6 2.35-2.4.35L10 18.7l-1.1-2.2-2.4-.35-.6-2.35-2-.9.9-2-.9-2 2-.9.6-2.35 2.4-.35L10 3.3Z" />
+                          <circle cx="10" cy="10" r="2.4" />
+                        </svg>
+                        Settings
+                      </button>
                       {communityViewHref && (
                         <a
                           href={communityViewHref}
@@ -1933,24 +2108,11 @@ export default function RedditSourcesManager({
                       </button>
                     </div>
                   </div>
-                  <div className="mt-2">
-                    {refreshingFlaresCommunityId === selectedCommunity.id ? (
-                      <p className="text-xs text-zinc-500">Loading post flares...</p>
-                    ) : selectedCommunity.post_flares.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectedCommunity.post_flares.map((flair) => (
-                          <span
-                            key={`selected-flair-${selectedCommunity.id}-${flair}`}
-                            className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                          >
-                            {flair}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-zinc-500">No post flairs available yet.</p>
-                    )}
-                  </div>
+                  <p className="mt-2 text-xs text-zinc-500">
+                    {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
+                    {selectedCommunity.analysis_flares.length} scan ·{" "}
+                    {selectedCommunity.post_flares.length} post flares
+                  </p>
                   {selectedCommunity.notes && (
                     <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                       {selectedCommunity.notes}
@@ -1958,14 +2120,51 @@ export default function RedditSourcesManager({
                   )}
                 </article>
 
-                <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <div className="mb-3">
-                    <h5 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                      Community Settings
-                    </h5>
-                  </div>
+                {showCommunitySettingsModal && (
+                  <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                    onClick={() => setShowCommunitySettingsModal(false)}
+                  >
+                    <article
+                      className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="mb-3 flex items-center justify-between">
+                        <h5 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                          Community Settings
+                        </h5>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                          onClick={() => setShowCommunitySettingsModal(false)}
+                        >
+                          Close
+                        </button>
+                      </div>
 
-                  <div className="space-y-3">
+                      <div className="mb-3 rounded-lg border border-zinc-200 p-3">
+                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                          Post Flares
+                        </p>
+                        {refreshingFlaresCommunityId === selectedCommunity.id ? (
+                          <p className="text-xs text-zinc-500">Loading post flares...</p>
+                        ) : selectedCommunity.post_flares.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedCommunity.post_flares.map((flair) => (
+                              <span
+                                key={`selected-flair-${selectedCommunity.id}-${flair}`}
+                                className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                              >
+                                {flair}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-zinc-500">No post flairs available yet.</p>
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
                     <div className="rounded-lg border border-zinc-200 p-3">
                       <div className="mb-2 flex items-center justify-between">
                         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
@@ -2295,18 +2494,10 @@ export default function RedditSourcesManager({
                     )}
 
                     <div className="rounded-lg border border-zinc-200 p-3">
-                      <div className="mb-2 flex items-center justify-between">
+                      <div className="mb-2">
                         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
                           Episode Discussion Communities
                         </p>
-                        <button
-                          type="button"
-                          disabled={isBusy || episodeRefreshing}
-                          onClick={() => void handleRefreshEpisodeDiscussions()}
-                          className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
-                        >
-                          {episodeRefreshing ? "Refreshing..." : "REFRESH"}
-                        </button>
                       </div>
 
                       <p className="mb-2 text-xs text-zinc-500">
@@ -2649,7 +2840,9 @@ export default function RedditSourcesManager({
                       </div>
                     </div>
                   </div>
-                </article>
+                    </article>
+                  </div>
+                )}
 
                 <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between">
