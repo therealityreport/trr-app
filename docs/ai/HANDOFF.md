@@ -2,6 +2,48 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-24) — Phase 4 completion (E2E hardening + final validation)
+
+- February 24, 2026: Completed Phase 4 validation/hardening pass for shows/seasons admin with deterministic Playwright coverage and final command checks.
+  - Files:
+    - `apps/web/tests/e2e/admin-fixtures.ts`
+    - `apps/web/tests/e2e/admin-show-tabs-deeplink.spec.ts`
+    - `apps/web/tsconfig.json`
+  - Extracted modules list (from this phase scope):
+    - Show modules:
+      - `apps/web/src/lib/admin/show-page/constants.ts`
+      - `apps/web/src/lib/admin/show-page/types.ts`
+      - `apps/web/src/lib/admin/show-page/use-show-core.ts`
+      - `apps/web/src/lib/admin/show-page/use-show-links.ts`
+      - `apps/web/src/lib/admin/show-page/use-show-roles.ts`
+      - `apps/web/src/lib/admin/show-page/use-show-cast.ts`
+      - `apps/web/src/lib/admin/show-page/use-show-bravo.ts`
+      - `apps/web/src/lib/admin/show-page/use-show-news.ts`
+      - `apps/web/src/lib/admin/show-page/use-show-gallery.ts`
+    - Season modules:
+      - `apps/web/src/lib/admin/season-page/constants.ts`
+      - `apps/web/src/lib/admin/season-page/types.ts`
+      - `apps/web/src/lib/admin/season-page/use-season-core.ts`
+      - `apps/web/src/lib/admin/season-page/use-season-cast.ts`
+      - `apps/web/src/lib/admin/season-page/use-season-gallery.ts`
+      - `apps/web/src/lib/admin/season-page/use-season-social.ts`
+  - E2E stability changes:
+    - Updated show test fixture UUID to a valid UUID shape so page UUID guards do not route into slug-resolution error state.
+    - Added `/api/admin/trr-api/shows/resolve-slug` mock in Playwright fixtures to support canonical slug route transitions.
+    - Hardened show tab deep-link spec to validate canonical tab path behavior (`assets` and legacy alias `media-gallery`) with back/reload checks.
+    - Added `.next-e2e-debug` type paths to `apps/web/tsconfig.json` so local dev/e2e debug dist types do not drift TS include coverage.
+  - Warning count (before/after for current validation pass):
+    - ESLint warnings: `0 -> 0` (no lint warnings; only Babel deopt note on large show page file)
+    - TypeScript errors: `0 -> 0`
+  - Validation:
+    - `pnpm -C apps/web run lint` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web run test -- admin-breadcrumbs.test.ts admin-breadcrumbs-component.test.tsx admin-modal.test.tsx admin-fetch.test.ts social-week-detail-wiring.test.ts show-page-tab-order-wiring.test.ts season-page-tab-order-wiring.test.ts` (pass; Vitest run completed with `186 files / 759 tests` passing in this environment)
+    - `pnpm -C apps/web run test:e2e` (pass; `4 passed`)
+  - Residual risks:
+    - Next dev prints `allowedDevOrigins` warning during Playwright runs for `127.0.0.1`; this is non-blocking but noisy. Consider adding `allowedDevOrigins` in `next.config.ts` if clean logs are required.
+    - E2E coverage currently validates breadcrumb/deeplink/modal keyboard flows with mocked admin API responses; no full backend-integrated browser flow was added in this phase.
+
 ## Latest Update (2026-02-24) — Season refresh request-id diagnostics + RHOSLC E2E runbook
 
 - February 24, 2026: Implemented end-to-end request-id correlation for season image refresh and added RHOSLC manual E2E validation runbook.
