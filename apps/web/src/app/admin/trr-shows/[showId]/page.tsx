@@ -114,6 +114,7 @@ import {
 } from "@/lib/admin/cast-refresh-orchestration";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { fetchWithTimeout } from "@/lib/admin/admin-fetch";
+import { fetchAllPaginatedGalleryRows } from "@/lib/admin/paginated-gallery-fetch";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -555,6 +556,8 @@ const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
 const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
 const GALLERY_ASSET_LOAD_TIMEOUT_MS = 60_000;
+const GALLERY_ASSET_PAGE_SIZE = 500;
+const GALLERY_ASSET_MAX_PAGES = 30;
 const ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const CAST_INCREMENTAL_INITIAL_LIMIT = 48;
@@ -1602,9 +1605,6 @@ export default function TrrShowDetailPage() {
   const castRefreshAbortControllerRef = useRef<AbortController | null>(null);
   const castMediaEnrichAbortControllerRef = useRef<AbortController | null>(null);
   const castLoadAbortControllerRef = useRef<AbortController | null>(null);
-  const refreshLogDialogRef = useRef<HTMLDivElement | null>(null);
-  const syncBravoModeDialogRef = useRef<HTMLDivElement | null>(null);
-  const syncBravoDialogRef = useRef<HTMLDivElement | null>(null);
 
   const showRouteState = useMemo(
     () => parseShowRouteState(pathname, new URLSearchParams(searchParams.toString())),
@@ -1644,50 +1644,6 @@ export default function TrrShowDetailPage() {
     }, 250);
     return () => clearTimeout(timeoutId);
   }, [castSearchQuery]);
-
-  useEffect(() => {
-    if (!refreshLogOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setRefreshLogOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [refreshLogOpen]);
-
-  useEffect(() => {
-    if (refreshLogOpen) refreshLogDialogRef.current?.focus();
-  }, [refreshLogOpen]);
-
-  useEffect(() => {
-    if (syncBravoModePickerOpen) syncBravoModeDialogRef.current?.focus();
-  }, [syncBravoModePickerOpen]);
-
-  useEffect(() => {
-    if (syncBravoOpen) syncBravoDialogRef.current?.focus();
-  }, [syncBravoOpen]);
-
-  useEffect(() => {
-    if (!syncBravoModePickerOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setSyncBravoModePickerOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [syncBravoModePickerOpen]);
-
-  useEffect(() => {
-    if (!syncBravoOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || syncBravoPreviewLoading || syncBravoCommitLoading) return;
-      setSyncBravoOpen(false);
-      setSyncBravoStep("preview");
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [syncBravoCommitLoading, syncBravoOpen, syncBravoPreviewLoading]);
 
   const showSlugForRouting = useMemo(() => {
     const canonical = show?.canonical_slug?.trim();
@@ -4138,7 +4094,7 @@ export default function TrrShowDetailPage() {
       force = false,
       forceSync = false,
       append = false,
-    }: { force?: boolean; forceSync?: boolean; append?: boolean } = {}) => {
+    }: { force?: boolean; forceSync?: boolean; append?: boolean } = {}) {
       const requestShowId = showId;
       if (!requestShowId) return;
       const baseParams = new URLSearchParams({
@@ -5681,9 +5637,14 @@ export default function TrrShowDetailPage() {
     return parsed.toLocaleDateString();
   };
 
-  const formatDateRange = (premiere: string | null, finale: string | null) => {
-    if (!premiere && !finale) return "Dates unavailable";
-    return `${formatDate(premiere)} – ${formatDate(finale)}`;
+  const formatDateRange = (
+    premiere: string | null | undefined,
+    finale: string | null | undefined
+  ) => {
+    const normalizedPremiere = premiere ?? null;
+    const normalizedFinale = finale ?? null;
+    if (!normalizedPremiere && !normalizedFinale) return "Dates unavailable";
+    return `${formatDate(normalizedPremiere)} – ${formatDate(normalizedFinale)}`;
   };
 
   const castRoleMemberByPersonId = useMemo(
@@ -6759,16 +6720,24 @@ export default function TrrShowDetailPage() {
           return Array.isArray(assets) ? (assets as SeasonAsset[]) : [];
         };
 
+        const fetchAllAssetRows = async (baseUrl: string): Promise<SeasonAsset[]> =>
+          fetchAllPaginatedGalleryRows({
+            pageSize: GALLERY_ASSET_PAGE_SIZE,
+            maxPages: GALLERY_ASSET_MAX_PAGES,
+            fetchPage: (offset, limit) =>
+              fetchAssetRows(`${baseUrl}?limit=${limit}&offset=${offset}${sourcesParam}`),
+          });
+
         const fetchShowAssets = async (): Promise<SeasonAsset[]> =>
-          fetchAssetRows(`/api/admin/trr-api/shows/${showId}/assets?limit=250&offset=0${sourcesParam}`);
+          fetchAllAssetRows(`/api/admin/trr-api/shows/${showId}/assets`);
 
         if (seasonNumber === "all") {
           // Fetch show-level assets once + season assets for all seasons.
           const [showAssets, ...seasonResults] = await Promise.all([
             fetchShowAssets(),
             ...visibleSeasons.map(async (season) => {
-              return fetchAssetRows(
-                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets?limit=250&offset=0${sourcesParam}`
+              return fetchAllAssetRows(
+                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets`
               );
             }),
           ]);
@@ -6776,9 +6745,7 @@ export default function TrrShowDetailPage() {
         } else {
           const [showAssets, seasonAssets] = await Promise.all([
             fetchShowAssets(),
-            fetchAssetRows(
-              `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0${sourcesParam}`
-            ),
+            fetchAllAssetRows(`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`),
           ]);
           setGalleryAssets(dedupe([...(showAssets ?? []), ...(seasonAssets ?? [])]));
         }
@@ -9290,7 +9257,7 @@ export default function TrrShowDetailPage() {
               <ShowTabsNav
                 tabs={SHOW_PAGE_TABS}
                 activeTab={activeTab}
-                onSelect={(tabId) => setTab(tabId as TabId)}
+                onSelect={setTab}
               />
               {activeTab === "social" && (
                 <nav className="mt-3 flex flex-wrap gap-2">
@@ -9374,9 +9341,7 @@ export default function TrrShowDetailPage() {
                     })
                   }
                   showTmdbId={show.tmdb_id}
-                  formatDateRange={(premiereDate, finaleDate) =>
-                    formatDateRange(premiereDate ?? null, finaleDate ?? null)
-                  }
+                  formatDateRange={formatDateRange}
                 />
               )}
             </div>
@@ -10328,8 +10293,11 @@ export default function TrrShowDetailPage() {
                   </div>
                   {castFailedMembersOpen && (
                     <ul className="mt-3 space-y-2 text-xs text-amber-900">
-                      {castRunFailedMembers.map((member, index) => (
-                        <li key={`${member.personId}-${index}`} className="rounded-md border border-amber-200 bg-white px-2 py-1">
+                      {castRunFailedMembers.map((member) => (
+                        <li
+                          key={`${member.personId}-${member.name}-${member.reason}`}
+                          className="rounded-md border border-amber-200 bg-white px-2 py-1"
+                        >
                           <span className="font-semibold">{member.name}</span>: {member.reason}
                         </li>
                       ))}
@@ -11702,22 +11670,13 @@ export default function TrrShowDetailPage() {
           />
         )}
 
-        {refreshLogOpen && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-            <button
-              type="button"
-              aria-label="Close health center"
-              className="absolute inset-0 bg-black/40"
-              onClick={() => setRefreshLogOpen(false)}
-            />
-            <div
-              ref={refreshLogDialogRef}
-              role="dialog"
-              aria-modal="true"
-              aria-label="Health Center"
-              tabIndex={-1}
-              className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl"
-            >
+        <AdminModal
+          isOpen={refreshLogOpen}
+          onClose={() => setRefreshLogOpen(false)}
+          closeLabel="Close health center"
+          ariaLabel="Health Center"
+          panelClassName="max-h-[90vh] max-w-5xl overflow-y-auto"
+        >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
                   <h3 className="text-lg font-bold text-zinc-900">Health Center</h3>
@@ -11958,26 +11917,15 @@ export default function TrrShowDetailPage() {
                   </div>
                 )}
               </section>
-            </div>
-          </div>
-        )}
+        </AdminModal>
 
-        {syncBravoModePickerOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <button
-              type="button"
-              aria-label="Close sync mode picker"
-              className="absolute inset-0 bg-black/40"
-              onClick={() => setSyncBravoModePickerOpen(false)}
-            />
-            <div
-              ref={syncBravoModeDialogRef}
-              role="dialog"
-              aria-modal="true"
-              aria-label="Sync by Bravo mode picker"
-              tabIndex={-1}
-              className="relative w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl"
-            >
+        <AdminModal
+          isOpen={syncBravoModePickerOpen}
+          onClose={() => setSyncBravoModePickerOpen(false)}
+          closeLabel="Close sync mode picker"
+          ariaLabel="Sync by Bravo mode picker"
+          panelClassName="max-w-md"
+        >
               <h3 className="text-lg font-bold text-zinc-900">Sync by Bravo</h3>
               <p className="mt-1 text-sm text-zinc-600">
                 Choose what to sync from Bravo for this run.
@@ -12005,30 +11953,20 @@ export default function TrrShowDetailPage() {
               >
                 Cancel
               </button>
-            </div>
-          </div>
-        )}
+        </AdminModal>
 
-        {syncBravoOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <button
-              type="button"
-              aria-label="Close Bravo sync dialog"
-              className="absolute inset-0 bg-black/40"
-              onClick={() => {
-                if (syncBravoLoading) return;
-                setSyncBravoOpen(false);
-                setSyncBravoStep("preview");
-              }}
-            />
-            <div
-              ref={syncBravoDialogRef}
-              role="dialog"
-              aria-modal="true"
-              aria-label="Import by Bravo"
-              tabIndex={-1}
-              className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl"
-            >
+        <AdminModal
+          isOpen={syncBravoOpen}
+          onClose={() => {
+            if (syncBravoLoading) return;
+            setSyncBravoOpen(false);
+            setSyncBravoStep("preview");
+          }}
+          disableClose={syncBravoLoading}
+          closeLabel="Close Bravo sync dialog"
+          ariaLabel="Import by Bravo"
+          panelClassName="max-h-[90vh] max-w-3xl overflow-y-auto"
+        >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
                   <h3 className="text-lg font-bold text-zinc-900">
@@ -12994,9 +12932,7 @@ export default function TrrShowDetailPage() {
                     : "Next"}
                 </button>
               </div>
-            </div>
-          </div>
-        )}
+        </AdminModal>
 
         <AdminModal
           isOpen={batchJobsOpen}

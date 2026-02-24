@@ -7,6 +7,7 @@ import Image from "next/image";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminModal from "@/components/admin/AdminModal";
 import { buildSeasonBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
@@ -17,11 +18,12 @@ import FandomSyncModal, {
   type FandomSyncOptions,
   type FandomSyncPreviewResponse,
 } from "@/components/admin/FandomSyncModal";
-import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
+import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import SeasonSocialAnalyticsSection, {
   type SocialAnalyticsView,
 } from "@/components/admin/season-social-analytics-section";
-import SurveysSection from "@/components/admin/surveys-section";
+import SeasonSurveysTab from "@/components/admin/season-tabs/SeasonSurveysTab";
+import SeasonOverviewTab from "@/components/admin/season-tabs/SeasonOverviewTab";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { resolveGalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import {
@@ -82,6 +84,12 @@ import {
   cleanLegacyRoutingQuery,
   parseSeasonRouteState,
 } from "@/lib/admin/show-admin-routes";
+import {
+  parseSeasonCastRouteState,
+  writeSeasonCastRouteState,
+} from "@/lib/admin/cast-route-state";
+import { fetchWithTimeout } from "@/lib/admin/admin-fetch";
+import { fetchAllPaginatedGalleryRows } from "@/lib/admin/paginated-gallery-fetch";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 interface TrrShow {
@@ -155,6 +163,12 @@ interface CastRoleMember {
   photo_url: string | null;
 }
 
+type CastRunFailedMember = {
+  personId: string;
+  name: string;
+  reason: string;
+};
+
 interface BravoVideoItem {
   title?: string | null;
   runtime?: string | null;
@@ -188,7 +202,7 @@ type RefreshProgressState = {
   total: number | null;
 };
 type SeasonRefreshLogLevel = "info" | "success" | "error";
-type SeasonRefreshLogScope = "assets" | "cast" | "image";
+type SeasonRefreshLogScope = "assets" | "cast" | "cast_enrich" | "image";
 type SeasonRefreshLogEntry = {
   id: number;
   ts: number;
@@ -238,14 +252,17 @@ const SEASON_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const SEASON_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
 const SEASON_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 const SEASON_ASSET_LOAD_TIMEOUT_MS = 60_000;
+const SEASON_ASSET_PAGE_SIZE = 500;
+const SEASON_ASSET_MAX_PAGES = 30;
 const SEASON_CAST_LOAD_TIMEOUT_MS = 60_000;
 const SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const SEASON_PERSON_STREAM_MAX_DURATION_MS = 6 * 60 * 1000;
-const SEASON_PERSON_FALLBACK_TIMEOUT_MS = 4 * 60 * 1000;
 const SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 120_000;
 const SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS = 2;
 const SEASON_CAST_PROFILE_SYNC_CONCURRENCY = 3;
+const SEASON_CAST_INCREMENTAL_INITIAL_LIMIT = 48;
+const SEASON_CAST_INCREMENTAL_BATCH_SIZE = 48;
 const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
 
 const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
@@ -351,34 +368,25 @@ const summarizePhotoStreamCompletion = (payload: unknown): string | null => {
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";
 
+const formatSnapshotAgeLabel = (timestampMs: number): string => {
+  const diffMs = Math.max(0, Date.now() - timestampMs);
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+};
+
+const withSnapshotAgeSuffix = (warning: string | null, timestampMs: number | null): string | null => {
+  if (!warning) return null;
+  if (!timestampMs) return warning;
+  return `${warning} Last successful snapshot: ${formatSnapshotAgeLabel(timestampMs)}.`;
+};
+
 const isTransientNotAuthenticatedError = (error: unknown): boolean =>
   error instanceof Error && error.message.toLowerCase().includes("not authenticated");
-
-const fetchWithTimeout = async (
-  input: RequestInfo | URL,
-  init: RequestInit,
-  timeoutMs: number,
-  externalSignal?: AbortSignal
-): Promise<Response> => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const forwardAbort = () => controller.abort();
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      controller.abort();
-    } else {
-      externalSignal.addEventListener("abort", forwardAbort, { once: true });
-    }
-  }
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeoutId);
-    if (externalSignal) {
-      externalSignal.removeEventListener("abort", forwardAbort);
-    }
-  }
-};
 
 const humanizeStage = (value: string): string => {
   const normalized = value.replace(/[_-]+/g, " ").trim();
@@ -827,12 +835,17 @@ export default function SeasonDetailPage() {
   );
   const [assetsRefreshLogOpen, setAssetsRefreshLogOpen] = useState(false);
   const [refreshingCast, setRefreshingCast] = useState(false);
+  const [enrichingCast, setEnrichingCast] = useState(false);
   const [castRefreshNotice, setCastRefreshNotice] = useState<string | null>(null);
   const [castRefreshError, setCastRefreshError] = useState<string | null>(null);
+  const [castEnrichNotice, setCastEnrichNotice] = useState<string | null>(null);
+  const [castEnrichError, setCastEnrichError] = useState<string | null>(null);
   const [castRefreshProgress, setCastRefreshProgress] = useState<RefreshProgressState | null>(
     null
   );
   const [castRefreshLogOpen, setCastRefreshLogOpen] = useState(false);
+  const [castRunFailedMembers, setCastRunFailedMembers] = useState<CastRunFailedMember[]>([]);
+  const [castFailedMembersOpen, setCastFailedMembersOpen] = useState(false);
   const [refreshLogEntries, setRefreshLogEntries] = useState<SeasonRefreshLogEntry[]>([]);
   const refreshLogCounterRef = useRef(0);
   const [trrShowCast, setTrrShowCast] = useState<TrrShowCastMember[]>([]);
@@ -843,16 +856,29 @@ export default function SeasonDetailPage() {
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
   const [castRoleMembersWarning, setCastRoleMembersWarning] = useState<string | null>(null);
+  const [lastSuccessfulCastRoleMembersAt, setLastSuccessfulCastRoleMembersAt] = useState<number | null>(
+    null
+  );
   const [castSortBy, setCastSortBy] = useState<"episodes" | "season" | "name">("episodes");
   const [castSortOrder, setCastSortOrder] = useState<"desc" | "asc">("desc");
   const [castRoleFilters, setCastRoleFilters] = useState<string[]>([]);
   const [castCreditFilters, setCastCreditFilters] = useState<string[]>([]);
   const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
+  const [castSearchQuery, setCastSearchQuery] = useState("");
+  const [castSearchQueryDebounced, setCastSearchQueryDebounced] = useState("");
+  const [castRenderLimit, setCastRenderLimit] = useState(SEASON_CAST_INCREMENTAL_INITIAL_LIMIT);
+  const [crewRenderLimit, setCrewRenderLimit] = useState(SEASON_CAST_INCREMENTAL_INITIAL_LIMIT);
+  const castIncrementalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [refreshingPersonIds, setRefreshingPersonIds] = useState<Record<string, boolean>>({});
+  const [refreshingPersonProgress, setRefreshingPersonProgress] = useState<
+    Record<string, RefreshProgressState>
+  >({});
   const showCastFetchAttemptedRef = useRef(false);
   const castRoleMembersLoadInFlightRef = useRef<Promise<void> | null>(null);
   const castRoleMembersLoadedOnceRef = useRef(false);
   const castRoleMembersSnapshotRef = useRef<CastRoleMember[]>([]);
   const castRefreshAbortControllerRef = useRef<AbortController | null>(null);
+  const castEnrichAbortControllerRef = useRef<AbortController | null>(null);
   const appendRefreshLog = useCallback(
     (
       entry: Omit<SeasonRefreshLogEntry, "id" | "ts"> & {
@@ -917,6 +943,10 @@ export default function SeasonDetailPage() {
     () => parseSeasonRouteState(pathname, new URLSearchParams(searchParams.toString())),
     [pathname, searchParams]
   );
+  const seasonCastRouteState = useMemo(
+    () => parseSeasonCastRouteState(new URLSearchParams(searchParams.toString())),
+    [searchParams]
+  );
 
   useEffect(() => {
     setActiveTab(seasonRouteState.tab);
@@ -924,6 +954,29 @@ export default function SeasonDetailPage() {
       setAssetsView(seasonRouteState.assetsSubTab);
     }
   }, [seasonRouteState.assetsSubTab, seasonRouteState.tab]);
+
+  useEffect(() => {
+    setCastSortBy(seasonCastRouteState.sortBy);
+    setCastSortOrder(seasonCastRouteState.sortOrder);
+    setCastHasImageFilter(seasonCastRouteState.hasImageFilter);
+    setCastRoleFilters(seasonCastRouteState.roleFilters);
+    setCastCreditFilters(seasonCastRouteState.creditFilters);
+    setCastSearchQuery(seasonCastRouteState.searchQuery);
+  }, [
+    seasonCastRouteState.creditFilters,
+    seasonCastRouteState.hasImageFilter,
+    seasonCastRouteState.roleFilters,
+    seasonCastRouteState.searchQuery,
+    seasonCastRouteState.sortBy,
+    seasonCastRouteState.sortOrder,
+  ]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setCastSearchQueryDebounced(castSearchQuery.trim());
+    }, 250);
+    return () => clearTimeout(timeoutId);
+  }, [castSearchQuery]);
 
   const showSlugForRouting = useMemo(() => {
     const canonical = show?.canonical_slug?.trim();
@@ -968,6 +1021,41 @@ export default function SeasonDetailPage() {
     },
     [router, searchParams, seasonNumber, showSlugForRouting]
   );
+
+  useEffect(() => {
+    if (activeTab !== "cast") return;
+    const currentQuery = new URLSearchParams(searchParams.toString());
+    const nextQuery = writeSeasonCastRouteState(currentQuery, {
+      searchQuery: castSearchQueryDebounced,
+      sortBy: castSortBy,
+      sortOrder: castSortOrder,
+      hasImageFilter: castHasImageFilter,
+      roleFilters: castRoleFilters,
+      creditFilters: castCreditFilters,
+    });
+    const nextUrl = buildSeasonAdminUrl({
+      showSlug: showSlugForRouting,
+      seasonNumber,
+      tab: "cast",
+      query: nextQuery,
+    });
+    const currentUrl = currentQuery.toString() ? `${pathname}?${currentQuery.toString()}` : pathname;
+    if (nextUrl === currentUrl) return;
+    router.replace(nextUrl as Route, { scroll: false });
+  }, [
+    activeTab,
+    castCreditFilters,
+    castHasImageFilter,
+    castRoleFilters,
+    castSearchQueryDebounced,
+    castSortBy,
+    castSortOrder,
+    pathname,
+    router,
+    searchParams,
+    seasonNumber,
+    showSlugForRouting,
+  ]);
 
   const socialAnalyticsView = useMemo<SocialAnalyticsView>(() => {
     const value = searchParams.get("social_view");
@@ -1232,6 +1320,7 @@ export default function SeasonDetailPage() {
               })
             );
             setCastRoleMembersLoadedOnce(true);
+            setLastSuccessfulCastRoleMembersAt(Date.now());
             setCastRoleMembersWarning(null);
             return;
           } catch (error) {
@@ -1475,63 +1564,51 @@ export default function SeasonDetailPage() {
       setSeasonCastSource("season_evidence");
       setSeasonCastEligibilityWarning(null);
 
-      try {
-        const [episodesResponse, castResponse, castWithArchiveResponse] = await Promise.all([
-          fetch(`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`, { headers }),
-          fetch(`/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500`, { headers }),
-          fetch(
-            `/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500&include_archive_only=true`,
-            { headers }
-          ),
-        ]);
+      void (async () => {
+        try {
+          const [episodesResponse, castResponse] = await Promise.all([
+            fetch(`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`, { headers }),
+            fetch(
+              `/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500&include_archive_only=true`,
+              { headers }
+            ),
+          ]);
 
-        if (!episodesResponse.ok) throw new Error("Failed to fetch episodes");
-        if (!castResponse.ok) throw new Error("Failed to fetch season cast");
-        if (!castWithArchiveResponse.ok) throw new Error("Failed to fetch season archive cast");
+          if (!episodesResponse.ok) throw new Error("Failed to fetch episodes");
+          if (!castResponse.ok) throw new Error("Failed to fetch season cast");
 
-        const episodesData = await episodesResponse.json();
-        const castData = await castResponse.json();
-        const castWithArchiveData = await castWithArchiveResponse.json();
-        if (!isCurrentSeasonRequest(requestKey, requestId)) return;
-
-        setEpisodes(episodesData.episodes ?? []);
-        setCast(castData.cast ?? []);
-        setSeasonCastSource(
-          castData.cast_source === "show_fallback" ? "show_fallback" : "season_evidence"
-        );
-        setSeasonCastEligibilityWarning(
-          typeof castData.eligibility_warning === "string" && castData.eligibility_warning.trim()
-            ? castData.eligibility_warning
-            : null
-        );
-        const allSeasonCast = Array.isArray(castWithArchiveData.cast)
-          ? (castWithArchiveData.cast as SeasonCastMember[])
-          : [];
-        setArchiveCast(
-          allSeasonCast.filter(
-            (member) =>
-              (member.episodes_in_season ?? 0) <= 0 &&
-              ((member.archive_episodes_in_season as number | null | undefined) ?? 0) > 0
-          )
-        );
-        setSeasonSupplementalWarning(null);
-        void Promise.allSettled([fetchSeasonBravoVideos(), fetchSeasonFandomData()]).then((results) => {
+          const episodesData = await episodesResponse.json();
+          const castData = await castResponse.json();
           if (!isCurrentSeasonRequest(requestKey, requestId)) return;
-          const failures = results
-            .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-            .map((result) => (result.reason instanceof Error ? result.reason.message : "supplemental request failed"));
-          if (failures.length === 0) {
-            setSeasonSupplementalWarning(null);
-            return;
-          }
-          setSeasonSupplementalWarning(failures.join(" · "));
-        });
-      } catch (err) {
-        if (!isCurrentSeasonRequest(requestKey, requestId)) return;
-        const message = err instanceof Error ? err.message : "Failed to load season supplemental data";
-        console.warn("[season] Supplemental season data unavailable:", message);
-        setSeasonSupplementalWarning(message);
-      }
+
+          setEpisodes(episodesData.episodes ?? []);
+          const allSeasonCast = Array.isArray((castData as { cast?: unknown }).cast)
+            ? ((castData as { cast: unknown[] }).cast as SeasonCastMember[])
+            : [];
+          setCast(allSeasonCast.filter((member) => (member.episodes_in_season ?? 0) > 0));
+          setSeasonCastSource(
+            castData.cast_source === "show_fallback" ? "show_fallback" : "season_evidence"
+          );
+          setSeasonCastEligibilityWarning(
+            typeof castData.eligibility_warning === "string" && castData.eligibility_warning.trim()
+              ? castData.eligibility_warning
+              : null
+          );
+          setArchiveCast(
+            allSeasonCast.filter(
+              (member) =>
+                (member.episodes_in_season ?? 0) <= 0 &&
+                ((member.archive_episodes_in_season as number | null | undefined) ?? 0) > 0
+            )
+          );
+          setSeasonSupplementalWarning(null);
+        } catch (err) {
+          if (!isCurrentSeasonRequest(requestKey, requestId)) return;
+          const message = err instanceof Error ? err.message : "Failed to load season supplemental data";
+          console.warn("[season] Supplemental season data unavailable:", message);
+          setSeasonSupplementalWarning(message);
+        }
+      })();
     } catch (err) {
       if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setError(err instanceof Error ? err.message : "Failed to load season");
@@ -1547,7 +1624,7 @@ export default function SeasonDetailPage() {
       if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setLoading(false);
     }
-  }, [fetchSeasonBravoVideos, fetchSeasonFandomData, getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
+  }, [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -1557,7 +1634,9 @@ export default function SeasonDetailPage() {
 
   useEffect(() => {
     castRefreshAbortControllerRef.current?.abort();
+    castEnrichAbortControllerRef.current?.abort();
     castRefreshAbortControllerRef.current = null;
+    castEnrichAbortControllerRef.current = null;
     setAllowPlaceholderMediaOverride(false);
     setGalleryDiagnosticFilter("all");
     setCastSortBy("episodes");
@@ -1565,10 +1644,22 @@ export default function SeasonDetailPage() {
     setCastRoleFilters([]);
     setCastCreditFilters([]);
     setCastHasImageFilter("all");
+    setCastSearchQuery("");
+    setCastSearchQueryDebounced("");
+    setCastRenderLimit(SEASON_CAST_INCREMENTAL_INITIAL_LIMIT);
+    setCrewRenderLimit(SEASON_CAST_INCREMENTAL_INITIAL_LIMIT);
     setCastRoleMembers([]);
     setCastRoleMembersLoadedOnce(false);
     setCastRoleMembersError(null);
     setCastRoleMembersWarning(null);
+    setLastSuccessfulCastRoleMembersAt(null);
+    setRefreshingPersonIds({});
+    setRefreshingPersonProgress({});
+    setCastRunFailedMembers([]);
+    setCastFailedMembersOpen(false);
+    setCastEnrichNotice(null);
+    setCastEnrichError(null);
+    setEnrichingCast(false);
     setRefreshLogEntries([]);
     setAssetsRefreshLogOpen(false);
     setCastRefreshLogOpen(false);
@@ -1604,32 +1695,47 @@ export default function SeasonDetailPage() {
     void fetchSeasonFandomData();
   }, [activeTab, fetchSeasonFandomData, hasAccess, showId]);
 
+  useEffect(() => {
+    if (!hasAccess || !showId) return;
+    if (activeTab !== "videos") return;
+    void fetchSeasonBravoVideos();
+  }, [activeTab, fetchSeasonBravoVideos, hasAccess, showId]);
+
   const fetchAssets = useCallback(async () => {
     if (!showId) return;
     const headers = await getAuthHeaders();
     const sourcesParam = advancedFilters.sources.length
       ? `&sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
       : "";
-    let response: Response;
-    try {
-      response = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=250&offset=0${sourcesParam}`,
-        { headers },
-        SEASON_ASSET_LOAD_TIMEOUT_MS
-      );
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw new Error(
-          `Timed out loading season assets after ${Math.round(
-            SEASON_ASSET_LOAD_TIMEOUT_MS / 1000
-          )}s.`
-        );
+    const fetchAssetRows = async (url: string): Promise<SeasonAsset[]> => {
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(url, { headers }, SEASON_ASSET_LOAD_TIMEOUT_MS);
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw new Error(
+            `Timed out loading season assets after ${Math.round(
+              SEASON_ASSET_LOAD_TIMEOUT_MS / 1000
+            )}s.`
+          );
+        }
+        throw error;
       }
-      throw error;
-    }
-    if (!response.ok) throw new Error("Failed to fetch season media");
-    const data = await response.json();
-    setAssets(data.assets ?? []);
+      if (!response.ok) throw new Error("Failed to fetch season media");
+      const data = await response.json().catch(() => ({}));
+      const payload = (data as { assets?: unknown }).assets;
+      return Array.isArray(payload) ? (payload as SeasonAsset[]) : [];
+    };
+
+    const assets = await fetchAllPaginatedGalleryRows({
+      pageSize: SEASON_ASSET_PAGE_SIZE,
+      maxPages: SEASON_ASSET_MAX_PAGES,
+      fetchPage: (offset, limit) =>
+        fetchAssetRows(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=${limit}&offset=${offset}${sourcesParam}`
+        ),
+    });
+    setAssets(assets);
   }, [showId, seasonNumber, getAuthHeaders, advancedFilters.sources]);
 
   useEffect(() => {
@@ -1665,15 +1771,47 @@ export default function SeasonDetailPage() {
       return;
     }
 
+    const advancedFiltered = applyAdvancedFiltersToSeasonAssets(assets, advancedFilters, {
+      showName: show?.name ?? undefined,
+      getSeasonNumber: () => seasonNumber,
+    });
+    const diagnosticsFiltered = advancedFiltered.filter((asset) => {
+      if (galleryDiagnosticFilter === "all") return true;
+      if (galleryDiagnosticFilter === "missing-variants") {
+        return hasMissingVariants(asset.metadata ?? null);
+      }
+      if (galleryDiagnosticFilter === "oversized") {
+        const pixelCount =
+          typeof asset.width === "number" && typeof asset.height === "number"
+            ? asset.width * asset.height
+            : 0;
+        return pixelCount > 6_000_000;
+      }
+      if (galleryDiagnosticFilter === "unclassified") {
+        return !asset.kind || asset.kind.trim().toLowerCase() === "other";
+      }
+      return true;
+    });
+    const visibleSections = groupSeasonAssetsBySection(
+      diagnosticsFiltered.slice(0, assetsVisibleCount),
+      {
+        seasonNumber,
+        showName: show?.name ?? undefined,
+        includeOther: true,
+      }
+    );
     const selectedSections = new Set(batchJobContentSections);
     const dedupeTargets = new Set<string>();
-    const targets = assets
+    const selectedVisibleAssets = ASSET_SECTION_ORDER.flatMap((section) =>
+      selectedSections.has(section) ? visibleSections[section] : []
+    );
+    const targets = selectedVisibleAssets
       .map((asset) => {
         const section = classifySeasonAssetSection(asset, {
           seasonNumber,
           showName: show?.name ?? undefined,
         });
-        if (!section || !selectedSections.has(section)) return null;
+        if (!section) return null;
         const origin = asset.origin_table ?? "unknown";
         const rawId = origin === "media_assets" ? asset.media_asset_id ?? asset.id : asset.id;
         if (!rawId) return null;
@@ -1812,12 +1950,15 @@ export default function SeasonDetailPage() {
       setBatchJobsLiveCounts(null);
     }
   }, [
+    advancedFilters,
     assets,
+    assetsVisibleCount,
     batchJobsLiveCounts,
     batchJobContentSections,
     batchJobOperations,
     batchJobsRunning,
     fetchAssets,
+    galleryDiagnosticFilter,
     getAuthHeaders,
     seasonNumber,
     show?.name,
@@ -2134,10 +2275,14 @@ export default function SeasonDetailPage() {
     setRefreshingCast(true);
     setCastRefreshError(null);
     setCastRefreshNotice(null);
+    setCastEnrichError(null);
+    setCastEnrichNotice(null);
+    setCastRunFailedMembers([]);
+    setCastFailedMembersOpen(false);
     setCastRefreshLogOpen(true);
     setCastRefreshProgress({
       stage: "Initializing",
-      message: "Refreshing cast credits and cast media...",
+      message: "Refreshing cast credits and season cast intelligence...",
       current: 0,
       total: null,
     });
@@ -2419,7 +2564,7 @@ export default function SeasonDetailPage() {
       let castResponse: Response;
       try {
         castResponse = await fetchWithTimeout(
-          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500`,
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
           { headers },
           SEASON_CAST_LOAD_TIMEOUT_MS,
           runController.signal
@@ -2449,9 +2594,12 @@ export default function SeasonDetailPage() {
       const refreshedCast = (castData as { cast?: unknown }).cast;
       const refreshedCastSource = (castData as { cast_source?: unknown }).cast_source;
       const refreshedCastWarning = (castData as { eligibility_warning?: unknown }).eligibility_warning;
-      const refreshedCastMembers = Array.isArray(refreshedCast)
+      const refreshedCastWithArchive = Array.isArray(refreshedCast)
         ? (refreshedCast as SeasonCastMember[])
         : [];
+      const refreshedCastMembers = refreshedCastWithArchive.filter(
+        (member) => (member.episodes_in_season ?? 0) > 0
+      );
       setCast(refreshedCastMembers);
       setSeasonCastSource(
         refreshedCastSource === "show_fallback" ? "show_fallback" : "season_evidence"
@@ -2461,363 +2609,25 @@ export default function SeasonDetailPage() {
           ? refreshedCastWarning
           : null
       );
-
-      let archiveCastResponse: Response;
-      try {
-        archiveCastResponse = await fetchWithTimeout(
-          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
-          { headers },
-          SEASON_CAST_LOAD_TIMEOUT_MS,
-          runController.signal
-        );
-      } catch (error) {
-        if (isAbortError(error) && runController.signal.aborted) {
-          throw new Error("Season cast refresh canceled.");
-        }
-        if (isAbortError(error)) {
-          throw new Error(
-            `Timed out loading archive cast after ${Math.round(
-              SEASON_CAST_LOAD_TIMEOUT_MS / 1000
-            )}s.`
-          );
-        }
-        throw error;
-      }
-      const archiveCastData = await archiveCastResponse.json().catch(() => ({}));
-      if (!archiveCastResponse.ok) {
-        const message =
-          typeof (archiveCastData as { error?: unknown }).error === "string"
-            ? (archiveCastData as { error: string }).error
-            : "Failed to fetch archive-footage cast";
-        throw new Error(message);
-      }
-      const archiveRows = Array.isArray((archiveCastData as { cast?: unknown }).cast)
-        ? ((archiveCastData as { cast: unknown[] }).cast as SeasonCastMember[])
-        : [];
       setArchiveCast(
-        archiveRows.filter(
+        refreshedCastWithArchive.filter(
           (member) =>
             (member.episodes_in_season ?? 0) <= 0 &&
             ((member.archive_episodes_in_season as number | null | undefined) ?? 0) > 0
         )
       );
 
-      const castMembersToSync = Array.from(
-        new Map(
-          refreshedCastMembers
-            .filter(
-              (member) => typeof member.person_id === "string" && member.person_id.trim()
-            )
-            .map((member) => [member.person_id, member] as const)
-        ).values()
-      );
-
-      let castProfilesFailed = 0;
-      const castProfilesTotal = castMembersToSync.length;
-      let castProfilesCompleted = 0;
-      let castProfilesInFlight = 0;
-      let nextMemberIndex = 0;
-      const profileWorkerCount = Math.max(
-        1,
-        Math.min(SEASON_CAST_PROFILE_SYNC_CONCURRENCY, castProfilesTotal || 1)
-      );
-
-      const syncCastMemberProfile = async (memberIndex: number) => {
-        throwIfCanceled();
-        const member = castMembersToSync[memberIndex];
-        const displayName = member.person_name || `Cast member ${memberIndex + 1}`;
-        castProfilesInFlight += 1;
-        appendRefreshLog({
-          scope: "cast",
-          stage: "cast_profile_sync",
-          message: `Syncing ${displayName} (${castProfilesCompleted + 1}/${castProfilesTotal})`,
-          level: "info",
-          current: castProfilesCompleted,
-          total: castProfilesTotal,
-        });
-        setCastRefreshProgress({
-          stage: "Cast Profiles & Media",
-          message: `Syncing ${displayName} from TMDb/IMDb/Fandom (${castProfilesCompleted + 1}/${castProfilesTotal}, ${castProfilesInFlight} in flight)...`,
-          current: castProfilesCompleted,
-          total: castProfilesTotal,
-        });
-
-        const requestBody = {
-          skip_mirror: false,
-          show_id: showId,
-          show_name: show?.name ?? undefined,
-        };
-
-        try {
-          let personStreamFailed = false;
-          try {
-            throwIfCanceled();
-            const personStreamController = new AbortController();
-            const forwardRunAbort = () => personStreamController.abort();
-            runController.signal.addEventListener("abort", forwardRunAbort, { once: true });
-            const personStreamTimeout = setTimeout(
-              () => personStreamController.abort(),
-              SEASON_PERSON_STREAM_MAX_DURATION_MS
-            );
-            let personStreamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
-            const bumpPersonStreamIdleTimeout = () => {
-              if (personStreamIdleTimeout) clearTimeout(personStreamIdleTimeout);
-              personStreamIdleTimeout = setTimeout(
-                () => personStreamController.abort(),
-                SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS
-              );
-            };
-            const clearPersonStreamIdleTimeout = () => {
-              if (personStreamIdleTimeout) clearTimeout(personStreamIdleTimeout);
-              personStreamIdleTimeout = null;
-            };
-            bumpPersonStreamIdleTimeout();
-            let personReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-            let shouldStopPersonStream = false;
-            try {
-              const personStreamResponse = await fetch(
-                `/api/admin/trr-api/people/${member.person_id}/refresh-images/stream`,
-                {
-                  method: "POST",
-                  headers: { ...headers, "Content-Type": "application/json" },
-                  body: JSON.stringify(requestBody),
-                  signal: personStreamController.signal,
-                }
-              );
-
-              if (!personStreamResponse.ok || !personStreamResponse.body) {
-                throw new Error("Person refresh stream unavailable");
-              }
-
-              personReader = personStreamResponse.body.getReader();
-              const personDecoder = new TextDecoder();
-              let personBuffer = "";
-
-              while (true) {
-                const { value, done } = await personReader.read();
-                if (done) break;
-                bumpPersonStreamIdleTimeout();
-                personBuffer += personDecoder.decode(value, { stream: true });
-                personBuffer = personBuffer.replace(/\r\n/g, "\n");
-
-                let boundaryIndex = personBuffer.indexOf("\n\n");
-                while (boundaryIndex !== -1) {
-                  const rawEvent = personBuffer.slice(0, boundaryIndex);
-                  personBuffer = personBuffer.slice(boundaryIndex + 2);
-
-                  const lines = rawEvent.split("\n").filter(Boolean);
-                  let eventType = "message";
-                  const dataLines: string[] = [];
-                  for (const line of lines) {
-                    if (line.startsWith("event:")) {
-                      eventType = line.slice(6).trim();
-                    } else if (line.startsWith("data:")) {
-                      dataLines.push(line.slice(5).trim());
-                    }
-                  }
-
-                  const dataStr = dataLines.join("\n");
-                  let payload: Record<string, unknown> | string = dataStr;
-                  try {
-                    payload = JSON.parse(dataStr) as Record<string, unknown>;
-                  } catch {
-                    payload = dataStr;
-                  }
-
-                  if (eventType === "progress" && payload && typeof payload === "object") {
-                    const stageLabel = resolveStageLabel(
-                      (payload as { stage?: unknown; step?: unknown }).stage ??
-                        (payload as { stage?: unknown; step?: unknown }).step,
-                      SEASON_REFRESH_STAGE_LABELS
-                    );
-                    setCastRefreshProgress({
-                      stage: stageLabel ?? "Cast Profiles & Media",
-                      message: buildProgressMessage(
-                        stageLabel,
-                        (payload as { message?: unknown }).message,
-                        `Syncing ${displayName}...`
-                      ),
-                      current: castProfilesCompleted,
-                      total: castProfilesTotal,
-                    });
-                  } else if (eventType === "complete") {
-                    shouldStopPersonStream = true;
-                  } else if (eventType === "error") {
-                    const errorPayload =
-                      payload && typeof payload === "object"
-                        ? (payload as { error?: unknown; detail?: unknown })
-                        : null;
-                    const errorText =
-                      typeof errorPayload?.error === "string" && errorPayload.error
-                        ? errorPayload.error
-                        : "Failed to sync cast member profile/media";
-                    const detailText =
-                      typeof errorPayload?.detail === "string" && errorPayload.detail
-                        ? errorPayload.detail
-                        : null;
-                    throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
-                  }
-
-                  if (shouldStopPersonStream) {
-                    break;
-                  }
-                  boundaryIndex = personBuffer.indexOf("\n\n");
-                }
-
-                if (shouldStopPersonStream) {
-                  break;
-                }
-              }
-            } finally {
-              clearPersonStreamIdleTimeout();
-              clearTimeout(personStreamTimeout);
-              runController.signal.removeEventListener("abort", forwardRunAbort);
-              if (personReader && shouldStopPersonStream) {
-                try {
-                  await personReader.cancel();
-                } catch {
-                  // no-op
-                }
-              }
-            }
-          } catch (personStreamErr) {
-            if (runController.signal.aborted) {
-              throw new Error("Season cast refresh canceled.");
-            }
-            personStreamFailed = true;
-            console.warn(
-              `Season cast member stream refresh failed for ${displayName}; using non-stream fallback.`,
-              personStreamErr
-            );
-            appendRefreshLog({
-              scope: "cast",
-              stage: "cast_profile_stream_failed",
-              message: `Stream failed for ${displayName}; running fallback.`,
-              detail: personStreamErr instanceof Error ? personStreamErr.message : String(personStreamErr),
-              level: "info",
-              current: castProfilesCompleted,
-              total: castProfilesTotal,
-            });
-          }
-
-          if (personStreamFailed) {
-            throwIfCanceled();
-            let personFallbackResponse: Response;
-            try {
-              personFallbackResponse = await fetchWithTimeout(
-                `/api/admin/trr-api/people/${member.person_id}/refresh-images`,
-                {
-                  method: "POST",
-                  headers: { ...headers, "Content-Type": "application/json" },
-                  body: JSON.stringify(requestBody),
-                },
-                SEASON_PERSON_FALLBACK_TIMEOUT_MS,
-                runController.signal
-              );
-            } catch (error) {
-              if (isAbortError(error) && runController.signal.aborted) {
-                throw new Error("Season cast refresh canceled.");
-              }
-              if (isAbortError(error)) {
-                throw new Error(
-                  `Timed out syncing cast member profile/media after ${Math.round(
-                    SEASON_PERSON_FALLBACK_TIMEOUT_MS / 1000
-                  )}s.`
-                );
-              }
-              throw error;
-            }
-            const personFallbackData = await personFallbackResponse.json().catch(() => ({}));
-            if (!personFallbackResponse.ok) {
-              const message =
-                typeof (personFallbackData as { error?: unknown }).error === "string"
-                  ? (personFallbackData as { error: string }).error
-                  : "Failed to sync cast member profile/media";
-              throw new Error(message);
-            }
-          }
-          appendRefreshLog({
-            scope: "cast",
-            stage: "cast_profile_complete",
-            message: `Synced ${displayName}.`,
-            level: "success",
-            current: castProfilesCompleted + 1,
-            total: castProfilesTotal,
-          });
-        } catch (castProfileErr) {
-          if (runController.signal.aborted) {
-            throw new Error("Season cast refresh canceled.");
-          }
-          console.warn(
-            `Failed syncing season cast profile/media for ${displayName}:`,
-            castProfileErr
-          );
-          castProfilesFailed += 1;
-          appendRefreshLog({
-            scope: "cast",
-            stage: "cast_profile_failed",
-            message: `Failed syncing ${displayName}.`,
-            detail: castProfileErr instanceof Error ? castProfileErr.message : String(castProfileErr),
-            level: "error",
-            current: castProfilesCompleted + 1,
-            total: castProfilesTotal,
-          });
-        } finally {
-          castProfilesCompleted += 1;
-          castProfilesInFlight = Math.max(0, castProfilesInFlight - 1);
-          setCastRefreshProgress({
-            stage: "Cast Profiles & Media",
-            message: `Synced ${castProfilesCompleted}/${castProfilesTotal} cast profiles/media... (${castProfilesInFlight} in flight)`,
-            current: castProfilesCompleted,
-            total: castProfilesTotal,
-          });
-        }
-      };
-
-      const runProfileWorker = async () => {
-        while (true) {
-          throwIfCanceled();
-          const memberIndex = nextMemberIndex;
-          nextMemberIndex += 1;
-          if (memberIndex >= castProfilesTotal) {
-            return;
-          }
-          await syncCastMemberProfile(memberIndex);
-        }
-      };
-
-      if (castProfilesTotal > 0) {
-        await Promise.all(Array.from({ length: profileWorkerCount }, () => runProfileWorker()));
-      }
-
       throwIfCanceled();
       await Promise.all([fetchCastRoleMembers({ force: true }), fetchShowCastForBrand()]);
-
-      const castProfileSummary =
-        castProfilesTotal > 0
-          ? `cast profiles/media: ${castProfilesTotal - castProfilesFailed}/${castProfilesTotal}${
-              castProfilesFailed > 0 ? ` (${castProfilesFailed} failed)` : ""
-            }`
-          : null;
-      const finalNotice = [
-        "Refreshed season cast.",
-        completionSummary,
-        castProfileSummary,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      setCastRefreshNotice(
-        castProfilesTotal > 0
-          ? finalNotice
-          : completionSummary
-            ? `Refreshed season cast. ${completionSummary}`
-            : "Refreshed season cast."
-      );
+      const finalNotice = completionSummary
+        ? `Refreshed season cast. ${completionSummary}`
+        : "Refreshed season cast.";
+      setCastRefreshNotice(finalNotice);
       appendRefreshLog({
         scope: "cast",
         stage: "done",
         message: "Season cast refresh complete.",
-        response: [completionSummary, castProfileSummary].filter(Boolean).join(" · ") || null,
+        response: completionSummary,
         level: "success",
       });
     } catch (err) {
@@ -2855,14 +2665,560 @@ export default function SeasonDetailPage() {
     getAuthHeaders,
     showId,
     seasonNumber,
-    show?.name,
     fetchCastRoleMembers,
     fetchShowCastForBrand,
   ]);
 
+  const refreshSeasonPersonImages = useCallback(
+    async (
+      personId: string,
+      onProgress?: (progress: RefreshProgressState) => void,
+      options?: { signal?: AbortSignal }
+    ) => {
+      const headers = await getAuthHeaders();
+      const externalSignal = options?.signal;
+      if (externalSignal?.aborted) {
+        throw new Error("Season cast refresh canceled.");
+      }
+      const streamController = new AbortController();
+      const forwardExternalAbort = () => streamController.abort();
+      if (externalSignal) {
+        externalSignal.addEventListener("abort", forwardExternalAbort, { once: true });
+      }
+      const streamTimeout = setTimeout(
+        () => streamController.abort(),
+        SEASON_PERSON_STREAM_MAX_DURATION_MS
+      );
+      let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+      const bumpStreamIdleTimeout = () => {
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = setTimeout(
+          () => streamController.abort(),
+          SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS
+        );
+      };
+      const clearStreamIdleTimeout = () => {
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = null;
+      };
+
+      bumpStreamIdleTimeout();
+      try {
+        const streamResponse = await fetch(
+          `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              skip_mirror: false,
+              show_id: showId,
+              show_name: show?.name ?? undefined,
+            }),
+            signal: streamController.signal,
+          }
+        );
+
+        if (!streamResponse.ok || !streamResponse.body) {
+          throw new Error("Person refresh stream unavailable");
+        }
+
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let shouldStopReading = false;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bumpStreamIdleTimeout();
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, "\n");
+
+          let boundaryIndex = buffer.indexOf("\n\n");
+          while (boundaryIndex !== -1) {
+            const rawEvent = buffer.slice(0, boundaryIndex);
+            buffer = buffer.slice(boundaryIndex + 2);
+
+            const lines = rawEvent.split("\n").filter(Boolean);
+            let eventType = "message";
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            const dataStr = dataLines.join("\n");
+            let payload: Record<string, unknown> | string = dataStr;
+            try {
+              payload = JSON.parse(dataStr) as Record<string, unknown>;
+            } catch {
+              payload = dataStr;
+            }
+
+            if (eventType === "progress" && payload && typeof payload === "object") {
+              const stageLabel = resolveStageLabel(
+                (payload as { stage?: unknown; step?: unknown }).stage ??
+                  (payload as { stage?: unknown; step?: unknown }).step,
+                SEASON_REFRESH_STAGE_LABELS
+              );
+              onProgress?.({
+                stage: stageLabel,
+                message: buildProgressMessage(
+                  stageLabel,
+                  (payload as { message?: unknown }).message,
+                  "Refreshing cast member..."
+                ),
+                current: parseProgressNumber((payload as { current?: unknown }).current),
+                total: parseProgressNumber((payload as { total?: unknown }).total),
+              });
+            } else if (eventType === "complete") {
+              shouldStopReading = true;
+            } else if (eventType === "error") {
+              const errorPayload =
+                payload && typeof payload === "object"
+                  ? (payload as { error?: unknown; detail?: unknown })
+                  : null;
+              const errorText =
+                typeof errorPayload?.error === "string" && errorPayload.error
+                  ? errorPayload.error
+                  : "Failed to sync cast member profile/media";
+              const detailText =
+                typeof errorPayload?.detail === "string" && errorPayload.detail
+                  ? errorPayload.detail
+                  : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            }
+
+            if (shouldStopReading) {
+              break;
+            }
+            boundaryIndex = buffer.indexOf("\n\n");
+          }
+
+          if (shouldStopReading) {
+            break;
+          }
+        }
+      } catch (streamErr) {
+        if (isAbortError(streamErr) && externalSignal?.aborted) {
+          throw new Error("Season cast refresh canceled.");
+        }
+        if (isAbortError(streamErr)) {
+          throw new Error(
+            `Timed out syncing cast member profile/media after ${Math.round(
+              SEASON_PERSON_STREAM_MAX_DURATION_MS / 1000
+            )}s.`
+          );
+        }
+        throw streamErr;
+      } finally {
+        if (externalSignal) {
+          externalSignal.removeEventListener("abort", forwardExternalAbort);
+        }
+        clearStreamIdleTimeout();
+        clearTimeout(streamTimeout);
+      }
+    },
+    [getAuthHeaders, show?.name, showId]
+  );
+
+  const reprocessSeasonPersonImages = useCallback(
+    async (
+      personId: string,
+      onProgress?: (progress: RefreshProgressState) => void,
+      options?: { signal?: AbortSignal }
+    ) => {
+      const headers = await getAuthHeaders();
+      const externalSignal = options?.signal;
+      if (externalSignal?.aborted) {
+        throw new Error("Season cast media enrich canceled.");
+      }
+      const streamController = new AbortController();
+      const forwardExternalAbort = () => streamController.abort();
+      if (externalSignal) {
+        externalSignal.addEventListener("abort", forwardExternalAbort, { once: true });
+      }
+      const streamTimeout = setTimeout(
+        () => streamController.abort(),
+        SEASON_PERSON_STREAM_MAX_DURATION_MS
+      );
+      let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+      const bumpStreamIdleTimeout = () => {
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = setTimeout(
+          () => streamController.abort(),
+          SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS
+        );
+      };
+      const clearStreamIdleTimeout = () => {
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = null;
+      };
+
+      bumpStreamIdleTimeout();
+      try {
+        const streamResponse = await fetch(
+          `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            signal: streamController.signal,
+          }
+        );
+
+        if (!streamResponse.ok || !streamResponse.body) {
+          throw new Error("Person reprocess stream unavailable");
+        }
+
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let shouldStopReading = false;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bumpStreamIdleTimeout();
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, "\n");
+
+          let boundaryIndex = buffer.indexOf("\n\n");
+          while (boundaryIndex !== -1) {
+            const rawEvent = buffer.slice(0, boundaryIndex);
+            buffer = buffer.slice(boundaryIndex + 2);
+
+            const lines = rawEvent.split("\n").filter(Boolean);
+            let eventType = "message";
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            const dataStr = dataLines.join("\n");
+            let payload: Record<string, unknown> | string = dataStr;
+            try {
+              payload = JSON.parse(dataStr) as Record<string, unknown>;
+            } catch {
+              payload = dataStr;
+            }
+
+            if (eventType === "progress" && payload && typeof payload === "object") {
+              const stageLabel = resolveStageLabel(
+                (payload as { stage?: unknown; step?: unknown }).stage ??
+                  (payload as { stage?: unknown; step?: unknown }).step,
+                SEASON_REFRESH_STAGE_LABELS
+              );
+              onProgress?.({
+                stage: stageLabel,
+                message: buildProgressMessage(
+                  stageLabel,
+                  (payload as { message?: unknown }).message,
+                  "Enriching cast media..."
+                ),
+                current: parseProgressNumber((payload as { current?: unknown }).current),
+                total: parseProgressNumber((payload as { total?: unknown }).total),
+              });
+            } else if (eventType === "complete") {
+              shouldStopReading = true;
+            } else if (eventType === "error") {
+              const errorPayload =
+                payload && typeof payload === "object"
+                  ? (payload as { error?: unknown; detail?: unknown })
+                  : null;
+              const errorText =
+                typeof errorPayload?.error === "string" && errorPayload.error
+                  ? errorPayload.error
+                  : "Failed to enrich cast media";
+              const detailText =
+                typeof errorPayload?.detail === "string" && errorPayload.detail
+                  ? errorPayload.detail
+                  : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            }
+
+            if (shouldStopReading) {
+              break;
+            }
+            boundaryIndex = buffer.indexOf("\n\n");
+          }
+
+          if (shouldStopReading) {
+            break;
+          }
+        }
+      } catch (streamErr) {
+        if (isAbortError(streamErr) && externalSignal?.aborted) {
+          throw new Error("Season cast media enrich canceled.");
+        }
+        if (isAbortError(streamErr)) {
+          throw new Error(
+            `Timed out enriching cast media after ${Math.round(
+              SEASON_PERSON_STREAM_MAX_DURATION_MS / 1000
+            )}s.`
+          );
+        }
+        throw streamErr;
+      } finally {
+        if (externalSignal) {
+          externalSignal.removeEventListener("abort", forwardExternalAbort);
+        }
+        clearStreamIdleTimeout();
+        clearTimeout(streamTimeout);
+      }
+    },
+    [getAuthHeaders]
+  );
+
+  const runSeasonCastMediaEnrich = useCallback(
+    async (members: SeasonCastMember[], options?: { signal?: AbortSignal }) => {
+      const uniqueMembers = Array.from(
+        new Map(
+          members
+            .filter((member) => typeof member.person_id === "string" && member.person_id.trim())
+            .map((member) => [member.person_id, member] as const)
+        ).values()
+      );
+      const total = uniqueMembers.length;
+      if (total === 0) {
+        return { attempted: 0, succeeded: 0, failed: 0, failedMembers: [] as CastRunFailedMember[] };
+      }
+
+      let completed = 0;
+      let inFlight = 0;
+      let nextIndex = 0;
+      let succeeded = 0;
+      let failed = 0;
+      const failedMembers: CastRunFailedMember[] = [];
+      const throwIfCanceled = () => {
+        if (options?.signal?.aborted) {
+          throw new Error("Season cast media enrich canceled.");
+        }
+      };
+      const updateProgressMessage = (message: string) => {
+        setCastRefreshProgress({
+          stage: "Cast Media Enrich",
+          message,
+          current: completed,
+          total,
+        });
+      };
+
+      updateProgressMessage(`Enriching media: ${completed}/${total} complete (${inFlight} in flight).`);
+      const workerCount = Math.max(1, Math.min(SEASON_CAST_PROFILE_SYNC_CONCURRENCY, total));
+      appendRefreshLog({
+        scope: "cast_enrich",
+        stage: "start",
+        message: `Season cast media enrich started (${total} members).`,
+        level: "info",
+      });
+      const runWorker = async () => {
+        while (true) {
+          throwIfCanceled();
+          const memberIndex = nextIndex;
+          nextIndex += 1;
+          if (memberIndex >= total) return;
+          const member = uniqueMembers[memberIndex];
+          const label = member.person_name || `Cast member ${memberIndex + 1}`;
+          inFlight += 1;
+          updateProgressMessage(`Enriching media: ${completed}/${total} complete (${inFlight} in flight) — ${label}`);
+          try {
+            await reprocessSeasonPersonImages(
+              member.person_id,
+              (progress) => {
+                updateProgressMessage(
+                  progress.message
+                    ? `Enriching media: ${completed}/${total} complete (${inFlight} in flight) — ${label}: ${progress.message}`
+                    : `Enriching media: ${completed}/${total} complete (${inFlight} in flight) — ${label}`
+                );
+              },
+              { signal: options?.signal }
+            );
+            succeeded += 1;
+            appendRefreshLog({
+              scope: "cast_enrich",
+              stage: "member_complete",
+              message: `Enriched ${label}.`,
+              current: completed + 1,
+              total,
+              level: "success",
+            });
+          } catch (err) {
+            if (options?.signal?.aborted) {
+              throw new Error("Season cast media enrich canceled.");
+            }
+            failed += 1;
+            const reason = err instanceof Error ? err.message : "Failed to enrich cast media";
+            appendRefreshLog({
+              scope: "cast_enrich",
+              stage: "member_failed",
+              message: `Failed enriching ${label}.`,
+              detail: reason,
+              current: completed + 1,
+              total,
+              level: "error",
+            });
+            failedMembers.push({
+              personId: member.person_id,
+              name: label,
+              reason,
+            });
+          } finally {
+            completed += 1;
+            inFlight = Math.max(0, inFlight - 1);
+            updateProgressMessage(`Enriching media: ${completed}/${total} complete (${inFlight} in flight).`);
+          }
+        }
+      };
+
+      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+      appendRefreshLog({
+        scope: "cast_enrich",
+        stage: "done",
+        message: `Season cast media enrich complete (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`,
+        level: "success",
+      });
+      return { attempted: total, succeeded, failed, failedMembers };
+    },
+    [appendRefreshLog, reprocessSeasonPersonImages]
+  );
+
+  const enrichSeasonCastMedia = useCallback(async () => {
+    if (!showId) return;
+    if (refreshingCast || enrichingCast) return;
+    const runController = new AbortController();
+    castEnrichAbortControllerRef.current = runController;
+    setEnrichingCast(true);
+    setCastEnrichError(null);
+    setCastEnrichNotice(null);
+    setCastRunFailedMembers([]);
+    setCastFailedMembersOpen(false);
+    setCastRefreshLogOpen(true);
+
+    try {
+      const summary = await runSeasonCastMediaEnrich(cast, { signal: runController.signal });
+      await Promise.all([fetchCastRoleMembers({ force: true }), fetchShowCastForBrand()]);
+      setCastRunFailedMembers(summary.failedMembers);
+      setCastFailedMembersOpen(summary.failedMembers.length > 0);
+      setCastEnrichNotice(
+        summary.failed > 0
+          ? `Cast media enrich completed with issues (${summary.succeeded}/${summary.attempted} succeeded).`
+          : `Cast media enrich complete (${summary.succeeded}/${summary.attempted}).`
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to enrich season cast media";
+      if (runController.signal.aborted || /canceled/i.test(message)) {
+        setCastEnrichError(null);
+        setCastEnrichNotice("Season cast media enrich canceled.");
+      } else {
+        setCastEnrichError(message);
+      }
+    } finally {
+      if (castEnrichAbortControllerRef.current === runController) {
+        castEnrichAbortControllerRef.current = null;
+      }
+      setEnrichingCast(false);
+      setCastRefreshProgress(null);
+    }
+  }, [
+    cast,
+    enrichingCast,
+    fetchCastRoleMembers,
+    fetchShowCastForBrand,
+    refreshingCast,
+    runSeasonCastMediaEnrich,
+    showId,
+  ]);
+
+  const retryFailedSeasonCastMediaEnrich = useCallback(async () => {
+    if (castRunFailedMembers.length === 0) return;
+    const retryPersonIds = new Set(castRunFailedMembers.map((member) => member.personId));
+    const retryMembers = cast.filter((member) => retryPersonIds.has(member.person_id));
+    if (retryMembers.length === 0) return;
+    if (refreshingCast || enrichingCast) return;
+    const runController = new AbortController();
+    castEnrichAbortControllerRef.current = runController;
+    setEnrichingCast(true);
+    setCastEnrichError(null);
+    setCastEnrichNotice(null);
+
+    try {
+      const summary = await runSeasonCastMediaEnrich(retryMembers, { signal: runController.signal });
+      setCastRunFailedMembers(summary.failedMembers);
+      setCastFailedMembersOpen(summary.failedMembers.length > 0);
+      setCastEnrichNotice(
+        summary.failed > 0
+          ? `Retried failed members; ${summary.succeeded}/${summary.attempted} succeeded.`
+          : "Retried failed members successfully."
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to retry failed cast members";
+      if (runController.signal.aborted || /canceled/i.test(message)) {
+        setCastEnrichError(null);
+        setCastEnrichNotice("Season cast media enrich canceled.");
+      } else {
+        setCastEnrichError(message);
+      }
+    } finally {
+      if (castEnrichAbortControllerRef.current === runController) {
+        castEnrichAbortControllerRef.current = null;
+      }
+      setEnrichingCast(false);
+      setCastRefreshProgress(null);
+    }
+  }, [cast, castRunFailedMembers, enrichingCast, refreshingCast, runSeasonCastMediaEnrich]);
+
   const cancelSeasonCastRefresh = useCallback(() => {
     castRefreshAbortControllerRef.current?.abort();
+    castEnrichAbortControllerRef.current?.abort();
   }, []);
+
+  const handleRefreshSeasonCastMember = useCallback(
+    async (personId: string, label: string) => {
+      if (!personId) return;
+      if (refreshingCast || enrichingCast) return;
+      setRefreshingPersonIds((prev) => ({ ...prev, [personId]: true }));
+      setRefreshingPersonProgress((prev) => ({
+        ...prev,
+        [personId]: {
+          stage: "Initializing",
+          message: `Refreshing cast media for ${label}...`,
+          current: 0,
+          total: null,
+        },
+      }));
+      setCastRefreshError(null);
+      setCastRefreshNotice(null);
+      try {
+        await refreshSeasonPersonImages(personId, (progress) => {
+          setRefreshingPersonProgress((prev) => ({
+            ...prev,
+            [personId]: progress,
+          }));
+        });
+        setCastRefreshNotice(`Refreshed person for ${label}.`);
+      } catch (err) {
+        setCastRefreshError(err instanceof Error ? err.message : "Failed to refresh cast member");
+      } finally {
+        setRefreshingPersonIds((prev) => {
+          const next = { ...prev };
+          delete next[personId];
+          return next;
+        });
+        setRefreshingPersonProgress((prev) => {
+          const next = { ...prev };
+          delete next[personId];
+          return next;
+        });
+      }
+    },
+    [enrichingCast, refreshingCast, refreshSeasonPersonImages]
+  );
 
   const openAddBackdrops = useCallback(async () => {
     if (!season?.id) return;
@@ -3506,6 +3862,13 @@ export default function SeasonDetailPage() {
 
   const castDisplayMembers = useMemo(() => {
     const filtered = castMergedMembers.filter((member) => {
+      const normalizedSearch = castSearchQuery.trim().toLowerCase();
+      if (normalizedSearch.length > 0) {
+        const name = (member.person_name || "").toLowerCase();
+        if (!name.includes(normalizedSearch)) {
+          return false;
+        }
+      }
       if (
         castRoleFilters.length > 0 &&
         !member.roles.some((role) =>
@@ -3549,6 +3912,7 @@ export default function SeasonDetailPage() {
     castCreditFilters,
     castHasImageFilter,
     castRoleFilters,
+    castSearchQuery,
     castSortBy,
     castSortOrder,
   ]);
@@ -3583,6 +3947,75 @@ export default function SeasonDetailPage() {
     () => castDisplayMembers.filter((member) => isCrewCreditCategory(member.credit_category)),
     [castDisplayMembers]
   );
+  const visibleCastSeasonMembers = useMemo(
+    () => castSeasonMembers.slice(0, castRenderLimit),
+    [castRenderLimit, castSeasonMembers]
+  );
+  const visibleCrewSeasonMembers = useMemo(
+    () => crewSeasonMembers.slice(0, crewRenderLimit),
+    [crewRenderLimit, crewSeasonMembers]
+  );
+  const castRenderProgressLabel = useMemo(() => {
+    const rendered =
+      Math.min(castRenderLimit, castSeasonMembers.length) +
+      Math.min(crewRenderLimit, crewSeasonMembers.length);
+    const total = castSeasonMembers.length + crewSeasonMembers.length;
+    if (total === 0 || rendered >= total) return null;
+    return `Rendering ${rendered.toLocaleString()}/${total.toLocaleString()}`;
+  }, [castRenderLimit, castSeasonMembers.length, crewRenderLimit, crewSeasonMembers.length]);
+  const castRoleMembersWarningWithSnapshotAge = withSnapshotAgeSuffix(
+    castRoleMembersWarning,
+    lastSuccessfulCastRoleMembersAt
+  );
+
+  useEffect(() => {
+    setCastRenderLimit(SEASON_CAST_INCREMENTAL_INITIAL_LIMIT);
+    setCrewRenderLimit(SEASON_CAST_INCREMENTAL_INITIAL_LIMIT);
+  }, [castCreditFilters, castHasImageFilter, castRoleFilters, castSearchQuery, castSortBy, castSortOrder]);
+
+  useEffect(() => {
+    if (activeTab !== "cast") return;
+    if (castRenderLimit >= castSeasonMembers.length && crewRenderLimit >= crewSeasonMembers.length) {
+      return;
+    }
+    const schedule = () => {
+      castIncrementalTimeoutRef.current = setTimeout(() => {
+        setCastRenderLimit((prev) =>
+          prev >= castSeasonMembers.length
+            ? prev
+            : Math.min(prev + SEASON_CAST_INCREMENTAL_BATCH_SIZE, castSeasonMembers.length)
+        );
+        setCrewRenderLimit((prev) =>
+          prev >= crewSeasonMembers.length
+            ? prev
+            : Math.min(prev + SEASON_CAST_INCREMENTAL_BATCH_SIZE, crewSeasonMembers.length)
+        );
+      }, 0);
+    };
+    if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(() => schedule());
+      return () => {
+        window.cancelIdleCallback(idleId);
+        if (castIncrementalTimeoutRef.current) {
+          clearTimeout(castIncrementalTimeoutRef.current);
+          castIncrementalTimeoutRef.current = null;
+        }
+      };
+    }
+    schedule();
+    return () => {
+      if (castIncrementalTimeoutRef.current) {
+        clearTimeout(castIncrementalTimeoutRef.current);
+        castIncrementalTimeoutRef.current = null;
+      }
+    };
+  }, [
+    activeTab,
+    castRenderLimit,
+    castSeasonMembers.length,
+    crewRenderLimit,
+    crewSeasonMembers.length,
+  ]);
 
   const formatEpisodesLabel = (count: number) => {
     const normalized = Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
@@ -3785,7 +4218,7 @@ export default function SeasonDetailPage() {
     );
   }
 
-  if (error || !show || !season) {
+  if (!show || !season) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
         <div className="text-center">
@@ -3819,7 +4252,9 @@ export default function SeasonDetailPage() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <AdminBreadcrumbs
-                  items={buildSeasonBreadcrumb(show.name, season.season_number)}
+                  items={buildSeasonBreadcrumb(show.name, season.season_number, {
+                    showHref: buildShowAdminUrl({ showSlug: showSlugForRouting }),
+                  })}
                   className="mb-1"
                 />
                 <h1 className="text-3xl font-bold text-zinc-900">
@@ -4046,9 +4481,13 @@ export default function SeasonDetailPage() {
                             <td className="px-3 py-2 text-zinc-700">
                               E{row.episodeNumber} {row.title ? `· ${row.title}` : ""}
                             </td>
-                            {[row.hasStill, row.hasDescription, row.hasAirDate, row.hasRuntime].map(
-                              (ok, idx) => (
-                                <td key={`${row.episodeId}-${idx}`} className="px-3 py-2">
+                            {[
+                              { key: "still", ok: row.hasStill },
+                              { key: "description", ok: row.hasDescription },
+                              { key: "air-date", ok: row.hasAirDate },
+                              { key: "runtime", ok: row.hasRuntime },
+                            ].map(({ key, ok }) => (
+                                <td key={`${row.episodeId}-${key}`} className="px-3 py-2">
                                   <span
                                     className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${
                                       ok
@@ -4059,8 +4498,7 @@ export default function SeasonDetailPage() {
                                     {ok ? "Ready" : "Missing"}
                                   </span>
                                 </td>
-                              )
-                            )}
+                              ))}
                           </tr>
                         ))}
                       </tbody>
@@ -4328,7 +4766,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-3 gap-4">
                       {mediaSections.backdrops.map((asset, i, arr) => (
                           <button
-                            key={`${asset.id}-${i}`}
+                            key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
@@ -4352,7 +4790,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-4 gap-4">
                       {mediaSections.posters.map((asset, i, arr) => (
                           <button
-                            key={`${asset.id}-${i}`}
+                            key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
@@ -4375,7 +4813,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-6 gap-3">
                       {mediaSections.episode_stills.map((asset, i, arr) => (
                           <button
-                            key={`${asset.id}-${i}`}
+                            key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-video overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
@@ -4398,7 +4836,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.profile_pictures.map((asset, i, arr) => (
                           <button
-                            key={`${asset.id}-${i}`}
+                            key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
@@ -4426,7 +4864,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.cast_photos.map((asset, i, arr) => (
                           <button
-                            key={`${asset.id}-${i}`}
+                            key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
@@ -4454,7 +4892,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.confessionals.map((asset, i, arr) => (
                         <button
-                          key={`${asset.id}-${i}`}
+                          key={asset.id}
                           onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                           className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
@@ -4482,7 +4920,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.reunion.map((asset, i, arr) => (
                         <button
-                          key={`${asset.id}-${i}`}
+                          key={asset.id}
                           onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                           className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
@@ -4505,7 +4943,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.intro_card.map((asset, i, arr) => (
                         <button
-                          key={`${asset.id}-${i}`}
+                          key={asset.id}
                           onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                           className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
@@ -4528,7 +4966,7 @@ export default function SeasonDetailPage() {
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.other.map((asset, i, arr) => (
                         <button
-                          key={`${asset.id}-${i}`}
+                          key={asset.id}
                           onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                           className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
@@ -4621,8 +5059,8 @@ export default function SeasonDetailPage() {
               )}
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {bravoVideos.map((video, index) => (
-                  <article key={`${video.clip_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                {bravoVideos.map((video) => (
+                  <article key={`${video.clip_url}-${video.published_at ?? "unknown"}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
                     <a href={video.clip_url} target="_blank" rel="noopener noreferrer" className="group block">
                       <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
                         {video.image_url ? (
@@ -4746,12 +5184,20 @@ export default function SeasonDetailPage() {
                   <button
                     type="button"
                     onClick={refreshSeasonCast}
-                    disabled={refreshingCast}
+                    disabled={refreshingCast || enrichingCast}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {refreshingCast ? "Refreshing..." : "Refresh"}
+                    {refreshingCast ? "Syncing..." : "Sync Cast"}
                   </button>
-                  {refreshingCast && (
+                  <button
+                    type="button"
+                    onClick={enrichSeasonCastMedia}
+                    disabled={refreshingCast || enrichingCast}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {enrichingCast ? "Enriching..." : "Enrich Media"}
+                  </button>
+                  {(refreshingCast || enrichingCast) && (
                     <button
                       type="button"
                       onClick={cancelSeasonCastRefresh}
@@ -4767,6 +5213,11 @@ export default function SeasonDetailPage() {
                   {castRefreshError || castRefreshNotice}
                 </p>
               )}
+              {(castEnrichNotice || castEnrichError) && (
+                <p className={`mb-4 text-sm ${castEnrichError ? "text-red-600" : "text-zinc-500"}`}>
+                  {castEnrichError || castEnrichNotice}
+                </p>
+              )}
               {showFallbackCastWarning && (
                 <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   Season cast evidence is still syncing. Showing show-level cast fallback until
@@ -4774,23 +5225,61 @@ export default function SeasonDetailPage() {
                 </div>
               )}
               <RefreshProgressBar
-                show={refreshingCast}
+                show={refreshingCast || enrichingCast}
                 stage={castRefreshProgress?.stage}
                 message={castRefreshProgress?.message}
                 current={castRefreshProgress?.current}
                 total={castRefreshProgress?.total}
               />
+              {castRunFailedMembers.length > 0 && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-amber-900">
+                      Failed Members ({castRunFailedMembers.length})
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCastFailedMembersOpen((prev) => !prev)}
+                        className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                      >
+                        {castFailedMembersOpen ? "Hide" : "Show"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void retryFailedSeasonCastMediaEnrich()}
+                        disabled={refreshingCast || enrichingCast}
+                        className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        Retry failed only
+                      </button>
+                    </div>
+                  </div>
+                  {castFailedMembersOpen && (
+                    <ul className="mt-3 space-y-2 text-xs text-amber-900">
+                      {castRunFailedMembers.map((member) => (
+                        <li
+                          key={`${member.personId}-${member.name}-${member.reason}`}
+                          className="rounded-md border border-amber-200 bg-white px-2 py-1"
+                        >
+                          <span className="font-semibold">{member.name}</span>: {member.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               <RefreshActivityLog
                 title="Refresh Activity"
                 entries={refreshLogEntries}
-                scopes={["cast"]}
+                scopes={["cast", "cast_enrich"]}
                 open={castRefreshLogOpen}
                 onToggle={() => setCastRefreshLogOpen((prev) => !prev)}
               />
 
-              {castRoleMembersWarning && (
+              {castRoleMembersWarningWithSnapshotAge && (
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  <span>{castRoleMembersWarning}</span>
+                  <span>{castRoleMembersWarningWithSnapshotAge}</span>
                   <button
                     type="button"
                     onClick={() => void fetchCastRoleMembers({ force: true })}
@@ -4813,7 +5302,13 @@ export default function SeasonDetailPage() {
                 </div>
               )}
               {trrShowCastError && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                <div
+                  className={`mb-4 flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm ${
+                    castRoleMembersLoadedOnce
+                      ? "border border-amber-300 bg-amber-50 text-amber-900"
+                      : "border border-rose-200 bg-rose-50 text-rose-700"
+                  }`}
+                >
                   <span>{trrShowCastError}</span>
                   <button
                     type="button"
@@ -4821,7 +5316,11 @@ export default function SeasonDetailPage() {
                       showCastFetchAttemptedRef.current = false;
                       void fetchShowCastForBrand();
                     }}
-                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                    className={`rounded-full bg-white px-3 py-1 text-xs font-semibold transition ${
+                      castRoleMembersLoadedOnce
+                        ? "border border-amber-400 text-amber-900 hover:bg-amber-100"
+                        : "border border-rose-300 text-rose-700 hover:bg-rose-100"
+                    }`}
                   >
                     Retry
                   </button>
@@ -4829,7 +5328,16 @@ export default function SeasonDetailPage() {
               )}
 
               <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                <div className="grid gap-3 md:grid-cols-4">
+                <div className="grid gap-3 md:grid-cols-5">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 md:col-span-2">
+                    Search Name
+                    <input
+                      value={castSearchQuery}
+                      onChange={(event) => setCastSearchQuery(event.target.value)}
+                      placeholder="Search cast or crew..."
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    />
+                  </label>
                   <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                     Sort By
                     <select
@@ -4877,6 +5385,7 @@ export default function SeasonDetailPage() {
                       setCastRoleFilters([]);
                       setCastCreditFilters([]);
                       setCastHasImageFilter("all");
+                      setCastSearchQuery("");
                     }}
                     className="self-end rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
                   >
@@ -4955,8 +5464,14 @@ export default function SeasonDetailPage() {
                 </div>
               </div>
 
-              {(castRoleMembersLoading || trrShowCastLoading) && (
-                <p className="mb-4 text-sm text-zinc-500">Refreshing cast intelligence...</p>
+              {castRoleMembersLoading && (
+                <p className="mb-2 text-sm text-zinc-500">Loading cast intelligence...</p>
+              )}
+              {trrShowCastLoading && (
+                <p className="mb-4 text-sm text-zinc-500">Loading supplemental show cast data...</p>
+              )}
+              {castRenderProgressLabel && (
+                <p className="mb-3 text-xs text-zinc-500">{castRenderProgressLabel}</p>
               )}
 
               <div className="space-y-8">
@@ -4968,64 +5483,109 @@ export default function SeasonDetailPage() {
                     <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {castSeasonMembers.map((member) => (
-                        <Link
+                      {visibleCastSeasonMembers.map((member) => (
+                        <div
                           key={member.person_id}
-                          href={buildPersonAdminUrl({
-                            showSlug: showSlugForRouting,
-                            personSlug: buildPersonRouteSlug({
-                              personName: member.person_name,
-                              personId: member.person_id,
-                            }),
-                            tab: "overview",
-                            query: new URLSearchParams({
-                              seasonNumber: String(seasonNumber),
-                            }),
-                          }) as Route}
                           className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                         >
-                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                            {member.merged_photo_url ? (
-                              <CastPhoto
-                                src={member.merged_photo_url}
-                                alt={member.person_name || "Cast"}
-                                thumbnail_focus_x={member.thumbnail_focus_x}
-                                thumbnail_focus_y={member.thumbnail_focus_y}
-                                thumbnail_zoom={member.thumbnail_zoom}
-                                thumbnail_crop_mode={member.thumbnail_crop_mode}
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-zinc-400">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                </svg>
+                          <Link
+                            href={buildPersonAdminUrl({
+                              showSlug: showSlugForRouting,
+                              personSlug: buildPersonRouteSlug({
+                                personName: member.person_name,
+                                personId: member.person_id,
+                              }),
+                              tab: "overview",
+                              query: new URLSearchParams({
+                                seasonNumber: String(seasonNumber),
+                              }),
+                            }) as Route}
+                            className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+                          >
+                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                              {member.merged_photo_url ? (
+                                <CastPhoto
+                                  src={member.merged_photo_url}
+                                  alt={member.person_name || "Cast"}
+                                  thumbnail_focus_x={member.thumbnail_focus_x}
+                                  thumbnail_focus_y={member.thumbnail_focus_y}
+                                  thumbnail_zoom={member.thumbnail_zoom}
+                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
+                                />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-zinc-400">
+                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
+                            <p className="text-sm text-zinc-600">
+                              {formatEpisodesLabel(member.episodes_in_season)}
+                            </p>
+                            <p className="text-xs text-zinc-500">
+                              Role: {member.roles.length > 0 ? member.roles.join(", ") : "Unspecified for season"}
+                            </p>
+                            {member.latest_season && (
+                              <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
+                            )}
+                            {member.roles.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {member.roles.map((role) => (
+                                  <span
+                                    key={`${member.person_id}-season-role-${role}`}
+                                    className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                  >
+                                    {role}
+                                  </span>
+                                ))}
                               </div>
                             )}
-                          </div>
-                          <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
-                          <p className="text-sm text-zinc-600">
-                            {formatEpisodesLabel(member.episodes_in_season)}
-                          </p>
-                          <p className="text-xs text-zinc-500">
-                            Role: {member.roles.length > 0 ? member.roles.join(", ") : "Unspecified for season"}
-                          </p>
-                          {member.latest_season && (
-                            <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
-                          )}
-                          {member.roles.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {member.roles.map((role) => (
-                                <span
-                                  key={`${member.person_id}-season-role-${role}`}
-                                  className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                >
-                                  {role}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </Link>
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleRefreshSeasonCastMember(
+                                member.person_id,
+                                member.person_name || "Cast member"
+                              )
+                            }
+                            disabled={refreshingCast || enrichingCast || Boolean(refreshingPersonIds[member.person_id])}
+                            title={refreshingCast || enrichingCast ? "Cast sync in progress" : undefined}
+                            className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                          >
+                            {refreshingPersonIds[member.person_id] ? "Refreshing..." : "Refresh Person"}
+                          </button>
+                          <Link
+                            href={
+                              buildShowAdminUrl({
+                                showSlug: showSlugForRouting,
+                                tab: "cast",
+                                query: (() => {
+                                  const nextQuery = new URLSearchParams(searchParams.toString());
+                                  nextQuery.set("cast_person", member.person_id);
+                                  nextQuery.set("cast_open_role_editor", "1");
+                                  return nextQuery;
+                                })(),
+                              }) as Route
+                            }
+                            className={`mt-2 block w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-center text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 ${
+                              refreshingCast || enrichingCast ? "pointer-events-none opacity-50" : ""
+                            }`}
+                            title={refreshingCast || enrichingCast ? "Cast sync in progress" : undefined}
+                          >
+                            Edit Roles
+                          </Link>
+                          <RefreshProgressBar
+                            show={Boolean(refreshingPersonIds[member.person_id])}
+                            stage={refreshingPersonProgress[member.person_id]?.stage}
+                            message={refreshingPersonProgress[member.person_id]?.message}
+                            current={refreshingPersonProgress[member.person_id]?.current}
+                            total={refreshingPersonProgress[member.person_id]?.total}
+                          />
+                        </div>
                       ))}
                     </div>
                   )}
@@ -5037,64 +5597,109 @@ export default function SeasonDetailPage() {
                       Crew
                     </p>
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {crewSeasonMembers.map((member) => (
-                        <Link
+                      {visibleCrewSeasonMembers.map((member) => (
+                        <div
                           key={`crew-${member.person_id}`}
-                          href={buildPersonAdminUrl({
-                            showSlug: showSlugForRouting,
-                            personSlug: buildPersonRouteSlug({
-                              personName: member.person_name,
-                              personId: member.person_id,
-                            }),
-                            tab: "overview",
-                            query: new URLSearchParams({
-                              seasonNumber: String(seasonNumber),
-                            }),
-                          }) as Route}
                           className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
                         >
-                          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                            {member.merged_photo_url ? (
-                              <CastPhoto
-                                src={member.merged_photo_url}
-                                alt={member.person_name || "Crew"}
-                                thumbnail_focus_x={member.thumbnail_focus_x}
-                                thumbnail_focus_y={member.thumbnail_focus_y}
-                                thumbnail_zoom={member.thumbnail_zoom}
-                                thumbnail_crop_mode={member.thumbnail_crop_mode}
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-zinc-400">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                </svg>
+                          <Link
+                            href={buildPersonAdminUrl({
+                              showSlug: showSlugForRouting,
+                              personSlug: buildPersonRouteSlug({
+                                personName: member.person_name,
+                                personId: member.person_id,
+                              }),
+                              tab: "overview",
+                              query: new URLSearchParams({
+                                seasonNumber: String(seasonNumber),
+                              }),
+                            }) as Route}
+                            className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                          >
+                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                              {member.merged_photo_url ? (
+                                <CastPhoto
+                                  src={member.merged_photo_url}
+                                  alt={member.person_name || "Crew"}
+                                  thumbnail_focus_x={member.thumbnail_focus_x}
+                                  thumbnail_focus_y={member.thumbnail_focus_y}
+                                  thumbnail_zoom={member.thumbnail_zoom}
+                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
+                                />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-zinc-400">
+                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
+                            {member.credit_category && (
+                              <p className="text-sm text-blue-700">{member.credit_category}</p>
+                            )}
+                            <p className="text-xs text-zinc-600">
+                              {formatEpisodesLabel(member.episodes_in_season)}
+                            </p>
+                            <p className="text-xs text-zinc-500">
+                              Role: {member.roles.length > 0 ? member.roles.join(", ") : "Unspecified for season"}
+                            </p>
+                            {member.roles.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {member.roles.map((role) => (
+                                  <span
+                                    key={`${member.person_id}-season-crew-role-${role}`}
+                                    className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700"
+                                  >
+                                    {role}
+                                  </span>
+                                ))}
                               </div>
                             )}
-                          </div>
-                          <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
-                          {member.credit_category && (
-                            <p className="text-sm text-blue-700">{member.credit_category}</p>
-                          )}
-                          <p className="text-xs text-zinc-600">
-                            {formatEpisodesLabel(member.episodes_in_season)}
-                          </p>
-                          <p className="text-xs text-zinc-500">
-                            Role: {member.roles.length > 0 ? member.roles.join(", ") : "Unspecified for season"}
-                          </p>
-                          {member.roles.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {member.roles.map((role) => (
-                                <span
-                                  key={`${member.person_id}-season-crew-role-${role}`}
-                                  className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700"
-                                >
-                                  {role}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </Link>
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleRefreshSeasonCastMember(
+                                member.person_id,
+                                member.person_name || "Crew member"
+                              )
+                            }
+                            disabled={refreshingCast || enrichingCast || Boolean(refreshingPersonIds[member.person_id])}
+                            title={refreshingCast || enrichingCast ? "Cast sync in progress" : undefined}
+                            className="mt-3 w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50"
+                          >
+                            {refreshingPersonIds[member.person_id] ? "Refreshing..." : "Refresh Person"}
+                          </button>
+                          <Link
+                            href={
+                              buildShowAdminUrl({
+                                showSlug: showSlugForRouting,
+                                tab: "cast",
+                                query: (() => {
+                                  const nextQuery = new URLSearchParams(searchParams.toString());
+                                  nextQuery.set("cast_person", member.person_id);
+                                  nextQuery.set("cast_open_role_editor", "1");
+                                  return nextQuery;
+                                })(),
+                              }) as Route
+                            }
+                            className={`mt-2 block w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-center text-xs font-semibold text-blue-700 transition hover:bg-blue-50 ${
+                              refreshingCast || enrichingCast ? "pointer-events-none opacity-50" : ""
+                            }`}
+                            title={refreshingCast || enrichingCast ? "Cast sync in progress" : undefined}
+                          >
+                            Edit Roles
+                          </Link>
+                          <RefreshProgressBar
+                            show={Boolean(refreshingPersonIds[member.person_id])}
+                            stage={refreshingPersonProgress[member.person_id]?.stage}
+                            message={refreshingPersonProgress[member.person_id]?.message}
+                            current={refreshingPersonProgress[member.person_id]?.current}
+                            total={refreshingPersonProgress[member.person_id]?.total}
+                          />
+                        </div>
                       ))}
                     </div>
                   </section>
@@ -5197,7 +5802,7 @@ export default function SeasonDetailPage() {
           )}
 
           {activeTab === "surveys" && (
-            <SurveysSection
+            <SeasonSurveysTab
               showId={showId}
               showName={show.name}
               totalSeasons={showSeasons.length > 0 ? showSeasons.length : null}
@@ -5224,62 +5829,7 @@ export default function SeasonDetailPage() {
           )}
 
           {activeTab === "overview" && (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Overview
-                  </p>
-                  <h3 className="text-xl font-bold text-zinc-900">
-                    {show.name} · Season {season.season_number}
-                  </h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  {show.tmdb_id && (
-                    <TmdbLinkIcon
-                      showTmdbId={show.tmdb_id}
-                      seasonNumber={season.season_number}
-                      type="season"
-                    />
-                  )}
-                  {show.imdb_id && <ImdbLinkIcon imdbId={show.imdb_id} type="title" />}
-                </div>
-              </div>
-
-              <div className="grid gap-6 lg:grid-cols-2">
-                <div className="space-y-3 text-sm">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-zinc-500">TRR Show ID:</span>
-                    <code className="rounded bg-zinc-100 px-2 py-0.5 text-xs">{showId}</code>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-zinc-500">TRR Season ID:</span>
-                    <code className="rounded bg-zinc-100 px-2 py-0.5 text-xs">{season.id}</code>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-zinc-500">Season Number:</span>
-                    <span className="font-semibold text-zinc-900">{season.season_number}</span>
-                  </div>
-                  {season.air_date && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-zinc-500">First Air Date:</span>
-                      <span className="text-zinc-900">
-                        {new Date(season.air_date).toLocaleDateString()}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <ExternalLinks
-                    externalIds={null}
-                    tmdbId={show.tmdb_id}
-                    imdbId={show.imdb_id}
-                    type="show"
-                  />
-                </div>
-              </div>
-            </div>
+            <SeasonOverviewTab show={show} season={season} showId={showId} />
           )}
         </main>
 
@@ -5362,10 +5912,14 @@ export default function SeasonDetailPage() {
               updateGalleryAssetContentType(assetLightbox.asset, contentType)
             }
             onDelete={async () => {
+              setAssetsRefreshError(null);
+              setAssetsRefreshNotice(null);
               try {
                 await deleteMediaAsset(assetLightbox.asset);
               } catch (err) {
-                alert(err instanceof Error ? err.message : "Failed to delete image");
+                setAssetsRefreshError(
+                  err instanceof Error ? err.message : "Failed to delete image"
+                );
               }
             }}
             position={{
@@ -5380,106 +5934,101 @@ export default function SeasonDetailPage() {
           />
         )}
 
-        {batchJobsOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"
-            onClick={() => {
-              if (!batchJobsRunning) setBatchJobsOpen(false);
-            }}
-          >
-            <div
-              className="w-full max-w-2xl rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl"
-              onClick={(event) => event.stopPropagation()}
+        <AdminModal
+          isOpen={batchJobsOpen}
+          onClose={() => setBatchJobsOpen(false)}
+          disableClose={batchJobsRunning}
+          closeLabel="Close batch jobs dialog"
+          ariaLabel="Run Image Jobs"
+          panelClassName="max-w-2xl p-5"
+        >
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                Batch Jobs
+              </p>
+              <h4 className="text-lg font-semibold text-zinc-900">Run Image Jobs</h4>
+              <p className="mt-1 text-xs text-zinc-500">
+                Select one or more operations and content types. Jobs run on currently loaded assets.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!batchJobsRunning) setBatchJobsOpen(false);
+              }}
+              className="rounded-lg border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
+              disabled={batchJobsRunning}
             >
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Batch Jobs
-                  </p>
-                  <h4 className="text-lg font-semibold text-zinc-900">Run Image Jobs</h4>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Select one or more operations and content types. Jobs run on currently loaded assets.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!batchJobsRunning) setBatchJobsOpen(false);
-                  }}
-                  className="rounded-lg border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
-                  disabled={batchJobsRunning}
-                >
-                  Close
-                </button>
+              Close
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                Operations
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {(Object.keys(BATCH_JOB_OPERATION_LABELS) as BatchJobOperation[]).map((operation) => (
+                  <label
+                    key={operation}
+                    className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={batchJobOperations.includes(operation)}
+                      onChange={() => toggleBatchJobOperation(operation)}
+                      disabled={batchJobsRunning}
+                    />
+                    {BATCH_JOB_OPERATION_LABELS[operation]}
+                  </label>
+                ))}
               </div>
+            </div>
 
-              <div className="space-y-4">
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Operations
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {(Object.keys(BATCH_JOB_OPERATION_LABELS) as BatchJobOperation[]).map((operation) => (
-                      <label
-                        key={operation}
-                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={batchJobOperations.includes(operation)}
-                          onChange={() => toggleBatchJobOperation(operation)}
-                          disabled={batchJobsRunning}
-                        />
-                        {BATCH_JOB_OPERATION_LABELS[operation]}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Content Types
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {ASSET_SECTION_ORDER.map((section) => (
-                      <label
-                        key={section}
-                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={batchJobContentSections.includes(section)}
-                          onChange={() => toggleBatchJobContentSection(section)}
-                          disabled={batchJobsRunning}
-                        />
-                        {ASSET_SECTION_LABELS[section]}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBatchJobsOpen(false)}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                  disabled={batchJobsRunning}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={runBatchJobs}
-                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                  disabled={batchJobsRunning}
-                >
-                  {batchJobsRunning ? "Running..." : "Run Batch Jobs"}
-                </button>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                Content Types
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {ASSET_SECTION_ORDER.map((section) => (
+                  <label
+                    key={section}
+                    className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={batchJobContentSections.includes(section)}
+                      onChange={() => toggleBatchJobContentSection(section)}
+                      disabled={batchJobsRunning}
+                    />
+                    {ASSET_SECTION_LABELS[section]}
+                  </label>
+                ))}
               </div>
             </div>
           </div>
-        )}
+
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setBatchJobsOpen(false)}
+              className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+              disabled={batchJobsRunning}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={runBatchJobs}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+              disabled={batchJobsRunning}
+            >
+              {batchJobsRunning ? "Running..." : "Run Batch Jobs"}
+            </button>
+          </div>
+        </AdminModal>
 
         <ImageScrapeDrawer
           isOpen={scrapeDrawerOpen}
@@ -5526,121 +6075,118 @@ export default function SeasonDetailPage() {
         />
 
         {/* Add Backdrops drawer */}
-        {addBackdropsOpen && (
-          <>
-            <div
-              className="fixed inset-0 z-40 bg-black/50"
-              onClick={assigningBackdrops ? undefined : () => setAddBackdropsOpen(false)}
-            />
-            <div
-              className="fixed inset-y-0 right-0 z-50 w-full max-w-3xl overflow-y-auto bg-white shadow-xl"
-              role="dialog"
-              aria-modal="true"
-            >
-              <div className="sticky top-0 z-10 border-b border-zinc-200 bg-white px-6 py-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                      Backdrops
-                    </p>
-                    <h3 className="text-lg font-bold text-zinc-900">
-                      Assign TMDb Backdrops
-                    </h3>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {selectedBackdropIds.size} selected
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setAddBackdropsOpen(false)}
-                      disabled={assigningBackdrops}
-                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                    >
-                      Close
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const all = new Set(unassignedBackdrops.map((b) => b.media_asset_id));
-                        if (selectedBackdropIds.size === all.size) {
-                          setSelectedBackdropIds(new Set());
-                        } else {
-                          setSelectedBackdropIds(all);
-                        }
-                      }}
-                      disabled={backdropsLoading || unassignedBackdrops.length === 0 || assigningBackdrops}
-                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                    >
-                      {selectedBackdropIds.size === unassignedBackdrops.length
-                        ? "Deselect All"
-                        : "Select All"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={assignSelectedBackdrops}
-                      disabled={assigningBackdrops || selectedBackdropIds.size === 0}
-                      className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                    >
-                      {assigningBackdrops
-                        ? "Assigning..."
-                        : `Assign ${selectedBackdropIds.size}`}
-                    </button>
-                  </div>
-                </div>
-                {backdropsError && (
-                  <p className="mt-3 text-sm text-red-600">{backdropsError}</p>
-                )}
+        <AdminModal
+          isOpen={addBackdropsOpen}
+          onClose={() => setAddBackdropsOpen(false)}
+          disableClose={assigningBackdrops}
+          closeLabel="Close add backdrops dialog"
+          ariaLabel="Assign TMDb Backdrops"
+          containerClassName="items-stretch justify-end p-0"
+          backdropClassName="bg-black/50"
+          panelClassName="h-full max-w-3xl overflow-y-auto rounded-none border-l border-zinc-200 p-0"
+        >
+          <div className="sticky top-0 z-10 border-b border-zinc-200 bg-white px-6 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                  Backdrops
+                </p>
+                <h3 className="text-lg font-bold text-zinc-900">
+                  Assign TMDb Backdrops
+                </h3>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {selectedBackdropIds.size} selected
+                </p>
               </div>
-
-              <div className="p-6">
-                {backdropsLoading ? (
-                  <div className="flex items-center justify-center py-16">
-                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-zinc-900" />
-                  </div>
-                ) : unassignedBackdrops.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No unassigned TMDb backdrops found.</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                    {unassignedBackdrops.map((b) => {
-                      const selected = selectedBackdropIds.has(b.media_asset_id);
-                      return (
-                        <button
-                          key={b.media_asset_id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedBackdropIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(b.media_asset_id)) next.delete(b.media_asset_id);
-                              else next.add(b.media_asset_id);
-                              return next;
-                            });
-                          }}
-                          className={`relative aspect-[16/9] overflow-hidden rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                            selected ? "border-zinc-900" : "border-zinc-200"
-                          }`}
-                        >
-                          <GalleryImage
-                            src={b.display_url ?? b.hosted_url ?? b.source_url ?? ""}
-                            alt={b.caption || "Backdrop"}
-                            sizes="420px"
-                            className="object-cover"
-                          />
-                          <div className="absolute inset-0 bg-black/0 transition hover:bg-black/10" />
-                          {selected && (
-                            <div className="absolute left-2 top-2 rounded-full bg-zinc-900 px-2 py-1 text-xs font-semibold text-white shadow">
-                              Selected
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAddBackdropsOpen(false)}
+                  disabled={assigningBackdrops}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const all = new Set(unassignedBackdrops.map((b) => b.media_asset_id));
+                    if (selectedBackdropIds.size === all.size) {
+                      setSelectedBackdropIds(new Set());
+                    } else {
+                      setSelectedBackdropIds(all);
+                    }
+                  }}
+                  disabled={backdropsLoading || unassignedBackdrops.length === 0 || assigningBackdrops}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {selectedBackdropIds.size === unassignedBackdrops.length
+                    ? "Deselect All"
+                    : "Select All"}
+                </button>
+                <button
+                  type="button"
+                  onClick={assignSelectedBackdrops}
+                  disabled={assigningBackdrops || selectedBackdropIds.size === 0}
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                >
+                  {assigningBackdrops
+                    ? "Assigning..."
+                    : `Assign ${selectedBackdropIds.size}`}
+                </button>
               </div>
             </div>
-          </>
-        )}
+            {backdropsError && (
+              <p className="mt-3 text-sm text-red-600">{backdropsError}</p>
+            )}
+          </div>
+
+          <div className="p-6">
+            {backdropsLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-zinc-900" />
+              </div>
+            ) : unassignedBackdrops.length === 0 ? (
+              <p className="text-sm text-zinc-500">No unassigned TMDb backdrops found.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                {unassignedBackdrops.map((b) => {
+                  const selected = selectedBackdropIds.has(b.media_asset_id);
+                  return (
+                    <button
+                      key={b.media_asset_id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedBackdropIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(b.media_asset_id)) next.delete(b.media_asset_id);
+                          else next.add(b.media_asset_id);
+                          return next;
+                        });
+                      }}
+                      className={`relative aspect-[16/9] overflow-hidden rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        selected ? "border-zinc-900" : "border-zinc-200"
+                      }`}
+                    >
+                      <GalleryImage
+                        src={b.display_url ?? b.hosted_url ?? b.source_url ?? ""}
+                        alt={b.caption || "Backdrop"}
+                        sizes="420px"
+                        className="object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/0 transition hover:bg-black/10" />
+                      {selected && (
+                        <div className="absolute left-2 top-2 rounded-full bg-zinc-900 px-2 py-1 text-xs font-semibold text-white shadow">
+                          Selected
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </AdminModal>
       </div>
     </ClientOnly>
   );
