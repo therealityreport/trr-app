@@ -233,7 +233,7 @@ export default function AdminNetworkStreamingDetailPage() {
     return (
       <ClientOnly>
         <div className="mx-auto mt-10 max-w-4xl rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Invalid network detail URL.
+          Invalid entity detail URL.
         </div>
       </ClientOnly>
     );
@@ -244,10 +244,18 @@ export default function AdminNetworkStreamingDetailPage() {
       <div className="min-h-screen bg-zinc-50">
         <header className="border-b border-zinc-200 bg-white px-6 py-6">
           <div className="mx-auto max-w-6xl">
-            <AdminBreadcrumbs items={buildNetworkDetailBreadcrumb(pageTitle)} className="mb-1" />
+            <AdminBreadcrumbs
+              items={buildNetworkDetailBreadcrumb(pageTitle)}
+              className="mb-1"
+            />
             <h1 className="mt-2 break-words text-3xl font-bold text-zinc-900">{pageTitle}</h1>
             <p className="mt-1 break-words text-sm text-zinc-500">
-              {routeEntityType === "network" ? "Network" : "Streaming service"} profile with saved assets, metadata, and added shows.
+              {routeEntityType === "network"
+                ? "Network"
+                : routeEntityType === "streaming"
+                  ? "Streaming service"
+                  : "Production company"}{" "}
+              profile with saved assets, metadata, and added shows.
             </p>
           </div>
         </header>
@@ -307,7 +315,12 @@ export default function AdminNetworkStreamingDetailPage() {
               <section className="rounded-xl border border-zinc-200 bg-white p-4">
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
-                    Type: {detail.entity_type === "network" ? "Network" : "Streaming"}
+                    Type:{" "}
+                    {detail.entity_type === "network"
+                      ? "Network"
+                      : detail.entity_type === "streaming"
+                        ? "Streaming"
+                        : "Production"}
                   </span>
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
                     Available Shows: {detail.available_show_count}
@@ -315,6 +328,9 @@ export default function AdminNetworkStreamingDetailPage() {
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
                     Added Shows: {detail.added_show_count}
                   </span>
+                  {detail.entity_type === "production" ? (
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">Logo optional</span>
+                  ) : null}
                 </div>
                 <h2 className="text-lg font-semibold text-zinc-900">Saved Logos</h2>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">

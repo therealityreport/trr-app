@@ -179,4 +179,64 @@ describe("Admin network detail page", () => {
       expect(suggestionLink).toHaveAttribute("href", "/admin/networks/network/bravo");
     });
   });
+
+  it("shows production logo-optional indicator", async () => {
+    mocks.params = { entityType: "production", entitySlug: "shed-media" };
+    mocks.fetchAdminWithAuth.mockResolvedValue(
+      jsonResponse({
+        entity_type: "production",
+        entity_key: "shed media",
+        entity_slug: "shed-media",
+        display_name: "Shed Media",
+        available_show_count: 12,
+        added_show_count: 3,
+        core: {
+          entity_id: "13120",
+          origin_country: null,
+          display_priority: null,
+          tmdb_logo_path: null,
+          logo_path: null,
+          hosted_logo_key: null,
+          hosted_logo_url: null,
+          hosted_logo_black_url: null,
+          hosted_logo_white_url: null,
+          wikidata_id: null,
+          wikipedia_url: null,
+          wikimedia_logo_file: null,
+          link_enriched_at: null,
+          link_enrichment_source: null,
+          facebook_id: null,
+          instagram_id: null,
+          twitter_id: null,
+          tiktok_id: null,
+        },
+        override: {
+          id: null,
+          display_name_override: null,
+          wikidata_id_override: null,
+          wikipedia_url_override: null,
+          logo_source_urls_override: [],
+          source_priority_override: [],
+          aliases_override: [],
+          notes: null,
+          is_active: false,
+          updated_by: null,
+          updated_at: null,
+        },
+        completion: {
+          resolution_status: "resolved",
+          resolution_reason: null,
+          last_attempt_at: "2026-02-24T00:00:00Z",
+        },
+        logo_assets: [],
+        shows: [],
+      }),
+    );
+
+    render(<AdminNetworkStreamingDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Logo optional")).toBeInTheDocument();
+    });
+  });
 });

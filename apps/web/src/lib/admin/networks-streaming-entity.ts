@@ -1,4 +1,4 @@
-export type NetworkStreamingEntityType = "network" | "streaming";
+export type NetworkStreamingEntityType = "network" | "streaming" | "production";
 
 export const normalizeEntityKey = (name: string): string => name.trim().toLowerCase();
 
@@ -10,7 +10,7 @@ export const toEntitySlug = (nameOrKey: string): string =>
 
 export const parseEntityType = (value: string): NetworkStreamingEntityType | null => {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "network" || normalized === "streaming") {
+  if (normalized === "network" || normalized === "streaming" || normalized === "production") {
     return normalized;
   }
   return null;

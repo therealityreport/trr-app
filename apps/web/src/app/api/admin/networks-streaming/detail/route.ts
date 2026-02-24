@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     const entitySlug = request.nextUrl.searchParams.get("entity_slug")?.trim() ?? "";
 
     if (!entityType) {
-      return NextResponse.json({ error: "entity_type must be network or streaming" }, { status: 400 });
+      return NextResponse.json({ error: "entity_type must be network, streaming, or production" }, { status: 400 });
     }
     if (!entityKey && !entitySlug) {
       return NextResponse.json({ error: "entity_key or entity_slug is required" }, { status: 400 });

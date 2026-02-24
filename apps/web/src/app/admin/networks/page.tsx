@@ -74,6 +74,12 @@ interface NetworksStreamingSyncResult {
   completion_total: number;
   completion_resolved: number;
   completion_unresolved: number;
+  completion_unresolved_total: number;
+  completion_unresolved_network: number;
+  completion_unresolved_streaming: number;
+  completion_unresolved_production: number;
+  production_missing_logos: number;
+  production_missing_bw_variants: number;
   completion_percent: number;
   completion_gate_passed: boolean;
   missing_columns: MissingColumn[];
@@ -274,12 +280,25 @@ export default function AdminNetworksPage() {
       return syncResult.unresolved_logos;
     }
     return (summary?.rows ?? [])
-      .filter((row) => !row.has_logo || !row.has_links || !row.has_bw_variants)
+      .filter((row) => {
+        if (row.type === "production") {
+          return row.resolution_status !== "resolved";
+        }
+        return !row.has_logo || !row.has_links || !row.has_bw_variants;
+      })
       .map((row) => ({
         type: row.type,
         id: normalizeEntityKey(row.name),
         name: row.name,
-        reason: row.resolution_reason || (!row.has_links ? "missing_links" : !row.has_logo ? "missing_logo" : "missing_bw_variants"),
+        reason:
+          row.resolution_reason ||
+          (row.type === "production"
+            ? "missing_reference_metadata"
+            : !row.has_links
+              ? "missing_links"
+              : !row.has_logo
+                ? "missing_logo"
+                : "missing_bw_variants"),
       }));
   }, [summary?.rows, syncResult?.unresolved_logos]);
   const unresolvedProductionRows = useMemo(
@@ -289,17 +308,21 @@ export default function AdminNetworksPage() {
 
   const completionStats = useMemo(() => {
     if (syncResult) {
+      const unresolvedTotal = syncResult.completion_unresolved_total ?? syncResult.completion_unresolved;
       return {
         total: syncResult.completion_total,
         resolved: syncResult.completion_resolved,
-        unresolved: syncResult.completion_unresolved,
+        unresolved: unresolvedTotal,
         percent: syncResult.completion_percent,
-        gatePassed: syncResult.completion_gate_passed && syncResult.missing_columns.length === 0,
+        gatePassed:
+          syncResult.completion_gate_passed &&
+          syncResult.missing_columns.length === 0 &&
+          unresolvedTotal === 0,
       };
     }
     const rows = summary?.rows ?? [];
     const total = rows.length;
-    const resolved = rows.filter((row) => row.has_logo && row.has_links && row.has_bw_variants).length;
+    const resolved = rows.filter((row) => row.resolution_status === "resolved").length;
     const unresolved = Math.max(0, total - resolved);
     const percent = total > 0 ? Number(((resolved / total) * 100).toFixed(2)) : 0;
     return {
@@ -323,6 +346,18 @@ export default function AdminNetworksPage() {
     () => (summary?.rows ?? []).filter((row) => !row.has_bw_variants).length,
     [summary?.rows],
   );
+  const productionMissingLogoCount = useMemo(() => {
+    if (syncResult) {
+      return syncResult.production_missing_logos ?? 0;
+    }
+    return (summary?.rows ?? []).filter((row) => row.type === "production" && !row.has_logo).length;
+  }, [summary?.rows, syncResult]);
+  const productionMissingBwCount = useMemo(() => {
+    if (syncResult) {
+      return syncResult.production_missing_bw_variants ?? 0;
+    }
+    return (summary?.rows ?? []).filter((row) => row.type === "production" && !row.has_bw_variants).length;
+  }, [summary?.rows, syncResult]);
 
   const missingColumns = syncResult?.missing_columns ?? [];
 
@@ -451,10 +486,10 @@ export default function AdminNetworksPage() {
         <header className="border-b border-zinc-200 bg-white px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Networks & Streaming")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Networks & Streaming", "/admin/networks")} className="mb-1" />
               <h1 className="break-words text-3xl font-bold text-zinc-900">Networks &amp; Streaming</h1>
               <p className="break-words text-sm text-zinc-500">
-                Coverage and sync health across network/streaming dimensions from the full Supabase show inventory.
+                Coverage and sync health across network/streaming/production dimensions from the full Supabase show inventory.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -482,6 +517,12 @@ export default function AdminNetworksPage() {
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">Missing Logos: {missingLogoCount}</span>
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">Missing B/W Variants: {missingBwVariantsCount}</span>
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">Missing Links: {missingLinksCount}</span>
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
+                    Production Missing Logos: {productionMissingLogoCount}
+                  </span>
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
+                    Production Missing B/W: {productionMissingBwCount}
+                  </span>
                 </div>
                 <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -503,6 +544,9 @@ export default function AdminNetworksPage() {
                     Resolved {completionStats.resolved} / {completionStats.total} ({completionStats.percent.toFixed(2)}%)
                   </p>
                 </div>
+                <p className="text-xs text-zinc-600">
+                  Production logos are optional and tracked separately as backlog.
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -609,7 +653,10 @@ export default function AdminNetworksPage() {
                   {syncResult.variants_black_mirrored} | White variants: {syncResult.variants_white_mirrored} | Assets discovered: {" "}
                   {syncResult.logo_assets_discovered} | Assets mirrored: {syncResult.logo_assets_mirrored} | Assets skipped: {" "}
                   {syncResult.logo_assets_skipped} | Assets failed: {syncResult.logo_assets_failed} | Unresolved: {" "}
-                  {syncResult.unresolved_logos_count} | Failures: {syncResult.failures}
+                  {syncResult.unresolved_logos_count} | Unresolved by type (N/S/P): {" "}
+                  {syncResult.completion_unresolved_network ?? 0}/{syncResult.completion_unresolved_streaming ?? 0}/
+                  {syncResult.completion_unresolved_production ?? 0} | Production logo backlog: {syncResult.production_missing_logos ?? 0} logos,{" "}
+                  {syncResult.production_missing_bw_variants ?? 0} B/W | Failures: {syncResult.failures}
                 </p>
               </div>
             ) : null}
@@ -665,7 +712,7 @@ export default function AdminNetworksPage() {
                 <thead className="bg-zinc-50">
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold text-zinc-700">Type</th>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Network / Streaming Service</th>
+                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Network / Streaming / Production</th>
                     <th className="px-3 py-2 text-right font-semibold text-zinc-700">Available Shows</th>
                     <th className="px-3 py-2 text-right font-semibold text-zinc-700">Added Shows</th>
                     <th className="px-3 py-2 text-left font-semibold text-zinc-700">Logo</th>
@@ -694,6 +741,10 @@ export default function AdminNetworksPage() {
                   {!summaryLoading
                     ? filteredRows.map((row) => {
                         const wikidataHref = row.wikidata_id ? `https://www.wikidata.org/wiki/${row.wikidata_id}` : null;
+                        const rowComplete =
+                          row.type === "production"
+                            ? row.resolution_status === "resolved"
+                            : row.has_logo && row.has_bw_variants && row.has_links;
                         return (
                           <tr key={`${row.type}:${row.name}`}>
                             <td className="px-3 py-2 text-zinc-700">
@@ -752,15 +803,27 @@ export default function AdminNetworksPage() {
                             <td className="px-3 py-2">
                               <div className="flex flex-wrap gap-1">
                                 {!row.has_logo ? (
-                                  <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">missing logo</span>
+                                  <span
+                                    className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                                      row.type === "production" ? "bg-zinc-100 text-zinc-700" : "bg-red-100 text-red-700"
+                                    }`}
+                                  >
+                                    {row.type === "production" ? "logo optional" : "missing logo"}
+                                  </span>
                                 ) : null}
                                 {!row.has_bw_variants ? (
-                                  <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">missing B/W</span>
+                                  <span
+                                    className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                                      row.type === "production" ? "bg-zinc-100 text-zinc-700" : "bg-amber-100 text-amber-700"
+                                    }`}
+                                  >
+                                    {row.type === "production" ? "B/W optional" : "missing B/W"}
+                                  </span>
                                 ) : null}
                                 {!row.has_links ? (
                                   <span className="rounded bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">missing links</span>
                                 ) : null}
-                                {row.has_logo && row.has_bw_variants && row.has_links ? (
+                                {rowComplete ? (
                                   <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">complete</span>
                                 ) : null}
                               </div>
