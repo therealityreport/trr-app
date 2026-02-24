@@ -6,11 +6,13 @@ const {
   searchShowsMock,
   getShowByIdMock,
   updateShowByIdMock,
+  validateShowImageForFieldMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   searchShowsMock: vi.fn(),
   getShowByIdMock: vi.fn(),
   updateShowByIdMock: vi.fn(),
+  validateShowImageForFieldMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -21,6 +23,7 @@ vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   searchShows: searchShowsMock,
   getShowById: getShowByIdMock,
   updateShowById: updateShowByIdMock,
+  validateShowImageForField: validateShowImageForFieldMock,
 }));
 
 import { GET as getShowsRoute } from "@/app/api/admin/trr-api/shows/route";
@@ -32,6 +35,7 @@ describe("TRR show routes slug fields", () => {
     searchShowsMock.mockReset();
     getShowByIdMock.mockReset();
     updateShowByIdMock.mockReset();
+    validateShowImageForFieldMock.mockReset();
     requireAdminMock.mockResolvedValue(undefined);
   });
 

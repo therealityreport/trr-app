@@ -60,6 +60,8 @@ export interface UpdateTrrShowInput {
   primaryLogoImageId?: string | null;
 }
 
+export type ShowFeaturedImageKind = "poster" | "backdrop";
+
 export interface TrrSeason {
   id: string;
   show_id: string;
@@ -216,6 +218,7 @@ export interface PaginationOptions {
 
 export interface SourcePaginationOptions extends PaginationOptions {
   sources?: string[];
+  includeBroken?: boolean;
 }
 
 const DEFAULT_LIMIT = 20;
@@ -602,6 +605,39 @@ export async function getShowByImdbId(imdbId: string): Promise<TrrShow | null> {
     [imdbId]
   );
   return result.rows[0] ?? null;
+}
+
+const normalizeFeaturedShowImageKind = (
+  imageType: string | null | undefined,
+  kind: string | null | undefined
+): ShowFeaturedImageKind | "other" => {
+  const token = String(imageType ?? kind ?? "")
+    .trim()
+    .toLowerCase();
+  if (token === "poster") return "poster";
+  if (token === "backdrop" || token === "background") return "backdrop";
+  return "other";
+};
+
+/**
+ * Validate that a show image belongs to the given show and matches expected featured kind.
+ */
+export async function validateShowImageForField(
+  showId: string,
+  imageId: string,
+  expectedKind: ShowFeaturedImageKind
+): Promise<boolean> {
+  const result = await pgQuery<{ kind: string | null; image_type: string | null }>(
+    `SELECT kind, image_type
+     FROM core.show_images
+     WHERE id = $1::uuid
+       AND show_id = $2::uuid
+     LIMIT 1`,
+    [imageId, showId]
+  );
+  const row = result.rows[0];
+  if (!row) return false;
+  return normalizeFeaturedShowImageKind(row.image_type, row.kind) === expectedKind;
 }
 
 /**
@@ -2276,6 +2312,12 @@ export async function getPhotosByPersonId(
   options?: SourcePaginationOptions
 ): Promise<TrrPersonPhoto[]> {
   const { limit, offset } = normalizePagination(options);
+  const includeBroken = options?.includeBroken === true;
+  const isMarkedBroken = (metadataValue: unknown): boolean => {
+    if (!metadataValue || typeof metadataValue !== "object") return false;
+    const status = (metadataValue as Record<string, unknown>).gallery_status;
+    return typeof status === "string" && status.trim().toLowerCase() === "broken_unreachable";
+  };
 
   const person = await getPersonById(personId);
   const fullName = person?.full_name?.trim() ?? null;
@@ -2515,6 +2557,7 @@ export async function getPhotosByPersonId(
   });
 
   const castPhotosFiltered = castPhotos.filter((photo) =>
+    (includeBroken || !isMarkedBroken(photo.metadata)) &&
     isLikelyImage(photo.hosted_content_type, photo.hosted_url) &&
     isFandomPhotoOwnedByExpectedPerson({
       source: photo.source,
@@ -2599,6 +2642,7 @@ export async function getPhotosByPersonId(
       .map((row) => {
         if (!row.hosted_url) return null;
         const context = row.context;
+        if (!includeBroken && isMarkedBroken(context)) return null;
         const contextPeopleNames = Array.isArray((context as { people_names?: unknown })?.people_names)
           ? ((context as { people_names: unknown }).people_names as string[])
           : null;
@@ -2654,7 +2698,7 @@ export async function getPhotosByPersonId(
           {
             hostedUrl: row.hosted_url,
             originalUrl: readMetadataOriginalUrl(normalizedFandom.metadata),
-            sourceUrl: row.source_url,
+            sourceUrl: sourceUrlForNormalization,
           }
         );
         const sourcePageUrl =
@@ -2670,7 +2714,7 @@ export async function getPhotosByPersonId(
           person_id: personId,
           source: normalizedFandom.source,
           source_asset_id: row.source_asset_id ?? null,
-          url: row.source_url,
+          url: sourceUrlForNormalization,
           hosted_url: row.hosted_url,
           hosted_sha256: row.hosted_sha256 ?? null,
           hosted_content_type: row.hosted_content_type ?? null,
@@ -2706,6 +2750,7 @@ export async function getPhotosByPersonId(
 
   if (mediaPhotos.length > 0) {
     mediaPhotos = mediaPhotos.filter((photo) =>
+      (includeBroken || !isMarkedBroken(photo.metadata)) &&
       isLikelyImage(photo.hosted_content_type, photo.hosted_url) &&
       isFandomPhotoOwnedByExpectedPerson({
         source: photo.source,
@@ -2722,7 +2767,7 @@ export async function getPhotosByPersonId(
   const allPhotos = [...(castPhotosWithTags ?? []) as TrrPersonPhoto[], ...mediaPhotos];
 
   // Deduplicate by canonical identity (source IDs / sha / hosted_url),
-  // preferring media_links rows when collisions occur.
+  // preferring the row with the best renderable URL set on collisions.
   const dedupedPhotos = dedupePhotosByCanonicalKeysPreferMediaLinks(allPhotos);
 
   const normalizedSources = new Set(
