@@ -241,9 +241,16 @@ interface UnifiedNewsItem {
   source_id?: string | null;
   headline?: string | null;
   article_url: string;
+  canonical_article_url?: string | null;
   image_url?: string | null;
   hosted_image_url?: string | null;
   original_image_url?: string | null;
+  mirror_status?: string | null;
+  mirror_attempt_count?: number | null;
+  last_mirror_attempt_at?: string | null;
+  last_mirror_success_at?: string | null;
+  last_mirror_error?: string | null;
+  mirror_retry_after?: string | null;
   published_at?: string | null;
   publisher_name?: string | null;
   publisher_domain?: string | null;
@@ -252,6 +259,7 @@ interface UnifiedNewsItem {
   season_matches?: UnifiedNewsSeasonMatch[] | null;
   feed_rank?: number | null;
   trending_rank?: number | null;
+  quality_score?: number | null;
 }
 
 interface BravoPreviewPerson {
@@ -482,14 +490,20 @@ const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const SHOW_REFRESH_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
 const SHOW_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
-const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 90_000;
+const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
 const GALLERY_ASSET_LOAD_TIMEOUT_MS = 60_000;
 const ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const BRAVO_LOAD_TIMEOUT_MS = 15_000;
+const NEWS_LOAD_TIMEOUT_MS = 45_000;
+const NEWS_SYNC_TIMEOUT_MS = 60_000;
+const NEWS_SYNC_POLL_INTERVAL_MS = 1_500;
+const NEWS_SYNC_POLL_TIMEOUT_MS = 90_000;
+const NEWS_PAGE_SIZE = 50;
 const SHOW_CORE_LOAD_TIMEOUT_MS = 15_000;
 const ROLE_LOAD_TIMEOUT_MS = 30_000;
+const ROLE_LOAD_MAX_ATTEMPTS = 2;
 const CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 125_000;
 const SEASON_EPISODE_SUMMARY_TIMEOUT_MS = 12_000;
 
@@ -1257,6 +1271,8 @@ export default function TrrShowDetailPage() {
   const [newsError, setNewsError] = useState<string | null>(null);
   const [newsNotice, setNewsNotice] = useState<string | null>(null);
   const [newsLoaded, setNewsLoaded] = useState(false);
+  const [newsTotalCount, setNewsTotalCount] = useState(0);
+  const [newsNextCursor, setNewsNextCursor] = useState<string | null>(null);
   const [newsGoogleUrlMissing, setNewsGoogleUrlMissing] = useState(false);
   const [newsSort, setNewsSort] = useState<"trending" | "latest">("trending");
   const [newsSourceFilter, setNewsSourceFilter] = useState<string>("");
@@ -1264,9 +1280,9 @@ export default function TrrShowDetailPage() {
   const [newsTopicFilter, setNewsTopicFilter] = useState<string>("");
   const [newsSeasonFilter, setNewsSeasonFilter] = useState<string>("");
   const newsLoadInFlightRef = useRef<Promise<void> | null>(null);
-  const newsSyncInFlightRef = useRef<Promise<void> | null>(null);
+  const newsSyncInFlightRef = useRef<Promise<boolean> | null>(null);
   const newsAutoSyncAttemptedRef = useRef(false);
-  const newsLoadedSortRef = useRef<"trending" | "latest" | null>(null);
+  const newsLoadedQueryKeyRef = useRef<string | null>(null);
   const [syncBravoOpen, setSyncBravoOpen] = useState(false);
   const [syncBravoModePickerOpen, setSyncBravoModePickerOpen] = useState(false);
   const [syncBravoRunMode, setSyncBravoRunMode] = useState<SyncBravoRunMode>("full");
@@ -1346,6 +1362,7 @@ export default function TrrShowDetailPage() {
   const [showRolesLoadedOnce, setShowRolesLoadedOnce] = useState(false);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
+  const [rolesWarning, setRolesWarning] = useState<string | null>(null);
   const [newRoleName, setNewRoleName] = useState("");
   const showRolesLoadInFlightRef = useRef<Promise<void> | null>(null);
   const castRoleMembersLoadInFlightRef = useRef<Promise<void> | null>(null);
@@ -3170,25 +3187,46 @@ export default function TrrShowDetailPage() {
       const request = (async () => {
         setRolesLoading(true);
         setRolesError(null);
+        setRolesWarning(null);
+        const headers = await getAuthHeaders();
+        let lastError: unknown = null;
         try {
-          const headers = await getAuthHeaders();
-          const response = await fetchWithTimeout(
-            `/api/admin/trr-api/shows/${showId}/roles`,
-            { headers, cache: "no-store" },
-            ROLE_LOAD_TIMEOUT_MS
-          );
-          const data = (await response.json().catch(() => ({}))) as { error?: string };
-          if (!response.ok) throw new Error(data.error || "Failed to load roles");
-          setShowRoles(Array.isArray(data) ? (data as ShowRole[]) : []);
-          setShowRolesLoadedOnce(true);
-        } catch (err) {
-          setRolesError(
-            isAbortError(err)
-              ? `Timed out loading roles after ${Math.round(ROLE_LOAD_TIMEOUT_MS / 1000)}s`
-              : err instanceof Error
-                ? err.message
-                : "Failed to load roles"
-          );
+          for (let attempt = 1; attempt <= ROLE_LOAD_MAX_ATTEMPTS; attempt += 1) {
+            try {
+              const response = await fetchWithTimeout(
+                `/api/admin/trr-api/shows/${showId}/roles`,
+                { headers, cache: "no-store" },
+                ROLE_LOAD_TIMEOUT_MS
+              );
+              const data = (await response.json().catch(() => ({}))) as { error?: string };
+              if (!response.ok) throw new Error(data.error || "Failed to load roles");
+              setShowRoles(Array.isArray(data) ? (data as ShowRole[]) : []);
+              setShowRolesLoadedOnce(true);
+              setRolesWarning(null);
+              return;
+            } catch (error) {
+              lastError = error;
+              if (attempt < ROLE_LOAD_MAX_ATTEMPTS) {
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                continue;
+              }
+            }
+          }
+
+          const message = isAbortError(lastError)
+            ? `Timed out loading roles after ${Math.round(ROLE_LOAD_TIMEOUT_MS / 1000)}s`
+            : lastError instanceof Error
+              ? lastError.message
+              : "Failed to load roles";
+          const hasPriorData = showRolesLoadedOnce || showRoles.length > 0;
+          if (hasPriorData) {
+            setRolesWarning(`${message}. Showing last successful role catalog snapshot.`);
+            setRolesError(null);
+          } else {
+            setShowRoles([]);
+            setShowRolesLoadedOnce(false);
+            setRolesError(message);
+          }
         } finally {
           setRolesLoading(false);
         }
@@ -3203,13 +3241,14 @@ export default function TrrShowDetailPage() {
         }
       }
     },
-    [getAuthHeaders, showId, showRolesLoadedOnce]
+    [getAuthHeaders, showId, showRoles, showRolesLoadedOnce]
   );
 
   const createShowRole = useCallback(async () => {
     const roleName = newRoleName.trim();
     if (!roleName || !showId) return;
     setRolesError(null);
+    setRolesWarning(null);
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
@@ -3428,6 +3467,7 @@ export default function TrrShowDetailPage() {
       if (!nextName || nextName.trim().length === 0 || nextName.trim() === role.name) return;
       try {
         setRolesError(null);
+        setRolesWarning(null);
         await patchShowRole(role.id, { name: nextName.trim() });
         await fetchShowRoles({ force: true });
         await fetchCastRoleMembers({ force: true });
@@ -3442,6 +3482,7 @@ export default function TrrShowDetailPage() {
     async (role: ShowRole) => {
       try {
         setRolesError(null);
+        setRolesWarning(null);
         await patchShowRole(role.id, { is_active: !role.is_active });
         await fetchShowRoles({ force: true });
         await fetchCastRoleMembers({ force: true });
@@ -3472,35 +3513,50 @@ export default function TrrShowDetailPage() {
       );
       try {
         setRolesError(null);
+        setRolesWarning(null);
         setCastRoleMembersError(null);
         const headers = await getAuthHeaders();
         let nextRoles = [...showRoles];
-        for (const roleName of roleNames) {
-          if (nextRoles.some((role) => role.name.toLowerCase() === roleName.toLowerCase())) continue;
-          const createResponse = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ name: roleName }),
-          });
-          const created = (await createResponse.json().catch(() => ({}))) as {
-            error?: string;
-            id?: string;
+        const existingRoleNames = new Set(nextRoles.map((role) => role.name.trim().toLowerCase()));
+        const missingRoleNames = roleNames.filter(
+          (roleName) => !existingRoleNames.has(roleName.trim().toLowerCase())
+        );
+
+        if (missingRoleNames.length > 0) {
+          const pendingRoleNames = [...missingRoleNames];
+          const createRoleWorkerCount = Math.min(3, pendingRoleNames.length);
+          const runCreateRoleWorker = async () => {
+            while (pendingRoleNames.length > 0) {
+              const roleName = pendingRoleNames.shift();
+              if (!roleName) return;
+              const createResponse = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
+                method: "POST",
+                headers: { ...headers, "Content-Type": "application/json" },
+                body: JSON.stringify({ name: roleName }),
+              });
+              const created = (await createResponse.json().catch(() => ({}))) as { error?: string };
+              if (!createResponse.ok) {
+                throw new Error(created.error || `Failed to create role "${roleName}"`);
+              }
+            }
           };
-          if (!createResponse.ok) {
-            throw new Error(created.error || `Failed to create role "${roleName}"`);
-          }
+
+          await Promise.all(Array.from({ length: createRoleWorkerCount }, () => runCreateRoleWorker()));
         }
 
-        await fetchShowRoles({ force: true });
-        nextRoles = await (async () => {
-          const response = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
-            headers,
-            cache: "no-store",
-          });
-          const data = (await response.json().catch(() => ({}))) as { error?: string };
-          if (!response.ok) throw new Error(data.error || "Failed to refresh roles");
-          return Array.isArray(data) ? (data as ShowRole[]) : [];
-        })();
+        const refreshedRolesResponse = await fetch(`/api/admin/trr-api/shows/${showId}/roles`, {
+          headers,
+          cache: "no-store",
+        });
+        const refreshedRolesData = (await refreshedRolesResponse.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        if (!refreshedRolesResponse.ok) {
+          throw new Error(refreshedRolesData.error || "Failed to refresh roles");
+        }
+        nextRoles = Array.isArray(refreshedRolesData) ? (refreshedRolesData as ShowRole[]) : [];
+        setShowRoles(nextRoles);
+        setShowRolesLoadedOnce(true);
 
         const roleIds = nextRoles
           .filter((role) => roleNames.some((name) => name.toLowerCase() === role.name.toLowerCase()))
@@ -3521,7 +3577,7 @@ export default function TrrShowDetailPage() {
         setCastRoleMembersError(err instanceof Error ? err.message : "Failed to assign roles");
       }
     },
-    [castRoleMembers, castSeasonFilters, fetchCastRoleMembers, fetchShowRoles, getAuthHeaders, showId, showRoles]
+    [castRoleMembers, castSeasonFilters, fetchCastRoleMembers, getAuthHeaders, showId, showRoles]
   );
 
   const loadBravoData = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
@@ -3587,49 +3643,101 @@ export default function TrrShowDetailPage() {
   }, [bravoLoaded, getAuthHeaders, isCurrentShowId, showId]);
 
   const syncGoogleNews = useCallback(
-    async ({ force = false }: { force?: boolean } = {}) => {
+    async ({ force = false }: { force?: boolean } = {}): Promise<boolean> => {
       const requestShowId = showId;
-      if (!requestShowId) return;
+      if (!requestShowId) return false;
       if (newsSyncInFlightRef.current) {
-        await newsSyncInFlightRef.current;
-        return;
+        return await newsSyncInFlightRef.current;
       }
 
-      const request = (async () => {
+      const request = (async (): Promise<boolean> => {
         try {
-          if (!isCurrentShowId(requestShowId)) return;
+          if (!isCurrentShowId(requestShowId)) return false;
           setNewsSyncing(true);
           const headers = await getAuthHeaders();
-          const response = await fetch(`/api/admin/trr-api/shows/${requestShowId}/google-news/sync`, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ force }),
-          });
-          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${requestShowId}/google-news/sync`,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({ force, async: true }),
+            },
+            NEWS_SYNC_TIMEOUT_MS
+          );
+          const data = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            job_id?: string;
+            status?: string;
+          };
           if (!response.ok) {
             if (response.status === 409) {
               const message = data.error || "Google News URL is not configured for this show.";
-              if (!isCurrentShowId(requestShowId)) return;
+              if (!isCurrentShowId(requestShowId)) return false;
               setNewsGoogleUrlMissing(true);
               setNewsNotice(message);
-              return;
+              return false;
             }
             throw new Error(data.error || "Failed to sync Google News");
           }
-          if (!isCurrentShowId(requestShowId)) return;
+          const jobId = typeof data.job_id === "string" ? data.job_id.trim() : "";
+          if (jobId) {
+            const pollStartedAt = Date.now();
+            while (Date.now() - pollStartedAt < NEWS_SYNC_POLL_TIMEOUT_MS) {
+              if (!isCurrentShowId(requestShowId)) return false;
+              const statusResponse = await fetchWithTimeout(
+                `/api/admin/trr-api/shows/${requestShowId}/google-news/sync/${encodeURIComponent(jobId)}`,
+                { headers, cache: "no-store" },
+                NEWS_SYNC_TIMEOUT_MS
+              );
+              const statusData = (await statusResponse.json().catch(() => ({}))) as {
+                error?: string;
+                status?: string;
+                result?: { synced?: boolean; stale_guard_skipped?: boolean } | null;
+              };
+              if (!statusResponse.ok) {
+                throw new Error(statusData.error || "Failed to fetch Google News sync status");
+              }
+              const jobStatus = String(statusData.status || "").trim().toLowerCase();
+              if (jobStatus === "completed") {
+                break;
+              }
+              if (jobStatus === "failed") {
+                const detail =
+                  (statusData.result &&
+                    typeof statusData.result === "object" &&
+                    "error" in statusData.result &&
+                    typeof statusData.result.error === "string" &&
+                    statusData.result.error) ||
+                  statusData.error ||
+                  "Google News sync failed";
+                throw new Error(detail);
+              }
+              await new Promise((resolve) => setTimeout(resolve, NEWS_SYNC_POLL_INTERVAL_MS));
+            }
+            if (Date.now() - pollStartedAt >= NEWS_SYNC_POLL_TIMEOUT_MS) {
+              throw new Error(
+                `Google News sync polling timed out after ${Math.round(NEWS_SYNC_POLL_TIMEOUT_MS / 1000)}s`
+              );
+            }
+          }
+          if (!isCurrentShowId(requestShowId)) return false;
           setNewsGoogleUrlMissing(false);
           setNewsNotice(null);
+          return true;
         } catch (err) {
-          throw err;
+          throw err instanceof Error
+            ? err
+            : new Error(isAbortError(err) ? "Timed out syncing Google News" : "Failed to sync Google News");
         } finally {
-          if (!isCurrentShowId(requestShowId)) return;
-          setNewsSyncing(false);
+          if (isCurrentShowId(requestShowId)) {
+            setNewsSyncing(false);
+          }
         }
       })();
 
       newsSyncInFlightRef.current = request;
       try {
-        await request;
+        return await request;
       } finally {
         if (newsSyncInFlightRef.current === request) {
           newsSyncInFlightRef.current = null;
@@ -3640,10 +3748,25 @@ export default function TrrShowDetailPage() {
   );
 
   const loadUnifiedNews = useCallback(
-    async ({ force = false, forceSync = false }: { force?: boolean; forceSync?: boolean } = {}) => {
+    async ({
+      force = false,
+      forceSync = false,
+      append = false,
+    }: { force?: boolean; forceSync?: boolean; append?: boolean } = {}) => {
       const requestShowId = showId;
       if (!requestShowId) return;
-      if (!force && newsLoaded && newsLoadedSortRef.current === newsSort) return;
+      const params = new URLSearchParams({
+        sources: "bravo,google_news",
+        sort: newsSort,
+        limit: String(NEWS_PAGE_SIZE),
+      });
+      if (newsPersonFilter) params.set("person_id", newsPersonFilter);
+      if (newsSourceFilter) params.set("source", newsSourceFilter);
+      if (newsTopicFilter) params.set("topic", newsTopicFilter);
+      if (newsSeasonFilter) params.set("season_number", newsSeasonFilter);
+      const queryKey = params.toString();
+      if (!force && !append && newsLoaded && newsLoadedQueryKeyRef.current === queryKey) return;
+      if (append && !newsNextCursor) return;
       if (newsLoadInFlightRef.current) {
         await newsLoadInFlightRef.current;
         return;
@@ -3654,45 +3777,54 @@ export default function TrrShowDetailPage() {
           if (!isCurrentShowId(requestShowId)) return;
           setNewsLoading(true);
           setNewsError(null);
-          if (forceSync || !newsAutoSyncAttemptedRef.current) {
-            await syncGoogleNews({ force: forceSync });
-            newsAutoSyncAttemptedRef.current = true;
+          if (!append && (forceSync || !newsAutoSyncAttemptedRef.current)) {
+            const syncSuccess = await syncGoogleNews({ force: forceSync });
+            if (syncSuccess) {
+              newsAutoSyncAttemptedRef.current = true;
+            }
           }
           if (!isCurrentShowId(requestShowId)) return;
 
           const headers = await getAuthHeaders();
-          const params = new URLSearchParams({
-            sources: "bravo,google_news",
-            sort: newsSort,
-          });
+          if (append && newsNextCursor) {
+            params.set("cursor", newsNextCursor);
+          }
           const response = await fetchWithTimeout(
             `/api/admin/trr-api/shows/${requestShowId}/news?${params.toString()}`,
             {
               headers,
               cache: "no-store",
             },
-            BRAVO_LOAD_TIMEOUT_MS
+            NEWS_LOAD_TIMEOUT_MS
           );
           const data = (await response.json().catch(() => ({}))) as {
             news?: UnifiedNewsItem[];
             error?: string;
+            total_count?: number;
+            next_cursor?: string | null;
           };
           if (!response.ok) {
             throw new Error(data.error || "Failed to fetch unified news");
           }
           if (!isCurrentShowId(requestShowId)) return;
-          setUnifiedNews(Array.isArray(data.news) ? data.news : []);
+          const nextItems = Array.isArray(data.news) ? data.news : [];
+          setUnifiedNews((prev) => (append ? [...prev, ...nextItems] : nextItems));
+          setNewsTotalCount(typeof data.total_count === "number" ? data.total_count : nextItems.length);
+          setNewsNextCursor(typeof data.next_cursor === "string" && data.next_cursor.trim() ? data.next_cursor : null);
           setNewsLoaded(true);
-          newsLoadedSortRef.current = newsSort;
+          newsLoadedQueryKeyRef.current = queryKey;
         } catch (err) {
           if (!isCurrentShowId(requestShowId)) return;
           const message = isAbortError(err)
-            ? `Timed out loading news after ${Math.round(BRAVO_LOAD_TIMEOUT_MS / 1000)}s`
+            ? `Timed out loading news after ${Math.round(NEWS_LOAD_TIMEOUT_MS / 1000)}s`
             : err instanceof Error
               ? err.message
               : "Failed to load unified news";
-          setNewsLoaded(false);
-          newsLoadedSortRef.current = null;
+          if (!append) {
+            setNewsLoaded(false);
+            newsLoadedQueryKeyRef.current = null;
+            setNewsNextCursor(null);
+          }
           setNewsError(message);
         } finally {
           if (!isCurrentShowId(requestShowId)) return;
@@ -3709,7 +3841,19 @@ export default function TrrShowDetailPage() {
         }
       }
     },
-    [getAuthHeaders, isCurrentShowId, newsLoaded, newsSort, showId, syncGoogleNews]
+    [
+      getAuthHeaders,
+      isCurrentShowId,
+      newsLoaded,
+      newsNextCursor,
+      newsPersonFilter,
+      newsSeasonFilter,
+      newsSort,
+      newsSourceFilter,
+      newsTopicFilter,
+      showId,
+      syncGoogleNews,
+    ]
   );
 
   const syncBravoCastUrlCandidates = useMemo(() => {
@@ -4882,6 +5026,10 @@ export default function TrrShowDetailPage() {
   }, [activeTab, fetchCastRoleMembers, hasAccess, showId]);
 
   useEffect(() => {
+    castRefreshAbortControllerRef.current?.abort();
+    castMediaEnrichAbortControllerRef.current?.abort();
+    castRefreshAbortControllerRef.current = null;
+    castMediaEnrichAbortControllerRef.current = null;
     abortSyncBravoPreviewStream();
     syncBravoPreviewRunRef.current += 1;
     setSyncBravoModePickerOpen(false);
@@ -4915,6 +5063,8 @@ export default function TrrShowDetailPage() {
     setNewsError(null);
     setNewsNotice(null);
     setNewsLoaded(false);
+    setNewsTotalCount(0);
+    setNewsNextCursor(null);
     setNewsGoogleUrlMissing(false);
     setNewsSort("trending");
     setNewsSourceFilter("");
@@ -4924,7 +5074,7 @@ export default function TrrShowDetailPage() {
     newsLoadInFlightRef.current = null;
     newsSyncInFlightRef.current = null;
     newsAutoSyncAttemptedRef.current = false;
-    newsLoadedSortRef.current = null;
+    newsLoadedQueryKeyRef.current = null;
     setShowLinks([]);
     setCast([]);
     setArchiveFootageCast([]);
@@ -4936,6 +5086,7 @@ export default function TrrShowDetailPage() {
     setCastPhotoEnrichNotice(null);
     setShowRoles([]);
     setShowRolesLoadedOnce(false);
+    setRolesWarning(null);
     setCastRoleMembers([]);
     setCastRoleMembersLoadedOnce(false);
     showRolesLoadInFlightRef.current = null;
@@ -7938,15 +8089,29 @@ export default function TrrShowDetailPage() {
   const globalRefreshCurrent =
     activeTargetProgress?.current ?? refreshAllProgress?.current ?? null;
   const globalRefreshTotal = activeTargetProgress?.total ?? refreshAllProgress?.total ?? null;
+  const castRefreshActivePhase =
+    castRefreshPhaseStates.find((phase) => phase.status === "running") ?? null;
+  const castRefreshActivePhaseIndex = castRefreshActivePhase
+    ? castRefreshPhaseStates.findIndex((phase) => phase.id === castRefreshActivePhase.id)
+    : -1;
+  const castPhaseProgress =
+    castRefreshActivePhase && castRefreshActivePhaseIndex >= 0
+      ? {
+          stage: `Phase ${castRefreshActivePhaseIndex + 1}/${castRefreshPhaseStates.length}: ${
+            CAST_REFRESH_PHASE_STAGES[castRefreshActivePhase.id] ?? castRefreshActivePhase.label
+          }`,
+          message: castRefreshActivePhase.progress.message ?? null,
+          current: castRefreshActivePhase.progress.current,
+          total: castRefreshActivePhase.progress.total,
+        }
+      : null;
   const castTabProgress =
     refreshingTargets.cast_credits || castRefreshPipelineRunning || castMediaEnriching
-      ? refreshTargetProgress.cast_credits ?? null
+      ? castPhaseProgress ?? refreshTargetProgress.cast_credits ?? null
       : null;
   const showCastTabProgress = Boolean(
     castTabProgress?.message || castTabProgress?.stage || castTabProgress?.total !== null
   );
-  const castRefreshActivePhase =
-    castRefreshPhaseStates.find((phase) => phase.status === "running") ?? null;
   const castRefreshPhasePanelStates =
     castRefreshPhaseStates.length > 0
       ? castRefreshPhaseStates
@@ -9292,7 +9457,7 @@ export default function TrrShowDetailPage() {
                 </div>
                 <div className="flex items-end">
                   <p className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-600">
-                    {filteredUnifiedNews.length} shown
+                    {filteredUnifiedNews.length} shown{newsTotalCount > 0 ? ` / ${newsTotalCount}` : ""}
                   </p>
                 </div>
               </div>
@@ -9403,6 +9568,18 @@ export default function TrrShowDetailPage() {
                   );
                 })}
               </div>
+              {newsNextCursor && (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => void loadUnifiedNews({ append: true })}
+                    disabled={newsLoading}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {newsLoading ? "Loading..." : "Load More"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -9558,10 +9735,29 @@ export default function TrrShowDetailPage() {
                   </button>
                 </div>
               )}
+              {rolesWarning && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <span>{rolesWarning}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchShowRoles({ force: true })}
+                    className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
+                  >
+                    Retry Roles
+                  </button>
+                </div>
+              )}
               {rolesError && (
-                <p className="mb-4 text-sm text-red-600">
-                  {rolesError}
-                </p>
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <span>{rolesError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchShowRoles({ force: true })}
+                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  >
+                    Retry Roles
+                  </button>
+                </div>
               )}
               {castSource === "show_fallback" && castEligibilityWarning && (
                 <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -10113,9 +10309,18 @@ export default function TrrShowDetailPage() {
                 </button>
               </div>
 
-              {(linksError || linksNotice || rolesError || googleNewsError || googleNewsNotice) && (
-                <p className={`mb-4 text-sm ${linksError || rolesError ? "text-red-600" : "text-zinc-500"}`}>
-                  {linksError || rolesError || googleNewsError || linksNotice || googleNewsNotice}
+              {(linksError || linksNotice || rolesError || rolesWarning || googleNewsError || googleNewsNotice) && (
+                <p
+                  className={`mb-4 text-sm ${
+                    linksError || rolesError || googleNewsError ? "text-red-600" : "text-zinc-500"
+                  }`}
+                >
+                  {linksError ||
+                    rolesError ||
+                    googleNewsError ||
+                    rolesWarning ||
+                    linksNotice ||
+                    googleNewsNotice}
                 </p>
               )}
 

@@ -5,30 +5,29 @@ import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 export const dynamic = "force-dynamic";
 
 interface RouteParams {
-  params: Promise<{ showId: string }>;
+  params: Promise<{ showId: string; jobId: string }>;
 }
 
-const BACKEND_TIMEOUT_MS = 45_000;
+const BACKEND_TIMEOUT_MS = 20_000;
 
 const formatFetchProxyError = (
   error: unknown,
-  context: { backendBase: string | null }
+  context: { backendUrl: string | null }
 ): { error: string; status: number } => {
-  const { backendBase } = context;
+  const { backendUrl } = context;
   const message = error instanceof Error ? error.message : "failed";
   if (message === "unauthorized") return { error: message, status: 401 };
   if (message === "forbidden") return { error: message, status: 403 };
   if (error instanceof Error && error.name === "AbortError") {
     return {
-      error: `Unified news request timed out after ${Math.round(BACKEND_TIMEOUT_MS / 1000)}s`,
+      error: `Google News sync status request timed out after ${Math.round(BACKEND_TIMEOUT_MS / 1000)}s`,
       status: 504,
     };
   }
-  const lower = message.toLowerCase();
-  if (lower.includes("fetch failed")) {
-    const backendHint = backendBase ?? process.env.TRR_API_URL ?? "<unset>";
+  if (message.toLowerCase().includes("fetch failed")) {
+    const backendHint = backendUrl ?? process.env.TRR_API_URL ?? "<unset>";
     return {
-      error: `Backend request failed while loading unified news (TRR_API_URL=${backendHint}). Ensure TRR-Backend is running and reachable.`,
+      error: `Backend request failed during Google News sync status check (TRR_API_URL=${backendHint}). Ensure TRR-Backend is running and reachable.`,
       status: 502,
     };
   }
@@ -36,16 +35,16 @@ const formatFetchProxyError = (
 };
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
-  let backendBase: string | null = null;
+  let backendUrl: string | null = null;
   try {
     await requireAdmin(request);
-    const { showId } = await params;
-    if (!showId) {
-      return NextResponse.json({ error: "showId is required" }, { status: 400 });
+    const { showId, jobId } = await params;
+    if (!showId || !jobId) {
+      return NextResponse.json({ error: "showId and jobId are required" }, { status: 400 });
     }
 
-    backendBase = getBackendApiUrl(`/admin/shows/${showId}/news`);
-    if (!backendBase) {
+    backendUrl = getBackendApiUrl(`/admin/shows/${showId}/google-news/sync/${jobId}`);
+    if (!backendUrl) {
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
 
@@ -54,8 +53,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }
 
-    const query = request.nextUrl.searchParams.toString();
-    const backendUrl = query ? `${backendBase}?${query}` : backendBase;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
 
@@ -79,14 +76,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           ? data.error
           : typeof data.detail === "string"
             ? data.detail
-            : "Failed to fetch unified news";
+            : "Failed to fetch Google News sync status";
       return NextResponse.json({ error }, { status: response.status });
     }
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error("[api] Failed to fetch unified news", error);
-    const mapped = formatFetchProxyError(error, { backendBase });
+    console.error("[api] Failed to fetch Google News sync status", error);
+    const mapped = formatFetchProxyError(error, { backendUrl });
     return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }

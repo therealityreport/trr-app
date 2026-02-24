@@ -55,6 +55,9 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/castMediaEnrichAbortControllerRef\.current\?\.abort\(\)/);
     expect(contents).toMatch(/\(castRefreshPipelineRunning \|\| castMediaEnriching\) &&/);
     expect(contents).toMatch(/if \(completedSuccessfully\) \{\s*setCastRefreshPhaseStates\(\[\]\);/s);
+    expect(contents).toMatch(
+      /castRefreshAbortControllerRef\.current\?\.abort\(\);\s*castMediaEnrichAbortControllerRef\.current\?\.abort\(\);/s
+    );
   });
 
   it("uses valid interactive structure for cast cards by separating link and action buttons", () => {
@@ -78,11 +81,16 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/Syncing Bios\.\.\./);
     expect(contents).toMatch(/Syncing Bravo\.\.\./);
     expect(contents).toMatch(/Ingesting Media\.\.\./);
+    expect(contents).toMatch(/const castPhaseProgress =/);
+    expect(contents).toMatch(/castPhaseProgress \?\? refreshTargetProgress\.cast_credits \?\? null/);
   });
 
   it("keeps cast tab usable when cast-role-members refresh fails", () => {
     expect(contents).toMatch(/Showing last successful cast intelligence snapshot/);
     expect(contents).toMatch(/setCastRoleMembersWarning/);
     expect(contents).toMatch(/onClick=\{\(\) => void fetchCastRoleMembers\(\{ force: true \}\)\}/);
+    expect(contents).toMatch(/rolesWarning && \(/);
+    expect(contents).toMatch(/Retry Roles/);
+    expect(contents).toMatch(/onClick=\{\(\) => void fetchShowRoles\(\{ force: true \}\)\}/);
   });
 });

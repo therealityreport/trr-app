@@ -8,7 +8,7 @@ interface RouteParams {
   params: Promise<{ showId: string }>;
 }
 
-const BACKEND_TIMEOUT_MS = 20_000;
+const BACKEND_TIMEOUT_MS = 60_000;
 
 const formatFetchProxyError = (
   error: unknown,

@@ -380,6 +380,7 @@ interface BravoNewsItem {
 }
 
 type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom";
+type ReprocessStageKey = "all" | "count" | "crop" | "id_text" | "resize";
 
 const parsePeopleCount = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -3535,10 +3536,19 @@ export default function PersonProfilePage() {
       });
 
       if (errors.length > 0) {
-        throw new Error(errors.join(" | "));
+        const warning = errors.join(" | ");
+        logStep("error", runLabel, `Completed with warnings: ${warning}`);
+        if (!allowPartialFailures) {
+          throw new Error(warning);
+        }
+        setRefreshNotice(
+          options?.successNotice
+            ? `${options.successNotice} (with warnings: ${warning})`
+            : `Completed with warnings: ${warning}`
+        );
       }
 
-      if (options?.successNotice) {
+      if (options?.successNotice && errors.length === 0) {
         const countSummary = formatJobLiveCounts(runCounts);
         setRefreshNotice(
           countSummary ? `${options.successNotice} ${countSummary}` : options.successNotice
@@ -3741,13 +3751,13 @@ export default function PersonProfilePage() {
 
   const handleRefreshAutoThumbnailCrop = useCallback(
     async (photo: TrrPersonPhoto) => {
-      await runPhotoPipelineSteps(photo, ["count"], {
+      await runPhotoAutoCropStage(photo, {
         allowPartialFailures: false,
         successNotice: "Auto thumbnail crop refreshed.",
-        runLabel: "auto_count",
+        runLabel: "auto_crop_refresh",
       });
     },
-    [runPhotoPipelineSteps],
+    [runPhotoAutoCropStage]
   );
 
   const handleLightboxSyncStage = useCallback(
@@ -3811,15 +3821,38 @@ export default function PersonProfilePage() {
     []
   );
 
-  const handleRefreshImages = useCallback(async () => {
+  const handleRefreshImages = useCallback(async (mode: "full" | "sync" = "full") => {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
+    const refreshBody =
+      mode === "sync"
+        ? {
+            skip_mirror: false,
+            force_mirror: false,
+            limit_per_source: 200,
+            enforce_show_source_policy: false,
+            skip_auto_count: true,
+            skip_word_detection: true,
+            skip_centering: true,
+            skip_resize: true,
+            skip_prune: true,
+            show_id: showIdForApi ?? undefined,
+            show_name: activeShowName ?? undefined,
+          }
+        : {
+            skip_mirror: false,
+            force_mirror: false,
+            limit_per_source: 200,
+            enforce_show_source_policy: false,
+            show_id: showIdForApi ?? undefined,
+            show_name: activeShowName ?? undefined,
+          };
 
     setRefreshingImages(true);
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.syncing,
-      message: "Syncing person images...",
-      detailMessage: "Syncing person images...",
+      message: mode === "sync" ? "Running sync stage..." : "Syncing person images...",
+      detailMessage: mode === "sync" ? "Running sync stage..." : "Syncing person images...",
       current: null,
       total: null,
       rawStage: "syncing",
@@ -3833,7 +3866,7 @@ export default function PersonProfilePage() {
     appendRefreshLog({
       source: "page_refresh",
       stage: "syncing",
-      message: "Refresh Images started",
+      message: mode === "sync" ? "Sync stage started" : "Refresh Images started",
       level: "info",
     });
 
@@ -3873,14 +3906,7 @@ export default function PersonProfilePage() {
             {
               method: "POST",
               headers: { ...headers, "Content-Type": "application/json" },
-              body: JSON.stringify({
-                skip_mirror: false,
-                force_mirror: false,
-                limit_per_source: 200,
-                enforce_show_source_policy: false,
-                show_id: showIdForApi ?? undefined,
-                show_name: activeShowName ?? undefined,
-              }),
+              body: JSON.stringify(refreshBody),
               signal: streamController.signal,
             }
           );
@@ -4238,15 +4264,67 @@ export default function PersonProfilePage() {
     activeShowName,
   ]);
 
-  const handleReprocessImages = useCallback(async () => {
+  const handleReprocessImages = useCallback(async (stage: ReprocessStageKey = "all") => {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
+    const stageRequest: Record<
+      ReprocessStageKey,
+      {
+        body: {
+          run_count: boolean;
+          run_id_text: boolean;
+          run_crop: boolean;
+          run_resize: boolean;
+        };
+        startLabel: string;
+        startMessage: string;
+        defaultSuccessMessage: string;
+        failureLabel: string;
+      }
+    > = {
+      all: {
+        body: { run_count: true, run_id_text: true, run_crop: true, run_resize: true },
+        startLabel: "Count & Crop started",
+        startMessage: "Reprocessing existing images...",
+        defaultSuccessMessage: "Reprocessing complete.",
+        failureLabel: "Count & Crop failed",
+      },
+      count: {
+        body: { run_count: true, run_id_text: false, run_crop: false, run_resize: false },
+        startLabel: "Count stage started",
+        startMessage: "Reprocessing count stage...",
+        defaultSuccessMessage: "Count stage complete.",
+        failureLabel: "Count stage failed",
+      },
+      crop: {
+        body: { run_count: false, run_id_text: false, run_crop: true, run_resize: false },
+        startLabel: "Crop stage started",
+        startMessage: "Reprocessing crop stage...",
+        defaultSuccessMessage: "Crop stage complete.",
+        failureLabel: "Crop stage failed",
+      },
+      id_text: {
+        body: { run_count: false, run_id_text: true, run_crop: false, run_resize: false },
+        startLabel: "ID Text stage started",
+        startMessage: "Reprocessing text-detection stage...",
+        defaultSuccessMessage: "ID Text stage complete.",
+        failureLabel: "ID Text stage failed",
+      },
+      resize: {
+        body: { run_count: false, run_id_text: false, run_crop: false, run_resize: true },
+        startLabel: "Auto-Crop stage started",
+        startMessage: "Reprocessing resize/auto-crop stage...",
+        defaultSuccessMessage: "Auto-Crop stage complete.",
+        failureLabel: "Auto-Crop stage failed",
+      },
+    };
+    const selectedStage = stageRequest[stage];
 
     setReprocessingImages(true);
     setRefreshLiveCounts(null);
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.counting,
-      message: "Reprocessing existing images...",
+      message: selectedStage.startMessage,
       current: null,
       total: null,
     });
@@ -4255,7 +4333,7 @@ export default function PersonProfilePage() {
     appendRefreshLog({
       source: "page_refresh",
       stage: "reprocess_start",
-      message: "Count & Crop started",
+      message: selectedStage.startLabel,
       level: "info",
     });
 
@@ -4266,7 +4344,7 @@ export default function PersonProfilePage() {
         {
           method: "POST",
           headers: { ...headers, "Content-Type": "application/json" },
-          body: "{}",
+          body: JSON.stringify(selectedStage.body),
         }
       );
 
@@ -4406,11 +4484,11 @@ export default function PersonProfilePage() {
       }
 
       if (!sawComplete && !hadError) {
-        setRefreshNotice("Reprocessing complete.");
+        setRefreshNotice(selectedStage.defaultSuccessMessage);
         appendRefreshLog({
           source: "page_refresh",
           stage: "reprocess_complete",
-          message: "Reprocessing complete.",
+          message: selectedStage.defaultSuccessMessage,
           level: "success",
         });
       }
@@ -4425,7 +4503,7 @@ export default function PersonProfilePage() {
       appendRefreshLog({
         source: "page_refresh",
         stage: "reprocess_error",
-        message: "Count & Crop failed",
+        message: selectedStage.failureLabel,
         detail: errorMessage,
         level: "error",
       });
@@ -5366,7 +5444,7 @@ export default function PersonProfilePage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={handleRefreshImages}
+                    onClick={() => void handleRefreshImages()}
                     disabled={refreshingImages || reprocessingImages}
                     className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
@@ -5375,11 +5453,11 @@ export default function PersonProfilePage() {
                     </svg>
                     {refreshingImages ? "Refreshing..." : "Refresh Images"}
                   </button>
-                  <button
-                    onClick={handleReprocessImages}
-                    disabled={refreshingImages || reprocessingImages}
-                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                  >
+                    <button
+                      onClick={() => void handleReprocessImages()}
+                      disabled={refreshingImages || reprocessingImages}
+                      className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                    >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
@@ -5391,7 +5469,7 @@ export default function PersonProfilePage() {
                       Stages
                     </span>
                     <button
-                      onClick={handleRefreshImages}
+                      onClick={() => void handleRefreshImages("sync")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Sync source + mirror stages."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
@@ -5399,7 +5477,7 @@ export default function PersonProfilePage() {
                       Sync
                     </button>
                     <button
-                      onClick={handleReprocessImages}
+                      onClick={() => void handleReprocessImages("count")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Run count stage for existing images."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
@@ -5407,7 +5485,7 @@ export default function PersonProfilePage() {
                       Count
                     </button>
                     <button
-                      onClick={handleReprocessImages}
+                      onClick={() => void handleReprocessImages("crop")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Run crop stage for existing images."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
@@ -5415,7 +5493,7 @@ export default function PersonProfilePage() {
                       Crop
                     </button>
                     <button
-                      onClick={handleReprocessImages}
+                      onClick={() => void handleReprocessImages("id_text")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Run ID Text stage for existing images."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
@@ -5423,9 +5501,9 @@ export default function PersonProfilePage() {
                       ID Text
                     </button>
                     <button
-                      onClick={handleRefreshImages}
+                      onClick={() => void handleReprocessImages("resize")}
                       disabled={refreshingImages || reprocessingImages}
-                      title="Run Auto-Crop stage with full refresh pipeline."
+                      title="Run Auto-Crop (resize variants) stage for existing images."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
                     >
                       Auto-Crop

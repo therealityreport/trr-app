@@ -60,7 +60,7 @@ describe("social routes season_id hint forwarding", () => {
       expect.objectContaining({
         seasonIdHint: seasonId,
         retries: 0,
-        timeoutMs: 15_000,
+        timeoutMs: 20_000,
       }),
     );
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };

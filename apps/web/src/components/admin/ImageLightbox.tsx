@@ -1339,10 +1339,11 @@ export function ImageLightbox({
       : null);
   const faceBoxes = metadata?.faceBoxes ?? [];
   const shouldShowFaceBoxes =
-    faceBoxes.length > 0 &&
-    (metadata?.peopleCount !== null && metadata?.peopleCount !== undefined
-      ? metadata.peopleCount > 1
-      : faceBoxes.length > 1);
+    faceBoxes.length > 1 ||
+    (faceBoxes.length === 0 &&
+      metadata?.peopleCount !== null &&
+      metadata?.peopleCount !== undefined &&
+      metadata.peopleCount > 1);
   const previewCenter =
     effectivePreviewRect
       ? {

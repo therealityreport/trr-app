@@ -702,6 +702,88 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("renders actionable current run empty state controls", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Current Run");
+    expect(screen.getByText("No run selected.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start New Ingest" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select Latest Run" })).not.toBeInTheDocument();
+  });
+
+  it("selects latest active run from current run empty state action", async () => {
+    const activeRunId = "run-active-123";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/runs/summary?")) return jsonResponse({ summaries: [] });
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            { id: "run-completed-999", status: "completed", created_at: "2026-02-16T10:00:00Z" },
+            { id: activeRunId, status: "running", created_at: "2026-02-17T10:00:00Z" },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const selectLatestButton = await screen.findByRole("button", { name: "Select Latest Run" });
+    fireEvent.click(selectLatestButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /Run/i })).toHaveValue(activeRunId);
+    });
+  });
+
+  it("copies season id from season details", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const copyButton = await screen.findByRole("button", { name: "Copy" });
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("season-1");
+      expect(screen.getByText("Copied")).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("Copied");
+    });
+  });
+
   it("preselects tab from social_platform query param and updates URL on tab change", async () => {
     window.history.replaceState(
       {},
@@ -1908,6 +1990,12 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     expect(runJobsCalls).toBeGreaterThan(0);
+    expect(
+      fetchMock.mock.calls.some(
+        (call) =>
+          String(call[0]).includes("/social/runs?") && String(call[0]).includes(`run_id=${runId}`),
+      ),
+    ).toBe(true);
 
     await vi.advanceTimersByTimeAsync(7000);
     expect(screen.queryByText(/Ingest complete/i)).not.toBeInTheDocument();

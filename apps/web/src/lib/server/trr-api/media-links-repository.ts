@@ -109,6 +109,21 @@ export async function updateMediaLinksContext(
   );
 }
 
+export async function setMediaLinkContextById(
+  linkId: string,
+  context: Record<string, unknown>
+): Promise<MediaLinkRow | null> {
+  const result = await query<MediaLinkRow>(
+    `UPDATE core.media_links
+     SET context = $2::jsonb,
+         updated_at = NOW()
+     WHERE id = $1::uuid
+     RETURNING ${MEDIA_LINK_FIELDS}`,
+    [linkId, JSON.stringify(context)]
+  );
+  return result.rows[0] ?? null;
+}
+
 export interface CreateMediaLinkParams {
   media_asset_id: string;
   entity_type: "person" | "season" | "show" | "episode";
