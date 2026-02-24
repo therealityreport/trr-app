@@ -1757,9 +1757,11 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Run");
-    fireEvent.change(screen.getByRole("combobox", { name: /Run/i }), {
-      target: { value: "run-1-abcdef" },
+    const selectLatestRunButton = await screen.findByRole("button", { name: "Select Latest Run" });
+    fireEvent.click(selectLatestRunButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /Run/i })).toHaveValue("run-1-abcdef");
     });
 
     await waitFor(() => {
