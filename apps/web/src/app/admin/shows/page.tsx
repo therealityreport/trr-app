@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { shows, type ShowAssets, type SeasonAssets } from "@/lib/admin/shows/data";
 
@@ -82,7 +84,7 @@ export default function AdminShowsPage() {
         <header className="border-b border-zinc-200 bg-white px-6 py-5">
           <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Shows · Assets</p>
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows Assets")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">{activeShow.title}</h1>
               <p className="text-sm text-zinc-500">{activeShow.logline}</p>
             </div>

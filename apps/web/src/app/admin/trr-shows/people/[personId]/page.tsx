@@ -5,6 +5,8 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildPersonBreadcrumb, humanizeSlug } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
@@ -30,7 +32,6 @@ import {
   THUMBNAIL_DEFAULTS,
   isThumbnailCropMode,
   resolveThumbnailPresentation,
-  resolveThumbnailViewportRect,
   type ThumbnailCrop,
 } from "@/lib/thumbnail-crop";
 import {
@@ -279,6 +280,39 @@ interface TrrPersonCredit {
   external_url?: string | null;
 }
 
+interface PersonCreditScopeEpisode {
+  episode_id: string;
+  episode_number: number | null;
+  episode_name: string | null;
+  appearance_type: string | null;
+}
+
+interface PersonCreditScopeSeason {
+  season_number: number | null;
+  episode_count: number;
+  episodes: PersonCreditScopeEpisode[];
+}
+
+interface PersonCreditScopeGroup {
+  credit_id: string;
+  role: string | null;
+  credit_category: string;
+  billing_order: number | null;
+  source_type: string | null;
+  total_episodes: number;
+  seasons: PersonCreditScopeSeason[];
+}
+
+interface PersonCreditShowScope {
+  show_id: string;
+  show_name: string | null;
+  cast_groups: PersonCreditScopeGroup[];
+  crew_groups: PersonCreditScopeGroup[];
+  cast_non_episodic: TrrPersonCredit[];
+  crew_non_episodic: TrrPersonCredit[];
+  other_show_credits: TrrPersonCredit[];
+}
+
 interface CoverPhoto {
   person_id: string;
   photo_id: string;
@@ -356,6 +390,104 @@ const parsePeopleCount = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const formatEpisodeCountLabel = (count: number): string =>
+  `${count} episode${count === 1 ? "" : "s"}`;
+
+const formatEpisodeCode = (
+  seasonNumber: number | null,
+  episodeNumber: number | null
+): string | null => {
+  if (seasonNumber === null && episodeNumber === null) return null;
+  const season = seasonNumber === null ? "?" : String(seasonNumber);
+  const episode =
+    episodeNumber === null ? "?" : String(episodeNumber).padStart(2, "0");
+  return `S${season}E${episode}`;
+};
+
+const isSelfCreditCategory = (creditCategory: string | null | undefined): boolean =>
+  typeof creditCategory === "string" && creditCategory.trim().toLowerCase() === "self";
+
+const normalizeRoleLabel = (role: string | null | undefined): string =>
+  typeof role === "string" ? role.trim() : "";
+
+const resolveOtherShowKey = (credit: TrrPersonCredit): string => {
+  if (typeof credit.show_id === "string" && credit.show_id.trim().length > 0) {
+    return `show:${credit.show_id.trim()}`;
+  }
+  if (typeof credit.show_name === "string" && credit.show_name.trim().length > 0) {
+    return `name:${credit.show_name.trim().toLowerCase()}`;
+  }
+  return `credit:${credit.id}`;
+};
+
+const partitionOtherShowCredits = (
+  otherShowCredits: TrrPersonCredit[]
+): { otherShowCastCredits: TrrPersonCredit[]; otherShowCrewCredits: TrrPersonCredit[] } => {
+  const hasExplicitCastRoleByShow = new Map<string, boolean>();
+
+  for (const credit of otherShowCredits) {
+    const showKey = resolveOtherShowKey(credit);
+    const isCastCredit = isSelfCreditCategory(credit.credit_category);
+    const roleLabel = normalizeRoleLabel(credit.role);
+    if (isCastCredit && roleLabel.length > 0) {
+      hasExplicitCastRoleByShow.set(showKey, true);
+    } else if (!hasExplicitCastRoleByShow.has(showKey)) {
+      hasExplicitCastRoleByShow.set(showKey, false);
+    }
+  }
+
+  const otherShowCastCredits: TrrPersonCredit[] = [];
+  const otherShowCrewCredits: TrrPersonCredit[] = [];
+
+  for (const credit of otherShowCredits) {
+    const showKey = resolveOtherShowKey(credit);
+    const isCastCredit = isSelfCreditCategory(credit.credit_category);
+    const roleLabel = normalizeRoleLabel(credit.role);
+    const hasExplicitCastRole = hasExplicitCastRoleByShow.get(showKey) ?? false;
+
+    if (isCastCredit && roleLabel.length === 0 && hasExplicitCastRole) {
+      continue;
+    }
+
+    if (isCastCredit) {
+      otherShowCastCredits.push(credit);
+      continue;
+    }
+    otherShowCrewCredits.push(credit);
+  }
+
+  return { otherShowCastCredits, otherShowCrewCredits };
+};
+
+const groupCreditsByShow = (
+  credits: TrrPersonCredit[]
+): Array<{ showKey: string; showName: string; credits: TrrPersonCredit[] }> => {
+  const groups = new Map<
+    string,
+    { showKey: string; showName: string; credits: TrrPersonCredit[] }
+  >();
+
+  for (const credit of credits) {
+    const showKey = resolveOtherShowKey(credit);
+    const existing = groups.get(showKey);
+    if (existing) {
+      existing.credits.push(credit);
+      continue;
+    }
+    const showName =
+      typeof credit.show_name === "string" && credit.show_name.trim().length > 0
+        ? credit.show_name.trim()
+        : "Unknown Show";
+    groups.set(showKey, {
+      showKey,
+      showName,
+      credits: [credit],
+    });
+  }
+
+  return Array.from(groups.values());
 };
 
 const clampFaceCoord = (value: number): number => Math.min(1, Math.max(0, value));
@@ -531,6 +663,21 @@ const buildThumbnailCropPayload = (photo: TrrPersonPhoto): Record<string, unknow
     zoom: photo.thumbnail_zoom,
     mode: photo.thumbnail_crop_mode ?? "auto",
   };
+};
+
+const buildAutoCropFallbackPayload = (): Record<string, unknown> => ({
+  x: THUMBNAIL_DEFAULTS.x,
+  y: THUMBNAIL_DEFAULTS.y,
+  zoom: THUMBNAIL_DEFAULTS.zoom,
+  mode: "auto",
+  strategy: "resize_center_fallback_v1",
+});
+
+const buildThumbnailCropPayloadWithFallback = (
+  photo: TrrPersonPhoto | null | undefined
+): Record<string, unknown> => {
+  if (!photo) return buildAutoCropFallbackPayload();
+  return buildThumbnailCropPayload(photo) ?? buildAutoCropFallbackPayload();
 };
 
 type ThumbnailCropPreview = {
@@ -715,48 +862,11 @@ function GalleryPhoto({
     setNaturalDimensions(null);
   }, [fallbackCandidates, primarySrc]);
 
-  const focusPoint = useMemo(() => {
-    const match = presentation.objectPosition.match(
-      /^(-?\d+(?:\.\d+)?)%\s+(-?\d+(?:\.\d+)?)%$/,
-    );
-    if (!match) {
-      return { x: THUMBNAIL_DEFAULTS.x, y: THUMBNAIL_DEFAULTS.y };
-    }
-    return {
-      x: Number.parseFloat(match[1]),
-      y: Number.parseFloat(match[2]),
-    };
-  }, [presentation.objectPosition]);
-
   const imageDimensions = useMemo(() => {
     const resolvedWidth = naturalDimensions?.width ?? parseDimensionValue(photo.width) ?? null;
     const resolvedHeight = naturalDimensions?.height ?? parseDimensionValue(photo.height) ?? null;
     return { width: resolvedWidth, height: resolvedHeight };
   }, [photo.height, photo.width, naturalDimensions?.height, naturalDimensions?.width]);
-
-  const viewportRect = useMemo(() => {
-    return resolveThumbnailViewportRect({
-      imageWidth: imageDimensions.width,
-      imageHeight: imageDimensions.height,
-      focusX: focusPoint.x,
-      focusY: focusPoint.y,
-      zoom: presentation.zoom,
-      aspectRatio: 4 / 5,
-    });
-  }, [focusPoint.x, focusPoint.y, imageDimensions.height, imageDimensions.width, presentation.zoom]);
-
-  const exactViewportStyle = useMemo(() => {
-    if (!viewportRect) return null;
-    if (viewportRect.widthPct <= 0 || viewportRect.heightPct <= 0) return null;
-    const widthScale = 100 / viewportRect.widthPct;
-    const heightScale = 100 / viewportRect.heightPct;
-    return {
-      width: `${(widthScale * 100).toFixed(4)}%`,
-      height: `${(heightScale * 100).toFixed(4)}%`,
-      left: `${(-(viewportRect.leftPct / viewportRect.widthPct) * 100).toFixed(4)}%`,
-      top: `${(-(viewportRect.topPct / viewportRect.heightPct) * 100).toFixed(4)}%`,
-    };
-  }, [viewportRect]);
 
   const handleError = () => {
     const nextCandidate = fallbackCandidates[fallbackIndex] ?? null;
@@ -792,17 +902,11 @@ function GalleryPhoto({
         alt={photo.caption || "Photo"}
         width={imageDimensions.width ?? 1200}
         height={imageDimensions.height ?? 1200}
-        className={
-          exactViewportStyle
-            ? "absolute max-w-none cursor-zoom-in select-none"
-            : "absolute inset-0 h-full w-full object-cover cursor-zoom-in select-none transition-transform duration-200"
-        }
+        className="absolute inset-0 h-full w-full cursor-zoom-in select-none object-cover transition-transform duration-200"
         style={{
-          ...(exactViewportStyle ?? {
-            objectPosition: presentation.objectPosition,
-            transform: presentation.zoom === 1 ? undefined : `scale(${presentation.zoom})`,
-            transformOrigin: presentation.objectPosition,
-          }),
+          objectPosition: presentation.objectPosition,
+          transform: presentation.zoom === 1 ? undefined : `scale(${presentation.zoom})`,
+          transformOrigin: presentation.objectPosition,
         }}
         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 200px"
         unoptimized
@@ -2035,6 +2139,7 @@ export default function PersonProfilePage() {
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
   const [photosVisibleCount, setPhotosVisibleCount] = useState(120);
   const [credits, setCredits] = useState<TrrPersonCredit[]>([]);
+  const [showScopedCredits, setShowScopedCredits] = useState<PersonCreditShowScope | null>(null);
   const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
   const [fandomSyncOpen, setFandomSyncOpen] = useState(false);
   const [fandomSyncPreview, setFandomSyncPreview] = useState<FandomSyncPreviewResponse | null>(null);
@@ -2899,17 +3004,28 @@ export default function PersonProfilePage() {
     if (!personId) return;
     try {
       const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      params.set("limit", "50");
+      if (showIdForApi) {
+        params.set("showId", showIdForApi);
+      }
       const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/credits?limit=50`,
+        `/api/admin/trr-api/people/${personId}/credits?${params.toString()}`,
         { headers }
       );
       if (!response.ok) throw new Error("Failed to fetch credits");
       const data = await response.json();
-      setCredits(data.credits);
+      setCredits(Array.isArray(data.credits) ? data.credits : []);
+      setShowScopedCredits(
+        data.show_scope && typeof data.show_scope === "object"
+          ? (data.show_scope as PersonCreditShowScope)
+          : null
+      );
     } catch (err) {
+      setShowScopedCredits(null);
       console.error("Failed to fetch credits:", err);
     }
-  }, [personId, getAuthHeaders]);
+  }, [personId, getAuthHeaders, showIdForApi]);
 
   // Fetch cover photo
   const fetchCoverPhoto = useCallback(async () => {
@@ -3195,14 +3311,6 @@ export default function PersonProfilePage() {
     []
   );
 
-  const handleFacebankSeedUpdated = useCallback(
-    (payload: { linkId: string; facebankSeed: boolean }) => {
-      setPhotos((prev) => applyFacebankSeedUpdateToPhotos(prev, payload));
-      setLightboxPhoto((prev) => applyFacebankSeedUpdateToLightbox(prev, payload));
-    },
-    []
-  );
-
   const runPhotoMetadataJob = useCallback(
     async (endpoint: string, payload?: Record<string, unknown>) => {
       const headers = await getAuthHeaders();
@@ -3304,9 +3412,9 @@ export default function PersonProfilePage() {
         },
         resize: {
           key: "resize",
-          label: "Resize",
+          label: "Auto-Crop",
           endpoint: `/api/admin/trr-api/media-assets/${assetId}/variants`,
-          payload: { force: true },
+          payload: { force: true, crop: buildThumbnailCropPayloadWithFallback(photo) },
         },
       };
     }
@@ -3340,9 +3448,9 @@ export default function PersonProfilePage() {
       },
       resize: {
         key: "resize",
-        label: "Resize",
+        label: "Auto-Crop",
         endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/variants`,
-        payload: { force: true },
+        payload: { force: true, crop: buildThumbnailCropPayloadWithFallback(photo) },
       },
     };
   }, []);
@@ -3449,19 +3557,186 @@ export default function PersonProfilePage() {
     [appendRefreshLog, fetchPhotos, resolvePhotoPipelineSteps, runPhotoMetadataJob]
   );
 
-  const handleRefreshLightboxPhotoMetadata = useCallback(
-    async (photo: TrrPersonPhoto) => {
-      const orderedSteps: PhotoPipelineStepKey[] = ["sync", "count", "id_text", "resize"];
-      if (buildThumbnailCropPayload(photo)) {
-        orderedSteps.push("crop");
+  const runPhotoAutoCropStage = useCallback(
+    async (
+      photo: TrrPersonPhoto,
+      options?: {
+        allowPartialFailures?: boolean;
+        successNotice?: string;
+        runLabel?: string;
+        skipCountStep?: boolean;
       }
-      await runPhotoPipelineSteps(photo, orderedSteps, {
+    ) => {
+      const allowPartialFailures = options?.allowPartialFailures ?? false;
+      const runLabel = options?.runLabel ?? "image_auto_crop";
+      const errors: string[] = [];
+      let runCounts: JobLiveCounts | null = null;
+
+      const basePrefix =
+        photo.origin === "media_links"
+          ? photo.media_asset_id
+            ? `/api/admin/trr-api/media-assets/${photo.media_asset_id}`
+            : null
+          : `/api/admin/trr-api/cast-photos/${photo.id}`;
+      if (!basePrefix) {
+        throw new Error("Cannot run auto-crop: media asset id is missing.");
+      }
+
+      const logStep = (
+        level: RefreshLogLevel,
+        stage: string,
+        message: string,
+        detail?: string | null
+      ) => {
+        appendRefreshLog({
+          source: "image_refresh",
+          stage,
+          message,
+          detail,
+          level,
+        });
+      };
+
+      logStep("info", runLabel, `Started auto-crop for ${photo.id}`);
+
+      if (!options?.skipCountStep) {
+        try {
+          const countData = await runPhotoMetadataJob(`${basePrefix}/auto-count`, { force: true });
+          runCounts = resolveJobLiveCounts(runCounts, countData);
+          const summary = summarizePhotoStepResponse(countData);
+          const countSummary = formatJobLiveCounts(runCounts);
+          logStep(
+            "success",
+            runLabel,
+            `Count complete${summary ? ` (${summary})` : ""}${
+              countSummary ? ` (${countSummary})` : ""
+            }`
+          );
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "failed";
+          logStep(
+            "error",
+            runLabel,
+            "Count failed; continuing with fallback auto-crop payload.",
+            detail
+          );
+        }
+      }
+
+      const refreshedAfterCount = await fetchPhotos();
+      const latestPhoto =
+        refreshedAfterCount.find((candidate) => candidate.id === photo.id) ?? photo;
+      const cropPayload = buildThumbnailCropPayloadWithFallback(latestPhoto);
+
+      try {
+        const baseVariantResponse = await runPhotoMetadataJob(`${basePrefix}/variants`, {
+          force: true,
+        });
+        runCounts = resolveJobLiveCounts(runCounts, baseVariantResponse);
+        logStep("success", runLabel, "Base variants complete.");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "failed";
+        if (!allowPartialFailures) {
+          logStep("error", runLabel, "Base variants failed.", detail);
+          throw error;
+        }
+        errors.push(`Base variants: ${detail}`);
+        logStep("error", runLabel, "Base variants failed.", detail);
+      }
+
+      try {
+        const cropVariantResponse = await runPhotoMetadataJob(`${basePrefix}/variants`, {
+          force: true,
+          crop: cropPayload,
+        });
+        runCounts = resolveJobLiveCounts(runCounts, cropVariantResponse);
+        logStep("success", runLabel, "Crop variants complete.");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "failed";
+        if (!allowPartialFailures) {
+          logStep("error", runLabel, "Crop variants failed.", detail);
+          throw error;
+        }
+        errors.push(`Crop variants: ${detail}`);
+        logStep("error", runLabel, "Crop variants failed.", detail);
+      }
+
+      const refreshedPhotos = await fetchPhotos();
+      const refreshedPhoto = refreshedPhotos.find((candidate) => candidate.id === photo.id) ?? null;
+      if (refreshedPhoto) {
+        setThumbnailCropPreview(buildThumbnailCropPreview(refreshedPhoto));
+      }
+      setLightboxPhoto((prev) => {
+        if (!prev || !refreshedPhoto) return prev;
+        if (prev.photo.id !== refreshedPhoto.id) return prev;
+        return { ...prev, photo: refreshedPhoto };
+      });
+
+      if (errors.length > 0 && !allowPartialFailures) {
+        throw new Error(errors.join(" | "));
+      }
+      if (errors.length > 0) {
+        logStep("error", runLabel, `Auto-crop completed with partial failures: ${errors.join(" | ")}`);
+      }
+
+      if (options?.successNotice) {
+        const countSummary = formatJobLiveCounts(runCounts);
+        setRefreshNotice(
+          countSummary ? `${options.successNotice} ${countSummary}` : options.successNotice
+        );
+      }
+      setRefreshError(null);
+      const completionCountSummary = formatJobLiveCounts(runCounts);
+      logStep(
+        "success",
+        runLabel,
+        `Completed auto-crop for ${photo.id}${
+          completionCountSummary ? ` (${completionCountSummary})` : ""
+        }`
+      );
+    },
+    [appendRefreshLog, fetchPhotos, runPhotoMetadataJob]
+  );
+
+  const triggerPreviewAutoCropRebuild = useCallback(
+    (photo: TrrPersonPhoto, runLabel: string) => {
+      void runPhotoAutoCropStage(photo, {
         allowPartialFailures: true,
-        successNotice: "Photo full pipeline refreshed.",
-        runLabel: "image_pipeline",
+        runLabel,
       });
     },
-    [runPhotoPipelineSteps]
+    [runPhotoAutoCropStage]
+  );
+
+  const handleFacebankSeedUpdated = useCallback(
+    (payload: { linkId: string; facebankSeed: boolean }) => {
+      let matchedPhoto: TrrPersonPhoto | null = null;
+      setPhotos((prev) => {
+        matchedPhoto = prev.find((photo) => photo.link_id === payload.linkId) ?? null;
+        return applyFacebankSeedUpdateToPhotos(prev, payload);
+      });
+      setLightboxPhoto((prev) => applyFacebankSeedUpdateToLightbox(prev, payload));
+      if (payload.facebankSeed && matchedPhoto) {
+        triggerPreviewAutoCropRebuild(matchedPhoto, "facebank_seed_auto_crop");
+      }
+    },
+    [triggerPreviewAutoCropRebuild]
+  );
+
+  const handleRefreshLightboxPhotoMetadata = useCallback(
+    async (photo: TrrPersonPhoto) => {
+      await runPhotoPipelineSteps(photo, ["sync", "count", "id_text"], {
+        allowPartialFailures: true,
+        runLabel: "image_pipeline",
+      });
+      await runPhotoAutoCropStage(photo, {
+        allowPartialFailures: true,
+        successNotice: "Photo full pipeline refreshed.",
+        runLabel: "image_pipeline_auto_crop",
+        skipCountStep: true,
+      });
+    },
+    [runPhotoAutoCropStage, runPhotoPipelineSteps]
   );
 
   const handleRefreshAutoThumbnailCrop = useCallback(
@@ -3513,11 +3788,11 @@ export default function PersonProfilePage() {
 
   const handleLightboxResizeStage = useCallback(
     async (photo: TrrPersonPhoto) =>
-      runPhotoPipelineSteps(photo, ["resize"], {
-        successNotice: "Image resize complete.",
-        runLabel: "image_resize",
+      runPhotoAutoCropStage(photo, {
+        successNotice: "Image auto-crop complete.",
+        runLabel: "image_auto_crop",
       }),
-    [runPhotoPipelineSteps]
+    [runPhotoAutoCropStage]
   );
 
   const handleThumbnailCropUpdated = useCallback(
@@ -4331,8 +4606,12 @@ export default function PersonProfilePage() {
           return { ...p, metadata: meta };
         })
       );
+
+      if (starred) {
+        triggerPreviewAutoCropRebuild(photo, "star_auto_crop");
+      }
     },
-    [getAuthHeaders]
+    [getAuthHeaders, triggerPreviewAutoCropRebuild]
   );
 
   const updateGalleryPhotoContentType = useCallback(
@@ -4449,6 +4728,109 @@ export default function PersonProfilePage() {
     };
   }, [person, canonicalSourceOrder]);
 
+  const { otherShowCastCredits, otherShowCrewCredits } = useMemo(
+    () => partitionOtherShowCredits(showScopedCredits?.other_show_credits ?? []),
+    [showScopedCredits]
+  );
+  const otherShowCastGroups = useMemo(
+    () => groupCreditsByShow(otherShowCastCredits),
+    [otherShowCastCredits]
+  );
+  const otherShowCrewGroups = useMemo(
+    () => groupCreditsByShow(otherShowCrewCredits),
+    [otherShowCrewCredits]
+  );
+  const currentScopedShowName =
+    showScopedCredits?.show_name && showScopedCredits.show_name.trim().length > 0
+      ? showScopedCredits.show_name.trim()
+      : "Unknown Show";
+  const breadcrumbShowName =
+    showScopedCredits?.show_name && showScopedCredits.show_name.trim().length > 0
+      ? showScopedCredits.show_name.trim()
+      : showSlugForRouting
+        ? humanizeSlug(showSlugForRouting)
+        : null;
+  const breadcrumbShowHref = backShowTarget
+    ? buildShowAdminUrl({ showSlug: backShowTarget })
+    : null;
+  const currentShowCastEpisodeTotal = useMemo(
+    () =>
+      (showScopedCredits?.cast_groups ?? []).reduce(
+        (total, group) => total + group.total_episodes,
+        0
+      ),
+    [showScopedCredits]
+  );
+  const currentShowCrewEpisodeTotal = useMemo(
+    () =>
+      (showScopedCredits?.crew_groups ?? []).reduce(
+        (total, group) => total + group.total_episodes,
+        0
+      ),
+    [showScopedCredits]
+  );
+
+  const renderOtherShowCreditSummaryRow = (
+    credit: TrrPersonCredit,
+    sectionType: "cast" | "crew"
+  ) => {
+    const roleFallback =
+      sectionType === "cast" ? "Unspecified Cast Role" : "Unspecified Crew Role";
+    const roleLabel = normalizeRoleLabel(credit.role) || roleFallback;
+    const rowClassName =
+      "flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 transition hover:bg-zinc-100";
+    const content = (
+      <>
+        <div>
+          <p className="font-semibold text-zinc-900">{credit.show_name || "Unknown Show"}</p>
+          <p className="text-sm text-zinc-600">{roleLabel}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+            {credit.credit_category}
+          </span>
+          {!credit.show_id && (
+            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+              IMDb
+            </span>
+          )}
+        </div>
+      </>
+    );
+
+    if (credit.show_id) {
+      const showLinkSlug =
+        showIdParam && showIdForApi && credit.show_id === showIdForApi
+          ? showIdParam
+          : credit.show_id;
+      return (
+        <Link key={credit.id} href={`/admin/trr-shows/${showLinkSlug}`} className={rowClassName}>
+          {content}
+        </Link>
+      );
+    }
+
+    if (credit.external_url) {
+      return (
+        <a
+          key={credit.id}
+          href={credit.external_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={rowClassName}
+        >
+          {content}
+        </a>
+      );
+    }
+
+    return (
+      <div key={credit.id} className={rowClassName}>
+        {content}
+      </div>
+    );
+  };
+
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -4500,12 +4882,12 @@ export default function PersonProfilePage() {
         <header className="border-b border-zinc-200 bg-white px-6 py-5">
           <div className="mx-auto max-w-6xl">
             <div className="mb-4">
-              <Link
-                href={backHref as "/admin/trr-shows"}
-                className="text-sm text-zinc-500 hover:text-zinc-900"
-              >
-                {backLabel}
-              </Link>
+              <AdminBreadcrumbs
+                items={buildPersonBreadcrumb(person.full_name, {
+                  showName: breadcrumbShowName,
+                  showHref: breadcrumbShowHref,
+                })}
+              />
             </div>
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
               {/* Profile Photo */}
@@ -4513,9 +4895,6 @@ export default function PersonProfilePage() {
 
               {/* Person Info */}
               <div className="flex-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                  Person
-                </p>
                 <div className="flex items-center gap-3">
                   <h1 className="text-3xl font-bold text-zinc-900">
                     {person.full_name}
@@ -5046,10 +5425,10 @@ export default function PersonProfilePage() {
                     <button
                       onClick={handleRefreshImages}
                       disabled={refreshingImages || reprocessingImages}
-                      title="Run resize stage with full refresh pipeline."
+                      title="Run Auto-Crop stage with full refresh pipeline."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
                     >
-                      Resize
+                      Auto-Crop
                     </button>
                   </div>
                   <button
@@ -5395,76 +5774,320 @@ export default function PersonProfilePage() {
                   {person.full_name}
                 </h3>
               </div>
-              <div className="space-y-3">
-                {credits.map((credit) => {
-                  const rowClassName =
-                    "flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-4 transition hover:bg-zinc-100";
-                  const content = (
-                    <>
-                      <div>
-                        <p className="font-semibold text-zinc-900">
-                          {credit.show_name || "Unknown Show"}
-                        </p>
-                        {credit.role && (
-                          <p className="text-sm text-zinc-600">{credit.role}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
-                          {credit.credit_category}
-                        </span>
-                        {!credit.show_id && (
-                          <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
-                            IMDb
-                          </span>
-                        )}
-                        {credit.billing_order && (
-                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
-                            #{credit.billing_order}
-                          </span>
-                        )}
-                      </div>
-                    </>
-                  );
-                  if (credit.show_id) {
-                    const showLinkSlug =
-                      showIdParam && showIdForApi && credit.show_id === showIdForApi
-                        ? showIdParam
-                        : credit.show_id;
-                    return (
-                      <Link
-                        key={credit.id}
-                        href={`/admin/trr-shows/${showLinkSlug}`}
-                        className={rowClassName}
-                      >
-                        {content}
-                      </Link>
-                    );
-                  }
-                  if (credit.external_url) {
-                    return (
-                      <a
-                        key={credit.id}
-                        href={credit.external_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={rowClassName}
-                      >
-                        {content}
-                      </a>
-                    );
-                  }
-                  return (
-                    <div key={credit.id} className={rowClassName}>
-                      {content}
+              {showScopedCredits ? (
+                <div className="space-y-8">
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-base font-semibold text-zinc-900">Cast Credits</h4>
+                      <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
+                        {showScopedCredits.cast_groups.length} grouped
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
-              {credits.length === 0 && (
-                <p className="text-sm text-zinc-500">
-                  No credits available for this person.
-                </p>
+                    <div className="space-y-3">
+                      <details className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-3">
+                        <summary className="cursor-pointer list-none">
+                          <div className="flex items-center justify-between gap-4">
+                            <h5 className="text-sm font-semibold text-zinc-700">{currentScopedShowName}</h5>
+                            <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
+                              {formatEpisodeCountLabel(currentShowCastEpisodeTotal)}
+                            </span>
+                          </div>
+                        </summary>
+                        <div className="mt-3 space-y-2">
+                          {showScopedCredits.cast_groups.length === 0 &&
+                            showScopedCredits.cast_non_episodic.length === 0 && (
+                              <p className="text-sm text-zinc-500">No cast credits for this show yet.</p>
+                            )}
+                          {showScopedCredits.cast_groups.map((group) => (
+                            <article
+                              key={`cast-group-${group.credit_id}`}
+                              className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-4">
+                                <div>
+                                  <p className="font-semibold text-zinc-900">
+                                    {group.role || "Unspecified Cast Role"}
+                                  </p>
+                                  <p className="text-xs text-zinc-500">{group.credit_category}</p>
+                                </div>
+                                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
+                                  {formatEpisodeCountLabel(group.total_episodes)}
+                                </span>
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                {group.seasons.map((season) => {
+                                  const seasonLabel =
+                                    season.season_number === null ? "Unknown" : String(season.season_number);
+                                  return (
+                                    <details
+                                      key={`cast-group-${group.credit_id}-season-${seasonLabel}`}
+                                      className="rounded-md border border-zinc-200 bg-white p-3"
+                                    >
+                                      <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-800">
+                                        Season {seasonLabel} • {formatEpisodeCountLabel(season.episode_count)}
+                                      </summary>
+                                      <div className="mt-2 space-y-1">
+                                        {season.episodes.map((episode) => {
+                                          const episodeCode = formatEpisodeCode(
+                                            season.season_number,
+                                            episode.episode_number
+                                          );
+                                          return (
+                                            <div
+                                              key={`${group.credit_id}-${episode.episode_id}`}
+                                              className="rounded border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+                                            >
+                                              {episodeCode
+                                                ? `${episodeCode} • ${episode.episode_name || "Untitled Episode"}`
+                                                : episode.episode_name || "Untitled Episode"}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </details>
+                                  );
+                                })}
+                              </div>
+                            </article>
+                          ))}
+
+                          {showScopedCredits.cast_non_episodic.map((credit) => (
+                            <div
+                              key={`cast-non-episodic-${credit.id}`}
+                              className="flex items-center justify-between rounded-lg border border-zinc-200 border-dashed bg-white p-3"
+                            >
+                              <div>
+                                <p className="font-semibold text-zinc-900">
+                                  {credit.role || "Unspecified Cast Role"}
+                                </p>
+                                <p className="text-xs text-zinc-500">
+                                  {credit.credit_category} • No episode evidence yet
+                                </p>
+                              </div>
+                              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-600">
+                                {credit.source_type || "source unknown"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+
+                      {otherShowCastGroups.map((showGroup) => (
+                        <details
+                          key={`other-cast-show-${showGroup.showKey}`}
+                          className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-3"
+                        >
+                          <summary className="cursor-pointer list-none">
+                            <div className="flex items-center justify-between gap-4">
+                              <h5 className="text-sm font-semibold text-zinc-700">{showGroup.showName}</h5>
+                              <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
+                                {showGroup.credits.length} credit{showGroup.credits.length === 1 ? "" : "s"}
+                              </span>
+                            </div>
+                          </summary>
+                          <div className="mt-3 space-y-2">
+                            {showGroup.credits.map((credit) =>
+                              renderOtherShowCreditSummaryRow(credit, "cast")
+                            )}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-base font-semibold text-zinc-900">Crew Credits</h4>
+                      <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
+                        {showScopedCredits.crew_groups.length} grouped
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      <details className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-3">
+                        <summary className="cursor-pointer list-none">
+                          <div className="flex items-center justify-between gap-4">
+                            <h5 className="text-sm font-semibold text-zinc-700">{currentScopedShowName}</h5>
+                            <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
+                              {formatEpisodeCountLabel(currentShowCrewEpisodeTotal)}
+                            </span>
+                          </div>
+                        </summary>
+                        <div className="mt-3 space-y-2">
+                          {showScopedCredits.crew_groups.length === 0 &&
+                            showScopedCredits.crew_non_episodic.length === 0 && (
+                              <p className="text-sm text-zinc-500">No crew credits for this show yet.</p>
+                            )}
+                          {showScopedCredits.crew_groups.map((group) => (
+                            <article
+                              key={`crew-group-${group.credit_id}`}
+                              className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-4">
+                                <div>
+                                  <p className="font-semibold text-zinc-900">
+                                    {group.role || "Unspecified Crew Role"}
+                                  </p>
+                                  <p className="text-xs text-zinc-500">{group.credit_category}</p>
+                                </div>
+                                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
+                                  {formatEpisodeCountLabel(group.total_episodes)}
+                                </span>
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                {group.seasons.map((season) => {
+                                  const seasonLabel =
+                                    season.season_number === null ? "Unknown" : String(season.season_number);
+                                  return (
+                                    <details
+                                      key={`crew-group-${group.credit_id}-season-${seasonLabel}`}
+                                      className="rounded-md border border-zinc-200 bg-white p-3"
+                                    >
+                                      <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-800">
+                                        Season {seasonLabel} • {formatEpisodeCountLabel(season.episode_count)}
+                                      </summary>
+                                      <div className="mt-2 space-y-1">
+                                        {season.episodes.map((episode) => {
+                                          const episodeCode = formatEpisodeCode(
+                                            season.season_number,
+                                            episode.episode_number
+                                          );
+                                          return (
+                                            <div
+                                              key={`${group.credit_id}-${episode.episode_id}`}
+                                              className="rounded border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+                                            >
+                                              {episodeCode
+                                                ? `${episodeCode} • ${episode.episode_name || "Untitled Episode"}`
+                                                : episode.episode_name || "Untitled Episode"}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </details>
+                                  );
+                                })}
+                              </div>
+                            </article>
+                          ))}
+
+                          {showScopedCredits.crew_non_episodic.map((credit) => (
+                            <div
+                              key={`crew-non-episodic-${credit.id}`}
+                              className="flex items-center justify-between rounded-lg border border-zinc-200 border-dashed bg-white p-3"
+                            >
+                              <div>
+                                <p className="font-semibold text-zinc-900">
+                                  {credit.role || "Unspecified Crew Role"}
+                                </p>
+                                <p className="text-xs text-zinc-500">
+                                  {credit.credit_category} • No episode evidence yet
+                                </p>
+                              </div>
+                              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-600">
+                                {credit.source_type || "source unknown"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+
+                      {otherShowCrewGroups.map((showGroup) => (
+                        <details
+                          key={`other-crew-show-${showGroup.showKey}`}
+                          className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-3"
+                        >
+                          <summary className="cursor-pointer list-none">
+                            <div className="flex items-center justify-between gap-4">
+                              <h5 className="text-sm font-semibold text-zinc-700">{showGroup.showName}</h5>
+                              <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
+                                {showGroup.credits.length} credit{showGroup.credits.length === 1 ? "" : "s"}
+                              </span>
+                            </div>
+                          </summary>
+                          <div className="mt-3 space-y-2">
+                            {showGroup.credits.map((credit) =>
+                              renderOtherShowCreditSummaryRow(credit, "crew")
+                            )}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {credits.map((credit) => {
+                      const rowClassName =
+                        "flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-4 transition hover:bg-zinc-100";
+                      const content = (
+                        <>
+                          <div>
+                            <p className="font-semibold text-zinc-900">
+                              {credit.show_name || "Unknown Show"}
+                            </p>
+                            {credit.role && (
+                              <p className="text-sm text-zinc-600">{credit.role}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
+                              {credit.credit_category}
+                            </span>
+                            {!credit.show_id && (
+                              <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
+                                IMDb
+                              </span>
+                            )}
+                            {credit.billing_order && (
+                              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
+                                #{credit.billing_order}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      );
+                      if (credit.show_id) {
+                        const showLinkSlug =
+                          showIdParam && showIdForApi && credit.show_id === showIdForApi
+                            ? showIdParam
+                            : credit.show_id;
+                        return (
+                          <Link
+                            key={credit.id}
+                            href={`/admin/trr-shows/${showLinkSlug}`}
+                            className={rowClassName}
+                          >
+                            {content}
+                          </Link>
+                        );
+                      }
+                      if (credit.external_url) {
+                        return (
+                          <a
+                            key={credit.id}
+                            href={credit.external_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={rowClassName}
+                          >
+                            {content}
+                          </a>
+                        );
+                      }
+                      return (
+                        <div key={credit.id} className={rowClassName}>
+                          {content}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {credits.length === 0 && (
+                    <p className="text-sm text-zinc-500">
+                      No credits available for this person.
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}

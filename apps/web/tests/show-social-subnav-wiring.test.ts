@@ -11,6 +11,7 @@ describe("show social subnav wiring", () => {
     expect(contents).toMatch(/SENTIMENT ANALYSIS/);
     expect(contents).toMatch(/HASHTAGS ANALYSIS/);
     expect(contents).toMatch(/ADVANCED ANALYTICS/);
+    expect(contents).toMatch(/REDDIT ANALYTICS/);
   });
 
   it("renders platform tabs above Social Scope in the social first container", () => {

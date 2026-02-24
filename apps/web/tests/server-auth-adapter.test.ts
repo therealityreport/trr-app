@@ -27,7 +27,11 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 function requestWithBearer(token: string): NextRequest {
-  return new NextRequest("http://localhost/api/test", {
+  return requestWithBearerAt("http://localhost/api/test", token);
+}
+
+function requestWithBearerAt(url: string, token: string): NextRequest {
+  return new NextRequest(url, {
     headers: {
       authorization: `Bearer ${token}`,
     },
@@ -50,6 +54,9 @@ describe("server auth adapter", () => {
     process.env.ADMIN_EMAIL_ALLOWLIST = "";
     process.env.TRR_CORE_SUPABASE_URL = "https://example.supabase.co";
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.ADMIN_APP_HOSTS;
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_ENFORCE_HOST;
 
     createClientMock.mockReturnValue({
       auth: {
@@ -225,5 +232,146 @@ describe("server auth adapter", () => {
     expect(resetSnapshot.counters.fallbackSuccesses).toBe(0);
     expect(resetSnapshot.windowStartedAt).toBeTruthy();
     expect(resetSnapshot.lastObservedAt).toBeNull();
+  });
+
+  it("defaults host enforcement to disabled in development when ADMIN_ENFORCE_HOST is unset", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin-dev-default",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      const user = await auth.requireAdmin(
+        requestWithBearerAt("http://localhost/api/test", "token-dev-default-host"),
+      );
+      expect(user).toMatchObject({
+        uid: "firebase-admin-dev-default",
+        email: "admin@example.com",
+        provider: "firebase",
+      });
+    } finally {
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
+  it("defaults host enforcement to enabled in production when ADMIN_ENFORCE_HOST is unset", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin-prod-default",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      await expect(
+        auth.requireAdmin(requestWithBearerAt("http://localhost/api/test", "token-prod-default-host")),
+      ).rejects.toThrow("forbidden");
+    } finally {
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
+  it("denies requireAdmin on non-admin host when host enforcement is enabled", async () => {
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    const auth = await import("@/lib/server/auth");
+    await expect(auth.requireAdmin(requestWithBearerAt("http://localhost/api/test", "token-host-block"))).rejects.toThrow(
+      "forbidden",
+    );
+  });
+
+  it("allows requireAdmin on configured admin host when host enforcement is enabled", async () => {
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.requireAdmin(
+      requestWithBearerAt("http://admin.localhost/api/test", "token-host-allow"),
+    );
+    expect(user).toMatchObject({
+      uid: "firebase-admin",
+      email: "admin@example.com",
+      provider: "firebase",
+    });
+  });
+
+  it("allows requireAdmin on bracketed IPv6 admin host when allowlisted", async () => {
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "[::1]";
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin-ipv6",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.requireAdmin(
+      requestWithBearerAt("http://[::1]:3000/api/test", "token-host-allow-ipv6"),
+    );
+    expect(user).toMatchObject({
+      uid: "firebase-admin-ipv6",
+      email: "admin@example.com",
+      provider: "firebase",
+    });
+  });
+
+  it("uses host header precedence when url host differs in local dev", async () => {
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin-host-header",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    const request = new NextRequest("http://localhost/api/test", {
+      headers: {
+        authorization: "Bearer token-host-header",
+        host: "admin.localhost:3000",
+      },
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.requireAdmin(request);
+    expect(user).toMatchObject({
+      uid: "firebase-admin-host-header",
+      email: "admin@example.com",
+      provider: "firebase",
+    });
   });
 });

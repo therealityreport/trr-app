@@ -12,13 +12,13 @@ export type ShowAssetsSubTab = "images" | "videos" | "brand";
 
 export type SeasonAdminTab =
   | "episodes"
+  | "overview"
   | "assets"
   | "videos"
   | "fandom"
   | "cast"
   | "surveys"
-  | "social"
-  | "details";
+  | "social";
 
 export type SeasonAssetsSubTab = "media" | "brand";
 export type PersonAdminTab =
@@ -85,6 +85,8 @@ const SHOW_TAB_BY_QUERY_ALIAS: Record<string, ShowAdminTab> = {
 };
 
 const SEASON_TAB_BY_PATH_SEGMENT: Record<string, SeasonAdminTab> = {
+  overview: "overview",
+  details: "overview",
   episodes: "episodes",
   assets: "assets",
   videos: "videos",
@@ -92,7 +94,6 @@ const SEASON_TAB_BY_PATH_SEGMENT: Record<string, SeasonAdminTab> = {
   cast: "cast",
   surveys: "surveys",
   social: "social",
-  details: "details",
 };
 
 const SEASON_ASSETS_SUBTAB_BY_SEGMENT: Record<string, SeasonAssetsSubTab> = {
@@ -102,6 +103,8 @@ const SEASON_ASSETS_SUBTAB_BY_SEGMENT: Record<string, SeasonAssetsSubTab> = {
 };
 
 const SEASON_TAB_BY_QUERY_ALIAS: Record<string, SeasonAdminTab> = {
+  overview: "overview",
+  details: "overview",
   episodes: "episodes",
   assets: "assets",
   videos: "videos",
@@ -109,7 +112,6 @@ const SEASON_TAB_BY_QUERY_ALIAS: Record<string, SeasonAdminTab> = {
   cast: "cast",
   surveys: "surveys",
   social: "social",
-  details: "details",
   media: "assets",
 };
 
@@ -207,9 +209,6 @@ export function cleanLegacyRoutingQuery(searchParams: URLSearchParams): URLSearc
   const next = new URLSearchParams(searchParams.toString());
   next.delete("tab");
   next.delete("assets");
-  next.delete("social_platform");
-  next.delete("social_view");
-  next.delete("source_scope");
   next.delete("scope");
   return next;
 }
@@ -308,10 +307,10 @@ export function parseSeasonRouteState(
   }
 
   if (seasonSegments) {
-    return { tab: "episodes", assetsSubTab: "media", source: "path" };
+    return { tab: "overview", assetsSubTab: "media", source: "path" };
   }
 
-  return { tab: "episodes", assetsSubTab: "media", source: "default" };
+  return { tab: "overview", assetsSubTab: "media", source: "default" };
 }
 
 export function parsePersonRouteState(
@@ -404,11 +403,11 @@ export function buildSeasonAdminUrl(input: {
 }): string {
   const slug = encodeURIComponent(input.showSlug.trim());
   const season = encodeURIComponent(String(input.seasonNumber));
-  const tab = input.tab ?? "episodes";
+  const tab = input.tab ?? "overview";
   const assetsSubTab = input.assetsSubTab ?? "media";
   const base = `/admin/trr-shows/${slug}/seasons/${season}`;
   const nextQuery = new URLSearchParams(input.query?.toString() ?? "");
-  if (tab === "episodes") {
+  if (tab === "overview") {
     nextQuery.delete("tab");
     nextQuery.delete("assets");
     return appendQuery(base, nextQuery);

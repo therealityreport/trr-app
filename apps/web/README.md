@@ -28,6 +28,28 @@ Notes
 - The client SDK auto-connects to emulators when the flag is on; no production data is read or written.
 - Keeping a distinct emulator project ID (e.g., `demo-trr`) helps the Emulator UI display the same namespace your client uses.
 
+## Admin Host Isolation (Dev)
+
+Use a dedicated local admin origin to mirror production isolation:
+
+- Public app: `http://localhost:3000`
+- Admin app: `http://admin.localhost:3000`
+
+Add these values in `.env.local`:
+
+```bash
+ADMIN_APP_ORIGIN=http://admin.localhost:3000
+ADMIN_APP_HOSTS=admin.localhost,localhost,127.0.0.1,[::1]
+ADMIN_ENFORCE_HOST=true
+ADMIN_STRICT_HOST_ROUTING=false
+```
+
+Behavior:
+
+- Requests to `/admin/*` on `localhost:3000` redirect to `admin.localhost:3000`.
+- Requests to `/api/admin/*` on non-admin hosts are denied (`403`).
+- This is the same code path used later for `https://admin.<domain>` in production.
+
 ## TRR Backend Facebank Seed Proxy
 
 For the admin gallery facebank seed toggle proxy route

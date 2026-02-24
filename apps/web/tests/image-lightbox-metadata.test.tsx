@@ -118,6 +118,24 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getByRole("button", { name: "Refresh Full Pipeline" })).toBeInTheDocument();
   });
 
+  it("renders Auto-Crop action label when resize handler is available", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        canManage
+        onResize={vi.fn(async () => {})}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByRole("button", { name: "Auto-Crop" })).toBeInTheDocument();
+  });
+
   it("renders placeholders for blank metadata fields instead of hiding rows", () => {
     render(
       <ImageLightbox

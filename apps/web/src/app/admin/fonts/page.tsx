@@ -5,6 +5,8 @@ import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import {
   DESIGN_SYSTEM_BASE_COLORS,
@@ -1201,6 +1203,7 @@ function AdminFontsPageContent() {
           <div className="mx-auto max-w-5xl">
             <div className="flex items-center justify-between">
               <div>
+                <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("UI Design System")} className="mb-1" />
                 <h1 className="text-2xl font-bold text-zinc-900">UI Design System</h1>
                 <p className="mt-1 text-sm text-zinc-500">
                   Fonts, colors, buttons, question components, and form patterns used across the app.

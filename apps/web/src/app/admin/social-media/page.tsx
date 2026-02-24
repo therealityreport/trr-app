@@ -3,7 +3,9 @@
 import { Route } from "next";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
+import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 export default function AdminSocialMediaPage() {
@@ -48,7 +50,7 @@ export default function AdminSocialMediaPage() {
         <header className="border-b border-zinc-200 bg-white px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Admin / Social Intelligence</p>
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Social Analytics")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Social Analytics</h1>
               <p className="text-sm text-zinc-500">Category dashboards for Bravo Content and Creator Content.</p>
             </div>

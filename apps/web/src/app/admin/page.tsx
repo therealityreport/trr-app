@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildAdminRootBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const ADMIN_TOOLS = [
@@ -96,9 +98,9 @@ export default function AdminDashboardPage() {
         <header className="border-b border-zinc-200 bg-white px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Admin Dashboard</p>
-              <h1 className="text-3xl font-bold text-zinc-900">Welcome, {displayName}</h1>
-              <p className="text-sm text-zinc-500">
+              <AdminBreadcrumbs items={buildAdminRootBreadcrumb()} className="mb-1" />
+              <h1 className="break-words text-3xl font-bold text-zinc-900">Welcome, {displayName}</h1>
+              <p className="break-words text-sm text-zinc-500">
                 Superfan tooling for The Reality Report - manage fonts, view survey analytics, and export data.
               </p>
             </div>
@@ -119,7 +121,7 @@ export default function AdminDashboardPage() {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Access Level</p>
                 <p className="text-lg font-semibold text-zinc-900">The Reality Report Superfan</p>
-                <p className="text-sm text-zinc-500">Display name verified as The Reality Report Superfan @the_reality_report1</p>
+                <p className="break-words text-sm text-zinc-500">Display name verified as The Reality Report Superfan @the_reality_report1</p>
               </div>
               <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
                 <p className="font-semibold">Authorized</p>
@@ -143,18 +145,18 @@ export default function AdminDashboardPage() {
                 <Link
                   key={tool.key}
                   href={tool.href}
-                  className="group rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-black/50 hover:shadow-md"
+                  className="group min-w-0 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-black/50 hover:shadow-md"
                 >
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">{tool.badge}</p>
-                      <h3 className="mt-1 text-xl font-bold text-zinc-900">{tool.title}</h3>
+                      <h3 className="mt-1 break-words text-xl font-bold text-zinc-900">{tool.title}</h3>
                     </div>
                     <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
                       Open
                     </div>
                   </div>
-                  <p className="mt-3 text-sm text-zinc-600">{tool.description}</p>
+                  <p className="mt-3 break-words text-sm text-zinc-600">{tool.description}</p>
                   <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-zinc-900">
                     <span className="transition group-hover:translate-x-0.5">Launch</span>
                     <svg

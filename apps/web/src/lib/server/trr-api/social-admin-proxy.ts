@@ -101,6 +101,29 @@ const isRetryableUpstreamStatus = (status: number): boolean => {
   return status === 502 || status === 503 || status === 504;
 };
 
+const hasDnsOrTransportFaultText = (value: string): boolean => {
+  const message = value.toLowerCase();
+  return (
+    message.includes("could not translate host name") ||
+    message.includes("enotfound") ||
+    message.includes("ssl syscall error: eof detected")
+  );
+};
+
+const hasDnsOrTransportFaultDetail = (detail: unknown): boolean => {
+  if (typeof detail === "string") {
+    return hasDnsOrTransportFaultText(detail);
+  }
+  if (!detail || typeof detail !== "object") {
+    return false;
+  }
+  const record = detail as Record<string, unknown>;
+  const values = [record.message, record.error, record.detail]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  return values.length > 0 && hasDnsOrTransportFaultText(values);
+};
+
 const isRetryableNetworkError = (error: unknown): boolean => {
   if (!(error instanceof Error)) {
     return false;
@@ -109,18 +132,20 @@ const isRetryableNetworkError = (error: unknown): boolean => {
     return true;
   }
   const message = error.message.toLowerCase();
-  if (message.includes("fetch failed")) {
+  if (message.includes("fetch failed") || hasDnsOrTransportFaultText(message)) {
     return true;
   }
   const cause = (error as Error & { cause?: { code?: string } }).cause;
   const code = String(cause?.code ?? "");
   return [
+    "ENOTFOUND",
     "ECONNRESET",
     "ECONNREFUSED",
     "ETIMEDOUT",
     "EPIPE",
     "ENETUNREACH",
     "EHOSTUNREACH",
+    "EAI_AGAIN",
     "UND_ERR_CONNECT_TIMEOUT",
   ].includes(code);
 };
@@ -168,6 +193,12 @@ const appendQuery = (backendBase: string, queryString: string): string => {
   return queryString ? `${backendBase}?${queryString}` : backendBase;
 };
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string | null | undefined): value is string =>
+  typeof value === "string" && UUID_PATTERN.test(value);
+
 type FetchWithRetryOptions = {
   method?: string;
   headers?: Record<string, string>;
@@ -175,6 +206,11 @@ type FetchWithRetryOptions = {
   timeoutMs?: number;
   retries?: number;
   fallbackError: string;
+};
+
+type SeasonBackendOptions = FetchWithRetryOptions & {
+  queryString?: string;
+  seasonIdHint?: string | null;
 };
 
 async function fetchWithTimeout(
@@ -220,14 +256,31 @@ async function fetchBackend(
 
       let data: Record<string, unknown> = {};
       data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      const proxyError = new SocialProxyError(normalizeBackendErrorMessage(data, options.fallbackError), {
-        status: response.status,
-        code: "UPSTREAM_ERROR",
-        retryable: isRetryableUpstreamStatus(response.status),
-        upstreamStatus: response.status,
-        upstreamDetail: readUpstreamDetail(data),
-        upstreamDetailCode: readUpstreamDetailCode(data),
-      });
+      const upstreamDetail = readUpstreamDetail(data);
+      const upstreamDetailCode = readUpstreamDetailCode(data);
+      const normalizedMessage = normalizeBackendErrorMessage(data, options.fallbackError);
+      const hasDnsOrTransportFault =
+        hasDnsOrTransportFaultText(normalizedMessage) || hasDnsOrTransportFaultDetail(upstreamDetail);
+      const proxyError = hasDnsOrTransportFault
+        ? new SocialProxyError(
+            "Could not reach TRR-Backend. Confirm TRR-Backend is running and TRR_API_URL is correct.",
+            {
+              status: 502,
+              code: "BACKEND_UNREACHABLE",
+              retryable: true,
+              upstreamStatus: response.status,
+              upstreamDetail,
+              upstreamDetailCode,
+            },
+          )
+        : new SocialProxyError(normalizedMessage, {
+            status: response.status,
+            code: "UPSTREAM_ERROR",
+            retryable: isRetryableUpstreamStatus(response.status),
+            upstreamStatus: response.status,
+            upstreamDetail,
+            upstreamDetailCode,
+          });
       if (!proxyError.retryable || attempt >= maxAttempts) {
         throw proxyError;
       }
@@ -260,8 +313,9 @@ export const buildSeasonBackendUrl = async (
   showId: string,
   seasonNumberRaw: string,
   seasonPath: string,
+  seasonIdHint?: string | null,
 ): Promise<string> => {
-  const seasonId = await resolveSeasonId(showId, seasonNumberRaw);
+  const seasonId = isUuid(seasonIdHint) ? seasonIdHint : await resolveSeasonId(showId, seasonNumberRaw);
   const normalizedSeasonPath = seasonPath.startsWith("/") ? seasonPath : `/${seasonPath}`;
   const backendUrl = getBackendApiUrl(`/admin/socials/seasons/${seasonId}${normalizedSeasonPath}`);
   if (!backendUrl) {
@@ -274,9 +328,9 @@ export const fetchSeasonBackendJson = async (
   showId: string,
   seasonNumberRaw: string,
   seasonPath: string,
-  options: FetchWithRetryOptions & { queryString?: string },
+  options: SeasonBackendOptions,
 ): Promise<Record<string, unknown>> => {
-  const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath);
+  const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath, options.seasonIdHint);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
   const response = await fetchBackend(backendUrl, {
     ...options,
@@ -292,9 +346,9 @@ export const fetchSeasonBackendResponse = async (
   showId: string,
   seasonNumberRaw: string,
   seasonPath: string,
-  options: FetchWithRetryOptions & { queryString?: string },
+  options: SeasonBackendOptions,
 ): Promise<Response> => {
-  const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath);
+  const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath, options.seasonIdHint);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
   return fetchBackend(backendUrl, {
     ...options,

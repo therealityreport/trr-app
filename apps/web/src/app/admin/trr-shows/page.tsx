@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
@@ -379,9 +381,7 @@ export default function TrrShowsPage() {
         <header className="border-b border-zinc-200 bg-white px-6 py-5">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                TRR Core API
-              </p>
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Shows</h1>
               <p className="text-sm text-zinc-500">
                 Browse shows from the TRR metadata database. Create surveys and

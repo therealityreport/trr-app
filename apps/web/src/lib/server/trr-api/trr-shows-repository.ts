@@ -380,6 +380,23 @@ export const toPersonSlug = (value: string): string => {
     .replace(/(^-|-$)/g, "");
 };
 
+const buildShowSlugCandidates = (rawSlug: string): string[] => {
+  const normalized = toShowSlug(rawSlug);
+  if (!normalized) return [];
+
+  const candidates = [normalized];
+  if (normalized.startsWith("the-")) {
+    const withoutArticle = normalized.slice(4).trim();
+    if (withoutArticle) {
+      candidates.push(withoutArticle);
+    }
+  } else {
+    candidates.push(`the-${normalized}`);
+  }
+
+  return Array.from(new Set(candidates.filter((value) => value.length > 0)));
+};
+
 export interface ResolvedShowSlug {
   show_id: string;
   slug: string;
@@ -405,16 +422,26 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
   const requestedPrefix = rawSuffix?.[1]?.toLowerCase() || null;
   const rawBase = rawSuffix ? slug.slice(0, -rawSuffix[0].length) : slug;
 
-  const normalizedInput = toShowSlug(rawBase);
-  if (!normalizedInput) return null;
+  const slugCandidates = buildShowSlugCandidates(rawBase);
+  if (slugCandidates.length === 0) return null;
 
-  const baseSlug = normalizedInput;
-
-  const rows = await pgQuery<{ id: string; name: string; slug: string }>(
-    `SELECT
-       s.id::text AS id,
-       s.name,
-       lower(
+  for (const baseSlug of slugCandidates) {
+    const rows = await pgQuery<{ id: string; name: string; slug: string }>(
+      `SELECT
+         s.id::text AS id,
+         s.name,
+         lower(
+           trim(
+             both '-' FROM regexp_replace(
+               regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
+               '[^a-z0-9]+',
+               '-',
+               'gi'
+             )
+           )
+         ) AS slug
+       FROM core.shows AS s
+       WHERE lower(
          trim(
            both '-' FROM regexp_replace(
              regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
@@ -423,51 +450,44 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
              'gi'
            )
          )
-       ) AS slug
-     FROM core.shows AS s
-     WHERE lower(
-       trim(
-         both '-' FROM regexp_replace(
-           regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
-           '[^a-z0-9]+',
-           '-',
-           'gi'
-         )
-       )
-     ) = $1
-     ORDER BY s.id ASC`,
-    [baseSlug]
-  );
+       ) = $1
+       ORDER BY s.id ASC`,
+      [baseSlug]
+    );
 
-  if (rows.rows.length === 0) return null;
+    if (rows.rows.length === 0) continue;
 
-  if (requestedPrefix) {
-    const prefixMatch = rows.rows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix));
-    if (!prefixMatch) return null;
-    const canonicalSlug = rows.rows.length > 1
-      ? `${baseSlug}--${prefixMatch.id.slice(0, 8).toLowerCase()}`
+    if (requestedPrefix) {
+      const prefixMatch = rows.rows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix));
+      if (!prefixMatch) {
+        continue;
+      }
+      const canonicalSlug = rows.rows.length > 1
+        ? `${baseSlug}--${prefixMatch.id.slice(0, 8).toLowerCase()}`
+        : baseSlug;
+      return {
+        show_id: prefixMatch.id,
+        slug: baseSlug,
+        canonical_slug: canonicalSlug,
+        show_name: prefixMatch.name,
+      };
+    }
+
+    const candidate = rows.rows[0];
+    const hasCollision = rows.rows.length > 1;
+    const canonicalSlug = hasCollision
+      ? `${baseSlug}--${candidate.id.slice(0, 8).toLowerCase()}`
       : baseSlug;
+
     return {
-      show_id: prefixMatch.id,
+      show_id: candidate.id,
       slug: baseSlug,
       canonical_slug: canonicalSlug,
-      show_name: prefixMatch.name,
+      show_name: candidate.name,
     };
   }
 
-  const candidate = rows.rows[0];
-
-  const hasCollision = rows.rows.length > 1;
-  const canonicalSlug = hasCollision
-    ? `${baseSlug}--${candidate.id.slice(0, 8).toLowerCase()}`
-    : baseSlug;
-
-  return {
-    show_id: candidate.id,
-    slug: baseSlug,
-    canonical_slug: canonicalSlug,
-    show_name: candidate.name,
-  };
+  return null;
 }
 
 /**
@@ -1940,6 +1960,19 @@ export interface TrrPersonCredit {
   external_url?: string | null;
 }
 
+export interface PersonShowEpisodeCredit {
+  credit_id: string;
+  credit_category: string;
+  role: string | null;
+  billing_order: number | null;
+  source_type: string | null;
+  episode_id: string;
+  season_number: number | null;
+  episode_number: number | null;
+  episode_name: string | null;
+  appearance_type: string | null;
+}
+
 interface ImdbNameFilmographyCredit {
   imdb_title_id: string;
   show_name: string;
@@ -2615,13 +2648,7 @@ export async function getPhotosByPersonId(
           context && typeof context === "object"
             ? (context as { thumbnail_crop?: unknown }).thumbnail_crop
             : null;
-        const metadataThumbnailCrop =
-          normalizedFandom.metadata && typeof normalizedFandom.metadata === "object"
-            ? (normalizedFandom.metadata as { thumbnail_crop?: unknown }).thumbnail_crop
-            : null;
-        const thumbnailCropFields = toThumbnailCropFields(
-          contextThumbnailCrop ?? metadataThumbnailCrop,
-        );
+        const thumbnailCropFields = toThumbnailCropFields(contextThumbnailCrop);
         const variantUrls = resolvePersonPhotoVariantUrls(
           normalizedFandom.metadata,
           {
@@ -2856,6 +2883,60 @@ export async function getCreditsByPersonId(
   imdbOnlyCredits.sort((a, b) => (a.show_name ?? "").localeCompare(b.show_name ?? ""));
   const combined = [...localCredits, ...imdbOnlyCredits];
   return combined.slice(offset, offset + limit);
+}
+
+/**
+ * Get episode-level credit evidence for a person scoped to a show.
+ * Reads from core.v_episode_credits and excludes archive footage by default.
+ */
+export async function getEpisodeCreditsByPersonShowId(
+  personId: string,
+  showId: string,
+  options?: { includeArchiveFootage?: boolean }
+): Promise<PersonShowEpisodeCredit[]> {
+  const includeArchiveFootage = options?.includeArchiveFootage ?? false;
+  const archiveFilter = includeArchiveFootage
+    ? ""
+    : "AND COALESCE(vec.appearance_type, 'appears') <> 'archive_footage'";
+
+  const result = await pgQuery<PersonShowEpisodeCredit>(
+    `SELECT
+       vec.credit_id,
+       vec.credit_category,
+       vec.role,
+       vec.billing_order,
+       vec.source_type,
+       vec.episode_id,
+       vec.season_number,
+       vec.episode_number,
+       vec.episode_name,
+       vec.appearance_type
+     FROM core.v_episode_credits AS vec
+     WHERE vec.person_id = $1::uuid
+       AND vec.show_id = $2::uuid
+       ${archiveFilter}
+     ORDER BY
+       vec.billing_order ASC NULLS LAST,
+       vec.role ASC NULLS LAST,
+       vec.season_number DESC NULLS LAST,
+       vec.episode_number ASC NULLS LAST,
+       vec.episode_name ASC NULLS LAST,
+       vec.episode_id ASC`,
+    [personId, showId]
+  );
+
+  return result.rows.map((row) => ({
+    credit_id: row.credit_id,
+    credit_category: row.credit_category,
+    role: row.role,
+    billing_order: row.billing_order,
+    source_type: row.source_type,
+    episode_id: row.episode_id,
+    season_number: row.season_number,
+    episode_number: row.episode_number,
+    episode_name: row.episode_name,
+    appearance_type: row.appearance_type,
+  }));
 }
 
 // ============================================================================

@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import AdminNetworksPage from "@/app/admin/networks/page";
 
 const mocks = vi.hoisted(() => ({
@@ -122,6 +122,19 @@ describe("Admin networks page auth + sync UI", () => {
       expect(mocks.fetchAdminWithAuth).toHaveBeenCalled();
       expect(screen.getByText("Bravo")).toBeInTheDocument();
     });
+    const breadcrumbNav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumbNav).toBeInTheDocument();
+    expect(within(breadcrumbNav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    expect(within(breadcrumbNav).getByText("Networks & Streaming")).toBeInTheDocument();
+
+    expect(screen.getByRole("link", { name: "Bravo" })).toHaveAttribute(
+      "href",
+      "/admin/networks/network/bravo",
+    );
+    expect(screen.getByRole("link", { name: "Peacock Premium" })).toHaveAttribute(
+      "href",
+      "/admin/networks/streaming/peacock-premium",
+    );
 
     const summaryCall = mocks.fetchAdminWithAuth.mock.calls.find((call: unknown[]) =>
       String(call[0]).endsWith("/api/admin/networks-streaming/summary"),

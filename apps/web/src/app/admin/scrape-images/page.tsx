@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
@@ -682,9 +684,7 @@ export default function ScrapeImagesPage() {
                 &larr; Admin
               </Link>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                  Media Tools
-                </p>
+                <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Scrape Images")} className="mb-1" />
                 <h1 className="text-2xl font-bold text-zinc-900">
                   Scrape Images from URL
                 </h1>

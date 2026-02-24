@@ -804,6 +804,8 @@ export function mapSeasonAssetToMetadata(
   const imdbTypeRaw =
     typeof metadata.imdb_image_type === "string"
       ? metadata.imdb_image_type
+      : typeof (metadata.tags as Record<string, unknown> | undefined)?.image_type === "string"
+        ? ((metadata.tags as Record<string, unknown>).image_type as string)
       : null;
   const imdbType = imdbTypeRaw ?? (isImdb ? asset.context_type ?? null : null);
   const inferredSectionTag = resolveSectionTag({
@@ -982,12 +984,38 @@ export function mapSeasonAssetToMetadata(
         .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
         .map((value) => value.trim())
     : [];
+  const peopleFromTags = Array.isArray((metadata.tags as Record<string, unknown> | undefined)?.people)
+    ? (((metadata.tags as Record<string, unknown>).people as unknown[])
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const name = (item as Record<string, unknown>).name;
+          return typeof name === "string" && name.trim().length > 0 ? name.trim() : null;
+        })
+        .filter((value): value is string => typeof value === "string"))
+    : [];
   const people =
-    peopleFromMeta.length > 0
-      ? [...new Set(peopleFromMeta)]
+    peopleFromMeta.length > 0 || peopleFromTags.length > 0
+      ? [...new Set([...peopleFromMeta, ...peopleFromTags])]
       : asset.person_name
         ? [asset.person_name]
         : [];
+
+  const titlesFromMeta = Array.isArray((metadata as Record<string, unknown>).title_names)
+    ? ((metadata as Record<string, unknown>).title_names as unknown[])
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim())
+    : [];
+  const titlesFromTags = Array.isArray((metadata.tags as Record<string, unknown> | undefined)?.titles)
+    ? (((metadata.tags as Record<string, unknown>).titles as unknown[])
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const title = (item as Record<string, unknown>).title;
+          return typeof title === "string" && title.trim().length > 0 ? title.trim() : null;
+        })
+        .filter((value): value is string => typeof value === "string"))
+    : [];
+  const titlesFallback = showName ? [showName] : [];
+  const titles = [...new Set([...titlesFromMeta, ...titlesFromTags, ...titlesFallback])];
 
   return {
     source: asset.source,
@@ -1022,7 +1050,7 @@ export function mapSeasonAssetToMetadata(
     season: asset.season_number ?? seasonNumber ?? null,
     contextType,
     people,
-    titles: showName ? [showName] : [],
+    titles,
     fetchedAt: asset.fetched_at ? new Date(asset.fetched_at) : null,
   };
 }

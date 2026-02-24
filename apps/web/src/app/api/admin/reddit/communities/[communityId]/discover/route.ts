@@ -63,6 +63,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       showName: show?.name ?? community.trr_show_name,
       showAliases: show?.alternative_names ?? [],
       castNames,
+      isShowFocused: community.is_show_focused,
       analysisFlares: community.analysis_flares ?? [],
       analysisAllFlares: community.analysis_all_flares ?? [],
       sortModes,

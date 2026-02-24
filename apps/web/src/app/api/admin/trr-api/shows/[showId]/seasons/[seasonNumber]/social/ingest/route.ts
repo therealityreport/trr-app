@@ -32,10 +32,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const seasonIdHintRaw = request.nextUrl.searchParams.get("season_id");
+    if (seasonIdHintRaw && !isValidUuid(seasonIdHintRaw)) {
+      return NextResponse.json(
+        { error: "season_id must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    const seasonIdHint = seasonIdHintRaw ?? undefined;
+
     const data = await fetchSeasonBackendJson(showId, seasonNumber, "/ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: await request.text(),
+      seasonIdHint,
       fallbackError: "Failed to run social ingest",
       retries: 0,
       timeoutMs: 60_000,

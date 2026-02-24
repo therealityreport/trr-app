@@ -6,9 +6,11 @@ interface SeasonTabAliasPageProps {
 }
 
 const ALLOWED_SEASON_TABS = new Set([
+  "overview",
   "episodes",
   "assets",
   "videos",
+  "fandom",
   "cast",
   "surveys",
   "social",
@@ -39,6 +41,7 @@ export default async function SeasonTabAliasPage({ params, searchParams }: Seaso
   >;
   const normalizedSlug = showSection.trim().toLowerCase();
   const normalizedTab = seasonTab.trim().toLowerCase();
+  const canonicalTab = normalizedTab === "details" ? "overview" : normalizedTab;
 
   const seasonMatch = normalizedSlug.match(/^season-([0-9]{1,3})$/);
   if (!seasonMatch) {
@@ -54,7 +57,7 @@ export default async function SeasonTabAliasPage({ params, searchParams }: Seaso
   }
 
   const query = new URLSearchParams(serializeSearchParams(resolvedSearchParams));
-  query.set("tab", normalizedTab);
+  query.set("tab", canonicalTab);
   const queryString = query.toString();
   redirect(
     `/admin/trr-shows/${showId}/seasons/${seasonNumber}${queryString ? `?${queryString}` : ""}`,

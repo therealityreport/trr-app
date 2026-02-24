@@ -194,11 +194,29 @@ interface ImageManagementProps {
   onArchive?: () => Promise<void>;
   onUnarchive?: () => Promise<void>;
   onToggleStar?: (starred: boolean) => Promise<void>;
+  onSetFeaturedPoster?: () => Promise<void>;
+  onSetFeaturedBackdrop?: () => Promise<void>;
+  isFeaturedPoster?: boolean;
+  isFeaturedBackdrop?: boolean;
   onUpdateContentType?: (contentType: string) => Promise<void>;
   onDelete?: () => Promise<void>;
   onReassign?: () => void;
   actionDisabledReasons?: Partial<
-    Record<"refresh" | "sync" | "count" | "crop" | "idText" | "resize" | "archive" | "star" | "delete" | "edit", string>
+    Record<
+      | "refresh"
+      | "sync"
+      | "count"
+      | "crop"
+      | "idText"
+      | "resize"
+      | "archive"
+      | "star"
+      | "delete"
+      | "edit"
+      | "featuredPoster"
+      | "featuredBackdrop",
+      string
+    >
   >;
 }
 
@@ -252,11 +270,29 @@ interface MetadataPanelProps {
     onArchive?: () => Promise<void>;
     onUnarchive?: () => Promise<void>;
     onToggleStar?: (starred: boolean) => Promise<void>;
+    onSetFeaturedPoster?: () => Promise<void>;
+    onSetFeaturedBackdrop?: () => Promise<void>;
+    isFeaturedPoster?: boolean;
+    isFeaturedBackdrop?: boolean;
     onUpdateContentType?: (contentType: string) => Promise<void>;
     onDelete?: () => Promise<void>;
     onReassign?: () => void;
     actionDisabledReasons?: Partial<
-      Record<"refresh" | "sync" | "count" | "crop" | "idText" | "resize" | "archive" | "star" | "delete" | "edit", string>
+      Record<
+        | "refresh"
+        | "sync"
+        | "count"
+        | "crop"
+        | "idText"
+        | "resize"
+        | "archive"
+        | "star"
+        | "delete"
+        | "edit"
+        | "featuredPoster"
+        | "featuredBackdrop",
+        string
+      >
     >;
   };
   extras?: ReactNode;
@@ -384,6 +420,8 @@ function MetadataPanel({
   const canReassign = Boolean(management?.onReassign);
   const canDelete = Boolean(management?.onDelete);
   const canStar = Boolean(management?.onToggleStar);
+  const canSetFeaturedPoster = Boolean(management?.onSetFeaturedPoster);
+  const canSetFeaturedBackdrop = Boolean(management?.onSetFeaturedBackdrop);
   const canEditTools = Boolean(extras && onToggleExtras);
   const hasAnyActions = true;
   const refreshDisabledReason = !canRefresh
@@ -405,7 +443,7 @@ function MetadataPanel({
     ? disabledReasons.idText ?? "ID Text is unavailable for this image."
     : disabledReasons.idText ?? null;
   const resizeDisabledReason = !canResize
-    ? disabledReasons.resize ?? "Resize is unavailable for this image."
+    ? disabledReasons.resize ?? "Auto-Crop is unavailable for this image."
     : disabledReasons.resize ?? null;
   const starDisabledReason = !canStar
     ? disabledReasons.star ?? "Star/Flag is unavailable for this image."
@@ -413,6 +451,14 @@ function MetadataPanel({
   const deleteDisabledReason = !canDelete
     ? disabledReasons.delete ?? "Delete is unavailable for this image."
     : disabledReasons.delete ?? null;
+  const featuredPosterDisabledReason = !canSetFeaturedPoster
+    ? disabledReasons.featuredPoster ??
+      "Featured poster selection is unavailable for this image."
+    : disabledReasons.featuredPoster ?? null;
+  const featuredBackdropDisabledReason = !canSetFeaturedBackdrop
+    ? disabledReasons.featuredBackdrop ??
+      "Featured backdrop selection is unavailable for this image."
+    : disabledReasons.featuredBackdrop ?? null;
   const editDisabledReason = !canEditTools
     ? disabledReasons.edit ?? "Edit tools are unavailable for this image."
     : disabledReasons.edit ?? null;
@@ -482,9 +528,35 @@ function MetadataPanel({
           >
             {starLoading
               ? "Saving..."
-              : management.isStarred
-                ? "Unstar/Unflag"
-                : "Star/Flag"}
+                : management.isStarred
+                  ? "Unstar/Unflag"
+                  : "Star/Flag"}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAction("featuredPoster", management.onSetFeaturedPoster)}
+            disabled={actionLoading !== null || starLoading || Boolean(featuredPosterDisabledReason)}
+            title={featuredPosterDisabledReason ?? undefined}
+            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {actionLoading === "featuredPoster"
+              ? "Saving..."
+              : management.isFeaturedPoster
+                ? "Featured Poster"
+                : "Set as Featured Poster"}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAction("featuredBackdrop", management.onSetFeaturedBackdrop)}
+            disabled={actionLoading !== null || starLoading || Boolean(featuredBackdropDisabledReason)}
+            title={featuredBackdropDisabledReason ?? undefined}
+            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {actionLoading === "featuredBackdrop"
+              ? "Saving..."
+              : management.isFeaturedBackdrop
+                ? "Featured Backdrop"
+                : "Set as Featured Backdrop"}
           </button>
           <button
             type="button"
@@ -894,10 +966,13 @@ function MetadataPanel({
                 <button
                   onClick={() => handleAction("resize", management.onResize)}
                   disabled={actionLoading !== null || Boolean(resizeDisabledReason)}
-                  title={resizeDisabledReason ?? undefined}
+                  title={
+                    resizeDisabledReason ??
+                    "Rebuilds preview/thumbnail crop variants only; original hosted image is unchanged."
+                  }
                   className="col-span-2 rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
                 >
-                  {actionLoading === "resize" ? "Resizing..." : "Resize"}
+                  {actionLoading === "resize" ? "Auto-Cropping..." : "Auto-Crop"}
                 </button>
               </div>
             )}
@@ -947,6 +1022,30 @@ function MetadataPanel({
                 : management.isStarred
                   ? "Unstar/Unflag"
                   : "Star/Flag"}
+            </button>
+            <button
+              onClick={() => handleAction("featuredPoster", management.onSetFeaturedPoster)}
+              disabled={actionLoading !== null || starLoading || Boolean(featuredPosterDisabledReason)}
+              title={featuredPosterDisabledReason ?? undefined}
+              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "featuredPoster"
+                ? "Saving..."
+                : management.isFeaturedPoster
+                  ? "Featured Poster"
+                  : "Set as Featured Poster"}
+            </button>
+            <button
+              onClick={() => handleAction("featuredBackdrop", management.onSetFeaturedBackdrop)}
+              disabled={actionLoading !== null || starLoading || Boolean(featuredBackdropDisabledReason)}
+              title={featuredBackdropDisabledReason ?? undefined}
+              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "featuredBackdrop"
+                ? "Saving..."
+                : management.isFeaturedBackdrop
+                  ? "Featured Backdrop"
+                  : "Set as Featured Backdrop"}
             </button>
             <button
               onClick={() => onToggleExtras?.()}
@@ -1030,6 +1129,10 @@ export function ImageLightbox({
   onArchive,
   onUnarchive,
   onToggleStar,
+  onSetFeaturedPoster,
+  onSetFeaturedBackdrop,
+  isFeaturedPoster,
+  isFeaturedBackdrop,
   onUpdateContentType,
   onRefresh,
   onSync,
@@ -1673,6 +1776,10 @@ export function ImageLightbox({
                         onArchive,
                         onUnarchive,
                         onToggleStar,
+                        onSetFeaturedPoster,
+                        onSetFeaturedBackdrop,
+                        isFeaturedPoster,
+                        isFeaturedBackdrop,
                         onUpdateContentType,
                         onDelete,
                         onReassign,

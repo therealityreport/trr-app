@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 
@@ -34,6 +35,11 @@ interface RedditCommunity {
   post_flares: string[];
   analysis_flares: string[];
   analysis_all_flares: string[];
+  is_show_focused: boolean;
+  network_focus_targets: string[];
+  franchise_focus_targets: string[];
+  episode_title_patterns: string[];
+  episode_required_flares: string[];
   post_flares_updated_at: string | null;
   is_active: boolean;
   created_at: string;
@@ -81,9 +87,72 @@ interface DiscoveryPayload {
   threads: DiscoveryThread[];
 }
 
+interface EpisodeDiscussionCandidate {
+  reddit_post_id: string;
+  title: string;
+  text: string | null;
+  url: string;
+  permalink: string | null;
+  author: string | null;
+  score: number;
+  num_comments: number;
+  posted_at: string | null;
+  link_flair_text: string | null;
+  source_sorts: Array<"new" | "hot" | "top">;
+  match_reasons: string[];
+}
+
+interface EpisodeDiscussionRefreshPayload {
+  community?: RedditCommunityResponse;
+  candidates?: EpisodeDiscussionCandidate[];
+  meta?: {
+    fetched_at?: string;
+    total_found?: number;
+    filters_applied?: Record<string, unknown>;
+    season_context?: {
+      season_id?: string;
+      season_number?: number;
+    };
+    period_context?: {
+      selected_window_start?: string | null;
+      selected_window_end?: string | null;
+      selected_period_labels?: string[];
+    };
+  };
+  error?: string;
+}
+
+interface EpisodeDiscussionSavePayload {
+  success?: boolean;
+  saved_count?: number;
+  skipped_conflicts?: string[];
+  error?: string;
+}
+
 interface CoveredShow {
   trr_show_id: string;
   show_name: string;
+}
+
+interface ShowSeasonOption {
+  id: string;
+  season_number: number;
+  title?: string | null;
+  name?: string | null;
+}
+
+interface SocialAnalyticsPeriodRow {
+  week_index?: number;
+  label?: string;
+  start?: string;
+  end?: string;
+}
+
+interface EpisodePeriodOption {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
 }
 
 interface CommunityFlaresRefreshResponse {
@@ -100,6 +169,9 @@ export interface RedditSourcesManagerProps {
   showName?: string;
   seasonId?: string | null;
   seasonNumber?: number | null;
+  initialCommunityId?: string;
+  hideCommunityList?: boolean;
+  backHref?: string;
 }
 
 const fmtDateTime = (value: string | null | undefined): string => {
@@ -144,6 +216,48 @@ const normalizeFlairList = (value: unknown): string[] => {
   return out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 };
 
+const pushListValue = (list: string[], rawValue: string): string[] => normalizeFlairList([...list, rawValue]);
+
+const toIsoDate = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+};
+
+const buildPeriodOptions = (weeklyRows: SocialAnalyticsPeriodRow[]): EpisodePeriodOption[] => {
+  const weekly = weeklyRows
+    .map((row) => {
+      const start = toIsoDate(row.start);
+      const end = toIsoDate(row.end);
+      if (!start || !end) return null;
+      return {
+        key: `weekly-${row.week_index ?? `${start}-${end}`}`,
+        label: row.label?.trim() || `Week ${row.week_index ?? "?"}`,
+        start,
+        end,
+      } satisfies EpisodePeriodOption;
+    })
+    .filter((row): row is EpisodePeriodOption => Boolean(row))
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+  if (weekly.length === 0) return [];
+
+  const allStart = weekly[0]?.start;
+  const allEnd = weekly[weekly.length - 1]?.end;
+  if (!allStart || !allEnd) return weekly;
+
+  return [
+    {
+      key: "all-periods",
+      label: "All Periods",
+      start: allStart,
+      end: allEnd,
+    },
+    ...weekly,
+  ];
+};
+
 const toCommunityModel = (community: RedditCommunityResponse): RedditCommunity => ({
   ...community,
   assigned_thread_count:
@@ -154,6 +268,11 @@ const toCommunityModel = (community: RedditCommunityResponse): RedditCommunity =
   post_flares: normalizeFlairList(community.post_flares),
   analysis_flares: normalizeFlairList(community.analysis_flares),
   analysis_all_flares: normalizeFlairList(community.analysis_all_flares),
+  is_show_focused: community.is_show_focused ?? false,
+  network_focus_targets: normalizeFlairList(community.network_focus_targets),
+  franchise_focus_targets: normalizeFlairList(community.franchise_focus_targets),
+  episode_title_patterns: normalizeFlairList(community.episode_title_patterns),
+  episode_required_flares: normalizeFlairList(community.episode_required_flares),
   post_flares_updated_at: community.post_flares_updated_at ?? null,
 });
 
@@ -201,10 +320,17 @@ export default function RedditSourcesManager({
   showName,
   seasonId,
   seasonNumber,
+  initialCommunityId,
+  hideCommunityList = false,
+  backHref,
 }: RedditSourcesManagerProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [communities, setCommunities] = useState<RedditCommunity[]>([]);
   const [coveredShows, setCoveredShows] = useState<CoveredShow[]>([]);
-  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(null);
+  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(
+    initialCommunityId ?? null,
+  );
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -220,6 +346,11 @@ export default function RedditSourcesManager({
   const [communityNotes, setCommunityNotes] = useState("");
   const [communityShowId, setCommunityShowId] = useState(showId ?? "");
   const [communityShowName, setCommunityShowName] = useState(showName ?? "");
+  const [communityIsShowFocused, setCommunityIsShowFocused] = useState(mode === "season");
+  const [communityNetworkTargets, setCommunityNetworkTargets] = useState<string[]>([]);
+  const [communityFranchiseTargets, setCommunityFranchiseTargets] = useState<string[]>([]);
+  const [communityNetworkTargetInput, setCommunityNetworkTargetInput] = useState("");
+  const [communityFranchiseTargetInput, setCommunityFranchiseTargetInput] = useState("");
 
   const [threadTitle, setThreadTitle] = useState("");
   const [threadUrl, setThreadUrl] = useState("");
@@ -228,6 +359,26 @@ export default function RedditSourcesManager({
 
   const [discovery, setDiscovery] = useState<DiscoveryPayload | null>(null);
   const [showOnlyMatches, setShowOnlyMatches] = useState(true);
+  const [selectedNetworkTargetInput, setSelectedNetworkTargetInput] = useState("");
+  const [selectedFranchiseTargetInput, setSelectedFranchiseTargetInput] = useState("");
+  const [episodePatternInput, setEpisodePatternInput] = useState("");
+  const [seasonOptions, setSeasonOptions] = useState<ShowSeasonOption[]>([]);
+  const [episodeSeasonId, setEpisodeSeasonId] = useState<string | null>(seasonId ?? null);
+  const [episodeSeasonNumber, setEpisodeSeasonNumber] = useState<number | null>(
+    typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0
+      ? seasonNumber
+      : null,
+  );
+  const [periodOptions, setPeriodOptions] = useState<EpisodePeriodOption[]>([]);
+  const [selectedPeriodKey, setSelectedPeriodKey] = useState<string>("all-periods");
+  const [periodsLoading, setPeriodsLoading] = useState(false);
+  const [episodeCandidates, setEpisodeCandidates] = useState<EpisodeDiscussionCandidate[]>([]);
+  const [episodeSelectedPostIds, setEpisodeSelectedPostIds] = useState<string[]>([]);
+  const [episodeRefreshing, setEpisodeRefreshing] = useState(false);
+  const [episodeSaving, setEpisodeSaving] = useState(false);
+  const [episodeMeta, setEpisodeMeta] = useState<EpisodeDiscussionRefreshPayload["meta"] | null>(
+    null,
+  );
   const isBusy = busyAction !== null;
 
   const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
@@ -264,6 +415,15 @@ export default function RedditSourcesManager({
                   post_flares: patch.post_flares ?? community.post_flares,
                   analysis_flares: patch.analysis_flares ?? community.analysis_flares,
                   analysis_all_flares: patch.analysis_all_flares ?? community.analysis_all_flares,
+                  is_show_focused: patch.is_show_focused ?? community.is_show_focused,
+                  network_focus_targets:
+                    patch.network_focus_targets ?? community.network_focus_targets,
+                  franchise_focus_targets:
+                    patch.franchise_focus_targets ?? community.franchise_focus_targets,
+                  episode_title_patterns:
+                    patch.episode_title_patterns ?? community.episode_title_patterns,
+                  episode_required_flares:
+                    patch.episode_required_flares ?? community.episode_required_flares,
                   post_flares_updated_at: patch.post_flares_updated_at ?? community.post_flares_updated_at,
                 }
               : community,
@@ -353,10 +513,13 @@ export default function RedditSourcesManager({
     const list = sortCommunityList((payload.communities ?? []).map(toCommunityModel));
     setCommunities(list);
     setSelectedCommunityId((prev) => {
+      if (initialCommunityId && list.some((community) => community.id === initialCommunityId)) {
+        return initialCommunityId;
+      }
       if (prev && list.some((community) => community.id === prev)) return prev;
       return list[0]?.id ?? null;
     });
-  }, [fetchWithTimeout, getAuthHeaders, mode, seasonId, showId]);
+  }, [fetchWithTimeout, getAuthHeaders, initialCommunityId, mode, seasonId, showId]);
 
   const refreshData = useCallback(async () => {
     setLoading(true);
@@ -374,10 +537,174 @@ export default function RedditSourcesManager({
     void refreshData();
   }, [refreshData]);
 
+  useEffect(() => {
+    setSelectedNetworkTargetInput("");
+    setSelectedFranchiseTargetInput("");
+    setEpisodePatternInput("");
+    setEpisodeCandidates([]);
+    setEpisodeSelectedPostIds([]);
+    setEpisodeMeta(null);
+    setSeasonOptions([]);
+    setPeriodOptions([]);
+    setSelectedPeriodKey("all-periods");
+    setEpisodeSeasonId(null);
+    setEpisodeSeasonNumber(null);
+  }, [selectedCommunityId]);
+
   const selectedCommunity = useMemo(
     () => communities.find((community) => community.id === selectedCommunityId) ?? null,
     [communities, selectedCommunityId],
   );
+
+  const selectedPeriod = useMemo(
+    () => periodOptions.find((option) => option.key === selectedPeriodKey) ?? periodOptions[0] ?? null,
+    [periodOptions, selectedPeriodKey],
+  );
+
+  const loadPeriodOptionsForSeason = useCallback(
+    async (community: RedditCommunity, season: ShowSeasonOption) => {
+      const headers = await getAuthHeaders();
+      const analyticsParams = new URLSearchParams();
+      analyticsParams.set("season_id", season.id);
+      const analyticsResponse = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${community.trr_show_id}/seasons/${season.season_number}/social/analytics?${analyticsParams.toString()}`,
+        {
+          headers,
+          cache: "no-store",
+        },
+      );
+      if (!analyticsResponse.ok) {
+        throw new Error("Failed to load social periods for episode discussions");
+      }
+      const analyticsPayload = (await analyticsResponse.json().catch(() => ({}))) as {
+        weekly?: SocialAnalyticsPeriodRow[];
+        summary?: {
+          window?: {
+            start?: string | null;
+            end?: string | null;
+          };
+        };
+        window?: {
+          start?: string | null;
+          end?: string | null;
+        };
+      };
+
+      const periods = buildPeriodOptions(Array.isArray(analyticsPayload.weekly) ? analyticsPayload.weekly : []);
+      if (periods.length > 0) {
+        setPeriodOptions(periods);
+        setSelectedPeriodKey("all-periods");
+        return;
+      }
+
+      const fallbackStart =
+        analyticsPayload.summary?.window?.start ?? analyticsPayload.window?.start ?? null;
+      const fallbackEnd =
+        analyticsPayload.summary?.window?.end ?? analyticsPayload.window?.end ?? null;
+      const fallbackStartIso = toIsoDate(fallbackStart);
+      const fallbackEndIso = toIsoDate(fallbackEnd);
+      if (fallbackStartIso && fallbackEndIso) {
+        setPeriodOptions([
+          {
+            key: "all-periods",
+            label: "All Periods",
+            start: fallbackStartIso,
+            end: fallbackEndIso,
+          },
+        ]);
+        setSelectedPeriodKey("all-periods");
+      } else {
+        setPeriodOptions([]);
+      }
+    },
+    [fetchWithTimeout, getAuthHeaders],
+  );
+
+  const loadSeasonAndPeriodContext = useCallback(
+    async (community: RedditCommunity) => {
+      setPeriodsLoading(true);
+      try {
+        const headers = await getAuthHeaders();
+        const seasonsResponse = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${community.trr_show_id}/seasons?limit=100`,
+          {
+            headers,
+            cache: "no-store",
+          },
+        );
+        if (!seasonsResponse.ok) {
+          throw new Error("Failed to load seasons for episode discussions");
+        }
+        const seasonsPayload = (await seasonsResponse.json().catch(() => ({}))) as {
+          seasons?: ShowSeasonOption[];
+        };
+        const seasons = Array.isArray(seasonsPayload.seasons)
+          ? [...seasonsPayload.seasons]
+              .filter(
+                (season): season is ShowSeasonOption =>
+                  Boolean(season?.id) &&
+                  typeof season.season_number === "number" &&
+                  Number.isFinite(season.season_number),
+              )
+              .sort((a, b) => b.season_number - a.season_number)
+          : [];
+        setSeasonOptions(seasons);
+        if (seasons.length === 0) {
+          throw new Error("No seasons found for this show");
+        }
+
+        const explicitSeason =
+          (seasonId ? seasons.find((season) => season.id === seasonId) : null) ??
+          (seasonNumber
+            ? seasons.find((season) => season.season_number === seasonNumber)
+            : null);
+        const resolvedSeason = explicitSeason ?? seasons[0];
+        if (!resolvedSeason) {
+          throw new Error("No season could be resolved for this community");
+        }
+
+        setEpisodeSeasonId(resolvedSeason.id);
+        setEpisodeSeasonNumber(resolvedSeason.season_number);
+        await loadPeriodOptionsForSeason(community, resolvedSeason);
+      } finally {
+        setPeriodsLoading(false);
+      }
+    },
+    [fetchWithTimeout, getAuthHeaders, loadPeriodOptionsForSeason, seasonId, seasonNumber],
+  );
+
+  useEffect(() => {
+    if (!selectedCommunity) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await loadSeasonAndPeriodContext(selectedCommunity);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load season context");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSeasonAndPeriodContext, selectedCommunity]);
+
+  const returnToValue = useMemo(() => {
+    const qs = searchParams.toString();
+    return qs ? `${pathname}?${qs}` : pathname;
+  }, [pathname, searchParams]);
+
+  const communityViewHref = useMemo(() => {
+    if (!selectedCommunity || hideCommunityList) return null;
+    const params = new URLSearchParams();
+    if (mode === "season" && returnToValue) {
+      params.set("return_to", returnToValue);
+    }
+
+    const qs = params.toString();
+    return `/admin/social-media/reddit/communities/${selectedCommunity.id}${qs ? `?${qs}` : ""}`;
+  }, [hideCommunityList, mode, returnToValue, selectedCommunity]);
 
   const persistAnalysisFlareModes = useCallback(
     async (
@@ -433,6 +760,124 @@ export default function RedditSourcesManager({
     [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
   );
 
+  const persistCommunityFocus = useCallback(
+    async (
+      communityId: string,
+      payload: {
+        isShowFocused: boolean;
+        networkFocusTargets: string[];
+        franchiseFocusTargets: string[];
+      },
+    ) => {
+      const previous = communities.find((community) => community.id === communityId);
+      if (!previous) return;
+
+      const nextFocus = {
+        is_show_focused: payload.isShowFocused,
+        network_focus_targets: payload.isShowFocused
+          ? []
+          : normalizeFlairList(payload.networkFocusTargets),
+        franchise_focus_targets: payload.isShowFocused
+          ? []
+          : normalizeFlairList(payload.franchiseFocusTargets),
+      };
+
+      mergeCommunityPatch(communityId, nextFocus);
+      setBusyAction("save-community-focus");
+      setBusyLabel("Saving community focus...");
+      setError(null);
+
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            is_show_focused: nextFocus.is_show_focused,
+            network_focus_targets: nextFocus.network_focus_targets,
+            franchise_focus_targets: nextFocus.franchise_focus_targets,
+          }),
+        });
+        const payloadBody = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          community?: RedditCommunityResponse;
+        };
+        if (!response.ok) {
+          throw new Error(payloadBody.error ?? "Failed to save community focus");
+        }
+        if (payloadBody.community) {
+          const nextCommunity = toCommunityModel(payloadBody.community);
+          mergeCommunityPatch(communityId, {
+            is_show_focused: nextCommunity.is_show_focused,
+            network_focus_targets: nextCommunity.network_focus_targets,
+            franchise_focus_targets: nextCommunity.franchise_focus_targets,
+          });
+        }
+      } catch (err) {
+        mergeCommunityPatch(communityId, {
+          is_show_focused: previous.is_show_focused,
+          network_focus_targets: previous.network_focus_targets,
+          franchise_focus_targets: previous.franchise_focus_targets,
+        });
+        setError(err instanceof Error ? err.message : "Failed to save community focus");
+      } finally {
+        setBusyAction(null);
+        setBusyLabel(null);
+      }
+    },
+    [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
+  );
+
+  const persistEpisodeRules = useCallback(
+    async (
+      communityId: string,
+      payload: { episodeTitlePatterns: string[] },
+    ) => {
+      const previous = communities.find((community) => community.id === communityId);
+      if (!previous) return;
+
+      const nextEpisodeTitlePatterns = normalizeFlairList(payload.episodeTitlePatterns);
+      mergeCommunityPatch(communityId, {
+        episode_title_patterns: nextEpisodeTitlePatterns,
+      });
+      setBusyAction("save-episode-rules");
+      setBusyLabel("Saving episode discussion rules...");
+      setError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            episode_title_patterns: nextEpisodeTitlePatterns,
+          }),
+        });
+        const payloadBody = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          community?: RedditCommunityResponse;
+        };
+        if (!response.ok) {
+          throw new Error(payloadBody.error ?? "Failed to save episode discussion rules");
+        }
+        if (payloadBody.community) {
+          const nextCommunity = toCommunityModel(payloadBody.community);
+          mergeCommunityPatch(communityId, {
+            episode_title_patterns: nextCommunity.episode_title_patterns,
+          });
+        }
+      } catch (err) {
+        mergeCommunityPatch(communityId, {
+          episode_title_patterns: previous.episode_title_patterns,
+        });
+        setError(err instanceof Error ? err.message : "Failed to save episode discussion rules");
+      } finally {
+        setBusyAction(null);
+        setBusyLabel(null);
+      }
+    },
+    [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
+  );
+
   const groupedCommunities = useMemo(() => {
     const grouped = new Map<string, RedditCommunity[]>();
     for (const community of communities) {
@@ -446,6 +891,7 @@ export default function RedditSourcesManager({
 
   const visibleDiscoveryThreads = useMemo(() => {
     const items = discovery?.threads ?? [];
+    if (selectedCommunity?.is_show_focused) return items;
     if (!showOnlyMatches) return items;
     const hasAllPostsFlairMode = (selectedCommunity?.analysis_all_flares.length ?? 0) > 0;
     if (!hasAllPostsFlairMode) {
@@ -456,6 +902,26 @@ export default function RedditSourcesManager({
     );
   }, [discovery, selectedCommunity, showOnlyMatches]);
 
+  const networkFocusSuggestions = useMemo(() => {
+    const values = communities.flatMap((community) => community.network_focus_targets);
+    return normalizeFlairList(["Bravo", ...values]);
+  }, [communities]);
+
+  const franchiseFocusSuggestions = useMemo(() => {
+    const values = communities.flatMap((community) => community.franchise_focus_targets);
+    return normalizeFlairList(["Real Housewives", ...values]);
+  }, [communities]);
+
+  const episodePatternSuggestions = useMemo(() => {
+    const values = communities.flatMap((community) => community.episode_title_patterns);
+    return normalizeFlairList([
+      "Live Episode Discussion",
+      "Post Episode Discussion",
+      "Weekly Episode Discussion",
+      ...values,
+    ]);
+  }, [communities]);
+
   const communityGroups = useMemo<Array<[string, RedditCommunity[]]>>(
     () => (mode === "global" ? groupedCommunities : [[showName ?? "Show", communities]]),
     [communities, groupedCommunities, mode, showName],
@@ -465,6 +931,11 @@ export default function RedditSourcesManager({
     setCommunitySubreddit("");
     setCommunityDisplayName("");
     setCommunityNotes("");
+    setCommunityIsShowFocused(mode === "season");
+    setCommunityNetworkTargets([]);
+    setCommunityFranchiseTargets([]);
+    setCommunityNetworkTargetInput("");
+    setCommunityFranchiseTargetInput("");
     if (mode === "season") {
       setCommunityShowId(showId ?? "");
       setCommunityShowName(showName ?? "");
@@ -501,6 +972,9 @@ export default function RedditSourcesManager({
           subreddit: communitySubreddit,
           display_name: communityDisplayName || null,
           notes: communityNotes || null,
+          is_show_focused: communityIsShowFocused,
+          network_focus_targets: communityIsShowFocused ? [] : communityNetworkTargets,
+          franchise_focus_targets: communityIsShowFocused ? [] : communityFranchiseTargets,
         }),
       });
       if (!response.ok) {
@@ -697,6 +1171,119 @@ export default function RedditSourcesManager({
     }
   };
 
+  const handleRefreshEpisodeDiscussions = useCallback(async () => {
+    if (!selectedCommunity) return;
+    if (!episodeSeasonId || !episodeSeasonNumber) {
+      setError("Season context is required for episode discussion refresh");
+      return;
+    }
+
+    setEpisodeRefreshing(true);
+    setError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams({
+        season_id: episodeSeasonId,
+        season_number: String(episodeSeasonNumber),
+      });
+      if (selectedPeriod) {
+        params.set("period_start", selectedPeriod.start);
+        params.set("period_end", selectedPeriod.end);
+        params.set("period_label", selectedPeriod.label);
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/reddit/communities/${selectedCommunity.id}/episode-discussions/refresh?${params.toString()}`,
+        {
+          method: "GET",
+          headers,
+          cache: "no-store",
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as EpisodeDiscussionRefreshPayload;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to refresh episode discussions");
+      }
+
+      if (payload.community) {
+        const nextCommunity = toCommunityModel(payload.community);
+        mergeCommunityPatch(selectedCommunity.id, {
+          episode_title_patterns: nextCommunity.episode_title_patterns,
+        });
+      }
+
+      const nextCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+      setEpisodeCandidates(nextCandidates);
+      setEpisodeSelectedPostIds(nextCandidates.map((candidate) => candidate.reddit_post_id));
+      setEpisodeMeta(payload.meta ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh episode discussions");
+    } finally {
+      setEpisodeRefreshing(false);
+    }
+  }, [
+    episodeSeasonId,
+    episodeSeasonNumber,
+    fetchWithTimeout,
+    getAuthHeaders,
+    mergeCommunityPatch,
+    selectedPeriod,
+    selectedCommunity,
+  ]);
+
+  const handleSaveSelectedEpisodeDiscussions = useCallback(async () => {
+    if (!selectedCommunity) return;
+    const selectedThreads = episodeCandidates.filter((candidate) =>
+      episodeSelectedPostIds.includes(candidate.reddit_post_id),
+    );
+    if (selectedThreads.length === 0) {
+      setError("Select at least one episode discussion candidate to save");
+      return;
+    }
+
+    setEpisodeSaving(true);
+    setError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchWithTimeout(
+        `/api/admin/reddit/communities/${selectedCommunity.id}/episode-discussions/save`,
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            season_id: episodeSeasonId ?? null,
+            threads: selectedThreads.map((thread) => ({
+              reddit_post_id: thread.reddit_post_id,
+              title: thread.title,
+              url: thread.url,
+              permalink: thread.permalink,
+              author: thread.author,
+              score: thread.score,
+              num_comments: thread.num_comments,
+              posted_at: thread.posted_at,
+            })),
+          }),
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as EpisodeDiscussionSavePayload;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to save selected episode discussions");
+      }
+      await fetchCommunities();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save selected episode discussions");
+    } finally {
+      setEpisodeSaving(false);
+    }
+  }, [
+    episodeCandidates,
+    episodeSeasonId,
+    episodeSelectedPostIds,
+    fetchCommunities,
+    fetchWithTimeout,
+    getAuthHeaders,
+    selectedCommunity,
+  ]);
+
   if (mode === "season" && (!showId || !showName)) {
     return (
       <section className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -743,6 +1330,17 @@ export default function RedditSourcesManager({
 
       {busyLabel && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">{busyLabel}</div>
+      )}
+
+      {hideCommunityList && backHref && (
+        <div>
+          <a
+            href={backHref}
+            className="inline-flex rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+          >
+            Back
+          </a>
+        </div>
       )}
 
       {showCommunityForm && (
@@ -837,6 +1435,152 @@ export default function RedditSourcesManager({
                 className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
               />
             </div>
+
+            <div className="md:col-span-2 rounded-lg border border-zinc-200 p-3">
+              <label className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={communityIsShowFocused}
+                  onChange={(event) => setCommunityIsShowFocused(event.target.checked)}
+                />
+                Show-focused community
+              </label>
+              <p className="mt-1 text-xs text-zinc-500">
+                Show-focused communities include all discovered posts and do not require flair assignment.
+              </p>
+            </div>
+
+            {!communityIsShowFocused && (
+              <>
+                <div className="md:col-span-2 rounded-lg border border-zinc-200 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                    Network Targets
+                  </p>
+                  {communityNetworkTargets.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {communityNetworkTargets.map((target) => (
+                        <button
+                          key={`new-community-network-${target}`}
+                          type="button"
+                          onClick={() =>
+                            setCommunityNetworkTargets((current) =>
+                              current.filter((value) => value.toLowerCase() !== target.toLowerCase()),
+                            )
+                          }
+                          className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200"
+                        >
+                          {target} ×
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      value={communityNetworkTargetInput}
+                      onChange={(event) => setCommunityNetworkTargetInput(event.target.value)}
+                      placeholder="Add network target"
+                      className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCommunityNetworkTargets((current) =>
+                          pushListValue(current, communityNetworkTargetInput),
+                        );
+                        setCommunityNetworkTargetInput("");
+                      }}
+                      className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {networkFocusSuggestions
+                      .filter(
+                        (target) =>
+                          !communityNetworkTargets.some(
+                            (value) => value.toLowerCase() === target.toLowerCase(),
+                          ),
+                      )
+                      .map((target) => (
+                        <button
+                          key={`new-community-network-suggestion-${target}`}
+                          type="button"
+                          onClick={() => setCommunityNetworkTargets((current) => pushListValue(current, target))}
+                          className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                        >
+                          + {target}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 rounded-lg border border-zinc-200 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                    Franchise Targets
+                  </p>
+                  {communityFranchiseTargets.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {communityFranchiseTargets.map((target) => (
+                        <button
+                          key={`new-community-franchise-${target}`}
+                          type="button"
+                          onClick={() =>
+                            setCommunityFranchiseTargets((current) =>
+                              current.filter((value) => value.toLowerCase() !== target.toLowerCase()),
+                            )
+                          }
+                          className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200"
+                        >
+                          {target} ×
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      value={communityFranchiseTargetInput}
+                      onChange={(event) => setCommunityFranchiseTargetInput(event.target.value)}
+                      placeholder="Add franchise target"
+                      className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCommunityFranchiseTargets((current) =>
+                          pushListValue(current, communityFranchiseTargetInput),
+                        );
+                        setCommunityFranchiseTargetInput("");
+                      }}
+                      className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {franchiseFocusSuggestions
+                      .filter(
+                        (target) =>
+                          !communityFranchiseTargets.some(
+                            (value) => value.toLowerCase() === target.toLowerCase(),
+                          ),
+                      )
+                      .map((target) => (
+                        <button
+                          key={`new-community-franchise-suggestion-${target}`}
+                          type="button"
+                          onClick={() =>
+                            setCommunityFranchiseTargets((current) => pushListValue(current, target))
+                          }
+                          className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                        >
+                          + {target}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -943,8 +1687,9 @@ export default function RedditSourcesManager({
           Loading reddit communities...
         </div>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-12">
-          <section className="xl:col-span-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <div className={hideCommunityList ? "space-y-5" : "grid gap-5 xl:grid-cols-12"}>
+          {!hideCommunityList && (
+            <section className="xl:col-span-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
             <h4 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">Communities</h4>
             {communities.length === 0 ? (
               <p className="mt-3 text-sm text-zinc-500">
@@ -990,9 +1735,10 @@ export default function RedditSourcesManager({
                 ))}
               </div>
             )}
-          </section>
+            </section>
+          )}
 
-          <section className="xl:col-span-8 space-y-5">
+          <section className={hideCommunityList ? "space-y-5" : "xl:col-span-8 space-y-5"}>
             {!selectedCommunity ? (
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500 shadow-sm">
                 Select a community to view assigned threads and discovery hints.
@@ -1003,14 +1749,31 @@ export default function RedditSourcesManager({
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                        Selected Community
+                        Community
                       </p>
-                      <h4 className="text-lg font-bold text-zinc-900">
-                        {selectedCommunity.display_name || `r/${selectedCommunity.subreddit}`}
-                      </h4>
+                      {communityViewHref ? (
+                        <a
+                          href={communityViewHref}
+                          className="text-lg font-bold text-zinc-900 underline-offset-4 hover:underline"
+                        >
+                          {selectedCommunity.display_name || `r/${selectedCommunity.subreddit}`}
+                        </a>
+                      ) : (
+                        <h4 className="text-lg font-bold text-zinc-900">
+                          {selectedCommunity.display_name || `r/${selectedCommunity.subreddit}`}
+                        </h4>
+                      )}
                       <p className="text-sm text-zinc-500">{selectedCommunity.trr_show_name}</p>
                     </div>
                     <div className="flex items-center gap-2">
+                      {communityViewHref && (
+                        <a
+                          href={communityViewHref}
+                          className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                        >
+                          Community View
+                        </a>
+                      )}
                       <button
                         type="button"
                         disabled={isBusy}
@@ -1047,113 +1810,615 @@ export default function RedditSourcesManager({
                       <p className="text-xs text-zinc-500">No post flairs available yet.</p>
                     )}
                   </div>
-                  <div className="mt-3">
-                    <div className="mb-1 flex items-center justify-between">
-                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                        Analysis Flares
-                      </p>
-                      <span className="text-[11px] font-semibold text-zinc-500">
-                        {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
-                        {selectedCommunity.analysis_flares.length} scan
-                      </span>
-                    </div>
-                    {selectedCommunity.post_flares.length === 0 ? (
-                      <p className="text-xs text-zinc-500">
-                        Refresh post flares first to assign analysis flares.
-                      </p>
-                    ) : (
-                      <div className="space-y-3">
-                        <div>
-                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                            All Posts With Flair
-                          </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {selectedCommunity.post_flares.map((flair) => {
-                              const flairKey = flair.toLowerCase();
-                              const isSelected = selectedCommunity.analysis_all_flares.some(
-                                (value) => value.toLowerCase() === flairKey,
-                              );
-                              return (
-                                <button
-                                  key={`analysis-all-flair-${selectedCommunity.id}-${flair}`}
-                                  type="button"
-                                  disabled={isBusy}
-                                  onClick={() => {
-                                    const nextAll = isSelected
-                                      ? selectedCommunity.analysis_all_flares.filter(
-                                          (value) => value.toLowerCase() !== flairKey,
-                                        )
-                                      : [...selectedCommunity.analysis_all_flares, flair];
-                                    const nextScan = selectedCommunity.analysis_flares.filter(
-                                      (value) => value.toLowerCase() !== flairKey,
-                                    );
-                                    void persistAnalysisFlareModes(selectedCommunity.id, {
-                                      analysisAllFlares: nextAll,
-                                      analysisFlares: nextScan,
-                                    });
-                                  }}
-                                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
-                                    isSelected
-                                      ? "bg-indigo-100 text-indigo-700"
-                                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                                  } disabled:cursor-not-allowed disabled:opacity-60`}
-                                >
-                                  {isSelected ? "All posts · " : ""}{flair}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div>
-                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                            Scan Flair For Relevant Terms
-                          </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {selectedCommunity.post_flares.map((flair) => {
-                              const flairKey = flair.toLowerCase();
-                              const isSelected = selectedCommunity.analysis_flares.some(
-                                (value) => value.toLowerCase() === flairKey,
-                              );
-                              return (
-                                <button
-                                  key={`analysis-scan-flair-${selectedCommunity.id}-${flair}`}
-                                  type="button"
-                                  disabled={isBusy}
-                                  onClick={() => {
-                                    const nextScan = isSelected
-                                      ? selectedCommunity.analysis_flares.filter(
-                                          (value) => value.toLowerCase() !== flairKey,
-                                        )
-                                      : [...selectedCommunity.analysis_flares, flair];
-                                    const nextAll = selectedCommunity.analysis_all_flares.filter(
-                                      (value) => value.toLowerCase() !== flairKey,
-                                    );
-                                    void persistAnalysisFlareModes(selectedCommunity.id, {
-                                      analysisAllFlares: nextAll,
-                                      analysisFlares: nextScan,
-                                    });
-                                  }}
-                                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
-                                    isSelected
-                                      ? "bg-emerald-100 text-emerald-700"
-                                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                                  } disabled:cursor-not-allowed disabled:opacity-60`}
-                                >
-                                  {isSelected ? "Scan terms · " : ""}{flair}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
                   {selectedCommunity.notes && (
                     <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                       {selectedCommunity.notes}
                     </p>
                   )}
+                </article>
+
+                <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                  <div className="mb-3">
+                    <h5 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                      Community Settings
+                    </h5>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-zinc-200 p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                          Community Focus
+                        </p>
+                        {selectedCommunity.is_show_focused ? (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                            Show-focused
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
+                            Network/Franchise-focused
+                          </span>
+                        )}
+                      </div>
+                      <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
+                        <input
+                          type="checkbox"
+                          checked={selectedCommunity.is_show_focused}
+                          disabled={isBusy}
+                          onChange={(event) => {
+                            void persistCommunityFocus(selectedCommunity.id, {
+                              isShowFocused: event.target.checked,
+                              networkFocusTargets: event.target.checked
+                                ? []
+                                : selectedCommunity.network_focus_targets,
+                              franchiseFocusTargets: event.target.checked
+                                ? []
+                                : selectedCommunity.franchise_focus_targets,
+                            });
+                          }}
+                        />
+                        Show-focused community
+                      </label>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Show-focused communities include all discovered posts and skip flair assignment.
+                      </p>
+                    </div>
+
+                    {!selectedCommunity.is_show_focused && (
+                      <>
+                        <div className="rounded-lg border border-zinc-200 p-3">
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            Network Targets
+                          </p>
+                          <div className="mb-2 flex flex-wrap gap-1.5">
+                            {selectedCommunity.network_focus_targets.length === 0 && (
+                              <span className="text-xs text-zinc-500">No network targets.</span>
+                            )}
+                            {selectedCommunity.network_focus_targets.map((target) => (
+                              <button
+                                key={`selected-network-target-${selectedCommunity.id}-${target}`}
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  const nextTargets = selectedCommunity.network_focus_targets.filter(
+                                    (value) => value.toLowerCase() !== target.toLowerCase(),
+                                  );
+                                  void persistCommunityFocus(selectedCommunity.id, {
+                                    isShowFocused: false,
+                                    networkFocusTargets: nextTargets,
+                                    franchiseFocusTargets: selectedCommunity.franchise_focus_targets,
+                                  });
+                                }}
+                                className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60"
+                              >
+                                {target} ×
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <input
+                              value={selectedNetworkTargetInput}
+                              onChange={(event) => setSelectedNetworkTargetInput(event.target.value)}
+                              placeholder="Add network target"
+                              className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                            />
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => {
+                                const nextTargets = pushListValue(
+                                  selectedCommunity.network_focus_targets,
+                                  selectedNetworkTargetInput,
+                                );
+                                setSelectedNetworkTargetInput("");
+                                void persistCommunityFocus(selectedCommunity.id, {
+                                  isShowFocused: false,
+                                  networkFocusTargets: nextTargets,
+                                  franchiseFocusTargets: selectedCommunity.franchise_focus_targets,
+                                });
+                              }}
+                              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                            >
+                              Add
+                            </button>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {networkFocusSuggestions
+                              .filter(
+                                (target) =>
+                                  !selectedCommunity.network_focus_targets.some(
+                                    (value) => value.toLowerCase() === target.toLowerCase(),
+                                  ),
+                              )
+                              .map((target) => (
+                                <button
+                                  key={`network-suggestion-${selectedCommunity.id}-${target}`}
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => {
+                                    void persistCommunityFocus(selectedCommunity.id, {
+                                      isShowFocused: false,
+                                      networkFocusTargets: [
+                                        ...selectedCommunity.network_focus_targets,
+                                        target,
+                                      ],
+                                      franchiseFocusTargets: selectedCommunity.franchise_focus_targets,
+                                    });
+                                  }}
+                                  className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                                >
+                                  + {target}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-zinc-200 p-3">
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            Franchise Targets
+                          </p>
+                          <div className="mb-2 flex flex-wrap gap-1.5">
+                            {selectedCommunity.franchise_focus_targets.length === 0 && (
+                              <span className="text-xs text-zinc-500">No franchise targets.</span>
+                            )}
+                            {selectedCommunity.franchise_focus_targets.map((target) => (
+                              <button
+                                key={`selected-franchise-target-${selectedCommunity.id}-${target}`}
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  const nextTargets = selectedCommunity.franchise_focus_targets.filter(
+                                    (value) => value.toLowerCase() !== target.toLowerCase(),
+                                  );
+                                  void persistCommunityFocus(selectedCommunity.id, {
+                                    isShowFocused: false,
+                                    networkFocusTargets: selectedCommunity.network_focus_targets,
+                                    franchiseFocusTargets: nextTargets,
+                                  });
+                                }}
+                                className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60"
+                              >
+                                {target} ×
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <input
+                              value={selectedFranchiseTargetInput}
+                              onChange={(event) => setSelectedFranchiseTargetInput(event.target.value)}
+                              placeholder="Add franchise target"
+                              className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                            />
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => {
+                                const nextTargets = pushListValue(
+                                  selectedCommunity.franchise_focus_targets,
+                                  selectedFranchiseTargetInput,
+                                );
+                                setSelectedFranchiseTargetInput("");
+                                void persistCommunityFocus(selectedCommunity.id, {
+                                  isShowFocused: false,
+                                  networkFocusTargets: selectedCommunity.network_focus_targets,
+                                  franchiseFocusTargets: nextTargets,
+                                });
+                              }}
+                              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                            >
+                              Add
+                            </button>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {franchiseFocusSuggestions
+                              .filter(
+                                (target) =>
+                                  !selectedCommunity.franchise_focus_targets.some(
+                                    (value) => value.toLowerCase() === target.toLowerCase(),
+                                  ),
+                              )
+                              .map((target) => (
+                                <button
+                                  key={`franchise-suggestion-${selectedCommunity.id}-${target}`}
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => {
+                                    void persistCommunityFocus(selectedCommunity.id, {
+                                      isShowFocused: false,
+                                      networkFocusTargets: selectedCommunity.network_focus_targets,
+                                      franchiseFocusTargets: [
+                                        ...selectedCommunity.franchise_focus_targets,
+                                        target,
+                                      ],
+                                    });
+                                  }}
+                                  className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                                >
+                                  + {target}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {selectedCommunity.is_show_focused ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                        Show-focused mode enabled. All discovered posts are eligible (including no-flair posts).
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-zinc-200 p-3">
+                        <div className="mb-1 flex items-center justify-between">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            Analysis Flares
+                          </p>
+                          <span className="text-[11px] font-semibold text-zinc-500">
+                            {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
+                            {selectedCommunity.analysis_flares.length} scan
+                          </span>
+                        </div>
+                        {selectedCommunity.post_flares.length === 0 ? (
+                          <p className="text-xs text-zinc-500">
+                            Refresh post flares first to assign analysis flares.
+                          </p>
+                        ) : (
+                          <div className="space-y-3">
+                            <div>
+                              <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                All Posts With Flair
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {selectedCommunity.post_flares.map((flair) => {
+                                  const flairKey = flair.toLowerCase();
+                                  const isSelected = selectedCommunity.analysis_all_flares.some(
+                                    (value) => value.toLowerCase() === flairKey,
+                                  );
+                                  return (
+                                    <button
+                                      key={`analysis-all-flair-${selectedCommunity.id}-${flair}`}
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() => {
+                                        const nextAll = isSelected
+                                          ? selectedCommunity.analysis_all_flares.filter(
+                                              (value) => value.toLowerCase() !== flairKey,
+                                            )
+                                          : [...selectedCommunity.analysis_all_flares, flair];
+                                        const nextScan = selectedCommunity.analysis_flares.filter(
+                                          (value) => value.toLowerCase() !== flairKey,
+                                        );
+                                        void persistAnalysisFlareModes(selectedCommunity.id, {
+                                          analysisAllFlares: nextAll,
+                                          analysisFlares: nextScan,
+                                        });
+                                      }}
+                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
+                                        isSelected
+                                          ? "bg-indigo-100 text-indigo-700"
+                                          : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                                      } disabled:cursor-not-allowed disabled:opacity-60`}
+                                    >
+                                      {isSelected ? "All posts · " : ""}
+                                      {flair}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div>
+                              <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                Scan Flair For Relevant Terms
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {selectedCommunity.post_flares.map((flair) => {
+                                  const flairKey = flair.toLowerCase();
+                                  const isSelected = selectedCommunity.analysis_flares.some(
+                                    (value) => value.toLowerCase() === flairKey,
+                                  );
+                                  return (
+                                    <button
+                                      key={`analysis-scan-flair-${selectedCommunity.id}-${flair}`}
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() => {
+                                        const nextScan = isSelected
+                                          ? selectedCommunity.analysis_flares.filter(
+                                              (value) => value.toLowerCase() !== flairKey,
+                                            )
+                                          : [...selectedCommunity.analysis_flares, flair];
+                                        const nextAll = selectedCommunity.analysis_all_flares.filter(
+                                          (value) => value.toLowerCase() !== flairKey,
+                                        );
+                                        void persistAnalysisFlareModes(selectedCommunity.id, {
+                                          analysisAllFlares: nextAll,
+                                          analysisFlares: nextScan,
+                                        });
+                                      }}
+                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
+                                        isSelected
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                                      } disabled:cursor-not-allowed disabled:opacity-60`}
+                                    >
+                                      {isSelected ? "Scan terms · " : ""}
+                                      {flair}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="rounded-lg border border-zinc-200 p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                          Episode Discussion Communities
+                        </p>
+                        <button
+                          type="button"
+                          disabled={isBusy || episodeRefreshing}
+                          onClick={() => void handleRefreshEpisodeDiscussions()}
+                          className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                        >
+                          {episodeRefreshing ? "Refreshing..." : "REFRESH"}
+                        </button>
+                      </div>
+
+                      <p className="mb-2 text-xs text-zinc-500">
+                        Episode Discussions are post types in this subreddit matched by title phrases.
+                      </p>
+
+                      <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            Season
+                          </span>
+                          <select
+                            value={episodeSeasonId ?? ""}
+                            disabled={isBusy || periodsLoading || seasonOptions.length === 0}
+                            onChange={(event) => {
+                              const nextSeasonId = event.target.value || null;
+                              setEpisodeSeasonId(nextSeasonId);
+                              const season = seasonOptions.find((item) => item.id === nextSeasonId);
+                              setEpisodeSeasonNumber(season?.season_number ?? null);
+                              if (season) {
+                                setPeriodsLoading(true);
+                                void loadPeriodOptionsForSeason(selectedCommunity, season)
+                                  .catch((err) => {
+                                    setError(
+                                      err instanceof Error
+                                        ? err.message
+                                        : "Failed to load social periods for selected season",
+                                    );
+                                  })
+                                  .finally(() => {
+                                    setPeriodsLoading(false);
+                                  });
+                              } else {
+                                setPeriodOptions([]);
+                              }
+                            }}
+                            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
+                          >
+                            {seasonOptions.length === 0 ? (
+                              <option value="">No seasons</option>
+                            ) : (
+                              seasonOptions.map((season) => (
+                                <option key={season.id} value={season.id}>
+                                  Season {season.season_number}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            Period
+                          </span>
+                          <select
+                            value={selectedPeriodKey}
+                            disabled={isBusy || periodsLoading || periodOptions.length === 0}
+                            onChange={(event) => setSelectedPeriodKey(event.target.value)}
+                            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
+                          >
+                            {periodOptions.length === 0 ? (
+                              <option value="all-periods">All Periods</option>
+                            ) : (
+                              periodOptions.map((period) => (
+                                <option key={period.key} value={period.key}>
+                                  {period.label}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          disabled={isBusy || periodsLoading}
+                          onClick={() => void handleRefreshEpisodeDiscussions()}
+                          className="self-end rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                        >
+                          Refresh Candidates
+                        </button>
+                      </div>
+
+                      <div className="mb-3">
+                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                          Title Phrases
+                        </p>
+                        <div className="mb-2 flex flex-wrap gap-1.5">
+                          {selectedCommunity.episode_title_patterns.length === 0 && (
+                            <span className="text-xs text-zinc-500">No episode title patterns.</span>
+                          )}
+                          {selectedCommunity.episode_title_patterns.map((pattern) => (
+                            <button
+                              key={`episode-pattern-${selectedCommunity.id}-${pattern}`}
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => {
+                                const nextPatterns = selectedCommunity.episode_title_patterns.filter(
+                                  (value) => value.toLowerCase() !== pattern.toLowerCase(),
+                                );
+                                void persistEpisodeRules(selectedCommunity.id, {
+                                  episodeTitlePatterns: nextPatterns,
+                                });
+                              }}
+                              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60"
+                            >
+                              {pattern} ×
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            value={episodePatternInput}
+                            onChange={(event) => setEpisodePatternInput(event.target.value)}
+                            placeholder="Add episode title phrase"
+                            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                          />
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => {
+                              const nextPatterns = pushListValue(
+                                selectedCommunity.episode_title_patterns,
+                                episodePatternInput,
+                              );
+                              setEpisodePatternInput("");
+                              void persistEpisodeRules(selectedCommunity.id, {
+                                episodeTitlePatterns: nextPatterns,
+                              });
+                            }}
+                            className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                          >
+                            Add
+                          </button>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {episodePatternSuggestions
+                            .filter(
+                              (pattern) =>
+                                !selectedCommunity.episode_title_patterns.some(
+                                  (value) => value.toLowerCase() === pattern.toLowerCase(),
+                                ),
+                            )
+                            .map((pattern) => (
+                              <button
+                                key={`episode-pattern-suggestion-${selectedCommunity.id}-${pattern}`}
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  void persistEpisodeRules(selectedCommunity.id, {
+                                    episodeTitlePatterns: [
+                                      ...selectedCommunity.episode_title_patterns,
+                                      pattern,
+                                    ],
+                                  });
+                                }}
+                                className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                              >
+                                + {pattern}
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+
+                      {!selectedCommunity.is_show_focused && (
+                        <div className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-600">
+                          Required flares for episode refresh are sourced from
+                          {" "}
+                          <span className="font-semibold">All Posts With Flair</span>.
+                          {selectedCommunity.analysis_all_flares.length === 0 && (
+                            <span className="block pt-1 text-amber-700">
+                              No all-post flares selected. Episode refresh will be less strict for this multi-show community.
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {episodeMeta && (
+                        <p className="mb-3 text-xs text-zinc-500">
+                          Found {episodeMeta.total_found ?? 0} candidates ·{" "}
+                          {typeof episodeMeta.fetched_at === "string"
+                            ? fmtDateTime(episodeMeta.fetched_at)
+                            : "-"}
+                          {episodeMeta.season_context?.season_number
+                            ? ` · Season ${episodeMeta.season_context.season_number}`
+                            : ""}
+                          {episodeMeta.period_context?.selected_period_labels?.[0]
+                            ? ` · ${episodeMeta.period_context.selected_period_labels[0]}`
+                            : ""}
+                        </p>
+                      )}
+
+                      {episodeCandidates.length === 0 ? (
+                        <p className="text-xs text-zinc-500">
+                          No episode discussion candidates loaded yet.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {episodeCandidates.map((candidate) => {
+                            const checked = episodeSelectedPostIds.includes(candidate.reddit_post_id);
+                            return (
+                              <div
+                                key={`episode-candidate-${candidate.reddit_post_id}`}
+                                className="rounded-lg border border-zinc-100 bg-zinc-50/60 p-2"
+                              >
+                                <div className="flex items-start gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) => {
+                                      setEpisodeSelectedPostIds((current) =>
+                                        event.target.checked
+                                          ? [...current, candidate.reddit_post_id]
+                                          : current.filter((id) => id !== candidate.reddit_post_id),
+                                      );
+                                    }}
+                                  />
+                                  <div className="min-w-0">
+                                    <a
+                                      href={candidate.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:underline"
+                                    >
+                                      {candidate.title}
+                                    </a>
+                                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                                      <span>{fmtNum(candidate.score)} upvotes</span>
+                                      <span>{fmtNum(candidate.num_comments)} comments</span>
+                                      <span>{fmtDateTime(candidate.posted_at)}</span>
+                                      {candidate.link_flair_text && (
+                                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                                          Flair: {candidate.link_flair_text}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          disabled={episodeSaving || episodeSelectedPostIds.length === 0}
+                          onClick={() => void handleSaveSelectedEpisodeDiscussions()}
+                          className="rounded-lg bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+                        >
+                          {episodeSaving ? "Saving..." : "Save Selected"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </article>
 
                 <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -1222,14 +2487,20 @@ export default function RedditSourcesManager({
                     <h5 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">
                       Discovered Threads
                     </h5>
-                    <label className="inline-flex items-center gap-2 text-xs text-zinc-600">
-                      <input
-                        type="checkbox"
-                        checked={showOnlyMatches}
-                        onChange={(event) => setShowOnlyMatches(event.target.checked)}
-                      />
-                      Show matched only
-                    </label>
+                    {selectedCommunity.is_show_focused ? (
+                      <span className="text-xs font-semibold text-emerald-700">
+                        Show-focused: all discovered posts shown
+                      </span>
+                    ) : (
+                      <label className="inline-flex items-center gap-2 text-xs text-zinc-600">
+                        <input
+                          type="checkbox"
+                          checked={showOnlyMatches}
+                          onChange={(event) => setShowOnlyMatches(event.target.checked)}
+                        />
+                        Show matched only
+                      </label>
+                    )}
                   </div>
 
                   {discovery?.hints && (

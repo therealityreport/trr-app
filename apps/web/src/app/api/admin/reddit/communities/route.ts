@@ -69,6 +69,11 @@ export async function POST(request: NextRequest) {
       display_name?: unknown;
       notes?: unknown;
       is_active?: unknown;
+      is_show_focused?: unknown;
+      network_focus_targets?: unknown;
+      franchise_focus_targets?: unknown;
+      episode_title_patterns?: unknown;
+      episode_required_flares?: unknown;
     };
 
     if (!body.trr_show_id || typeof body.trr_show_id !== "string") {
@@ -104,6 +109,59 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let networkFocusTargets: string[] | undefined;
+    if (body.network_focus_targets !== undefined) {
+      if (!Array.isArray(body.network_focus_targets) || body.network_focus_targets.some((value) => typeof value !== "string")) {
+        return NextResponse.json(
+          { error: "network_focus_targets must be an array of strings" },
+          { status: 400 },
+        );
+      }
+      networkFocusTargets = body.network_focus_targets as string[];
+    }
+
+    let franchiseFocusTargets: string[] | undefined;
+    if (body.franchise_focus_targets !== undefined) {
+      if (
+        !Array.isArray(body.franchise_focus_targets) ||
+        body.franchise_focus_targets.some((value) => typeof value !== "string")
+      ) {
+        return NextResponse.json(
+          { error: "franchise_focus_targets must be an array of strings" },
+          { status: 400 },
+        );
+      }
+      franchiseFocusTargets = body.franchise_focus_targets as string[];
+    }
+
+    let episodeTitlePatterns: string[] | undefined;
+    if (body.episode_title_patterns !== undefined) {
+      if (
+        !Array.isArray(body.episode_title_patterns) ||
+        body.episode_title_patterns.some((value) => typeof value !== "string")
+      ) {
+        return NextResponse.json(
+          { error: "episode_title_patterns must be an array of strings" },
+          { status: 400 },
+        );
+      }
+      episodeTitlePatterns = body.episode_title_patterns as string[];
+    }
+
+    let episodeRequiredFlares: string[] | undefined;
+    if (body.episode_required_flares !== undefined) {
+      if (
+        !Array.isArray(body.episode_required_flares) ||
+        body.episode_required_flares.some((value) => typeof value !== "string")
+      ) {
+        return NextResponse.json(
+          { error: "episode_required_flares must be an array of strings" },
+          { status: 400 },
+        );
+      }
+      episodeRequiredFlares = body.episode_required_flares as string[];
+    }
+
     const community = await createRedditCommunity(authContext, {
       trrShowId: body.trr_show_id,
       trrShowName: body.trr_show_name.trim(),
@@ -112,6 +170,11 @@ export async function POST(request: NextRequest) {
         typeof body.display_name === "string" ? body.display_name.trim() || null : null,
       notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
       isActive: typeof body.is_active === "boolean" ? body.is_active : true,
+      isShowFocused: typeof body.is_show_focused === "boolean" ? body.is_show_focused : undefined,
+      networkFocusTargets,
+      franchiseFocusTargets,
+      episodeTitlePatterns,
+      episodeRequiredFlares,
     });
 
     return NextResponse.json({ community }, { status: 201 });

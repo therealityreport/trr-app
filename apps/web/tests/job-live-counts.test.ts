@@ -86,6 +86,16 @@ describe("job-live-counts", () => {
     expect(second).toEqual(first);
   });
 
+  it("returns null when payload has no count signals", () => {
+    const counts = resolveJobLiveCounts(null, {
+      stage: "cast_credits_show_cast",
+      message: "Syncing cast credits...",
+      current: 1,
+      total: 2,
+    });
+    expect(counts).toBeNull();
+  });
+
   it("formats and appends count labels", () => {
     const counts = {
       synced: 3,

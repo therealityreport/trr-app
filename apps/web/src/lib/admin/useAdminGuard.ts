@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { isClientAdmin } from "./client-access";
-import { isDevAdminBypassEnabledClient } from "./dev-admin-bypass";
+import { isDevAdminBypassEnabledClient, isLocalDevHostname } from "./dev-admin-bypass";
 
 const TRANSIENT_UNAUTH_GRACE_MS = 2500;
 const DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS = 2500;
@@ -14,6 +14,12 @@ function buildUserKey(user: User | null): string | null {
   if (!user) return null;
   return `${user.uid}|${user.email ?? ""}|${user.displayName ?? ""}`;
 }
+
+const DEV_ADMIN_BYPASS_USER = {
+  uid: "dev-admin-bypass",
+  email: "dev-admin-bypass@localhost",
+  displayName: "Dev Admin Bypass",
+} as User;
 
 function getAdminAuthReadyTimeoutMs(): number {
   const rawTimeout = process.env.NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS;
@@ -34,13 +40,52 @@ export function useAdminGuard() {
   const [hasAccess, setHasAccess] = useState(false);
 
   useEffect(() => {
-    if (isDevAdminBypassEnabledClient()) {
-      const currentUser = auth.currentUser;
-      setUser(currentUser);
-      setUserKey(buildUserKey(currentUser) ?? "dev-admin-bypass");
-      setHasAccess(true);
-      setChecking(false);
-      return;
+    const shouldUseLocalBypass =
+      isDevAdminBypassEnabledClient() ||
+      (typeof window !== "undefined" && isLocalDevHostname(window.location.hostname));
+
+    if (shouldUseLocalBypass) {
+      let mounted = true;
+      let authReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const clearAuthReadyFallbackTimer = () => {
+        if (!authReadyFallbackTimer) return;
+        clearTimeout(authReadyFallbackTimer);
+        authReadyFallbackTimer = null;
+      };
+
+      const applyBypassState = (currentUser: User | null) => {
+        if (!mounted) return;
+        setUser(currentUser ?? DEV_ADMIN_BYPASS_USER);
+        setUserKey(buildUserKey(currentUser) ?? "dev-admin-bypass");
+        setHasAccess(true);
+        setChecking(false);
+      };
+
+      const markBypassReady = () => {
+        clearAuthReadyFallbackTimer();
+        applyBypassState(auth.currentUser);
+      };
+
+      applyBypassState(auth.currentUser);
+      authReadyFallbackTimer = setTimeout(markBypassReady, getAdminAuthReadyTimeoutMs());
+
+      const authStateReady = (auth as { authStateReady?: () => Promise<void> }).authStateReady;
+      const authReadyPromise =
+        typeof authStateReady === "function"
+          ? Promise.resolve(authStateReady.call(auth)).catch(() => undefined)
+          : Promise.resolve();
+      void authReadyPromise.finally(markBypassReady);
+
+      const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+        applyBypassState(currentUser);
+      });
+
+      return () => {
+        mounted = false;
+        clearAuthReadyFallbackTimer();
+        unsubscribe();
+      };
     }
 
     let mounted = true;
@@ -128,7 +173,6 @@ export function useAdminGuard() {
       pendingHasAccess = nextHasAccess;
 
       if (!currentUser && hadAuthenticatedSession && authReady) {
-        setChecking(true);
         clearTransientUnauthTimer();
         transientUnauthTimer = setTimeout(() => {
           if (!mounted) return;

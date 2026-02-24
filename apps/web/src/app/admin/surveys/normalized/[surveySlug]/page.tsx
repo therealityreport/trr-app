@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildNormalizedSurveyDetailBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { SurveyQuestionsEditor } from "@/components/admin/SurveyQuestionsEditor";
@@ -157,9 +159,10 @@ export default function NormalizedSurveyEditorPage() {
       <div className="min-h-screen bg-zinc-50">
         <header className="border-b border-zinc-200 bg-white px-6 py-6">
           <div className="mx-auto max-w-6xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-              Admin / Normalized Surveys / {survey.slug}
-            </p>
+            <AdminBreadcrumbs
+              items={buildNormalizedSurveyDetailBreadcrumb(survey.title || survey.slug)}
+              className="mb-1"
+            />
             <h1 className="mt-2 text-2xl font-bold text-zinc-900">
               {survey.title}
             </h1>

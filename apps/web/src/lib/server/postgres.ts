@@ -25,6 +25,14 @@ const parseSslMode = (connectionString: string): string | null => {
   }
 };
 
+const parseConnectionHostname = (connectionString: string): string | null => {
+  try {
+    return new URL(connectionString).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
 const resolveCaBundle = (): string | undefined => {
   const inline = process.env.DATABASE_SSL_CA;
   if (inline && inline.trim().length > 0) {
@@ -42,22 +50,40 @@ const resolveCaBundle = (): string | undefined => {
   return undefined;
 };
 
-const getConnectionString = (): string => {
-  const connectionString = process.env.DATABASE_URL;
+type EnvLike = Record<string, string | undefined>;
+
+export const resolvePostgresConnectionString = (env: EnvLike = process.env): string => {
+  const candidates = [env.DATABASE_URL, env.SUPABASE_DB_URL, env.TRR_DB_URL]
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value.length > 0);
+
+  const connectionString = candidates[0];
   if (!connectionString) {
-    throw new Error("DATABASE_URL is not set. This request requires a database connection.");
+    throw new Error(
+      "No database connection string is set. Configure SUPABASE_DB_URL, DATABASE_URL, or TRR_DB_URL.",
+    );
   }
   return connectionString;
 };
 
-const buildSslConfig = (connectionString: string): SslConfig | undefined => {
+const getConnectionString = (): string => resolvePostgresConnectionString(process.env);
+
+export const resolvePostgresSslConfig = (
+  connectionString: string,
+  env: EnvLike = process.env,
+): SslConfig | undefined => {
   const sslMode = parseSslMode(connectionString);
-  const envSsl = (process.env.DATABASE_SSL ?? "").toLowerCase();
+  const envSsl = (env.DATABASE_SSL ?? "").toLowerCase();
   const forceDisableSsl = ["false", "disable", "0"].includes(envSsl);
   const forceEnableSsl = ["true", "1", "require"].includes(envSsl);
+  const host = parseConnectionHostname(connectionString);
+  const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if (isLocalHost && envSsl !== "require") {
+    return undefined;
+  }
   const shouldUseSsl = forceEnableSsl || (!forceDisableSsl && Boolean(sslMode && sslMode !== "disable"));
 
-  const rejectEnv = (process.env.DATABASE_SSL_REJECT_UNAUTHORIZED ?? "").toLowerCase();
+  const rejectEnv = (env.DATABASE_SSL_REJECT_UNAUTHORIZED ?? "").toLowerCase();
   const defaultReject = sslMode === "verify-full" || sslMode === "verify-ca";
   const shouldRejectUnauthorized = rejectEnv.length
     ? !["false", "0"].includes(rejectEnv)
@@ -81,7 +107,7 @@ const getPool = (): Pool => {
     const connectionString = getConnectionString();
     pool = new Pool({
       connectionString,
-      ssl: buildSslConfig(connectionString),
+      ssl: resolvePostgresSslConfig(connectionString, process.env),
     });
   }
   return pool;

@@ -20,6 +20,12 @@ describe("isDevAdminBypassEnabledClient", () => {
     expect(isDevAdminBypassEnabledClient("localhost")).toBe(true);
   });
 
+  it("treats localhost subdomains as local during development", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.NEXT_PUBLIC_DEV_ADMIN_BYPASS;
+    expect(isDevAdminBypassEnabledClient("admin.localhost")).toBe(true);
+  });
+
   it("allows explicit enable on localhost outside development", () => {
     process.env.NODE_ENV = "production";
     process.env.NEXT_PUBLIC_DEV_ADMIN_BYPASS = "true";

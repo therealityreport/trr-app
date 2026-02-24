@@ -5,6 +5,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildSurveyDetailBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { DEFAULT_SURVEY_THEME, type SurveyTheme } from "@/lib/surveys/types";
@@ -777,9 +779,10 @@ export default function SurveyEditorPage({
           <div className="mx-auto max-w-6xl">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                  Admin / Survey Editor
-                </p>
+                <AdminBreadcrumbs
+                  items={buildSurveyDetailBreadcrumb(survey.title || survey.key)}
+                  className="mb-1"
+                />
                 <h1 className="text-3xl font-bold text-zinc-900">{survey.title}</h1>
                 <p className="text-sm text-zinc-500">{survey.key}</p>
               </div>

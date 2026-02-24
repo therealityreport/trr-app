@@ -15,7 +15,9 @@ function parseOptionalBoolean(value: string | undefined): boolean | null {
 
 export function isLocalDevHostname(value: string | null | undefined): boolean {
   if (!value) return false;
-  return LOCALHOST_HOSTNAMES.has(value.trim().toLowerCase());
+  const normalized = value.trim().toLowerCase();
+  if (LOCALHOST_HOSTNAMES.has(normalized)) return true;
+  return normalized.endsWith(".localhost");
 }
 
 export function isDevAdminBypassEnabledClient(hostnameOverride?: string | null): boolean {

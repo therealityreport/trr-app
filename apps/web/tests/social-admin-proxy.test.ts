@@ -98,4 +98,87 @@ describe("social-admin-proxy", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("uses seasonIdHint to bypass season lookup", async () => {
+    const hintedSeasonId = "11111111-1111-4111-8111-111111111111";
+    getBackendApiUrlMock.mockImplementation(
+      (path: string) => `http://backend.local/api/v1${path}`,
+    );
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const payload = await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+      queryString: "source_scope=bravo",
+      seasonIdHint: hintedSeasonId,
+      fallbackError: "Failed to fetch social analytics",
+      retries: 0,
+      timeoutMs: 1000,
+    });
+
+    expect(payload).toEqual({ ok: true });
+    expect(getSeasonByShowAndNumberMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${hintedSeasonId}/analytics?source_scope=bravo`);
+  });
+
+  it("falls back to season lookup when seasonIdHint is invalid", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+      seasonIdHint: "bad-season-id",
+      fallbackError: "Failed to fetch social analytics",
+      retries: 0,
+      timeoutMs: 1000,
+    });
+
+    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes DNS and SSL transport detail responses to BACKEND_UNREACHABLE", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({
+        detail: {
+          code: "INTERNAL_ERROR",
+          message: "could not translate host name \"aws-1-us-east-1.pooler.supabase.com\" to address",
+          error: "SSL SYSCALL error: EOF detected",
+        },
+      }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    let thrown: unknown;
+    try {
+      await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+        fallbackError: "Failed to fetch social analytics",
+        retries: 0,
+        timeoutMs: 1000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const response = socialProxyErrorResponse(thrown, "[test] transport failure");
+    const payload = (await response.json()) as {
+      code?: string;
+      retryable?: boolean;
+      upstream_status?: number;
+    };
+
+    expect(response.status).toBe(502);
+    expect(payload.code).toBe("BACKEND_UNREACHABLE");
+    expect(payload.retryable).toBe(true);
+    expect(payload.upstream_status).toBe(500);
+  });
 });
