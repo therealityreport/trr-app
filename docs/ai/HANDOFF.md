@@ -7,8 +7,10 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 - February 24, 2026: Fixed the remaining Node 20 CI failure on `codex/2026-02-24-trr-app-sync` by removing a stale hardcoded timeout expectation in one route test.
   - Files:
     - `apps/web/tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts`
+    - `apps/web/tests/reddit-sources-manager.test.tsx`
   - Changes:
     - Updated abort-timeout assertion from exact `90s` text to a format assertion (`timed out after <N>s`) so the test stays aligned with the route timeout constant.
+    - Stabilized the show-focused community test by waiting for communities to finish loading before selection and using an async text assertion for the post-load helper copy.
   - Validation:
     - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx` (pass)
     - `pnpm -C apps/web run test:ci` (pass; `186 files, 745 tests`)

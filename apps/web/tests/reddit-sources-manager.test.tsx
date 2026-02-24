@@ -601,12 +601,15 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Bravo RH").length).toBeGreaterThan(0);
     });
+    await waitFor(() => {
+      expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
 
     expect(screen.queryByText("All Posts With Flair")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Show-focused mode enabled. All discovered posts are eligible (including no-flair posts)."),
+      await screen.findByText("Show-focused mode enabled. All discovered posts are eligible (including no-flair posts)."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: /Show matched only/i })).not.toBeInTheDocument();
   });
