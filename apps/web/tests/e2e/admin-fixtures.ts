@@ -1,10 +1,12 @@
-import type { Page, Route } from "@playwright/test";
+import { expect, type Page, type Route } from "@playwright/test";
 
 export const SHOW_ID = "11111111-1111-1111-1111-111111111111";
 export const SHOW_SLUG = "the-real-housewives-of-salt-lake-city";
 export const SHOW_NAME = "The Real Housewives of Salt Lake City";
 export const SEASON_ID = "season-6-id";
 export const SEASON_NUMBER = 6;
+
+const ADMIN_LOADING_MARKERS = ["Loading admin access", "Preparing admin dashboard", "Checking admin access"];
 
 const json = async (route: Route, body: unknown, status = 200) => {
   await route.fulfill({
@@ -129,4 +131,19 @@ export async function mockAdminApi(page: Page) {
 
     return json(route, {});
   });
+}
+
+export async function waitForAdminReady(page: Page, timeoutMs = 90_000) {
+  await expect
+    .poll(
+      async () => {
+        const bodyText = await page.locator("body").innerText();
+        return ADMIN_LOADING_MARKERS.some((marker) => bodyText.includes(marker));
+      },
+      {
+        timeout: timeoutMs,
+        intervals: [500, 1_000, 2_000, 3_000],
+      },
+    )
+    .toBe(false);
 }

@@ -6572,3 +6572,38 @@ Continuation (same session, 2026-02-24) — Social analytics soak validation + g
 - Next patch target (priority):
   1. Backend job-list hot path optimization + response-size control for unscoped jobs polling.
   2. Tighten/guard app pollers around Next dev server restarts (`next.config.ts` reload windows), so transient app restarts do not collapse all social probes.
+
+Continuation (same session, 2026-02-24) — NO_GO follow-up patch: poller resilience during dev-server restart windows.
+- Files changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
+- Change summary:
+  - Added guarded JSON parsing helper (`parseResponseJson`) to avoid hard crashes on transient malformed/partial JSON responses during Next dev restart windows.
+  - Added transient restart error classifier (`isTransientDevRestartMessage`) for known restart/network parse signatures.
+  - Landing live poll loop:
+    - suppresses section-level error noise for transient restart signatures,
+    - avoids escalating consecutive failure counter to retry-banner threshold on transient restart-only failures.
+  - Week sync poll loop:
+    - applies same transient restart classification,
+    - keeps failure counter below banner threshold for transient restart-only failures,
+    - continues adaptive backoff and preserves last-good progress state.
+- Validation evidence:
+  - `pnpm exec vitest run tests/social-week-detail-wiring.test.ts tests/season-social-analytics-section.test.tsx` (pass: 48 tests)
+  - `pnpm exec eslint src/components/admin/season-social-analytics-section.tsx 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' tests/social-week-detail-wiring.test.ts` (pass)
+
+Continuation (same session, 2026-02-24) — Reddit community view UX cleanup + season-aware episode defaults.
+- Files adjusted in this pass:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tsconfig.json`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/eslint.config.mjs`
+- Behavioral outcomes validated:
+  - Community settings are accessed via the gear action (`aria-label="Open community settings"`), with flair/focus controls living in the modal flow.
+  - Episode discussions use a single action button (`Refresh Episode Discussions`) and no duplicate mini refresh action.
+  - Episode refresh/defaulting behavior remains aligned to the season-context rules and matrix rendering paths used in Reddit manager tests.
+  - Build/typecheck no longer ingest `.next-e2e*` generated validator files through `tsconfig` include patterns.
+  - ESLint ignores generated `.next-e2e*` and `test-results` artifacts through flat-config ignores.
+- Validation evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-view-page.test.tsx tests/reddit-community-episode-refresh-route.test.ts tests/show-seasons-route-episode-signal.test.ts` (pass: 25 tests)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)

@@ -42,7 +42,19 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/Sync jobs request timed out/);
     expect(contents).toMatch(/SYNC_POLL_BACKOFF_MS/);
     expect(contents).toMatch(/syncPollFailureCountRef/);
-    expect(contents).toMatch(/if \(syncPollFailureCountRef\.current >= 2\)/);
+    expect(contents).toMatch(/syncPollFailureCountRef\.current >= 2 && !isTransientDevRestartMessage\(message\)/);
+  });
+
+  it("keeps transient dev-restart poll failures below retry-banner threshold", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const TRANSIENT_DEV_RESTART_PATTERNS = \[/);
+    expect(contents).toMatch(/isTransientDevRestartMessage/);
+    expect(contents).toMatch(/syncPollFailureCountRef\.current = Math\.max\(1, syncPollFailureCountRef\.current\)/);
   });
 
   it("preserves social_view and social_platform in back link query", () => {

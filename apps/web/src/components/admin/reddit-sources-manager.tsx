@@ -2588,11 +2588,11 @@ export default function RedditSourcesManager({
                         </label>
                         <button
                           type="button"
-                          disabled={isBusy || periodsLoading}
+                          disabled={isBusy || periodsLoading || episodeRefreshing}
                           onClick={() => void handleRefreshEpisodeDiscussions()}
                           className="self-end rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
                         >
-                          Refresh Episode Discussions
+                          {episodeRefreshing ? "Refreshing..." : "Refresh Episode Discussions"}
                         </button>
                       </div>
 

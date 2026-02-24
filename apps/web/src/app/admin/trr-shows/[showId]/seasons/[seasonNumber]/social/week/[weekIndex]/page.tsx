@@ -275,6 +275,15 @@ const REQUEST_TIMEOUT_MS = {
   commentsCoverage: 35_000,
 } as const;
 const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
+const TRANSIENT_DEV_RESTART_PATTERNS = [
+  "failed to fetch",
+  "networkerror when attempting to fetch resource",
+  "fetch failed",
+  "unexpected end of json input",
+  "invalid json",
+  "load failed",
+  "connection closed",
+] as const;
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -306,6 +315,20 @@ const fetchWithTimeout = async (
     throw error;
   } finally {
     clearTimeout(timeoutId);
+  }
+};
+
+const isTransientDevRestartMessage = (message: string | null | undefined): boolean => {
+  const normalized = String(message ?? "").toLowerCase();
+  if (!normalized) return false;
+  return TRANSIENT_DEV_RESTART_PATTERNS.some((pattern) => normalized.includes(pattern));
+};
+
+const parseResponseJson = async <T,>(response: Response, fallbackMessage: string): Promise<T> => {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new Error(`${fallbackMessage}. Response payload unavailable.`);
   }
 };
 
@@ -605,7 +628,7 @@ function PostStatsDrawer({
         (body as Record<string, string>).error || `HTTP ${res.status}`,
       );
     }
-    return (await res.json()) as PostDetailResponse;
+    return await parseResponseJson<PostDetailResponse>(res, "Failed to load post detail");
   }, [seasonId, seasonNumber, showId, platform, sourceId]);
 
   useEffect(() => {
@@ -667,7 +690,7 @@ function PostStatsDrawer({
         const body = await res.json().catch(() => ({}));
         throw new Error((body as Record<string, string>).error || `HTTP ${res.status}`);
       }
-      setData((await res.json()) as PostDetailResponse);
+      setData(await parseResponseJson<PostDetailResponse>(res, "Failed to refresh post comments"));
     } catch (err) {
       setRefreshError(err instanceof Error ? err.message : "Failed to refresh comments");
     } finally {
@@ -1280,7 +1303,7 @@ export default function WeekDetailPage() {
           (body as Record<string, string>).error || `HTTP ${res.status}`,
         );
       }
-      setData(await res.json());
+      setData(await parseResponseJson<WeekDetailResponse>(res, "Failed to load week detail"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load week detail");
     } finally {
@@ -1355,7 +1378,10 @@ export default function WeekDetailPage() {
           const body = (await runsResponse.json().catch(() => ({}))) as { error?: string };
           runsError = body.error ?? "Failed to load sync runs";
         } else {
-          const runsPayload = (await runsResponse.json()) as { runs?: SocialRun[] };
+          const runsPayload = await parseResponseJson<{ runs?: SocialRun[] }>(
+            runsResponse,
+            "Failed to load sync runs",
+          );
           nextRun = (runsPayload.runs ?? []).find((run) => run.id === runId) ?? null;
           runsLoaded = true;
         }
@@ -1369,7 +1395,10 @@ export default function WeekDetailPage() {
           const body = (await jobsResponse.json().catch(() => ({}))) as { error?: string };
           jobsError = body.error ?? "Failed to load sync jobs";
         } else {
-          const jobsPayload = (await jobsResponse.json()) as { jobs?: SocialJob[] };
+          const jobsPayload = await parseResponseJson<{ jobs?: SocialJob[] }>(
+            jobsResponse,
+            "Failed to load sync jobs",
+          );
           nextJobs = jobsPayload.jobs ?? [];
           jobsLoaded = true;
         }
@@ -1520,7 +1549,7 @@ export default function WeekDetailPage() {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? "Failed to fetch comments coverage");
       }
-      return (await response.json()) as CommentsCoverageResponse;
+      return await parseResponseJson<CommentsCoverageResponse>(response, "Failed to fetch comments coverage");
     },
     [resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
   );
@@ -1727,9 +1756,14 @@ export default function WeekDetailPage() {
         }
       } catch (err) {
         if (cancelled || generation !== syncPollGenerationRef.current) return;
-        syncPollFailureCountRef.current += 1;
-        if (syncPollFailureCountRef.current >= 2) {
-          setSyncPollError(err instanceof Error ? err.message : "Failed to refresh sync progress");
+        const message = err instanceof Error ? err.message : "Failed to refresh sync progress";
+        if (isTransientDevRestartMessage(message)) {
+          syncPollFailureCountRef.current = Math.max(1, syncPollFailureCountRef.current);
+        } else {
+          syncPollFailureCountRef.current += 1;
+        }
+        if (syncPollFailureCountRef.current >= 2 && !isTransientDevRestartMessage(message)) {
+          setSyncPollError(message);
         }
       }
 

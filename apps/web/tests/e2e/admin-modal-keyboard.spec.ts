@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { mockAdminApi, SHOW_ID } from "./admin-fixtures";
+import { mockAdminApi, SHOW_ID, waitForAdminReady } from "./admin-fixtures";
 
 test("batch jobs modal supports keyboard escape close", async ({ page }) => {
   await mockAdminApi(page);
 
   await page.goto(`/admin/trr-shows/${SHOW_ID}?tab=assets`);
+  await waitForAdminReady(page);
 
   const openButton = page.getByRole("button", { name: "Batch Jobs" }).first();
   await expect(openButton).toBeVisible();
