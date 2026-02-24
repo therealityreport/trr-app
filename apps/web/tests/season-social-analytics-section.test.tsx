@@ -571,6 +571,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   });
 
   afterEach(() => {
+    if (vi.isFakeTimers()) {
+      vi.clearAllTimers();
+    }
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -598,6 +601,22 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const zeroTile = within(weekTwoRow).getByTestId("weekly-heatmap-day-2-0").firstElementChild;
     expect(zeroTile?.className).toContain("bg-zinc-200");
     expect(within(weekTwoRow).getByTestId("weekly-heatmap-total-2")).toHaveTextContent("0 posts");
+  });
+
+  it("renders section skeletons before analytics resolve", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    expect(screen.getByTestId("social-analytics-skeleton")).toBeInTheDocument();
+    await screen.findByText("Weekly Trend");
   });
 
   it("requires two consecutive poll failures before setting retry state", () => {
@@ -1175,6 +1194,122 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.getByText("Consistency & Momentum")).toBeInTheDocument();
   });
 
+  it("groups failures and renders latest five failure events in run health", async () => {
+    const runId = "run-fail-1";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs/summary?")) {
+        return jsonResponse({
+          summaries: [{ run_id: runId, status: "failed", duration_seconds: 240, success_rate_pct: 42.5 }],
+        });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [{ id: runId, status: "failed", created_at: "2026-02-24T18:00:00Z" }],
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({
+          jobs: [
+            {
+              id: "job-a",
+              run_id: runId,
+              platform: "youtube",
+              status: "failed",
+              job_type: "comments",
+              error_message: "Rate limited",
+              created_at: "2026-02-24T18:04:00Z",
+              config: { stage: "comments" },
+              job_error_code: "RATE_LIMIT",
+            },
+            {
+              id: "job-b",
+              run_id: runId,
+              platform: "youtube",
+              status: "failed",
+              job_type: "comments",
+              error_message: "Rate limited",
+              created_at: "2026-02-24T18:03:00Z",
+              config: { stage: "comments" },
+              job_error_code: "RATE_LIMIT",
+            },
+            {
+              id: "job-c",
+              run_id: runId,
+              platform: "instagram",
+              status: "failed",
+              job_type: "posts",
+              error_message: "Parser mismatch",
+              created_at: "2026-02-24T18:02:00Z",
+              config: { stage: "posts" },
+              job_error_code: "PARSER",
+            },
+            {
+              id: "job-d",
+              run_id: runId,
+              platform: "twitter",
+              status: "retrying",
+              job_type: "comments",
+              error_message: "Network timeout",
+              created_at: "2026-02-24T18:01:00Z",
+              config: { stage: "comments" },
+              job_error_code: "NETWORK",
+            },
+            {
+              id: "job-e",
+              run_id: runId,
+              platform: "tiktok",
+              status: "failed",
+              job_type: "posts",
+              error_message: "Auth rejected",
+              created_at: "2026-02-24T18:00:00Z",
+              config: { stage: "posts" },
+              job_error_code: "AUTH",
+            },
+            {
+              id: "job-f",
+              run_id: runId,
+              platform: "instagram",
+              status: "failed",
+              job_type: "comments",
+              error_message: "Unknown error",
+              created_at: "2026-02-24T17:59:00Z",
+              config: { stage: "comments" },
+              job_error_code: "UNKNOWN",
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="advanced"
+      />,
+    );
+
+    await screen.findByText("Run Health");
+    fireEvent.click(screen.getByRole("button", { name: "Select Latest Run" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Failure Groups")).toBeInTheDocument();
+      expect(screen.getByText("Latest 5 Failure Events")).toBeInTheDocument();
+    });
+    expect(screen.getByText("RATE_LIMIT · comments · 2")).toBeInTheDocument();
+    const latestFailures = screen.getByTestId("run-health-latest-failures");
+    await waitFor(() => {
+      expect(within(latestFailures).getAllByRole("listitem")).toHaveLength(5);
+    });
+  });
+
   it("does not crash when benchmark delta payload is partially missing", async () => {
     const analyticsWithPartialBenchmark = {
       ...analyticsBase,
@@ -1481,7 +1616,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.queryByText("Loading social analytics...")).not.toBeInTheDocument();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(22_001);
+      await vi.advanceTimersByTimeAsync(40_001);
     });
     await Promise.resolve();
     expect(screen.getByText(/Social analytics request timed out/i)).toBeInTheDocument();
@@ -1988,7 +2123,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: /Run Season Ingest \(All\)/i }));
 
-    await vi.advanceTimersByTimeAsync(3000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
     expect(runJobsCalls).toBeGreaterThan(0);
     expect(
       fetchMock.mock.calls.some(
@@ -1997,8 +2134,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       ),
     ).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(7000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7000);
+    });
     expect(screen.queryByText(/Ingest complete/i)).not.toBeInTheDocument();
-    vi.useRealTimers();
   });
 });
