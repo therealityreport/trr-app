@@ -564,6 +564,7 @@ const normalizeFaceBoxes = (value: unknown): FaceBoxTag[] => {
 
 const PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_PAGE_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
+const PERSON_PAGE_STREAM_START_DEADLINE_MS = 20_000;
 const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
 const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
 const BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
@@ -4260,13 +4261,23 @@ export default function PersonProfilePage() {
         const syncProgressTracker = createSyncProgressTracker();
         const headers = await getAuthHeaders();
         const streamController = new AbortController();
-        let streamAbortReason: "max_duration" | "idle" | null = null;
+        let streamAbortReason: "max_duration" | "idle" | "start_deadline" | null = null;
+        let sawFirstEvent = false;
         const streamTimeout = setTimeout(
           () => {
             streamAbortReason = "max_duration";
             streamController.abort();
           },
           PERSON_PAGE_STREAM_MAX_DURATION_MS
+        );
+        let streamStartTimeout: ReturnType<typeof setTimeout> | null = setTimeout(
+          () => {
+            if (!sawFirstEvent) {
+              streamAbortReason = "start_deadline";
+              streamController.abort();
+            }
+          },
+          PERSON_PAGE_STREAM_START_DEADLINE_MS
         );
         let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
         const bumpStreamIdleTimeout = () => {
@@ -4282,6 +4293,10 @@ export default function PersonProfilePage() {
         const clearStreamIdleTimeout = () => {
           if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
           streamIdleTimeout = null;
+        };
+        const clearStreamStartTimeout = () => {
+          if (streamStartTimeout) clearTimeout(streamStartTimeout);
+          streamStartTimeout = null;
         };
         bumpStreamIdleTimeout();
         let response: Response;
@@ -4312,6 +4327,14 @@ export default function PersonProfilePage() {
               `Refresh stream reached max duration (${Math.round(
                 PERSON_PAGE_STREAM_MAX_DURATION_MS / 60000
               )}m).`
+            );
+          }
+          if (streamAbortReason === "start_deadline") {
+            throw createNamedError(
+              "StreamTimeoutError",
+              `No refresh stream events received within ${Math.round(
+                PERSON_PAGE_STREAM_START_DEADLINE_MS / 1000
+              )}s.`
             );
           }
           if (isAbortError(error) || isSignalAbortedWithoutReasonError(error)) {
@@ -4361,6 +4384,16 @@ export default function PersonProfilePage() {
             while (boundaryIndex !== -1) {
               const rawEvent = buffer.slice(0, boundaryIndex);
               buffer = buffer.slice(boundaryIndex + 2);
+              if (!sawFirstEvent && rawEvent.trim().length > 0) {
+                sawFirstEvent = true;
+                clearStreamStartTimeout();
+                appendRefreshLog({
+                  source: "page_refresh",
+                  stage: "stream_connected",
+                  message: "Stream connected.",
+                  level: "info",
+                });
+              }
 
               const lines = rawEvent.split("\n").filter(Boolean);
               let eventType = "message";
@@ -4537,6 +4570,14 @@ export default function PersonProfilePage() {
               )}m).`
             );
           }
+          if (streamAbortReason === "start_deadline") {
+            throw createNamedError(
+              "StreamTimeoutError",
+              `No refresh stream events received within ${Math.round(
+                PERSON_PAGE_STREAM_START_DEADLINE_MS / 1000
+              )}s.`
+            );
+          }
           if (isAbortError(error) || isSignalAbortedWithoutReasonError(error)) {
             throw createNamedError("StreamAbortError", "Refresh stream request was aborted.");
           }
@@ -4544,6 +4585,7 @@ export default function PersonProfilePage() {
         } finally {
           clearInterval(staleInterval);
           clearStreamIdleTimeout();
+          clearStreamStartTimeout();
           clearTimeout(streamTimeout);
           if (shouldStopReading) {
             try {
@@ -4563,6 +4605,14 @@ export default function PersonProfilePage() {
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
           await runStreamAttempt();
+          if (attempt > 1) {
+            appendRefreshLog({
+              source: "page_refresh",
+              stage: "stream_recovered",
+              message: "Stream recovered.",
+              level: "success",
+            });
+          }
           streamError = null;
           break;
         } catch (streamErr) {

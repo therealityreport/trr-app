@@ -216,7 +216,12 @@ export default function AdminNetworksPage() {
   }, [checking, hasAccess, loadNetworksStreamingSummary, loadOverrides, userIdentity]);
 
   const onSyncNetworksStreaming = useCallback(
-    async (options?: { unresolvedOnly?: boolean; resumeRunId?: string }) => {
+    async (options?: {
+      unresolvedOnly?: boolean;
+      resumeRunId?: string;
+      entityType?: NetworksStreamingType;
+      entityKeys?: string[];
+    }) => {
       const unresolvedOnly = Boolean(options?.unresolvedOnly);
       setSyncing(true);
       setSyncError(null);
@@ -234,6 +239,10 @@ export default function AdminNetworksPage() {
             refresh_external_sources: refreshExternalSources,
             batch_size: 25,
             max_runtime_sec: 840,
+            ...(options?.entityType ? { entity_type: options.entityType } : {}),
+            ...(Array.isArray(options?.entityKeys) && options.entityKeys.length > 0
+              ? { entity_keys: options.entityKeys.map((item) => normalizeEntityKey(item)).filter(Boolean) }
+              : {}),
             ...(typeof options?.resumeRunId === "string" && options.resumeRunId.trim().length > 0
               ? { resume_run_id: options.resumeRunId.trim() }
               : {}),
@@ -273,6 +282,10 @@ export default function AdminNetworksPage() {
         reason: row.resolution_reason || (!row.has_links ? "missing_links" : !row.has_logo ? "missing_logo" : "missing_bw_variants"),
       }));
   }, [summary?.rows, syncResult?.unresolved_logos]);
+  const unresolvedProductionRows = useMemo(
+    () => unresolvedRows.filter((row) => row.type === "production"),
+    [unresolvedRows],
+  );
 
   const completionStats = useMemo(() => {
     if (syncResult) {
@@ -516,6 +529,20 @@ export default function AdminNetworksPage() {
                 >
                   Re-run Unresolved Only
                 </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void onSyncNetworksStreaming({
+                      unresolvedOnly: true,
+                      entityType: "production",
+                      entityKeys: unresolvedProductionRows.map((row) => row.name),
+                    })
+                  }
+                  disabled={syncing || unresolvedProductionRows.length === 0}
+                  className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Re-run Unresolved Production Only
+                </button>
                 {syncResult?.status === "stopped" ? (
                   <button
                     type="button"
@@ -540,6 +567,9 @@ export default function AdminNetworksPage() {
                 Refresh external catalogs (uses credits)
               </label>
             </div>
+            <p className="mt-2 text-xs text-zinc-600">
+              Unresolved production entities: {unresolvedProductionRows.length}
+            </p>
 
             {summaryError ? (
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{summaryError}</div>

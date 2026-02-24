@@ -75,6 +75,8 @@ export interface TrrSeason {
   poster_path: string | null;
   url_original_poster: string | null;
   tmdb_season_id: number | null;
+  has_scheduled_or_aired_episode?: boolean;
+  episode_airdate_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -214,6 +216,10 @@ export interface TrrSeasonFandom {
 export interface PaginationOptions {
   limit?: number;
   offset?: number;
+}
+
+export interface SeasonListOptions extends PaginationOptions {
+  includeEpisodeSignal?: boolean;
 }
 
 export interface SourcePaginationOptions extends PaginationOptions {
@@ -674,9 +680,29 @@ export async function updateShowById(
  */
 export async function getSeasonsByShowId(
   showId: string,
-  options?: PaginationOptions
+  options?: SeasonListOptions
 ): Promise<TrrSeason[]> {
   const { limit, offset } = normalizePagination(options);
+  const includeEpisodeSignal = options?.includeEpisodeSignal === true;
+  if (includeEpisodeSignal) {
+    const result = await pgQuery<TrrSeason>(
+      `SELECT s.*,
+              COALESCE(ep.episode_airdate_count, 0)::int AS episode_airdate_count,
+              (COALESCE(ep.episode_airdate_count, 0) > 0) AS has_scheduled_or_aired_episode
+         FROM core.seasons AS s
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*)::int AS episode_airdate_count
+             FROM core.episodes AS e
+            WHERE e.season_id = s.id
+              AND e.air_date IS NOT NULL
+         ) AS ep ON TRUE
+        WHERE s.show_id = $1::uuid
+        ORDER BY s.season_number DESC
+        LIMIT $2 OFFSET $3`,
+      [showId, limit, offset]
+    );
+    return result.rows;
+  }
   const result = await pgQuery<TrrSeason>(
     `SELECT *
      FROM core.seasons

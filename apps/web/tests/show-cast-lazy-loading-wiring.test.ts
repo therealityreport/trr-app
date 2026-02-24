@@ -116,7 +116,7 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/useDeferredValue/);
     expect(contents).toMatch(/const castSearchQueryDeferred = useDeferredValue/);
     expect(contents).toMatch(/const roleDataReady = castRoleMembersLoadedOnce \|\| Boolean\(roleMember\);/);
-    expect(contents).toMatch(/if \(!roleDataReady\) return;/);
+    expect(contents).toMatch(/if \(!roleDataReady\) \{/);
   });
 
   it("keeps cast tab usable when cast-role-members refresh fails", () => {
@@ -126,5 +126,32 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/rolesWarningWithSnapshotAge && \(/);
     expect(contents).toMatch(/Retry Roles/);
     expect(contents).toMatch(/onClick=\{\(\) => void fetchShowRoles\(\{ force: true \}\)\}/);
+    expect(contents).toMatch(/Cast intelligence unavailable; showing base cast snapshot\./);
+    expect(contents).toMatch(/Retry Cast Intelligence/);
+    expect(contents).toMatch(/Refreshing cast intelligence\.\.\./);
+    expect(contents).toMatch(
+      /showCastIntelligenceUnavailable =\s*activeTab === "cast" &&\s*castSource === "show_fallback" &&\s*!castRoleMembersLoading &&\s*!rolesLoading &&\s*\(Boolean\(castRoleMembersError\) \|\| Boolean\(rolesError\)\)/
+    );
+  });
+
+  it("prevents cast intelligence auto-load retry loops and keeps manual retries explicit", () => {
+    expect(contents).toMatch(/showRolesAutoLoadAttemptedRef/);
+    expect(contents).toMatch(/castRoleMembersAutoLoadAttemptedRef/);
+    expect(contents).toMatch(/if \(showRolesAutoLoadAttemptedRef\.current === autoLoadKey\) return;/);
+    expect(contents).toMatch(/if \(castRoleMembersAutoLoadAttemptedRef\.current === autoLoadKey\) return;/);
+    expect(contents).toMatch(/if \(!force && showRolesLoadedOnceRef\.current\) return;/);
+    expect(contents).toMatch(
+      /if \(!force && castRoleMembersLoadKeyRef\.current === fetchKey && castRoleMembersLoadedOnceRef\.current\)/
+    );
+  });
+
+  it("keeps deep-link role editor params when intelligence is unavailable", () => {
+    expect(contents).toMatch(/castRoleEditorDeepLinkWarning/);
+    expect(contents).toMatch(
+      /if \(!castRoleMembersLoading && !rolesLoading && \(Boolean\(castRoleMembersError\) \|\| Boolean\(rolesError\)\)\)/
+    );
+    expect(contents).toMatch(
+      /Role editor deep-link is waiting for cast intelligence\. Retry roles and cast intelligence, then reopen\./
+    );
   });
 });

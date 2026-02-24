@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { adminFetch, fetchWithTimeout } from "@/lib/admin/admin-fetch";
+import { adminFetch, adminStream, fetchWithTimeout } from "@/lib/admin/admin-fetch";
 
 const createAbortableNeverFetch = () =>
   vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
@@ -58,5 +58,42 @@ describe("admin-fetch", () => {
 
     expect(response.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses SSE events with adminStream", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: progress\ndata: {"stage":"Batch Jobs","current":1,"total":2}\n\n' +
+              'event: complete\ndata: {"attempted":2}\n\n'
+          )
+        );
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const onEvent = vi.fn();
+
+    await adminStream("/api/test/stream", {
+      method: "POST",
+      timeoutMs: 1000,
+      onEvent,
+    });
+
+    expect(onEvent).toHaveBeenCalledWith({
+      event: "progress",
+      payload: { stage: "Batch Jobs", current: 1, total: 2 },
+    });
+    expect(onEvent).toHaveBeenCalledWith({
+      event: "complete",
+      payload: { attempted: 2 },
+    });
   });
 });

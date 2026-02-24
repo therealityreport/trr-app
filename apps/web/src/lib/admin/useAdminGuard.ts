@@ -47,6 +47,13 @@ export function useAdminGuard() {
     if (shouldUseLocalBypass) {
       let mounted = true;
       let authReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+      const getCurrentUserSafely = () => {
+        try {
+          return auth.currentUser;
+        } catch {
+          return null;
+        }
+      };
 
       const clearAuthReadyFallbackTimer = () => {
         if (!authReadyFallbackTimer) return;
@@ -64,10 +71,10 @@ export function useAdminGuard() {
 
       const markBypassReady = () => {
         clearAuthReadyFallbackTimer();
-        applyBypassState(auth.currentUser);
+        applyBypassState(getCurrentUserSafely());
       };
 
-      applyBypassState(auth.currentUser);
+      applyBypassState(getCurrentUserSafely());
       authReadyFallbackTimer = setTimeout(markBypassReady, getAdminAuthReadyTimeoutMs());
 
       const authStateReady = (auth as { authStateReady?: () => Promise<void> }).authStateReady;
@@ -77,9 +84,14 @@ export function useAdminGuard() {
           : Promise.resolve();
       void authReadyPromise.finally(markBypassReady);
 
-      const unsubscribe = auth.onAuthStateChanged((currentUser) => {
-        applyBypassState(currentUser);
-      });
+      let unsubscribe = () => {};
+      try {
+        unsubscribe = auth.onAuthStateChanged((currentUser) => {
+          applyBypassState(currentUser);
+        });
+      } catch {
+        applyBypassState(getCurrentUserSafely());
+      }
 
       return () => {
         mounted = false;

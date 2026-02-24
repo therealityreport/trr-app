@@ -18,6 +18,12 @@ interface RouteParams {
   params: Promise<{ showId: string }>;
 }
 
+const parseBoolean = (value: string | null): boolean => {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+};
+
 /**
  * GET /api/admin/trr-api/shows/[showId]/seasons
  *
@@ -44,6 +50,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get("limit") ?? "20", 10);
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const includeEpisodeSignal = parseBoolean(searchParams.get("include_episode_signal"));
 
     const cacheKey = buildUserScopedRouteCacheKey(
       user.uid,
@@ -58,7 +65,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
     }
 
-    const seasons = await getSeasonsByShowId(showId, { limit, offset });
+    const seasons = await getSeasonsByShowId(showId, { limit, offset, includeEpisodeSignal });
     const payload = {
       seasons,
       pagination: {

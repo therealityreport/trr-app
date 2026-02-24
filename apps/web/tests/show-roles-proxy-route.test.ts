@@ -96,7 +96,7 @@ describe("show roles proxy route", () => {
 
     expect(response.status).toBe(504);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(payload.error).toContain("timed out after 20s");
+    expect(payload.error).toContain("timed out after 120s");
     expect(payload.code).toBe("UPSTREAM_TIMEOUT");
     expect(payload.retryable).toBe(true);
     expect(payload.upstream_status).toBe(504);

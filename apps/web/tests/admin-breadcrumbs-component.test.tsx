@@ -1,6 +1,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import { axe } from "vitest-axe";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 
 describe("AdminBreadcrumbs component", () => {
@@ -25,5 +26,19 @@ describe("AdminBreadcrumbs component", () => {
     );
     expect(within(nav).queryByRole("link", { name: "ABC" })).not.toBeInTheDocument();
     expect(within(nav).getByText("ABC")).toBeInTheDocument();
+  });
+
+  it("has no basic axe violations", async () => {
+    const { container } = render(
+      <AdminBreadcrumbs
+        items={[
+          { label: "Admin", href: "/admin" },
+          { label: "Shows", href: "/admin/trr-shows" },
+          { label: "Sample Show" },
+        ]}
+      />,
+    );
+    const results = await axe(container);
+    expect(results.violations).toHaveLength(0);
   });
 });

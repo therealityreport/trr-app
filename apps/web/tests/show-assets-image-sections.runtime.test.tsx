@@ -86,4 +86,22 @@ describe("ShowAssetsImageSections runtime", () => {
     expect(screen.getByRole("button", { name: "Load More Backdrops" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load More Posters" })).toBeInTheDocument();
   });
+
+  it("renders auto-advance sentinels when auto mode is enabled", () => {
+    render(
+      <ShowAssetsImageSections
+        backdrops={[buildAsset("backdrop-1", "backdrop")]}
+        posters={[buildAsset("poster-1", "poster")]}
+        hasMoreBackdrops
+        hasMorePosters
+        autoAdvanceMode="auto"
+        onLoadMoreBackdrops={vi.fn()}
+        onLoadMorePosters={vi.fn()}
+        onOpenAssetLightbox={vi.fn()}
+        renderGalleryImage={({ asset }): ReactNode => <span>{asset.id}</span>}
+      />
+    );
+
+    expect(document.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThan(0);
+  });
 });

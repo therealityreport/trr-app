@@ -23,6 +23,8 @@ import { LightboxShell } from "@/components/admin/image-lightbox/LightboxShell";
 import { LightboxImageStage } from "@/components/admin/image-lightbox/LightboxImageStage";
 import { LightboxMetadataPanel } from "@/components/admin/image-lightbox/LightboxMetadataPanel";
 import { LightboxManagementActions } from "@/components/admin/image-lightbox/LightboxManagementActions";
+import { useLightboxManagementState } from "@/components/admin/image-lightbox/useLightboxManagementState";
+import { useLightboxKeyboardFocus } from "@/components/admin/image-lightbox/useLightboxKeyboardFocus";
 
 // Inline SVG icons to avoid external dependencies
 const XIcon = ({ className }: { className?: string }) => (
@@ -200,6 +202,8 @@ interface ImageManagementProps {
   onToggleStar?: (starred: boolean) => Promise<void>;
   onSetFeaturedPoster?: () => Promise<void>;
   onSetFeaturedBackdrop?: () => Promise<void>;
+  onClearFeaturedPoster?: () => Promise<void>;
+  onClearFeaturedBackdrop?: () => Promise<void>;
   isFeaturedPoster?: boolean;
   isFeaturedBackdrop?: boolean;
   onUpdateContentType?: (contentType: string) => Promise<void>;
@@ -276,6 +280,8 @@ interface MetadataPanelProps {
     onToggleStar?: (starred: boolean) => Promise<void>;
     onSetFeaturedPoster?: () => Promise<void>;
     onSetFeaturedBackdrop?: () => Promise<void>;
+    onClearFeaturedPoster?: () => Promise<void>;
+    onClearFeaturedBackdrop?: () => Promise<void>;
     isFeaturedPoster?: boolean;
     isFeaturedBackdrop?: boolean;
     onUpdateContentType?: (contentType: string) => Promise<void>;
@@ -314,9 +320,6 @@ function MetadataPanel({
   onToggleExtras,
 }: MetadataPanelProps) {
   const [showFullCaption, setShowFullCaption] = useState(false);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [starLoading, setStarLoading] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [copyMirrorFileNotice, setCopyMirrorFileNotice] = useState<string | null>(null);
   const currentContentType = normalizeContentTypeToken(
     metadata.contentType ?? metadata.sectionTag ?? "OTHER"
@@ -331,7 +334,8 @@ function MetadataPanel({
     metadata.caption && metadata.caption.length > captionTruncateLength;
   const sourcePageLabel = metadata.sourcePageTitle || metadata.sourceUrl || null;
   const sourceBadgeLabel = formatSourceBadgeLabel(metadata.source, metadata.sourceUrl);
-  const foundOnSourceLabel = formatFoundOnSourceLabel(metadata.source, metadata.sourceUrl);
+  const foundOnSourceUrl = metadata.sourceUrl ?? metadata.originalImageUrl ?? null;
+  const foundOnSourceLabel = formatFoundOnSourceLabel(metadata.source, foundOnSourceUrl);
   const foundOnPageTitle = metadata.sourcePageTitle || "Unknown";
   const galleryStatusNormalized = (metadata.galleryStatus ?? "").trim().toLowerCase();
   const isBrokenUnreachable = galleryStatusNormalized === "broken_unreachable";
@@ -414,18 +418,16 @@ function MetadataPanel({
     });
   }
 
-  const handleAction = async (action: string, handler?: () => Promise<void>) => {
-    if (!handler || actionLoading) return;
-    setActionLoading(action);
-    setActionError(null);
-    try {
-      await handler();
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Action failed");
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const {
+    actionLoading,
+    starLoading,
+    actionError,
+    handleAction,
+    handleToggleStar,
+  } = useLightboxManagementState({
+    onToggleStar: management?.onToggleStar,
+    isStarred: Boolean(management?.isStarred),
+  });
 
   const disabledReasons = management?.actionDisabledReasons ?? {};
   const canRefresh = Boolean(management?.onRefresh);
@@ -531,15 +533,7 @@ function MetadataPanel({
 
           <button
             type="button"
-            onClick={async () => {
-              if (!management?.onToggleStar || starLoading || actionLoading) return;
-              setStarLoading(true);
-              try {
-                await management.onToggleStar(!Boolean(management.isStarred));
-              } finally {
-                setStarLoading(false);
-              }
-            }}
+            onClick={handleToggleStar}
             disabled={actionLoading !== null || starLoading || Boolean(starDisabledReason)}
             title={starDisabledReason ?? undefined}
             className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
@@ -552,7 +546,12 @@ function MetadataPanel({
           </button>
           <button
             type="button"
-            onClick={() => handleAction("featuredPoster", management.onSetFeaturedPoster)}
+            onClick={() =>
+              handleAction(
+                "featuredPoster",
+                management.isFeaturedPoster ? management.onClearFeaturedPoster : management.onSetFeaturedPoster
+              )
+            }
             disabled={actionLoading !== null || starLoading || Boolean(featuredPosterDisabledReason)}
             title={featuredPosterDisabledReason ?? undefined}
             className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
@@ -560,12 +559,17 @@ function MetadataPanel({
             {actionLoading === "featuredPoster"
               ? "Saving..."
               : management.isFeaturedPoster
-                ? "Featured Poster"
+                ? "Clear Featured Poster"
                 : "Set as Featured Poster"}
           </button>
           <button
             type="button"
-            onClick={() => handleAction("featuredBackdrop", management.onSetFeaturedBackdrop)}
+            onClick={() =>
+              handleAction(
+                "featuredBackdrop",
+                management.isFeaturedBackdrop ? management.onClearFeaturedBackdrop : management.onSetFeaturedBackdrop
+              )
+            }
             disabled={actionLoading !== null || starLoading || Boolean(featuredBackdropDisabledReason)}
             title={featuredBackdropDisabledReason ?? undefined}
             className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
@@ -573,7 +577,7 @@ function MetadataPanel({
             {actionLoading === "featuredBackdrop"
               ? "Saving..."
               : management.isFeaturedBackdrop
-                ? "Featured Backdrop"
+                ? "Clear Featured Backdrop"
                 : "Set as Featured Backdrop"}
           </button>
           <button
@@ -1030,15 +1034,7 @@ function MetadataPanel({
               </button>
             )}
             <button
-              onClick={async () => {
-                if (!management?.onToggleStar || starLoading || actionLoading) return;
-                setStarLoading(true);
-                try {
-                  await management.onToggleStar(!Boolean(management.isStarred));
-                } finally {
-                  setStarLoading(false);
-                }
-              }}
+              onClick={handleToggleStar}
               disabled={actionLoading !== null || starLoading || Boolean(starDisabledReason)}
               title={starDisabledReason ?? undefined}
               className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
@@ -1050,7 +1046,12 @@ function MetadataPanel({
                   : "Star/Flag"}
             </button>
             <button
-              onClick={() => handleAction("featuredPoster", management.onSetFeaturedPoster)}
+              onClick={() =>
+                handleAction(
+                  "featuredPoster",
+                  management.isFeaturedPoster ? management.onClearFeaturedPoster : management.onSetFeaturedPoster
+                )
+              }
               disabled={actionLoading !== null || starLoading || Boolean(featuredPosterDisabledReason)}
               title={featuredPosterDisabledReason ?? undefined}
               className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
@@ -1058,11 +1059,16 @@ function MetadataPanel({
               {actionLoading === "featuredPoster"
                 ? "Saving..."
                 : management.isFeaturedPoster
-                  ? "Featured Poster"
+                  ? "Clear Featured Poster"
                   : "Set as Featured Poster"}
             </button>
             <button
-              onClick={() => handleAction("featuredBackdrop", management.onSetFeaturedBackdrop)}
+              onClick={() =>
+                handleAction(
+                  "featuredBackdrop",
+                  management.isFeaturedBackdrop ? management.onClearFeaturedBackdrop : management.onSetFeaturedBackdrop
+                )
+              }
               disabled={actionLoading !== null || starLoading || Boolean(featuredBackdropDisabledReason)}
               title={featuredBackdropDisabledReason ?? undefined}
               className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
@@ -1070,7 +1076,7 @@ function MetadataPanel({
               {actionLoading === "featuredBackdrop"
                 ? "Saving..."
                 : management.isFeaturedBackdrop
-                  ? "Featured Backdrop"
+                  ? "Clear Featured Backdrop"
                   : "Set as Featured Backdrop"}
             </button>
             <button
@@ -1117,18 +1123,6 @@ function MetadataPanel({
  * Supports metadata panel, navigation between images, and keyboard controls.
  * Closes on backdrop click, Escape key, or close button.
  */
-// Check if element is an input-like element (don't hijack typing)
-function isInputElement(element: EventTarget | null): boolean {
-  if (!element || !(element instanceof HTMLElement)) return false;
-  const tagName = element.tagName.toLowerCase();
-  return (
-    tagName === "input" ||
-    tagName === "textarea" ||
-    tagName === "select" ||
-    element.isContentEditable
-  );
-}
-
 type CropResizeHandle = "nw" | "ne" | "sw" | "se";
 
 export function ImageLightbox({
@@ -1157,6 +1151,8 @@ export function ImageLightbox({
   onToggleStar,
   onSetFeaturedPoster,
   onSetFeaturedBackdrop,
+  onClearFeaturedPoster,
+  onClearFeaturedBackdrop,
   isFeaturedPoster,
   isFeaturedBackdrop,
   onUpdateContentType,
@@ -1193,7 +1189,6 @@ export function ImageLightbox({
   const [showEditTools, setShowEditTools] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const previousTrigger = useRef<HTMLElement | null>(null);
   const overlayImageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1214,23 +1209,6 @@ export function ImageLightbox({
     setImageFailed(true);
   };
 
-  // Store trigger element when opening
-  useEffect(() => {
-    if (isOpen && triggerRef?.current) {
-      previousTrigger.current = triggerRef.current;
-    }
-  }, [isOpen, triggerRef]);
-
-  // Focus management - focus first element on open, restore on close
-  useEffect(() => {
-    if (isOpen) {
-      closeButtonRef.current?.focus();
-    } else if (previousTrigger.current) {
-      previousTrigger.current.focus();
-      previousTrigger.current = null;
-    }
-  }, [isOpen]);
-
   useEffect(() => {
     return () => {
       document.body.style.cursor = "";
@@ -1238,76 +1216,19 @@ export function ImageLightbox({
     };
   }, []);
 
-  // Focus trap - cycle Tab within modal
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleTabKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab" || !modalRef.current) return;
-
-      const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      );
-      const focusableArray = Array.from(focusableElements);
-      if (focusableArray.length === 0) return;
-
-      const firstElement = focusableArray[0];
-      const lastElement = focusableArray[focusableArray.length - 1];
-
-      if (e.shiftKey) {
-        // Shift+Tab: if on first, go to last
-        if (document.activeElement === firstElement) {
-          e.preventDefault();
-          lastElement.focus();
-        }
-      } else {
-        // Tab: if on last, go to first
-        if (document.activeElement === lastElement) {
-          e.preventDefault();
-          firstElement.focus();
-        }
-      }
-    };
-
-    document.addEventListener("keydown", handleTabKey);
-    return () => document.removeEventListener("keydown", handleTabKey);
-  }, [isOpen]);
-
-  // Keyboard shortcuts (guarded against input elements)
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't hijack typing in input elements
-      if (isInputElement(e.target)) return;
-
-      switch (e.key) {
-        case "Escape":
-          onClose();
-          break;
-        case "ArrowLeft":
-          if (hasPrevious && onPrevious) {
-            e.preventDefault();
-            onPrevious();
-          }
-          break;
-        case "ArrowRight":
-          if (hasNext && onNext) {
-            e.preventDefault();
-            onNext();
-          }
-          break;
-        case "i":
-          if (metadata) {
-            setShowMetadata((prev) => !prev);
-          }
-          break;
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, hasPrevious, hasNext, onPrevious, onNext, onClose, metadata]);
+  useLightboxKeyboardFocus({
+    isOpen,
+    modalRef,
+    closeButtonRef,
+    triggerRef,
+    hasPrevious,
+    hasNext,
+    onPrevious,
+    onNext,
+    onClose,
+    metadataEnabled: Boolean(metadata),
+    onToggleMetadata: metadata ? () => setShowMetadata((prev) => !prev) : undefined,
+  });
 
   // Body scroll lock (iOS-safe: also locks touch scrolling)
   useEffect(() => {
@@ -1791,6 +1712,8 @@ export function ImageLightbox({
                       onToggleStar,
                       onSetFeaturedPoster,
                       onSetFeaturedBackdrop,
+                      onClearFeaturedPoster,
+                      onClearFeaturedBackdrop,
                       isFeaturedPoster,
                       isFeaturedBackdrop,
                       onUpdateContentType,

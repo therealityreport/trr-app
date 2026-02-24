@@ -30,6 +30,7 @@ import SeasonVideosTab from "@/components/admin/season-tabs/SeasonVideosTab";
 import SeasonFandomTab from "@/components/admin/season-tabs/SeasonFandomTab";
 import SeasonCastTab from "@/components/admin/season-tabs/SeasonCastTab";
 import SeasonSocialTab from "@/components/admin/season-tabs/SeasonSocialTab";
+import { SeasonTabsNav } from "@/components/admin/season-tabs/SeasonTabsNav";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { resolveGalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import {
@@ -97,11 +98,13 @@ import {
 } from "@/lib/admin/cast-route-state";
 import {
   AdminRequestError,
+  adminStream,
   adminGetJson,
   adminMutation,
   fetchWithTimeout,
 } from "@/lib/admin/admin-fetch";
 import { fetchAllPaginatedGalleryRowsWithMeta } from "@/lib/admin/paginated-gallery-fetch";
+import { useSeasonCore } from "@/lib/admin/season-page/use-season-core";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 interface TrrShow {
@@ -217,6 +220,7 @@ type RefreshProgressState = {
   message?: string | null;
   current: number | null;
   total: number | null;
+  requestId?: string | null;
 };
 type SeasonRefreshLogLevel = "info" | "success" | "error";
 type SeasonRefreshLogScope = "assets" | "cast" | "cast_enrich" | "image";
@@ -226,6 +230,7 @@ type SeasonRefreshLogEntry = {
   scope: SeasonRefreshLogScope;
   stage: string;
   message: string;
+  requestId?: string | null;
   detail?: string | null;
   response?: string | null;
   level: SeasonRefreshLogLevel;
@@ -242,6 +247,17 @@ type EpisodeCoverageRow = {
   hasAirDate: boolean;
   hasRuntime: boolean;
 };
+
+const SEASON_PAGE_TABS: ReadonlyArray<{ id: TabId; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "episodes", label: "Seasons & Episodes" },
+  { id: "assets", label: "Assets" },
+  { id: "videos", label: "Videos" },
+  { id: "fandom", label: "Fandom" },
+  { id: "cast", label: "Cast" },
+  { id: "surveys", label: "Surveys" },
+  { id: "social", label: "Social Media" },
+];
 
 const SEASON_REFRESH_STAGE_LABELS: Record<string, string> = {
   starting: "Initializing",
@@ -760,7 +776,7 @@ function RefreshActivityLog({
                       {new Date(entry.ts).toLocaleTimeString()}
                     </span>
                   </div>
-                  <p>{entry.message}</p>
+                  <p>{entry.requestId ? `[req:${entry.requestId}] ${entry.message}` : entry.message}</p>
                   {typeof entry.current === "number" &&
                     typeof entry.total === "number" &&
                     Number.isFinite(entry.current) &&
@@ -806,22 +822,24 @@ export default function SeasonDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showRouteParam = params.showId as string;
-  const [resolvedShowId, setResolvedShowId] = useState<string | null>(
-    looksLikeUuid(showRouteParam) ? showRouteParam : null
-  );
-  const [slugResolutionLoading, setSlugResolutionLoading] = useState(!looksLikeUuid(showRouteParam));
-  const [slugResolutionError, setSlugResolutionError] = useState<string | null>(null);
-  const showId = resolvedShowId ?? "";
   const seasonNumberParam = params.seasonNumber as string;
   const seasonNumber = Number.parseInt(seasonNumberParam, 10);
+  const {
+    setResolvedShowId,
+    slugResolutionLoading,
+    setSlugResolutionLoading,
+    slugResolutionError,
+    setSlugResolutionError,
+    showId,
+    activeSeasonRequestKeyRef,
+    seasonLoadRequestIdRef,
+  } = useSeasonCore<TrrShow, TrrSeason, TrrEpisode>(showRouteParam, seasonNumberParam);
   const { user, checking, hasAccess } = useAdminGuard();
-  const activeSeasonRequestKeyRef = useRef(`${showId}:${seasonNumber}`);
-  const seasonLoadRequestIdRef = useRef(0);
   const isCurrentSeasonRequest = useCallback(
     (requestKey: string, requestId?: number) =>
       activeSeasonRequestKeyRef.current === requestKey &&
       (typeof requestId !== "number" || seasonLoadRequestIdRef.current === requestId),
-    []
+    [activeSeasonRequestKeyRef, seasonLoadRequestIdRef]
   );
 
   useEffect(() => {
@@ -830,7 +848,7 @@ export default function SeasonDetailPage() {
     bravoVideoSyncInFlightRef.current = null;
     setBravoVideoSyncWarning(null);
     setBravoVideoSyncing(false);
-  }, [seasonNumber, showId]);
+  }, [activeSeasonRequestKeyRef, seasonNumber, showId]);
 
   const [show, setShow] = useState<TrrShow | null>(null);
   const [season, setSeason] = useState<TrrSeason | null>(null);
@@ -906,6 +924,7 @@ export default function SeasonDetailPage() {
   const [castFailedMembersOpen, setCastFailedMembersOpen] = useState(false);
   const [refreshLogEntries, setRefreshLogEntries] = useState<SeasonRefreshLogEntry[]>([]);
   const refreshLogCounterRef = useRef(0);
+  const seasonRefreshRequestCounterRef = useRef(0);
   const [trrShowCast, setTrrShowCast] = useState<TrrShowCastMember[]>([]);
   const [trrShowCastLoading, setTrrShowCastLoading] = useState(false);
   const [trrShowCastError, setTrrShowCastError] = useState<string | null>(null);
@@ -973,6 +992,18 @@ export default function SeasonDetailPage() {
     },
     []
   );
+
+  const buildSeasonRefreshRequestId = useCallback(() => {
+    const counter = ++seasonRefreshRequestCounterRef.current;
+    const timestampToken = Date.now().toString(36);
+    const showToken = String(showId || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32);
+    const seasonToken = Number.isFinite(seasonNumber) ? String(seasonNumber) : "na";
+    return `season-refresh-${showToken}-s${seasonToken}-${timestampToken}-${counter}`;
+  }, [seasonNumber, showId]);
 
   useEffect(() => {
     castRoleMembersLoadedOnceRef.current = castRoleMembersLoadedOnce;
@@ -1264,7 +1295,16 @@ export default function SeasonDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [checking, getAuthHeaders, hasAccess, showRouteParam, user]);
+  }, [
+    checking,
+    getAuthHeaders,
+    hasAccess,
+    setResolvedShowId,
+    setSlugResolutionError,
+    setSlugResolutionLoading,
+    showRouteParam,
+    user,
+  ]);
 
   useEffect(() => {
     const canonicalSlug = show?.canonical_slug?.trim() || show?.slug?.trim();
@@ -1799,7 +1839,7 @@ export default function SeasonDetailPage() {
       if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setLoading(false);
     }
-  }, [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
+  }, [getAuthHeaders, isCurrentSeasonRequest, seasonLoadRequestIdRef, seasonNumber, showId]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -2061,7 +2101,8 @@ export default function SeasonDetailPage() {
 
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(
+      const completePayloadRef: { current: Record<string, unknown> | null } = { current: null };
+      await adminStream(
         `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets/batch-jobs/stream`,
         {
           method: "POST",
@@ -2074,82 +2115,49 @@ export default function SeasonDetailPage() {
             targets,
             force: true,
           }),
+          timeoutMs: SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS,
+          onEvent: async ({ event, payload }) => {
+            if (!payload || typeof payload !== "object") return;
+            if (event === "progress") {
+              const current = parseProgressNumber(payload.current);
+              const total = parseProgressNumber(payload.total);
+              const stage = typeof payload.stage === "string" ? payload.stage : "Batch Jobs";
+              const baseMessage =
+                typeof payload.message === "string" && payload.message.trim()
+                  ? payload.message
+                  : "Running batch jobs...";
+              setBatchJobsLiveCounts((prev) => {
+                const nextLiveCounts = resolveJobLiveCounts(prev, payload);
+                setBatchJobsProgress({
+                  stage,
+                  message: appendLiveCountsToMessage(baseMessage, nextLiveCounts),
+                  current,
+                  total,
+                });
+                return nextLiveCounts;
+              });
+              return;
+            }
+            if (event === "error") {
+              const errorText =
+                typeof payload.error === "string" ? payload.error : "Batch jobs failed.";
+              const detailText =
+                typeof payload.detail === "string" ? payload.detail : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            }
+            if (event === "complete") {
+              completePayloadRef.current = payload;
+            }
+          },
         }
       );
-      if (!response.ok || !response.body) {
-        throw new Error("Batch jobs stream unavailable.");
-      }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let completePayload: Record<string, unknown> | null = null;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        buffer = buffer.replace(/\r\n/g, "\n");
-
-        let boundaryIndex = buffer.indexOf("\n\n");
-        while (boundaryIndex !== -1) {
-          const rawEvent = buffer.slice(0, boundaryIndex);
-          buffer = buffer.slice(boundaryIndex + 2);
-
-          const lines = rawEvent.split("\n").filter(Boolean);
-          let eventType = "message";
-          const dataLines: string[] = [];
-          for (const line of lines) {
-            if (line.startsWith("event:")) {
-              eventType = line.slice(6).trim();
-            } else if (line.startsWith("data:")) {
-              dataLines.push(line.slice(5).trim());
-            }
-          }
-
-          const dataStr = dataLines.join("\n");
-          let payload: Record<string, unknown> | null = null;
-          try {
-            payload = JSON.parse(dataStr) as Record<string, unknown>;
-          } catch {
-            payload = null;
-          }
-
-          if (eventType === "progress" && payload) {
-            const current = parseProgressNumber(payload.current);
-            const total = parseProgressNumber(payload.total);
-            const stage = typeof payload.stage === "string" ? payload.stage : "Batch Jobs";
-            const baseMessage =
-              typeof payload.message === "string" && payload.message.trim()
-                ? payload.message
-                : "Running batch jobs...";
-            const nextLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, payload);
-            setBatchJobsLiveCounts(nextLiveCounts);
-            setBatchJobsProgress({
-              stage,
-              message: appendLiveCountsToMessage(baseMessage, nextLiveCounts),
-              current,
-              total,
-            });
-          } else if (eventType === "error") {
-            const errorText =
-              payload && typeof payload.error === "string" ? payload.error : "Batch jobs failed.";
-            const detailText =
-              payload && typeof payload.detail === "string" ? payload.detail : null;
-            throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
-          } else if (eventType === "complete" && payload) {
-            completePayload = payload;
-          }
-
-          boundaryIndex = buffer.indexOf("\n\n");
-        }
-      }
-
+      const completePayload = completePayloadRef.current;
       const attempted = parseProgressNumber(completePayload?.attempted ?? null) ?? 0;
       const succeeded = parseProgressNumber(completePayload?.succeeded ?? null) ?? 0;
       const failed = parseProgressNumber(completePayload?.failed ?? null) ?? 0;
       const skipped = parseProgressNumber(completePayload?.skipped ?? null) ?? 0;
-      const completeLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, completePayload);
+      const completeLiveCounts = resolveJobLiveCounts(batchJobsLiveCounts, completePayload ?? {});
       setBatchJobsLiveCounts(completeLiveCounts);
       const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
       setBatchJobsNotice(
@@ -2195,6 +2203,7 @@ export default function SeasonDetailPage() {
   const handleRefreshImages = useCallback(async () => {
     if (!showId) return;
     if (refreshingAssets) return;
+    const requestId = buildSeasonRefreshRequestId();
     setRefreshingAssets(true);
     setAssetsRefreshError(null);
     setAssetsRefreshNotice(null);
@@ -2205,11 +2214,13 @@ export default function SeasonDetailPage() {
       message: "Refreshing show/season/episode media...",
       current: 0,
       total: null,
+      requestId,
     });
     appendRefreshLog({
       scope: "assets",
       stage: "start",
       message: "Refresh Images started",
+      requestId,
       level: "info",
     });
     try {
@@ -2218,6 +2229,7 @@ export default function SeasonDetailPage() {
       let completionSummary: string | null = null;
       let completionLiveCounts: JobLiveCounts | null = null;
       let lastProgressLogSignature: string | null = null;
+      let lastSeenRequestId: string = requestId;
 
       try {
         const streamController = new AbortController();
@@ -2243,7 +2255,11 @@ export default function SeasonDetailPage() {
         try {
           const streamResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh-photos/stream`, {
             method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+              "x-trr-request-id": requestId,
+            },
             body: JSON.stringify({ skip_mirror: false, season_number: seasonNumber }),
             signal: streamController.signal,
           });
@@ -2310,6 +2326,10 @@ export default function SeasonDetailPage() {
                 const source = typeof (payload as { source?: unknown }).source === "string"
                   ? (payload as { source: string }).source
                   : null;
+                const payloadRequestId = typeof (payload as { request_id?: unknown }).request_id === "string"
+                  ? (payload as { request_id: string }).request_id
+                  : requestId;
+                lastSeenRequestId = payloadRequestId;
                 const sourceTotal = parseProgressNumber((payload as { source_total?: unknown }).source_total);
                 const mirroredCount = parseProgressNumber((payload as { mirrored_count?: unknown }).mirrored_count);
                 const resolvedCurrent = stageCurrent ?? current;
@@ -2341,12 +2361,14 @@ export default function SeasonDetailPage() {
                   message: enrichedProgressMessage,
                   current: resolvedCurrent,
                   total: resolvedTotal,
+                  requestId: payloadRequestId,
                 });
                 const signature = [
                   stageLabel ?? "",
                   enrichedProgressMessage ?? "",
                   resolvedCurrent ?? "",
                   resolvedTotal ?? "",
+                  payloadRequestId,
                 ].join("|");
                 if (signature !== lastProgressLogSignature) {
                   appendRefreshLog({
@@ -2356,6 +2378,7 @@ export default function SeasonDetailPage() {
                       ? `${source.toUpperCase()}: ${enrichedProgressMessage}`
                       : enrichedProgressMessage ?? "Refresh progress update",
                     level: "info",
+                    requestId: payloadRequestId,
                     current: resolvedCurrent,
                     total: resolvedTotal,
                   });
@@ -2363,6 +2386,10 @@ export default function SeasonDetailPage() {
                 }
               } else if (eventType === "complete") {
                 sawComplete = true;
+                const completeRequestId = typeof (payload as { request_id?: unknown }).request_id === "string"
+                  ? (payload as { request_id: string }).request_id
+                  : requestId;
+                lastSeenRequestId = completeRequestId;
                 const completeLiveCounts = resolveJobLiveCounts(assetsRefreshLiveCounts, payload);
                 setAssetsRefreshLiveCounts(completeLiveCounts);
                 completionLiveCounts = completeLiveCounts;
@@ -2374,6 +2401,7 @@ export default function SeasonDetailPage() {
                   scope: "assets",
                   stage: "complete",
                   message: "Media refresh stream complete.",
+                  requestId: completeRequestId,
                   response: [completionSummary, liveCountSuffix].filter(Boolean).join(" | "),
                   level: "success",
                 });
@@ -2381,8 +2409,11 @@ export default function SeasonDetailPage() {
               } else if (eventType === "error") {
                 const errorPayload =
                   payload && typeof payload === "object"
-                    ? (payload as { error?: unknown; detail?: unknown })
+                    ? (payload as { error?: unknown; detail?: unknown; request_id?: unknown })
                     : null;
+                const payloadRequestId =
+                  typeof errorPayload?.request_id === "string" ? errorPayload.request_id : requestId;
+                lastSeenRequestId = payloadRequestId;
                 const errorText =
                   typeof errorPayload?.error === "string" && errorPayload.error
                     ? errorPayload.error
@@ -2395,6 +2426,7 @@ export default function SeasonDetailPage() {
                   scope: "assets",
                   stage: "error",
                   message: errorText,
+                  requestId: payloadRequestId,
                   detail: detailText,
                   level: "error",
                 });
@@ -2427,6 +2459,7 @@ export default function SeasonDetailPage() {
             scope: "assets",
             stage: "stream_incomplete",
             message: "Refresh stream ended before completion.",
+            requestId: lastSeenRequestId,
             level: "error",
           });
           throw new Error("Refresh stream ended before completion.");
@@ -2437,6 +2470,7 @@ export default function SeasonDetailPage() {
           scope: "assets",
           stage: "stream_failed",
           message: "Live stream unavailable.",
+          requestId: lastSeenRequestId,
           detail: streamErr instanceof Error ? streamErr.message : String(streamErr),
           level: "error",
         });
@@ -2458,6 +2492,7 @@ export default function SeasonDetailPage() {
         scope: "assets",
         stage: "done",
         message: "Refresh Images completed.",
+        requestId: lastSeenRequestId,
         response: completionSummary,
         level: "success",
       });
@@ -2469,6 +2504,7 @@ export default function SeasonDetailPage() {
         scope: "assets",
         stage: "error",
         message: "Refresh Images failed.",
+        requestId,
         detail: errorMessage,
         level: "error",
       });
@@ -2483,6 +2519,7 @@ export default function SeasonDetailPage() {
     refreshingAssets,
     fetchAssets,
     getAuthHeaders,
+    buildSeasonRefreshRequestId,
     seasonNumber,
     showId,
   ]);
@@ -4608,32 +4645,7 @@ export default function SeasonDetailPage() {
 
         <div className="border-b border-zinc-200 bg-white">
           <div className="mx-auto max-w-6xl px-6">
-            <nav className="flex flex-wrap gap-2 py-4">
-              {(
-                [
-                  { id: "overview", label: "Overview" },
-                  { id: "episodes", label: "Seasons & Episodes" },
-                  { id: "assets", label: "Assets" },
-                  { id: "videos", label: "Videos" },
-                  { id: "fandom", label: "Fandom" },
-                  { id: "cast", label: "Cast" },
-                  { id: "surveys", label: "Surveys" },
-                  { id: "social", label: "Social Media" },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setTab(tab.id)}
-                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                    activeTab === tab.id
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </nav>
+            <SeasonTabsNav tabs={SEASON_PAGE_TABS} activeTab={activeTab} onSelect={setTab} />
             {activeTab === "social" && (
               <nav className="pb-4 flex flex-wrap gap-2">
                 {SEASON_SOCIAL_ANALYTICS_VIEWS.map((view) => (
@@ -6161,12 +6173,18 @@ export default function SeasonDetailPage() {
           )}
 
           {activeTab === "surveys" && (
-            <SeasonSurveysTab
-              showId={showId}
-              showName={show.name}
-              totalSeasons={showSeasons.length > 0 ? showSeasons.length : null}
-              seasonNumber={Number.isFinite(seasonNumber) ? seasonNumber : null}
-            />
+            <section
+              id="season-tabpanel-surveys"
+              role="tabpanel"
+              aria-labelledby="season-tab-surveys"
+            >
+              <SeasonSurveysTab
+                showId={showId}
+                showName={show.name}
+                totalSeasons={showSeasons.length > 0 ? showSeasons.length : null}
+                seasonNumber={Number.isFinite(seasonNumber) ? seasonNumber : null}
+              />
+            </section>
           )}
 
           {activeTab === "social" && (

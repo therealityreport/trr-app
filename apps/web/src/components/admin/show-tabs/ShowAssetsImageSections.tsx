@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 type GalleryRenderArgs = {
@@ -17,6 +17,7 @@ interface ShowAssetsImageSectionsProps {
   featuredPosterImageId?: string | null;
   hasMoreBackdrops?: boolean;
   hasMorePosters?: boolean;
+  autoAdvanceMode?: "manual" | "auto";
   onLoadMoreBackdrops?: () => void;
   onLoadMorePosters?: () => void;
   onOpenAssetLightbox: (
@@ -35,11 +36,57 @@ export function ShowAssetsImageSections({
   featuredPosterImageId,
   hasMoreBackdrops = false,
   hasMorePosters = false,
+  autoAdvanceMode = "manual",
   onLoadMoreBackdrops,
   onLoadMorePosters,
   onOpenAssetLightbox,
   renderGalleryImage,
 }: ShowAssetsImageSectionsProps) {
+  const backdropSentinelRef = useRef<HTMLDivElement | null>(null);
+  const posterSentinelRef = useRef<HTMLDivElement | null>(null);
+  const backdropAutoAdvanceLockRef = useRef(false);
+  const posterAutoAdvanceLockRef = useRef(false);
+
+  useEffect(() => {
+    if (autoAdvanceMode !== "auto" || !hasMoreBackdrops || !onLoadMoreBackdrops) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    if (!backdropSentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting || backdropAutoAdvanceLockRef.current) return;
+        backdropAutoAdvanceLockRef.current = true;
+        onLoadMoreBackdrops();
+        window.setTimeout(() => {
+          backdropAutoAdvanceLockRef.current = false;
+        }, 300);
+      },
+      { rootMargin: "250px 0px 250px 0px", threshold: 0.01 }
+    );
+    observer.observe(backdropSentinelRef.current);
+    return () => observer.disconnect();
+  }, [autoAdvanceMode, hasMoreBackdrops, onLoadMoreBackdrops]);
+
+  useEffect(() => {
+    if (autoAdvanceMode !== "auto" || !hasMorePosters || !onLoadMorePosters) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    if (!posterSentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting || posterAutoAdvanceLockRef.current) return;
+        posterAutoAdvanceLockRef.current = true;
+        onLoadMorePosters();
+        window.setTimeout(() => {
+          posterAutoAdvanceLockRef.current = false;
+        }, 300);
+      },
+      { rootMargin: "250px 0px 250px 0px", threshold: 0.01 }
+    );
+    observer.observe(posterSentinelRef.current);
+    return () => observer.disconnect();
+  }, [autoAdvanceMode, hasMorePosters, onLoadMorePosters]);
+
   return (
     <>
       {backdrops.length > 0 && (
@@ -78,6 +125,9 @@ export function ShowAssetsImageSections({
               </button>
             </div>
           )}
+          {hasMoreBackdrops && autoAdvanceMode === "auto" && (
+            <div ref={backdropSentinelRef} className="h-1 w-full" aria-hidden="true" />
+          )}
         </section>
       )}
 
@@ -115,6 +165,9 @@ export function ShowAssetsImageSections({
                 Load More Posters
               </button>
             </div>
+          )}
+          {hasMorePosters && autoAdvanceMode === "auto" && (
+            <div ref={posterSentinelRef} className="h-1 w-full" aria-hidden="true" />
           )}
         </section>
       )}

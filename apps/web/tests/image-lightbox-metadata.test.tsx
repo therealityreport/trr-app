@@ -256,7 +256,7 @@ describe("ImageLightbox metadata panel", () => {
 
     openMetadataPanel();
 
-    const featuredPosterButtons = screen.getAllByRole("button", { name: "Featured Poster" });
+    const featuredPosterButtons = screen.getAllByRole("button", { name: "Clear Featured Poster" });
     expect(featuredPosterButtons.length).toBeGreaterThan(0);
 
     const featuredBackdropButtons = screen.getAllByRole("button", {
@@ -268,5 +268,35 @@ describe("ImageLightbox metadata panel", () => {
       "title",
       "Featured backdrop selection is unavailable for this image."
     );
+  });
+
+  it("supports clearing featured poster and backdrop", async () => {
+    const onClearFeaturedPoster = vi.fn(async () => {});
+    const onClearFeaturedBackdrop = vi.fn(async () => {});
+
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        canManage
+        isFeaturedPoster
+        isFeaturedBackdrop
+        onSetFeaturedPoster={vi.fn(async () => {})}
+        onSetFeaturedBackdrop={vi.fn(async () => {})}
+        onClearFeaturedPoster={onClearFeaturedPoster}
+        onClearFeaturedBackdrop={onClearFeaturedBackdrop}
+      />
+    );
+
+    openMetadataPanel();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear Featured Poster" })[0]);
+    await waitFor(() => expect(onClearFeaturedPoster).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear Featured Backdrop" })[0]);
+    await waitFor(() => expect(onClearFeaturedBackdrop).toHaveBeenCalledTimes(1));
   });
 });

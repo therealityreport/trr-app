@@ -15,6 +15,8 @@ interface SyncRequestBody {
   batch_size?: number;
   max_runtime_sec?: number;
   resume_run_id?: string;
+  entity_type?: "network" | "streaming" | "production";
+  entity_keys?: string[];
   limit?: number;
 }
 
@@ -57,6 +59,17 @@ const sanitizeBody = (body: unknown): SyncRequestBody => {
     typeof source.resume_run_id === "string" && source.resume_run_id.trim().length > 0
       ? source.resume_run_id.trim()
       : undefined;
+  const entityType =
+    source.entity_type === "network" || source.entity_type === "streaming" || source.entity_type === "production"
+      ? source.entity_type
+      : undefined;
+  const entityKeys = Array.isArray(source.entity_keys)
+    ? source.entity_keys
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length > 0)
+        .slice(0, 200)
+    : undefined;
 
   return {
     ...(typeof source.force === "boolean" ? { force: source.force } : {}),
@@ -69,6 +82,8 @@ const sanitizeBody = (body: unknown): SyncRequestBody => {
     ...(batchSize !== undefined ? { batch_size: batchSize } : {}),
     ...(maxRuntimeSec !== undefined ? { max_runtime_sec: maxRuntimeSec } : {}),
     ...(resumeRunId !== undefined ? { resume_run_id: resumeRunId } : {}),
+    ...(entityType !== undefined ? { entity_type: entityType } : {}),
+    ...(entityKeys && entityKeys.length > 0 ? { entity_keys: entityKeys } : {}),
     ...(limit !== undefined ? { limit } : {}),
   };
 };

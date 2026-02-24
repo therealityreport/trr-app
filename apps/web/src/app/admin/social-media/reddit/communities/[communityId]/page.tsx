@@ -1,10 +1,10 @@
 "use client";
 
 import { useParams, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
-import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
-import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import RedditSourcesManager, { type RedditCommunityContext } from "@/components/admin/reddit-sources-manager";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const DEFAULT_BACK_HREF = "/admin/social-media";
@@ -22,6 +22,37 @@ export default function RedditCommunityViewPage() {
 
   const communityId = typeof params.communityId === "string" ? params.communityId : "";
   const backHref = resolveBackHref(searchParams.get("return_to"));
+  const [communityContext, setCommunityContext] = useState<RedditCommunityContext | null>(null);
+  const breadcrumbItems = useMemo(() => {
+    const communityLabel = communityContext?.communityLabel ?? "Community";
+    const items: Array<{ label: string; href?: string }> = [{ label: "Admin", href: "/admin" }];
+    const showLabel = communityContext?.showLabel;
+    if (showLabel) {
+      if (communityContext?.showSlug) {
+        items.push({
+          label: showLabel,
+          href: `/admin/trr-shows/${communityContext.showSlug}`,
+        });
+      } else {
+        items.push({ label: showLabel });
+      }
+    }
+    if (communityContext?.seasonLabel) {
+      if (communityContext.showSlug && communityContext.seasonNumber) {
+        items.push({
+          label: communityContext.seasonLabel,
+          href: `/admin/trr-shows/${communityContext.showSlug}/seasons/${communityContext.seasonNumber}?tab=social`,
+        });
+      } else {
+        items.push({ label: communityContext.seasonLabel });
+      }
+    }
+    items.push({ label: "Social Analytics", href: backHref });
+    items.push({ label: "Reddit" });
+    items.push({ label: communityLabel });
+    return items;
+  }, [backHref, communityContext]);
+  const pageTitle = communityContext?.communityLabel ?? "Reddit Community View";
 
   if (checking) {
     return (
@@ -63,10 +94,10 @@ export default function RedditCommunityViewPage() {
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
             <div>
               <AdminBreadcrumbs
-                items={[...buildAdminSectionBreadcrumb("Social Analytics", "/admin/social-media"), { label: "Reddit Community View" }]}
+                items={breadcrumbItems}
                 className="mb-1"
               />
-              <h1 className="text-2xl font-bold text-zinc-900">Reddit Community View</h1>
+              <h1 className="text-2xl font-bold text-zinc-900">{pageTitle}</h1>
             </div>
             <a
               href={backHref}
@@ -84,6 +115,7 @@ export default function RedditCommunityViewPage() {
               initialCommunityId={communityId}
               hideCommunityList
               backHref={backHref}
+              onCommunityContextChange={setCommunityContext}
             />
           </section>
         </main>
