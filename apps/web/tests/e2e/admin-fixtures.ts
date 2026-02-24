@@ -1,6 +1,6 @@
 import { expect, type Page, type Route } from "@playwright/test";
 
-export const SHOW_ID = "11111111-1111-1111-1111-111111111111";
+export const SHOW_ID = "11111111-1111-4111-8111-111111111111";
 export const SHOW_SLUG = "the-real-housewives-of-salt-lake-city";
 export const SHOW_NAME = "The Real Housewives of Salt Lake City";
 export const SEASON_ID = "season-6-id";
@@ -44,6 +44,15 @@ export async function mockAdminApi(page: Page) {
           logo_url: null,
           streaming_providers: [],
           watch_providers: [],
+        },
+      });
+    }
+
+    if (path === "/api/admin/trr-api/shows/resolve-slug") {
+      return json(route, {
+        resolved: {
+          show_id: SHOW_ID,
+          slug: SHOW_SLUG,
         },
       });
     }
