@@ -14,7 +14,10 @@ describe("season cast tab quality wiring", () => {
   it("hardens cast-role-members loading with timeout, retry, and stale snapshot warning", () => {
     expect(contents).toMatch(/SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 120_000/);
     expect(contents).toMatch(/SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS = 2/);
-    expect(contents).toMatch(/fetchWithTimeout\(\s*`\/api\/admin\/trr-api\/shows\/\$\{showId\}\/cast-role-members/);
+    expect(contents).toMatch(
+      /adminGetJson<unknown\[]>\(\s*`\/api\/admin\/trr-api\/shows\/\$\{showId\}\/cast-role-members\?\$\{params\.toString\(\)\}`/
+    );
+    expect(contents).toMatch(/timeoutMs:\s*SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS/);
     expect(contents).toMatch(/Showing last successful cast intelligence snapshot\./);
     expect(contents).toMatch(/setCastRoleMembersWarning/);
   });
@@ -50,14 +53,14 @@ describe("season cast tab quality wiring", () => {
     expect(contents).toMatch(/showCastFetchAttemptedRef\.current = false;/);
     expect(contents).toMatch(/void fetchShowCastForBrand\(\);/);
     expect(contents).toMatch(/const castDisplayTotals = useMemo/);
-    expect(contents).toMatch(/castSeasonMembers\.length}\/\{castDisplayTotals\.cast} cast/);
-    expect(contents).toMatch(/crewSeasonMembers\.length}\/\{castDisplayTotals\.crew} crew/);
-    expect(contents).toMatch(/castDisplayMembers\.length}\/\{castDisplayTotals\.total} visible/);
+    expect(contents).toMatch(/renderedCastCount}\/\{matchedCastCount}\/\{totalCastCount} cast/);
+    expect(contents).toMatch(/renderedCrewCount}\/\{matchedCrewCount}\/\{totalCrewCount} crew/);
+    expect(contents).toMatch(/renderedVisibleCount}\/\{matchedVisibleCount}\/\{totalVisibleCount} visible/);
   });
 
   it("splits season cast actions into sync and enrich, with per-card actions", () => {
     expect(contents).toMatch(/Sync Cast/);
-    expect(contents).toMatch(/Enrich Media/);
+    expect(contents).toMatch(/Enrich Cast & Crew Media/);
     expect(contents).toMatch(/handleRefreshSeasonCastMember/);
     expect(contents).toMatch(/Edit Roles/);
     expect(contents).toMatch(/cast_open_role_editor/);
@@ -66,8 +69,11 @@ describe("season cast tab quality wiring", () => {
   it("adds cast search and URL-persisted cast filters", () => {
     expect(contents).toMatch(/parseSeasonCastRouteState/);
     expect(contents).toMatch(/writeSeasonCastRouteState/);
+    expect(contents).toMatch(/writeShowCastRouteState/);
     expect(contents).toMatch(/castSearchQuery/);
     expect(castRouteStateContents).toMatch(/cast_q/);
+    expect(castRouteStateContents).toMatch(/cast_role_filters/);
+    expect(castRouteStateContents).toMatch(/cast_credit_filters/);
     expect(contents).toMatch(/Search Name/);
   });
 
@@ -75,5 +81,23 @@ describe("season cast tab quality wiring", () => {
     expect(contents).toMatch(/castRoleMembersLoadedOnce/);
     expect(contents).toMatch(/Loading cast intelligence\.\.\./);
     expect(contents).toMatch(/Loading supplemental show cast data\.\.\./);
+  });
+
+  it("refreshes supporting cast intelligence after person refresh and retry-failed enrich", () => {
+    expect(contents).toMatch(/await Promise\.all\(\[fetchCastRoleMembers\(\{ force: true \}\), fetchShowCastForBrand\(\)\]\);/);
+    expect(contents).toMatch(/const summary = await runSeasonCastMediaEnrich\(retryMembers, \{ signal: runController\.signal \}\);/);
+  });
+
+  it("dedupes season cast members and blocks top-level actions when person refresh is in flight", () => {
+    expect(contents).toMatch(/const castUniqueMembers = useMemo/);
+    expect(contents).toMatch(/const seasonHasPersonRefreshInFlight = Object\.keys\(refreshingPersonIds\)\.length > 0;/);
+    expect(contents).toMatch(/const seasonCastAnyJobRunning = refreshingCast \|\| enrichingCast \|\| seasonHasPersonRefreshInFlight;/);
+    expect(contents).toMatch(/disabled=\{seasonCastAnyJobRunning\}/);
+  });
+
+  it("builds show role-editor deep links from whitelisted cast query state", () => {
+    expect(contents).toMatch(/const buildShowCastRoleEditorQuery = useCallback/);
+    expect(contents).toMatch(/writeShowCastRouteState\(new URLSearchParams\(\), \{/);
+    expect(contents).toMatch(/query: buildShowCastRoleEditorQuery\(member\.person_id\)/);
   });
 });

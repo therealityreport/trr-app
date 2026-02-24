@@ -8,7 +8,7 @@ export interface ShowCastRouteState {
   sortOrder: CastSortOrder;
   hasImageFilter: CastHasImageFilter;
   seasonFilters: number[];
-  roleAndCreditFilters: string[];
+  filters: string[];
 }
 
 export interface SeasonCastRouteState {
@@ -26,7 +26,7 @@ const SHOW_CAST_DEFAULTS: ShowCastRouteState = {
   sortOrder: "desc",
   hasImageFilter: "all",
   seasonFilters: [],
-  roleAndCreditFilters: [],
+  filters: [],
 };
 
 const SEASON_CAST_DEFAULTS: SeasonCastRouteState = {
@@ -77,29 +77,40 @@ const setOrDelete = (searchParams: URLSearchParams, key: string, value: string |
   searchParams.set(key, value);
 };
 
-export const parseShowCastRouteState = (searchParams: URLSearchParams): ShowCastRouteState => ({
-  searchQuery: searchParams.get("cast_q")?.trim() ?? SHOW_CAST_DEFAULTS.searchQuery,
-  sortBy: parseSortBy(searchParams.get("cast_sort")),
-  sortOrder: parseSortOrder(searchParams.get("cast_order")),
-  hasImageFilter: parseHasImageFilter(searchParams.get("cast_img")),
-  seasonFilters: parseNumberCsv(searchParams.get("cast_seasons")),
-  roleAndCreditFilters: parseCsv(searchParams.get("cast_roles")),
-});
+export const parseShowCastRouteState = (searchParams: URLSearchParams): ShowCastRouteState => {
+  const canonicalFilters = parseCsv(searchParams.get("cast_filters"));
+  const legacyFilters = parseCsv(searchParams.get("cast_roles"));
+  return {
+    searchQuery: searchParams.get("cast_q")?.trim() ?? SHOW_CAST_DEFAULTS.searchQuery,
+    sortBy: parseSortBy(searchParams.get("cast_sort")),
+    sortOrder: parseSortOrder(searchParams.get("cast_order")),
+    hasImageFilter: parseHasImageFilter(searchParams.get("cast_img")),
+    seasonFilters: parseNumberCsv(searchParams.get("cast_seasons")),
+    filters: canonicalFilters.length > 0 ? canonicalFilters : legacyFilters,
+  };
+};
 
-export const parseSeasonCastRouteState = (searchParams: URLSearchParams): SeasonCastRouteState => ({
-  searchQuery: searchParams.get("cast_q")?.trim() ?? SEASON_CAST_DEFAULTS.searchQuery,
-  sortBy: parseSortBy(searchParams.get("cast_sort")),
-  sortOrder: parseSortOrder(searchParams.get("cast_order")),
-  hasImageFilter: parseHasImageFilter(searchParams.get("cast_img")),
-  roleFilters: parseCsv(searchParams.get("cast_roles")),
-  creditFilters: parseCsv(searchParams.get("cast_credits")),
-});
+export const parseSeasonCastRouteState = (searchParams: URLSearchParams): SeasonCastRouteState => {
+  const canonicalRoleFilters = parseCsv(searchParams.get("cast_role_filters"));
+  const canonicalCreditFilters = parseCsv(searchParams.get("cast_credit_filters"));
+  const legacyRoleFilters = parseCsv(searchParams.get("cast_roles"));
+  const legacyCreditFilters = parseCsv(searchParams.get("cast_credits"));
+  return {
+    searchQuery: searchParams.get("cast_q")?.trim() ?? SEASON_CAST_DEFAULTS.searchQuery,
+    sortBy: parseSortBy(searchParams.get("cast_sort")),
+    sortOrder: parseSortOrder(searchParams.get("cast_order")),
+    hasImageFilter: parseHasImageFilter(searchParams.get("cast_img")),
+    roleFilters: canonicalRoleFilters.length > 0 ? canonicalRoleFilters : legacyRoleFilters,
+    creditFilters: canonicalCreditFilters.length > 0 ? canonicalCreditFilters : legacyCreditFilters,
+  };
+};
 
 export const writeShowCastRouteState = (
   searchParams: URLSearchParams,
   state: ShowCastRouteState
 ): URLSearchParams => {
   const next = new URLSearchParams(searchParams.toString());
+  next.delete("cast_roles");
   setOrDelete(next, "cast_q", state.searchQuery.trim() || null);
   setOrDelete(next, "cast_sort", state.sortBy !== SHOW_CAST_DEFAULTS.sortBy ? state.sortBy : null);
   setOrDelete(next, "cast_order", state.sortOrder !== SHOW_CAST_DEFAULTS.sortOrder ? state.sortOrder : null);
@@ -113,11 +124,7 @@ export const writeShowCastRouteState = (
     "cast_seasons",
     state.seasonFilters.length > 0 ? writeCsv([...state.seasonFilters].sort((a, b) => a - b).map(String)) : null
   );
-  setOrDelete(
-    next,
-    "cast_roles",
-    state.roleAndCreditFilters.length > 0 ? writeCsv(state.roleAndCreditFilters) : null
-  );
+  setOrDelete(next, "cast_filters", state.filters.length > 0 ? writeCsv(state.filters) : null);
   return next;
 };
 
@@ -126,6 +133,8 @@ export const writeSeasonCastRouteState = (
   state: SeasonCastRouteState
 ): URLSearchParams => {
   const next = new URLSearchParams(searchParams.toString());
+  next.delete("cast_roles");
+  next.delete("cast_credits");
   setOrDelete(next, "cast_q", state.searchQuery.trim() || null);
   setOrDelete(next, "cast_sort", state.sortBy !== SEASON_CAST_DEFAULTS.sortBy ? state.sortBy : null);
   setOrDelete(next, "cast_order", state.sortOrder !== SEASON_CAST_DEFAULTS.sortOrder ? state.sortOrder : null);
@@ -134,7 +143,15 @@ export const writeSeasonCastRouteState = (
     "cast_img",
     state.hasImageFilter !== SEASON_CAST_DEFAULTS.hasImageFilter ? state.hasImageFilter : null
   );
-  setOrDelete(next, "cast_roles", state.roleFilters.length > 0 ? writeCsv(state.roleFilters) : null);
-  setOrDelete(next, "cast_credits", state.creditFilters.length > 0 ? writeCsv(state.creditFilters) : null);
+  setOrDelete(
+    next,
+    "cast_role_filters",
+    state.roleFilters.length > 0 ? writeCsv(state.roleFilters) : null
+  );
+  setOrDelete(
+    next,
+    "cast_credit_filters",
+    state.creditFilters.length > 0 ? writeCsv(state.creditFilters) : null
+  );
   return next;
 };

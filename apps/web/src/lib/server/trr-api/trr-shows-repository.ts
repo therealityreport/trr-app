@@ -245,41 +245,6 @@ function normalizePagination(options?: PaginationOptions): {
   return { limit, offset };
 }
 
-/**
- * Helper: Fetch image URLs for shows from show_images table.
- * Mutates the shows array in place to add poster_url, backdrop_url, logo_url.
- */
-async function enrichShowsWithImageUrls(shows: TrrShow[]): Promise<void> {
-  if (shows.length === 0) return;
-
-  // Collect all image IDs
-  const imageIds = shows.flatMap((show) =>
-    [show.primary_poster_image_id, show.primary_backdrop_image_id, show.primary_logo_image_id]
-      .filter((id): id is string => id !== null)
-  );
-
-  if (imageIds.length === 0) return;
-
-  try {
-    const result = await pgQuery<{ id: string; hosted_url: string | null }>(
-      `SELECT id, hosted_url
-       FROM core.show_images
-       WHERE id = ANY($1::uuid[])`,
-      [imageIds]
-    );
-    const imageMap = new Map(result.rows.map((img) => [img.id, img.hosted_url]));
-
-    // Enrich each show
-    for (const show of shows) {
-      show.poster_url = show.primary_poster_image_id ? imageMap.get(show.primary_poster_image_id) ?? null : null;
-      show.backdrop_url = show.primary_backdrop_image_id ? imageMap.get(show.primary_backdrop_image_id) ?? null : null;
-      show.logo_url = show.primary_logo_image_id ? imageMap.get(show.primary_logo_image_id) ?? null : null;
-    }
-  } catch (error) {
-    console.warn("[trr-shows-repository] Failed to enrich shows with image URLs", error);
-  }
-}
-
 // ============================================================================
 // Show Functions
 // ============================================================================
@@ -2928,6 +2893,46 @@ export async function getCreditsByPersonId(
   imdbOnlyCredits.sort((a, b) => (a.show_name ?? "").localeCompare(b.show_name ?? ""));
   const combined = [...localCredits, ...imdbOnlyCredits];
   return combined.slice(offset, offset + limit);
+}
+
+/**
+ * Get the full credits dataset used for show-scoped person credit assembly.
+ * Fetches all paginated credits in bounded pages and deduplicates by credit id.
+ */
+export async function getCreditsForPersonShowScope(
+  personId: string,
+  showId: string,
+  options?: { pageSize?: number; maxPages?: number }
+): Promise<TrrPersonCredit[]> {
+  const pageSize = Math.min(Math.max(options?.pageSize ?? MAX_LIMIT, 1), MAX_LIMIT);
+  const maxPages = Math.max(options?.maxPages ?? 40, 1);
+
+  const allCredits: TrrPersonCredit[] = [];
+  let offset = 0;
+  for (let page = 0; page < maxPages; page += 1) {
+    const pageCredits = await getCreditsByPersonId(personId, {
+      limit: pageSize,
+      offset,
+    });
+    if (pageCredits.length === 0) break;
+    allCredits.push(...pageCredits);
+    if (pageCredits.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  const deduped: TrrPersonCredit[] = [];
+  const seen = new Set<string>();
+  for (const credit of allCredits) {
+    if (seen.has(credit.id)) continue;
+    seen.add(credit.id);
+    deduped.push(credit);
+  }
+
+  // Keep parameter meaningful for this scope helper and aid diagnostics.
+  if (!deduped.some((credit) => credit.show_id === showId)) {
+    return deduped;
+  }
+  return deduped;
 }
 
 /**

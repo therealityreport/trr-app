@@ -5,8 +5,19 @@ import {
   getCoveredShows,
   addCoveredShow,
 } from "@/lib/server/admin/covered-shows-repository";
+import {
+  buildUserScopedRouteCacheKey,
+  getRouteResponseCache,
+  invalidateRouteResponseCache,
+  parseCacheTtlMs,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
+const COVERED_SHOWS_CACHE_NAMESPACE = "admin-covered-shows";
+const COVERED_SHOWS_CACHE_TTL_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_COVERED_SHOWS_CACHE_TTL_MS,
+);
 
 /**
  * GET /api/admin/covered-shows
@@ -15,9 +26,22 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
+    const cacheKey = buildUserScopedRouteCacheKey(
+      user.uid,
+      "list",
+      request.nextUrl.searchParams,
+    );
+    const cachedShows = getRouteResponseCache<Awaited<ReturnType<typeof getCoveredShows>>>(
+      COVERED_SHOWS_CACHE_NAMESPACE,
+      cacheKey,
+    );
+    if (cachedShows) {
+      return NextResponse.json({ shows: cachedShows }, { headers: { "x-trr-cache": "hit" } });
+    }
 
     const shows = await getCoveredShows();
+    setRouteResponseCache(COVERED_SHOWS_CACHE_NAMESPACE, cacheKey, shows, COVERED_SHOWS_CACHE_TTL_MS);
 
     return NextResponse.json({ shows });
   } catch (error) {
@@ -64,6 +88,7 @@ export async function POST(request: NextRequest) {
       trr_show_id,
       show_name,
     });
+    invalidateRouteResponseCache(COVERED_SHOWS_CACHE_NAMESPACE, `${user.uid}:`);
 
     return NextResponse.json({ show }, { status: 201 });
   } catch (error) {

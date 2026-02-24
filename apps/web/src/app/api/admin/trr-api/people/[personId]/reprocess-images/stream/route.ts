@@ -21,14 +21,11 @@ interface RouteParams {
   params: Promise<{ personId: string }>;
 }
 
-const buildSseErrorResponse = (payload: Record<string, unknown>): Response => {
-  return new Response(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, {
-    status: 200,
+const buildErrorResponse = (payload: Record<string, unknown>, status: number): Response => {
+  return Response.json(payload, {
+    status,
     headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
+      "Cache-Control": "no-store, max-age=0",
     },
   });
 };
@@ -72,34 +69,34 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { personId } = await params;
     if (!personId) {
-      return buildSseErrorResponse(
+      return buildErrorResponse(
         {
           stage: "proxy",
           error: "personId is required",
-          status: 400,
         },
+        400
       );
     }
 
     const backendUrl = getBackendApiUrl(`/admin/person/${personId}/reprocess-images/stream`);
     if (!backendUrl) {
-      return buildSseErrorResponse(
+      return buildErrorResponse(
         {
           stage: "proxy",
           error: "Backend API not configured",
-          status: 500,
         },
+        500
       );
     }
 
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      return buildSseErrorResponse(
+      return buildErrorResponse(
         {
           stage: "proxy",
           error: "Backend auth not configured",
-          status: 500,
         },
+        500
       );
     }
 
@@ -143,49 +140,48 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     if (!backendResponse) {
-      const rawBackendUrl = process.env.TRR_API_URL ?? "unset";
       const detail =
         lastError instanceof Error && lastError.name === "AbortError"
           ? "Timed out waiting for backend reprocess stream response (10m)."
           : isRetryableNetworkError(lastError)
-            ? `Could not reach TRR-Backend. Confirm backend is running and TRR_API_URL is correct (TRR_API_URL=${rawBackendUrl}).`
-            : `${getErrorDetail(lastError)} (TRR_API_URL=${rawBackendUrl})`;
-      return buildSseErrorResponse(
+            ? "Could not reach TRR-Backend. Confirm the backend service is running and reachable."
+            : getErrorDetail(lastError);
+      return buildErrorResponse(
         {
           stage: "proxy",
           error: "Backend fetch failed",
           detail,
-          status: 502,
         },
+        502
       );
     }
 
     if (!backendResponse.ok) {
       const errorText = await backendResponse.text();
-      return buildSseErrorResponse(
+      return buildErrorResponse(
         {
           stage: "backend",
           error: "Backend reprocess failed",
           detail: errorText || `HTTP ${backendResponse.status}`,
-          status: backendResponse.status,
         },
+        backendResponse.status
       );
     }
 
     if (!backendResponse.body) {
-      return buildSseErrorResponse(
+      return buildErrorResponse(
         {
           stage: "backend",
           error: "No response body from backend",
-          status: 502,
         },
+        502
       );
     }
 
     return new Response(backendResponse.body, {
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-store, max-age=0",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       },
@@ -193,13 +189,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     const message = getErrorDetail(error);
     const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return buildSseErrorResponse(
+    return buildErrorResponse(
       {
         stage: "proxy",
         error: "Reprocess stream request failed",
         detail: message,
-        status,
       },
+      status
     );
   }
 }

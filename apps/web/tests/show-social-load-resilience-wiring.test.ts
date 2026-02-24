@@ -17,9 +17,13 @@ describe("show social load resilience wiring", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(/SHOW_CORE_LOAD_TIMEOUT_MS/);
-    expect(contents).toMatch(/fetchWithTimeout\(\s*`\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}`/);
-    expect(contents).toMatch(/fetchWithTimeout\(\s*`\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}\/seasons\?limit=50`/);
-    expect(contents).toMatch(/fetchWithTimeout\(\s*`\/api\/admin\/covered-shows\/\$\{requestShowId\}`/);
+    expect(contents).toMatch(/adminGetJson<\{ show\?: TrrShow \}>/);
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}/);
+    expect(contents).toMatch(/adminGetJson<\{ seasons\?: TrrSeason\[] \}>/);
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}\/seasons\?limit=50/);
+    expect(contents).toMatch(/adminGetJson\(/);
+    expect(contents).toMatch(/\/api\/admin\/covered-shows\/\$\{requestShowId\}/);
+    expect(contents).toMatch(/timeoutMs:\s*SHOW_CORE_LOAD_TIMEOUT_MS/);
   });
 
   it("does not fail close the page when season dependency fetches degrade", () => {
@@ -35,7 +39,7 @@ describe("show social load resilience wiring", () => {
   it("skips expensive season episode summary fanout while social tab is active", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/if \(activeTab === "social"\) return;/);
+    expect(contents).toMatch(/if \(activeTab !== "seasons"\) return;/);
   });
 
   it("batches season episode summary failures into a single warning", () => {

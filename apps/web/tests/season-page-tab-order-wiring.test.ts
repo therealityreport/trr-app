@@ -39,4 +39,15 @@ describe("season page tab order wiring", () => {
     expect(contents).toMatch(/useState<TabId>\("overview"\)/);
     expect(contents).toMatch(/activeTab === "overview"/);
   });
+
+  it("passes showHref so the show breadcrumb segment is clickable", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx"
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/buildSeasonBreadcrumb\(show\.name,\s*season\.season_number,\s*\{/);
+    expect(contents).toMatch(/showHref:\s*buildShowAdminUrl\(\{\s*showSlug:\s*showSlugForRouting\s*\}\)/);
+  });
 });

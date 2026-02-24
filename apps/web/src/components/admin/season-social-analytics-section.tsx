@@ -316,6 +316,26 @@ type IngestProxyErrorPayload = {
   upstream_detail_code?: string;
 };
 
+type CommentsCoverageResponse = {
+  total_saved_comments: number;
+  total_reported_comments: number;
+  coverage_pct: number | null;
+  up_to_date: boolean;
+  stale_posts_count: number;
+  posts_scanned: number;
+  by_platform?: Record<
+    string,
+    {
+      saved_comments: number;
+      reported_comments: number;
+      coverage_pct: number | null;
+      up_to_date: boolean;
+      stale_posts_count: number;
+      posts_scanned: number;
+    }
+  >;
+};
+
 interface SeasonSocialAnalyticsSectionProps {
   showId: string;
   showSlug?: string;
@@ -361,6 +381,8 @@ const platformFilterFromTab = (tab: PlatformTab): "all" | Platform =>
 
 const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running"]);
 const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
+const COMMENT_SYNC_MAX_PASSES = 8;
+const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
 const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter"];
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
@@ -637,11 +659,13 @@ const getTotalCoverage = (week: WeeklyPlatformRow): CoverageSummary => {
 
 const REQUEST_TIMEOUT_MS = {
   analytics: 22_000,
-  runs: 20_000,
+  runs: 15_000,
   targets: 12_000,
-  jobs: 20_000,
+  jobs: 15_000,
+  commentsCoverage: 35_000,
 } as const;
 const ANALYTICS_POLL_REFRESH_MS = 30_000;
+const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 
 export const POLL_FAILURES_BEFORE_RETRY_BANNER = 2;
 export const shouldSetPollingRetry = (consecutiveFailures: number): boolean =>
@@ -865,6 +889,12 @@ const extractHashtags = (text: string | null | undefined): string[] => {
   return tags;
 };
 
+const getJobStageLabel = (job: SocialJob): string =>
+  (typeof job.config?.stage === "string" ? job.config.stage : undefined) ??
+  (typeof job.metadata?.stage === "string" ? job.metadata.stage : undefined) ??
+  job.job_type ??
+  "posts";
+
 const statusToLogVerb = (status: SocialJob["status"]): string => {
   if (status === "queued" || status === "pending") return "queued";
   if (status === "retrying") return "retrying";
@@ -989,6 +1019,7 @@ export default function SeasonSocialAnalyticsSection({
   const [targets, setTargets] = useState<SocialTarget[]>([]);
   const [runs, setRuns] = useState<SocialRun[]>([]);
   const [runSummaries, setRunSummaries] = useState<SocialRunSummary[]>([]);
+  const [runSummariesLoading, setRunSummariesLoading] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<SocialJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1038,6 +1069,19 @@ export default function SeasonSocialAnalyticsSection({
   });
   const pollGenerationRef = useRef(0);
   const pollFailureCountRef = useRef(0);
+  const autoSyncGenerationRef = useRef(0);
+  const autoSyncSessionRef = useRef<{
+    week: number | null;
+    day: string | null;
+    platform: "all" | Platform;
+    dateStart?: string;
+    dateEnd?: string;
+    pass: number;
+    maxPasses: number;
+    maxDurationMs: number;
+    startedAtMs: number;
+    enabled: boolean;
+  } | null>(null);
   const lastAnalyticsPollAtRef = useRef(0);
   const seasonIdCopyTimerRef = useRef<number | null>(null);
   const ingestPanelRef = useRef<HTMLElement | null>(null);
@@ -1270,22 +1314,29 @@ export default function SeasonSocialAnalyticsSection({
     }
 
     const request = (async () => {
-      const headers = await getAuthHeaders();
-      const response = await fetchAdminWithTimeout(
-        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics?${queryString}`,
-        { headers, cache: "no-store" },
-        REQUEST_TIMEOUT_MS.analytics,
-        "Social analytics request timed out",
-      );
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, "Failed to load social analytics"));
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchAdminWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics?${queryString}`,
+          { headers, cache: "no-store" },
+          REQUEST_TIMEOUT_MS.analytics,
+          "Social analytics request timed out",
+        );
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response, "Failed to load social analytics"));
+        }
+        const data = (await response.json()) as AnalyticsResponse;
+        const now = new Date();
+        setAnalytics(data);
+        setLastUpdated(now);
+        setSectionLastSuccessAt((current) => ({ ...current, analytics: now }));
+        return data;
+      } catch (analyticsError) {
+        const message =
+          analyticsError instanceof Error ? analyticsError.message : "Failed to load social analytics";
+        setSectionErrors((current) => ({ ...current, analytics: message }));
+        throw analyticsError;
       }
-      const data = (await response.json()) as AnalyticsResponse;
-      const now = new Date();
-      setAnalytics(data);
-      setLastUpdated(now);
-      setSectionLastSuccessAt((current) => ({ ...current, analytics: now }));
-      return data;
     })();
 
     inFlightRef.current.analyticsByKey.set(analyticsRequestKey, request);
@@ -1361,24 +1412,29 @@ export default function SeasonSocialAnalyticsSection({
   }, [getAuthHeaders, readErrorMessage, runsRequestKey, scope, seasonId, seasonNumber, showId]);
 
   const fetchRunSummaries = useCallback(async () => {
-    const headers = await getAuthHeaders();
-    const params = new URLSearchParams({ limit: "20" });
-    params.set("source_scope", scope);
-    params.set("season_id", seasonId);
-    const response = await fetchAdminWithTimeout(
-      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/runs/summary?${params.toString()}`,
-      { headers, cache: "no-store" },
-      REQUEST_TIMEOUT_MS.runs,
-      "Social run summary request timed out",
-    );
-    if (!response.ok) {
-      throw new Error(await readErrorMessage(response, "Failed to load social run summary"));
+    setRunSummariesLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams({ limit: "20" });
+      params.set("source_scope", scope);
+      params.set("season_id", seasonId);
+      const response = await fetchAdminWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/runs/summary?${params.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.runs,
+        "Social run summary request timed out",
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to load social run summary"));
+      }
+      const data = (await response.json()) as { summaries?: SocialRunSummary[] };
+      const nextSummaries = data.summaries ?? [];
+      setRunSummaries(nextSummaries);
+      setRunSummaryError(null);
+      return nextSummaries;
+    } finally {
+      setRunSummariesLoading(false);
     }
-    const data = (await response.json()) as { summaries?: SocialRunSummary[] };
-    const nextSummaries = data.summaries ?? [];
-    setRunSummaries(nextSummaries);
-    setRunSummaryError(null);
-    return nextSummaries;
   }, [getAuthHeaders, readErrorMessage, scope, seasonId, seasonNumber, showId]);
 
   const fetchTargets = useCallback(async () => {
@@ -1420,20 +1476,22 @@ export default function SeasonSocialAnalyticsSection({
 
   const fetchJobs = useCallback(async (
     runId?: string | null,
-    options?: { preserveLastGoodIfEmpty?: boolean },
+    options?: { preserveLastGoodIfEmpty?: boolean; limit?: number },
   ) => {
     if (!runId) {
       setJobs([]);
       return [] as SocialJob[];
     }
-    const jobsRequestKey = `${seasonId}:${runId}:250`;
+    const requestedLimit = Number.isFinite(options?.limit) ? Number(options?.limit) : 100;
+    const safeLimit = Math.max(1, Math.min(250, requestedLimit));
+    const jobsRequestKey = `${seasonId}:${runId}:${safeLimit}`;
     const existingRequest = inFlightRef.current.jobsByKey.get(jobsRequestKey);
     if (existingRequest) {
       return existingRequest;
     }
     const request = (async () => {
     const headers = await getAuthHeaders();
-    const params = new URLSearchParams({ limit: "250", run_id: runId });
+    const params = new URLSearchParams({ limit: String(safeLimit), run_id: runId });
     params.set("season_id", seasonId);
     const response = await fetchAdminWithTimeout(
       `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?${params.toString()}`,
@@ -1467,6 +1525,37 @@ export default function SeasonSocialAnalyticsSection({
       }
     }
   }, [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId]);
+
+  const fetchCommentsCoverage = useCallback(
+    async (scopeWindow: {
+      platform: "all" | Platform;
+      dateStart?: string;
+      dateEnd?: string;
+      sourceScope: Scope;
+    }) => {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      params.set("season_id", seasonId);
+      params.set("source_scope", scopeWindow.sourceScope);
+      params.set("timezone", SOCIAL_TIME_ZONE);
+      if (scopeWindow.platform !== "all") {
+        params.set("platforms", scopeWindow.platform);
+      }
+      if (scopeWindow.dateStart) params.set("date_start", scopeWindow.dateStart);
+      if (scopeWindow.dateEnd) params.set("date_end", scopeWindow.dateEnd);
+      const response = await fetchAdminWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/comments-coverage?${params.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.commentsCoverage,
+        "Comments coverage request timed out",
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to load comments coverage"));
+      }
+      return (await response.json()) as CommentsCoverageResponse;
+    },
+    [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId],
+  );
 
   const refreshAll = useCallback(async () => {
     if (inFlightRef.current.refreshAll) {
@@ -1770,11 +1859,7 @@ export default function SeasonSocialAnalyticsSection({
     if (!selectedRunId) return [];
     return [...runScopedJobs]
       .map((job) => {
-        const stage =
-          (typeof job.config?.stage === "string" ? job.config.stage : undefined) ??
-          (typeof job.metadata?.stage === "string" ? job.metadata.stage : undefined) ??
-          job.job_type ??
-          "posts";
+        const stage = getJobStageLabel(job);
         const timestamp = job.completed_at ?? job.started_at ?? job.created_at ?? null;
         const ts = timestamp ? Date.parse(timestamp) : Number.NaN;
         const counters = getJobStageCounters(job);
@@ -1811,37 +1896,167 @@ export default function SeasonSocialAnalyticsSection({
   useEffect(() => {
     if (!runningIngest || !activeRunId || !activeRun) return;
     if (!TERMINAL_RUN_STATUSES.has(activeRun.status)) return;
-
-    const summary = activeRun.summary ?? {};
-    const completedJobs = Number(summary.completed_jobs ?? 0);
-    const failedJobs = Number(summary.failed_jobs ?? 0);
-    const totalJobs = Math.max(Number(summary.total_jobs ?? 0), completedJobs + failedJobs);
-    const totalItems = Number(summary.items_found_total ?? 0);
-    const elapsed = ingestStartedAt ? ` in ${Math.round((Date.now() - ingestStartedAt.getTime()) / 1000)}s` : "";
-    const finalVerb = activeRun.status === "cancelled" ? "cancelled" : activeRun.status === "failed" ? "failed" : "complete";
-    let msg = `Ingest ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
-    if (totalJobs > 0) {
-      msg += ` of ${totalJobs}`;
-    }
-    msg += `, ${totalItems.toLocaleString()} items`;
-    if (failedJobs > 0) {
-      msg += ` · ${failedJobs} failed`;
-    }
-
+    let cancelled = false;
     const completedRunId = activeRunId;
-    setIngestMessage(msg);
-    setRunningIngest(false);
-    setIngestingWeek(null);
-    setIngestingDay(null);
-    setIngestingPlatform(null);
-    setActiveRunRequest(null);
-    setActiveRunId(null);
-    setIngestStartedAt(null);
-    void fetchAnalytics().catch(() => {});
-    void fetchRuns().catch(() => {});
-    void fetchRunSummaries().catch(() => {});
-    void fetchJobs(completedRunId).catch(() => {});
-  }, [activeRun, activeRunId, fetchAnalytics, fetchJobs, fetchRunSummaries, fetchRuns, ingestStartedAt, runningIngest]);
+
+    const finalizeRun = (message: string) => {
+      setIngestMessage(message);
+      setRunningIngest(false);
+      setIngestingWeek(null);
+      setIngestingDay(null);
+      setIngestingPlatform(null);
+      setActiveRunRequest(null);
+      setActiveRunId(null);
+      setIngestStartedAt(null);
+      autoSyncSessionRef.current = null;
+      void fetchAnalytics().catch(() => {});
+      void fetchRuns().catch(() => {});
+      void fetchRunSummaries().catch(() => {});
+      void fetchJobs(completedRunId).catch(() => {});
+    };
+
+    void (async () => {
+      const summary = activeRun.summary ?? {};
+      const completedJobs = Number(summary.completed_jobs ?? 0);
+      const failedJobs = Number(summary.failed_jobs ?? 0);
+      const totalJobs = Math.max(Number(summary.total_jobs ?? 0), completedJobs + failedJobs);
+      const totalItems = Number(summary.items_found_total ?? 0);
+      const elapsed = ingestStartedAt ? ` in ${Math.round((Date.now() - ingestStartedAt.getTime()) / 1000)}s` : "";
+      const finalVerb = activeRun.status === "cancelled" ? "cancelled" : activeRun.status === "failed" ? "failed" : "complete";
+      let terminalMessage = `Ingest ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
+      if (totalJobs > 0) {
+        terminalMessage += ` of ${totalJobs}`;
+      }
+      terminalMessage += `, ${totalItems.toLocaleString()} items`;
+      if (failedJobs > 0) {
+        terminalMessage += ` · ${failedJobs} failed`;
+      }
+
+      const session = autoSyncSessionRef.current;
+      if (!session || !session.enabled || activeRun.status === "cancelled") {
+        if (!cancelled) finalizeRun(terminalMessage);
+        return;
+      }
+
+      try {
+        const coverage = await fetchCommentsCoverage({
+          platform: session.platform,
+          dateStart: session.dateStart,
+          dateEnd: session.dateEnd,
+          sourceScope: scope,
+        });
+        if (cancelled) return;
+        const coverageSaved = Number(coverage.total_saved_comments ?? 0);
+        const coverageReported = Number(coverage.total_reported_comments ?? 0);
+        const coveragePct = coverageReported > 0 ? Math.max(0, Math.min(100, (coverageSaved / coverageReported) * 100)) : 100;
+        const coverageLabel = `${coverageSaved.toLocaleString()}/${coverageReported.toLocaleString()} (${coveragePct.toFixed(1)}%)`;
+        if (coverage.up_to_date) {
+          finalizeRun(`${terminalMessage} · Coverage ${coverageLabel} · Up-to-Date.`);
+          return;
+        }
+
+        const elapsedMs = Date.now() - session.startedAtMs;
+        const nextPass = session.pass + 1;
+        if (nextPass > session.maxPasses || elapsedMs >= session.maxDurationMs) {
+          finalizeRun(
+            `${terminalMessage} · Coverage ${coverageLabel} · Stalled (guardrail reached after ${session.pass}/${session.maxPasses} passes).`,
+          );
+          return;
+        }
+
+        const headers = await getAuthHeaders();
+        if (cancelled) return;
+        const payload: {
+          source_scope: Scope;
+          platforms?: Platform[];
+          max_posts_per_target: number;
+          max_comments_per_post: number;
+          max_replies_per_post: number;
+          fetch_replies: boolean;
+          ingest_mode: "comments_only";
+          sync_strategy: "incremental";
+          allow_inline_dev_fallback: boolean;
+          date_start?: string;
+          date_end?: string;
+        } = {
+          source_scope: scope,
+          max_posts_per_target: 100000,
+          max_comments_per_post: 100000,
+          max_replies_per_post: 100000,
+          fetch_replies: true,
+          ingest_mode: "comments_only",
+          sync_strategy: "incremental",
+          allow_inline_dev_fallback: true,
+        };
+        if (session.platform !== "all") {
+          payload.platforms = [session.platform];
+        }
+        if (session.dateStart) payload.date_start = session.dateStart;
+        if (session.dateEnd) payload.date_end = session.dateEnd;
+
+        setIngestMessage(
+          `${terminalMessage} · Coverage ${coverageLabel} · Auto-continuing pass ${nextPass}/${session.maxPasses}...`,
+        );
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest?season_id=${encodeURIComponent(seasonId)}`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+          { allowDevAdminBypass: true },
+        );
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as IngestProxyErrorPayload;
+          throw new Error(formatIngestErrorMessage(data));
+        }
+        const result = (await response.json().catch(() => ({}))) as {
+          run_id?: string;
+          queued_or_started_jobs?: number;
+        };
+        const runId = typeof result.run_id === "string" && result.run_id ? result.run_id : null;
+        if (!runId) {
+          throw new Error("Auto-continue pass started without a run id");
+        }
+        if (cancelled) return;
+        session.pass = nextPass;
+        setActiveRunId(runId);
+        setSelectedRunId(runId);
+        setJobs([]);
+        const jobCount = Number(result.queued_or_started_jobs ?? 0);
+        setIngestMessage(`Pass ${nextPass}/${session.maxPasses} queued · run ${runId.slice(0, 8)} · ${jobCount} jobs · Coverage ${coverageLabel}.`);
+        await fetchJobs(runId);
+        await fetchRuns();
+        await fetchRunSummaries();
+      } catch (autoContinueError) {
+        if (cancelled) return;
+        const message = autoContinueError instanceof Error ? autoContinueError.message : "Auto-continue failed";
+        finalizeRun(`${terminalMessage} · ${message}`);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeRun,
+    activeRunId,
+    fetchAnalytics,
+    fetchCommentsCoverage,
+    fetchJobs,
+    fetchRunSummaries,
+    fetchRuns,
+    getAuthHeaders,
+    ingestStartedAt,
+    runningIngest,
+    scope,
+    seasonId,
+    seasonNumber,
+    showId,
+  ]);
 
   // Poll for job + run updates using a single-flight loop (no overlapping requests).
   useEffect(() => {
@@ -1851,31 +2066,51 @@ export default function SeasonSocialAnalyticsSection({
     pollGenerationRef.current += 1;
     const generation = pollGenerationRef.current;
     pollFailureCountRef.current = 0;
-    const interval = runningIngest ? 3000 : 5000;
+    const baseInterval = runningIngest ? 3_000 : 5_000;
     let timer: number | null = null;
     let cancelled = false;
     let inFlight = false;
 
     const scheduleNext = () => {
       if (cancelled) return;
+      const failureIndex = Math.min(pollFailureCountRef.current, LIVE_POLL_BACKOFF_MS.length - 1);
+      const delay = pollFailureCountRef.current > 0 ? LIVE_POLL_BACKOFF_MS[failureIndex] : baseInterval;
       timer = window.setTimeout(() => {
         void poll();
-      }, interval);
+      }, delay);
     };
 
     const poll = async () => {
       if (cancelled || inFlight) return;
       inFlight = true;
       try {
-        const nextRuns = await fetchRuns({ runId: activeRunId, limit: 1 });
+        const [runsResult, jobsResult] = await Promise.allSettled([
+          fetchRuns({ runId: activeRunId, limit: 1 }),
+          fetchJobs(activeRunId, { preserveLastGoodIfEmpty: true, limit: 100 }),
+        ]);
         if (cancelled || generation !== pollGenerationRef.current) return;
 
-        const currentRun = nextRuns.find((run) => run.id === activeRunId);
-        const preserveJobs = Boolean(currentRun && ACTIVE_RUN_STATUSES.has(currentRun.status));
-        await fetchJobs(activeRunId, { preserveLastGoodIfEmpty: preserveJobs });
-        if (cancelled || generation !== pollGenerationRef.current) return;
+        const runsError =
+          runsResult.status === "rejected"
+            ? runsResult.reason instanceof Error
+              ? runsResult.reason.message
+              : "Failed to refresh social runs"
+            : null;
+        const jobsError =
+          jobsResult.status === "rejected"
+            ? jobsResult.reason instanceof Error
+              ? jobsResult.reason.message
+              : "Failed to refresh social jobs"
+            : null;
+        const runAndJobsSucceeded = runsResult.status === "fulfilled" && jobsResult.status === "fulfilled";
 
-        if (!runningIngest) {
+        setSectionErrors((current) => ({
+          ...current,
+          runs: runsError,
+          jobs: jobsError,
+        }));
+
+        if (runAndJobsSucceeded && !runningIngest) {
           const now = Date.now();
           if (now - lastAnalyticsPollAtRef.current >= ANALYTICS_POLL_REFRESH_MS) {
             lastAnalyticsPollAtRef.current = now;
@@ -1892,14 +2127,15 @@ export default function SeasonSocialAnalyticsSection({
               });
           }
         }
-        pollFailureCountRef.current = 0;
-        setPollingStatus((current) => (current === "retrying" ? "recovered" : current));
-        setSectionErrors((current) => ({ ...current, runs: null, jobs: null }));
-      } catch {
-        if (cancelled || generation !== pollGenerationRef.current) return;
-        pollFailureCountRef.current += 1;
-        if (shouldSetPollingRetry(pollFailureCountRef.current)) {
-          setPollingStatus("retrying");
+
+        if (runAndJobsSucceeded) {
+          pollFailureCountRef.current = 0;
+          setPollingStatus((current) => (current === "retrying" ? "recovered" : current));
+        } else {
+          pollFailureCountRef.current += 1;
+          if (shouldSetPollingRetry(pollFailureCountRef.current)) {
+            setPollingStatus("retrying");
+          }
         }
       } finally {
         inFlight = false;
@@ -1963,6 +2199,7 @@ export default function SeasonSocialAnalyticsSection({
       setSelectedRunId(activeRunId);
       setActiveRunId(null);
       setIngestStartedAt(null);
+      autoSyncSessionRef.current = null;
       await fetchJobs(activeRunId);
       await fetchAnalytics();
       await fetchRuns();
@@ -1991,6 +2228,7 @@ export default function SeasonSocialAnalyticsSection({
     const effectivePlatform = override?.platform ?? platformFilter;
     const effectiveDay = override?.day?.trim() ? override.day.trim() : null;
     const effectiveWeek = effectiveDay ? null : (override?.week ?? (weekFilter === "all" ? null : weekFilter));
+    const effectiveIngestMode = override?.ingestMode ?? "posts_and_comments";
     setIngestingWeek(effectiveWeek);
     setIngestingDay(effectiveDay);
     setIngestingPlatform(effectivePlatform);
@@ -2016,7 +2254,7 @@ export default function SeasonSocialAnalyticsSection({
         max_comments_per_post: 100000,
         max_replies_per_post: 100000,
         fetch_replies: true,
-        ingest_mode: override?.ingestMode ?? "posts_and_comments",
+        ingest_mode: effectiveIngestMode,
         sync_strategy: syncStrategy,
         allow_inline_dev_fallback: true,
       }
@@ -2080,13 +2318,36 @@ export default function SeasonSocialAnalyticsSection({
       if (!runId) {
         throw new Error(result.message ?? "Ingest started without a run id");
       }
+
+      const autoContinueEnabled = effectiveIngestMode === "posts_and_comments" || effectiveIngestMode === "comments_only";
+      autoSyncGenerationRef.current += 1;
+      autoSyncSessionRef.current = {
+        week: effectiveWeek,
+        day: effectiveDay,
+        platform: effectivePlatform,
+        dateStart: payload.date_start,
+        dateEnd: payload.date_end,
+        pass: 1,
+        maxPasses: COMMENT_SYNC_MAX_PASSES,
+        maxDurationMs: COMMENT_SYNC_MAX_DURATION_MS,
+        startedAtMs: Date.now(),
+        enabled: autoContinueEnabled,
+      };
+      if (autoContinueEnabled) {
+      }
       setActiveRunId(runId);
       setSelectedRunId(runId);
 
       // Backend returns queued/staged run metadata immediately.
       const stages = (result.stages ?? []).join(" -> ") || "posts -> comments";
       const jobCount = result.queued_or_started_jobs ?? 0;
-      setIngestMessage(`${label} · ${platformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
+      if (autoContinueEnabled) {
+        setIngestMessage(
+          `Pass 1/${COMMENT_SYNC_MAX_PASSES} · ${label} · ${platformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`,
+        );
+      } else {
+        setIngestMessage(`${label} · ${platformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
+      }
 
       // Immediately fetch jobs to pick up the newly created running jobs
       await fetchJobs(runId);
@@ -2107,6 +2368,7 @@ export default function SeasonSocialAnalyticsSection({
       setSelectedRunId(null);
       setActiveRunId(null);
       setIngestStartedAt(null);
+      autoSyncSessionRef.current = null;
     }
   }, [
     analytics,
@@ -2267,6 +2529,92 @@ export default function SeasonSocialAnalyticsSection({
     return Array.from(counts.entries())
       .map(([code, count]) => ({ code, count }))
       .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+  }, [runScopedJobs]);
+  const groupedFailureRows = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        code: string;
+        stage: string;
+        count: number;
+        platforms: Set<string>;
+        latestTimestamp: string | null;
+        latestTimestampMs: number;
+        sampleMessage: string | null;
+      }
+    >();
+    for (const job of runScopedJobs) {
+      if (job.status !== "failed" && job.status !== "retrying") continue;
+      const code =
+        job.job_error_code ??
+        ((job.metadata as Record<string, unknown> | undefined)?.job_error_code as string | undefined) ??
+        "UNKNOWN";
+      const normalizedCode = String(code || "UNKNOWN").toUpperCase();
+      const stage = getJobStageLabel(job);
+      const key = `${normalizedCode}:${stage}`;
+      const timestamp = job.completed_at ?? job.started_at ?? job.created_at ?? null;
+      const timestampMs = timestamp ? Date.parse(timestamp) : Number.NaN;
+      const current = groups.get(key) ?? {
+        code: normalizedCode,
+        stage,
+        count: 0,
+        platforms: new Set<string>(),
+        latestTimestamp: null,
+        latestTimestampMs: Number.NaN,
+        sampleMessage: null,
+      };
+      current.count += 1;
+      current.platforms.add(job.platform);
+      if (!Number.isNaN(timestampMs) && (Number.isNaN(current.latestTimestampMs) || timestampMs > current.latestTimestampMs)) {
+        current.latestTimestamp = timestamp;
+        current.latestTimestampMs = timestampMs;
+      }
+      if (!current.sampleMessage && typeof job.error_message === "string" && job.error_message.trim()) {
+        current.sampleMessage = job.error_message.trim();
+      }
+      groups.set(key, current);
+    }
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        platformsLabel: Array.from(group.platforms)
+          .sort((a, b) => (PLATFORM_LABELS[a] ?? a).localeCompare(PLATFORM_LABELS[b] ?? b))
+          .map((platform) => PLATFORM_LABELS[platform] ?? platform)
+          .join(", "),
+      }))
+      .sort(
+        (a, b) =>
+          b.count - a.count ||
+          (Number.isNaN(b.latestTimestampMs) ? 0 : b.latestTimestampMs) -
+            (Number.isNaN(a.latestTimestampMs) ? 0 : a.latestTimestampMs),
+      );
+  }, [runScopedJobs]);
+  const latestFailureEvents = useMemo(() => {
+    return runScopedJobs
+      .filter((job) => job.status === "failed" || job.status === "retrying")
+      .map((job) => {
+        const timestamp = job.completed_at ?? job.started_at ?? job.created_at ?? null;
+        const timestampMs = timestamp ? Date.parse(timestamp) : Number.NaN;
+        const code =
+          job.job_error_code ??
+          ((job.metadata as Record<string, unknown> | undefined)?.job_error_code as string | undefined) ??
+          "UNKNOWN";
+        return {
+          id: job.id,
+          code: String(code || "UNKNOWN").toUpperCase(),
+          stage: getJobStageLabel(job),
+          platform: PLATFORM_LABELS[job.platform] ?? job.platform,
+          status: job.status,
+          message:
+            typeof job.error_message === "string" && job.error_message.trim()
+              ? job.error_message.trim()
+              : "No error message provided",
+          timestamp,
+          timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
+        };
+      })
+      .sort((a, b) => b.timestampMs - a.timestampMs)
+      .slice(0, 5);
   }, [runScopedJobs]);
   const commentGapFlagCount = useMemo(
     () => (analytics?.weekly_flags ?? []).filter((flag) => flag.code === "comment_gap").length,
@@ -2787,9 +3135,7 @@ export default function SeasonSocialAnalyticsSection({
         const elapsedMin = Math.floor(elapsedSec / 60);
         const elapsedStr = elapsedMin > 0 ? `${elapsedMin}m ${String(elapsedSec % 60).padStart(2, "0")}s` : `${elapsedSec}s`;
 
-        const getStage = (j: SocialJob) =>
-          (typeof j.config?.stage === "string" ? j.config.stage : undefined) ??
-          (typeof j.metadata?.stage === "string" ? j.metadata.stage : "unknown");
+        const getStage = (j: SocialJob) => getJobStageLabel(j);
 
         const getAccount = (j: SocialJob) =>
           typeof j.config?.account === "string" && j.config.account ? j.config.account : null;
@@ -3010,8 +3356,65 @@ export default function SeasonSocialAnalyticsSection({
           seasonNumber={seasonNumber}
         />
       ) : loading && !analytics ? (
-        <div className="rounded-2xl border border-zinc-200 bg-white p-10 text-center text-sm text-zinc-500 shadow-sm">
-          Loading social analytics...
+        <div data-testid="social-analytics-skeleton" className="space-y-4">
+          {(isBravoView || isSentimentView) && (
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {[0, 1, 2, 3].map((index) => (
+                <article
+                  key={`summary-skeleton-${index}`}
+                  className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+                >
+                  <div className="h-3 w-24 animate-pulse rounded bg-zinc-200" />
+                  <div className="mt-3 h-8 w-16 animate-pulse rounded bg-zinc-200" />
+                  <div className="mt-2 h-3 w-36 animate-pulse rounded bg-zinc-200" />
+                </article>
+              ))}
+            </section>
+          )}
+          {(isBravoView || isAdvancedView) && (
+            <section className="grid gap-6 xl:grid-cols-3">
+              <article className="xl:col-span-2 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <div className="h-4 w-40 animate-pulse rounded bg-zinc-200" />
+                <div className="mt-4 space-y-3">
+                  {[0, 1].map((row) => (
+                    <div key={`heatmap-skeleton-${row}`} className="space-y-2">
+                      <div className="h-3 w-32 animate-pulse rounded bg-zinc-200" />
+                      <div className="grid grid-cols-7 gap-1.5 rounded-lg border border-zinc-100 bg-zinc-50 p-2">
+                        {Array.from({ length: 7 }).map((_, idx) => (
+                          <div
+                            key={`heatmap-skeleton-${row}-${idx}`}
+                            className="h-9 w-9 animate-pulse rounded bg-zinc-200 sm:h-10 sm:w-10"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <div className="h-4 w-28 animate-pulse rounded bg-zinc-200" />
+                <div className="mt-4 space-y-2">
+                  {[0, 1, 2, 3].map((index) => (
+                    <div key={`panel-skeleton-${index}`} className="h-8 animate-pulse rounded bg-zinc-200" />
+                  ))}
+                </div>
+              </article>
+            </section>
+          )}
+          {(isSentimentView || isHashtagsView) && (
+            <section className="grid gap-6 xl:grid-cols-2">
+              {[0, 1].map((index) => (
+                <article key={`detail-skeleton-${index}`} className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <div className="h-4 w-40 animate-pulse rounded bg-zinc-200" />
+                  <div className="mt-4 space-y-2">
+                    {[0, 1, 2, 3].map((row) => (
+                      <div key={`detail-skeleton-${index}-${row}`} className="h-8 animate-pulse rounded bg-zinc-200" />
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </section>
+          )}
         </div>
       ) : (
         <>
@@ -3263,36 +3666,92 @@ export default function SeasonSocialAnalyticsSection({
               {ingestExportPanel}
               <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <h4 className="text-lg font-semibold text-zinc-900">Run Health</h4>
-                <div className="mt-4 space-y-2 text-sm">
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Success Rate</p>
-                    <p className="mt-1 text-lg font-semibold text-zinc-900">
-                      {formatPctLabel(runHealth.successRate)}
-                    </p>
+                {runSummariesLoading && runSummaries.length === 0 ? (
+                  <div className="mt-4 space-y-2">
+                    {[0, 1, 2].map((index) => (
+                      <div key={`run-health-skeleton-${index}`} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                        <div className="h-3 w-24 animate-pulse rounded bg-zinc-200" />
+                        <div className="mt-2 h-6 w-20 animate-pulse rounded bg-zinc-200" />
+                      </div>
+                    ))}
                   </div>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Median Duration</p>
-                    <p className="mt-1 text-lg font-semibold text-zinc-900">
-                      {formatDurationLabel(runHealth.medianDurationSeconds)}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Active Failures</p>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {activeFailureErrorCounts.length === 0 && (
-                        <span className="text-xs text-zinc-500">No active failures</span>
+                ) : (
+                  <div className="mt-4 space-y-2 text-sm">
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Success Rate</p>
+                      <p className="mt-1 text-lg font-semibold text-zinc-900">
+                        {formatPctLabel(runHealth.successRate)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Median Duration</p>
+                      <p className="mt-1 text-lg font-semibold text-zinc-900">
+                        {formatDurationLabel(runHealth.medianDurationSeconds)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Active Failures</p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {activeFailureErrorCounts.length === 0 && (
+                          <span className="text-xs text-zinc-500">No active failures</span>
+                        )}
+                        {activeFailureErrorCounts.map((item) => (
+                          <span
+                            key={item.code}
+                            className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-700"
+                          >
+                            {item.code}: {item.count}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Failure Groups</p>
+                      {groupedFailureRows.length === 0 ? (
+                        <p className="mt-1 text-xs text-zinc-500">No grouped failures for selected run.</p>
+                      ) : (
+                        <ul className="mt-1 space-y-1 text-xs">
+                          {groupedFailureRows.slice(0, 6).map((group) => (
+                            <li key={`${group.code}-${group.stage}`} className="rounded border border-zinc-200 bg-white px-2 py-1 text-zinc-700">
+                              <p className="font-semibold">
+                                {group.code} · {group.stage} · {group.count}
+                              </p>
+                              <p className="text-zinc-500">
+                                {group.platformsLabel || "Unknown platform"}
+                                {group.latestTimestamp ? ` · ${formatDateTime(group.latestTimestamp)}` : ""}
+                              </p>
+                              {group.sampleMessage && (
+                                <p className="line-clamp-1 text-zinc-500">{group.sampleMessage}</p>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
                       )}
-                      {activeFailureErrorCounts.map((item) => (
-                        <span
-                          key={item.code}
-                          className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-700"
-                        >
-                          {item.code}: {item.count}
-                        </span>
-                      ))}
+                    </div>
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2" data-testid="run-health-latest-failures">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                        Latest 5 Failure Events
+                      </p>
+                      {latestFailureEvents.length === 0 ? (
+                        <p className="mt-1 text-xs text-zinc-500">No recent failure events.</p>
+                      ) : (
+                        <ul className="mt-1 space-y-1 text-xs">
+                          {latestFailureEvents.map((event) => (
+                            <li key={event.id} className="rounded border border-zinc-200 bg-white px-2 py-1 text-zinc-700">
+                              <p className="font-semibold">
+                                {event.code} · {event.platform} · {event.stage}
+                              </p>
+                              <p className="text-zinc-500">
+                                {formatDateTime(event.timestamp)} · {event.status}
+                              </p>
+                              <p className="line-clamp-1 text-zinc-500">{event.message}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   </div>
-                </div>
+                )}
                 {runSummaryError && (
                   <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                     {runSummaryError}
@@ -3725,10 +4184,7 @@ export default function SeasonSocialAnalyticsSection({
                   (a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9)
                 );
                 return sorted.map((job) => {
-                  const stage =
-                    (typeof job.config?.stage === "string" ? job.config.stage : undefined) ??
-                    (typeof job.metadata?.stage === "string" ? job.metadata.stage : undefined) ??
-                    job.job_type ?? "posts";
+                  const stage = getJobStageLabel(job);
                   const account = typeof job.config?.account === "string" && job.config.account ? job.config.account : null;
                   const counters = getJobStageCounters(job);
                   const persistCounters = getJobPersistCounters(job);

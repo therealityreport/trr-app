@@ -9,7 +9,7 @@ import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming-entity";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
-type NetworksStreamingType = "network" | "streaming";
+type NetworksStreamingType = "network" | "streaming" | "production";
 
 type CompletionStatus = "resolved" | "manual_required" | "failed";
 
@@ -52,7 +52,15 @@ interface UnresolvedLogoItem {
   reason: string;
 }
 
+interface SyncResumeCursor {
+  entity_type: NetworksStreamingType;
+  entity_key: string;
+}
+
 interface NetworksStreamingSyncResult {
+  run_id: string;
+  status: "completed" | "stopped" | "failed";
+  resume_cursor: SyncResumeCursor | null;
   entities_synced: number;
   providers_synced: number;
   links_enriched: number;
@@ -130,6 +138,7 @@ export default function AdminNetworksPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<NetworksStreamingSyncResult | null>(null);
   const [showUnresolved, setShowUnresolved] = useState(false);
+  const [refreshExternalSources, setRefreshExternalSources] = useState(false);
 
   const [overrides, setOverrides] = useState<Record<string, OverrideRow>>({});
   const [overrideDrafts, setOverrideDrafts] = useState<Record<string, OverrideDraft>>({});
@@ -207,7 +216,8 @@ export default function AdminNetworksPage() {
   }, [checking, hasAccess, loadNetworksStreamingSummary, loadOverrides, userIdentity]);
 
   const onSyncNetworksStreaming = useCallback(
-    async (unresolvedOnly = false) => {
+    async (options?: { unresolvedOnly?: boolean; resumeRunId?: string }) => {
+      const unresolvedOnly = Boolean(options?.unresolvedOnly);
       setSyncing(true);
       setSyncError(null);
       if (!unresolvedOnly) {
@@ -219,7 +229,15 @@ export default function AdminNetworksPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(unresolvedOnly ? { unresolved_only: true } : {}),
+          body: JSON.stringify({
+            unresolved_only: unresolvedOnly,
+            refresh_external_sources: refreshExternalSources,
+            batch_size: 25,
+            max_runtime_sec: 840,
+            ...(typeof options?.resumeRunId === "string" && options.resumeRunId.trim().length > 0
+              ? { resume_run_id: options.resumeRunId.trim() }
+              : {}),
+          }),
         });
 
         if (!response.ok) {
@@ -239,7 +257,7 @@ export default function AdminNetworksPage() {
         setSyncing(false);
       }
     },
-    [fetchWithAuth, loadNetworksStreamingSummary, loadOverrides],
+    [fetchWithAuth, loadNetworksStreamingSummary, loadOverrides, refreshExternalSources],
   );
 
   const unresolvedRows = useMemo(() => {
@@ -484,7 +502,7 @@ export default function AdminNetworksPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void onSyncNetworksStreaming(false)}
+                  onClick={() => void onSyncNetworksStreaming()}
                   disabled={syncing}
                   className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-500"
                 >
@@ -492,13 +510,35 @@ export default function AdminNetworksPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void onSyncNetworksStreaming(true)}
+                  onClick={() => void onSyncNetworksStreaming({ unresolvedOnly: true })}
                   disabled={syncing || unresolvedRows.length === 0}
                   className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Re-run Unresolved Only
                 </button>
+                {syncResult?.status === "stopped" ? (
+                  <button
+                    type="button"
+                    onClick={() => void onSyncNetworksStreaming({ resumeRunId: syncResult.run_id })}
+                    disabled={syncing}
+                    className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Resume Sync
+                  </button>
+                ) : null}
               </div>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                id="refresh-external-sources"
+                type="checkbox"
+                checked={refreshExternalSources}
+                onChange={(event) => setRefreshExternalSources(event.target.checked)}
+                className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+              />
+              <label htmlFor="refresh-external-sources" className="text-xs text-zinc-700">
+                Refresh external catalogs (uses credits)
+              </label>
             </div>
 
             {summaryError ? (
@@ -527,6 +567,12 @@ export default function AdminNetworksPage() {
             {syncResult ? (
               <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
                 <p className="font-semibold">Sync complete</p>
+                <p className="mt-1 [overflow-wrap:anywhere]">
+                  Run: {syncResult.run_id} | Status: {syncResult.status}
+                  {syncResult.resume_cursor
+                    ? ` | Resume Cursor: ${syncResult.resume_cursor.entity_type}:${syncResult.resume_cursor.entity_key}`
+                    : ""}
+                </p>
                 <p className="mt-1 [overflow-wrap:anywhere]">
                   Entities synced: {syncResult.entities_synced} | Providers synced: {syncResult.providers_synced} | Links enriched: {" "}
                   {syncResult.links_enriched} | Logos mirrored: {syncResult.logos_mirrored} | Black variants: {" "}
@@ -573,6 +619,17 @@ export default function AdminNetworksPage() {
                 >
                   Streaming Services
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setTypeFilter("production")}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                    typeFilter === "production"
+                      ? "border-zinc-900 bg-zinc-900 text-white"
+                      : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+                  }`}
+                >
+                  Production
+                </button>
               </div>
               <table className="min-w-full divide-y divide-zinc-200 text-sm">
                 <thead className="bg-zinc-50">
@@ -609,7 +666,9 @@ export default function AdminNetworksPage() {
                         const wikidataHref = row.wikidata_id ? `https://www.wikidata.org/wiki/${row.wikidata_id}` : null;
                         return (
                           <tr key={`${row.type}:${row.name}`}>
-                            <td className="px-3 py-2 text-zinc-700">{row.type === "network" ? "Network" : "Streaming"}</td>
+                            <td className="px-3 py-2 text-zinc-700">
+                              {row.type === "network" ? "Network" : row.type === "streaming" ? "Streaming" : "Production"}
+                            </td>
                             <td className="max-w-[300px] px-3 py-2 font-medium text-zinc-900 [overflow-wrap:anywhere]">
                               <Link
                                 href={`/admin/networks/${row.type}/${toEntitySlug(row.name)}`}

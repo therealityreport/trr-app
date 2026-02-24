@@ -41,8 +41,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean);
+    const includeBrokenRaw = (searchParams.get("include_broken") ?? "").trim().toLowerCase();
+    const includeBroken = includeBrokenRaw === "1" || includeBrokenRaw === "true";
 
-    const photos = await getPhotosByPersonId(personId, { limit, offset, sources });
+    const photos = await getPhotosByPersonId(personId, {
+      limit,
+      offset,
+      sources,
+      includeBroken,
+    });
 
     return NextResponse.json({
       photos,

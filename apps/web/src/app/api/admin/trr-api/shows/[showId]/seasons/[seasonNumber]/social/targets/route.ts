@@ -68,7 +68,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       seasonIdHint,
       fallbackError: "Failed to fetch social targets",
       retries: 0,
-      timeoutMs: 12_000,
+      timeoutMs: 15_000,
     });
     return NextResponse.json(data);
   } catch (error) {
@@ -102,11 +102,20 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         { status: 400 },
       );
     }
+    const seasonIdHintRaw = request.nextUrl.searchParams.get("season_id");
+    if (seasonIdHintRaw && !isValidUuid(seasonIdHintRaw)) {
+      return NextResponse.json(
+        { error: "season_id must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    const seasonIdHint = seasonIdHintRaw ?? undefined;
 
     const data = await fetchSeasonBackendJson(showId, seasonNumber, "/targets", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      seasonIdHint,
       fallbackError: "Failed to update social targets",
       retries: 0,
       timeoutMs: 30_000,

@@ -6242,3 +6242,80 @@ Continuation (same session, 2026-02-24) — Reddit contract hardening follow-thr
   - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-threads-route.test.ts tests/reddit-sources-manager.test.tsx tests/reddit-community-flares-refresh-route.test.ts tests/reddit-flairs-service.test.ts tests/reddit-discovery-service.test.ts tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts tests/reddit-community-route.test.ts tests/reddit-communities-route.test.ts tests/reddit-community-view-page.test.tsx` (`10 files passed`, `72 tests passed`)
   - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
   - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+
+Continuation (same session, 2026-02-24) — MEDIA/GALLERY hardening pass (show/season/person reliability + diagnostics).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/ImageLightbox.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/photo-metadata.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/paginated-gallery-fetch.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-gallery-pagination.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-gallery-pagination.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-broken-toggle.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-gallery-batch-preflight.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-gallery-batch-preflight.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-gallery-section-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/gallery-fallback-telemetry.test.ts`
+- Changes:
+  - Person gallery audit mode:
+    - Added `Show Broken` toggle in person gallery toolbar (`showBrokenRows`, default off).
+    - Person photo fetch now sends `include_broken=true` only when toggle is enabled.
+    - Added broken card badge (`Broken`) and tooltip context for `broken_unreachable` rows.
+  - Person gallery diagnostics:
+    - Added fallback telemetry counters (`recovered`, `failed`, `attempted`) in gallery UI.
+    - Gallery card loader now emits attempt/recovered/failed events and logs all-candidate failure as before.
+  - Lightbox metadata visibility:
+    - Added additive gallery status fields to `PhotoMetadata` (`galleryStatus`, `galleryStatusReason`, `galleryStatusCheckedAt`).
+    - Mapped status values from metadata for person + season/show assets.
+    - Lightbox now surfaces `BROKEN (UNREACHABLE)` badge and status rows in Metadata Coverage when present.
+  - Show gallery hardening:
+    - Removed dead/disallowed section branches from section-visible defaults and grouping keys, keeping only:
+      - `cast_photos`
+      - `profile_pictures`
+      - `posters`
+      - `backdrops`
+  - Season batch preflight UX:
+    - Added deterministic preflight summary text in season batch modal using the same computed target plan as submit payload.
+  - Pagination metadata helper usage remains additive (`fetchAllPaginatedGalleryRowsWithMeta`) with truncation warnings preserved on show/season pages.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-gallery-broken-toggle.test.ts tests/show-gallery-pagination.test.ts tests/season-gallery-pagination.test.ts tests/show-gallery-batch-preflight.test.ts tests/season-gallery-batch-preflight.test.ts tests/show-gallery-section-visibility.test.ts tests/gallery-fallback-telemetry.test.ts` (`7 files passed`, `7 tests passed`).
+  - Additional regressions:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-gallery-thumbnail-wiring.test.ts tests/image-lightbox-metadata.test.tsx` (`2 files passed`, `13 tests passed`; expected jsdom `scrollTo` warnings only).
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/people-page-tabs-runtime.test.tsx tests/show-assets-image-sections.runtime.test.tsx` (`2 files passed`, `6 tests passed`; existing mocked fandom fetch stderr noise in runtime test path).
+
+Continuation (same session, 2026-02-24) — Networks sync hardening rollout (ops/deploy follow-through).
+- Scope:
+  - Confirmed TRR-APP proxy/UI surfaces new sync controls (`refresh_external_sources`, `resume_run_id`, runtime/batch passthrough) and run metadata render path.
+  - Executed production Vercel deploy for `apps/web`.
+- Execution details:
+  - Initial production deploy failed due lockfile mismatch in app-local lock:
+    - `apps/web/package.json` expected `eslint-config-next@16.1.6`
+    - `apps/web/pnpm-lock.yaml` pinned `eslint-config-next@15.5.0`
+  - Lock refresh:
+    - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm install --lockfile-only --ignore-workspace`
+  - Redeploy result:
+    - `vercel deploy --prod` succeeded.
+    - production deployment: `https://web-6s2s56rn1-the-reality-reports-projects.vercel.app`
+    - `vercel inspect` status: `Ready`.
+- Notes:
+  - Backend Cloud Run remains pending (separate auth blocker in backend handoff); app deploy is complete.
+
+Continuation (same session, 2026-02-24) — Bravo video thumbnail sync timeout hardening + RHOSLC videos smoke verification.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/bravo/videos/sync-thumbnails/route.ts`
+- Changes:
+  - Increased Bravo video thumbnail sync proxy timeout from `90s` to `15 minutes`:
+    - `BACKEND_TIMEOUT_MS = 15 * 60_000`
+  - Rationale: forced one-time thumbnail mirror/backfill can legitimately exceed 90s.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/api/admin/trr-api/shows/[showId]/bravo/videos/sync-thumbnails/route.ts'` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+- RHOSLC data-path smoke checks after forced backfill (UI-serving endpoints):
+  - Show videos: `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/bravo/videos?merge_person_sources=true`
+    - `count=58`, `hosted_count=58`, `non_hosted_count=0`
+  - Season videos: `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/bravo/videos?season_number=6&merge_person_sources=true`
+    - `count=58`, `hosted_count=58`, `non_hosted_count=0`
+  - Person videos (Heather Gay): `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/bravo/videos?person_id=a0f6454b-2ceb-4077-9e9a-a3b152e922f0&merge_person_sources=true`
+    - `count=17`, `hosted_count=17`, `non_hosted_count=0`

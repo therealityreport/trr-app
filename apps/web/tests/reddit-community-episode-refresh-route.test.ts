@@ -87,6 +87,9 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       subreddit: "BravoRealHousewives",
       fetched_at: "2026-02-24T12:00:00.000Z",
       sources_fetched: ["new"],
+      successful_sorts: ["new"],
+      failed_sorts: [],
+      rate_limited_sorts: [],
       candidates: [
         {
           reddit_post_id: "post-1",
@@ -99,8 +102,33 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
           num_comments: 55,
           posted_at: "2026-02-24T12:00:00.000Z",
           link_flair_text: "Salt Lake City",
+          episode_number: 4,
+          discussion_type: "live",
           source_sorts: ["new"],
           match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [
+        {
+          episode_number: 4,
+          live: {
+            post_count: 1,
+            total_comments: 55,
+            total_upvotes: 120,
+            top_post_id: "post-1",
+            top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/post-1/test/",
+          },
+          post: { post_count: 0, total_comments: 0, total_upvotes: 0, top_post_id: null, top_post_url: null },
+          weekly: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          total_posts: 1,
+          total_comments: 55,
+          total_upvotes: 120,
         },
       ],
       filters_applied: {
@@ -125,10 +153,25 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
 
     expect(response.status).toBe(200);
     expect(payload.meta?.season_context).toEqual({ season_id: SEASON_ID, season_number: 6 });
+    expect(payload.episode_matrix).toHaveLength(1);
+    expect(payload.meta?.effective_required_flares).toEqual(["Salt Lake City"]);
+    expect(payload.meta?.auto_seeded_required_flares).toBe(false);
+    expect(payload.meta?.successful_sorts).toEqual(["new"]);
+    expect(payload.meta?.failed_sorts).toEqual([]);
+    expect(payload.meta?.rate_limited_sorts).toEqual([]);
+    expect(payload.meta?.effective_episode_title_patterns).toEqual([
+      "Live Episode Discussion",
+      "Post Episode Discussion",
+      "Weekly Episode Discussion",
+    ]);
     expect(discoverEpisodeDiscussionThreadsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         seasonNumber: 6,
-        episodeTitlePatterns: ["Live Episode Discussion"],
+        episodeTitlePatterns: [
+          "Live Episode Discussion",
+          "Post Episode Discussion",
+          "Weekly Episode Discussion",
+        ],
         episodeRequiredFlares: ["Salt Lake City"],
       }),
     );
@@ -152,6 +195,59 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
         periodEnd: "2026-01-31T23:59:59.000Z",
       }),
     );
+  });
+
+  it("returns partial-sort diagnostics without failing refresh", async () => {
+    discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
+      subreddit: "BravoRealHousewives",
+      fetched_at: "2026-02-24T12:00:00.000Z",
+      sources_fetched: ["new", "top"],
+      successful_sorts: ["new", "top"],
+      failed_sorts: ["hot"],
+      rate_limited_sorts: ["hot"],
+      candidates: [],
+      episode_matrix: [],
+      filters_applied: {
+        season_number: 6,
+        title_patterns: ["Live Episode Discussion"],
+        required_flares: ["Salt Lake City"],
+        show_focused: false,
+        period_start: null,
+        period_end: null,
+      },
+    });
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.successful_sorts).toEqual(["new", "top"]);
+    expect(payload.meta?.failed_sorts).toEqual(["hot"]);
+    expect(payload.meta?.rate_limited_sorts).toEqual(["hot"]);
+  });
+
+  it("caps and sanitizes echoed period labels", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?period_label= Pre-Season  &period_label=Final%20Reunion&period_label=final%20reunion&period_label=${encodeURIComponent("x".repeat(240))}&period_label=One&period_label=Two&period_label=Three`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.period_context?.selected_period_labels).toEqual([
+      "Pre-Season",
+      "Final Reunion",
+      "x".repeat(120),
+      "One",
+      "Two",
+    ]);
   });
 
   it("returns 400 when period_start is invalid", async () => {
@@ -192,5 +288,48 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
         episodeRequiredFlares: ["Salt Lake City"],
       }),
     );
+  });
+
+  it("auto-seeds Salt Lake City flair for BravoRealHousewives RHOSLC rows when all-post flares are empty", async () => {
+    getRedditCommunityByIdMock.mockResolvedValueOnce({
+      id: COMMUNITY_ID,
+      trr_show_id: SHOW_ID,
+      trr_show_name: "The Real Housewives of Salt Lake City",
+      subreddit: "BravoRealHousewives",
+      is_show_focused: false,
+      episode_title_patterns: [],
+      analysis_all_flares: [],
+    });
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.auto_seeded_required_flares).toBe(true);
+    expect(payload.meta?.effective_required_flares).toEqual(["Salt Lake City"]);
+    expect(discoverEpisodeDiscussionThreadsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        episodeRequiredFlares: ["Salt Lake City"],
+      }),
+    );
+  });
+
+  it("rejects legacy params when provided", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?show_id=${SHOW_ID}&season_number=6`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("Legacy params");
+    expect(discoverEpisodeDiscussionThreadsMock).not.toHaveBeenCalled();
   });
 });

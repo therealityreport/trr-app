@@ -24,10 +24,19 @@ describe("season social load resilience wiring", () => {
     expect(contents).toMatch(/setSeasonSupplementalWarning\(message\)/);
   });
 
-  it("does not block season loading on bravo\/fandom supplemental requests", () => {
+  it("does not block season loading on supplemental requests", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/void Promise\.allSettled\(\[fetchSeasonBravoVideos\(\), fetchSeasonFandomData\(\)\]\)/);
-    expect(contents).not.toMatch(/await Promise\.all\(\[fetchSeasonBravoVideos\(\), fetchSeasonFandomData\(\)\]\)/);
+    expect(contents).toMatch(/void \(async \(\) => \{/);
+    expect(contents).toMatch(/const \[episodesResponse, castResponse\] = await Promise\.all\(\[/);
+    expect(contents).toMatch(
+      /useEffect\(\(\) => \{[\s\S]*activeTab !== "fandom"[\s\S]*void fetchSeasonFandomData\(\);/
+    );
+    expect(contents).toMatch(
+      /useEffect\(\(\) => \{[\s\S]*activeTab !== "videos"[\s\S]*void fetchSeasonBravoVideos\(\{ signal: controller\.signal \}\);/
+    );
+    expect(contents).not.toMatch(
+      /await Promise\.allSettled\(\[fetchSeasonBravoVideos\(\), fetchSeasonFandomData\(\)\]\)/
+    );
   });
 });

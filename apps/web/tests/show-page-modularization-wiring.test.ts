@@ -7,9 +7,9 @@ describe("show page modularization wiring", () => {
     const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/import \{ ShowTabsNav \} from "\.\/\_components\/ShowTabsNav"/);
-    expect(contents).toMatch(/import \{ ShowSeasonCards \} from "\.\/\_components\/ShowSeasonCards"/);
-    expect(contents).toMatch(/import \{ ShowAssetsImageSections \} from "\.\/\_components\/ShowAssetsImageSections"/);
+    expect(contents).toMatch(/import \{ ShowTabsNav \} from "@\/components\/admin\/show-tabs\/ShowTabsNav"/);
+    expect(contents).toMatch(/import \{ ShowSeasonCards \} from "@\/components\/admin\/show-tabs\/ShowSeasonCards"/);
+    expect(contents).toMatch(/import \{ ShowAssetsImageSections \} from "@\/components\/admin\/show-tabs\/ShowAssetsImageSections"/);
     expect(contents).toMatch(/<ShowTabsNav/);
     expect(contents).toMatch(/<ShowSeasonCards/);
     expect(contents).toMatch(/<ShowAssetsImageSections/);

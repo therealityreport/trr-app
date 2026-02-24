@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import type { Route } from "next";
 import Link from "next/link";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import {
@@ -9,7 +10,7 @@ import {
   humanizeSlug,
 } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { buildSeasonAdminUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
+import { buildSeasonAdminUrl, buildSeasonSocialWeekUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 
 /* ------------------------------------------------------------------ */
@@ -185,6 +186,26 @@ interface SocialRun {
   cancelled_at?: string | null;
 }
 
+interface CommentsCoverageResponse {
+  total_saved_comments: number;
+  total_reported_comments: number;
+  coverage_pct: number | null;
+  up_to_date: boolean;
+  stale_posts_count: number;
+  posts_scanned: number;
+  by_platform?: Record<
+    string,
+    {
+      saved_comments: number;
+      reported_comments: number;
+      coverage_pct: number | null;
+      up_to_date: boolean;
+      stale_posts_count: number;
+      posts_scanned: number;
+    }
+  >;
+}
+
 type PlatformFilter = "all" | "instagram" | "tiktok" | "twitter" | "youtube";
 type SortField = "engagement" | "likes" | "views" | "comments_count" | "shares" | "retweets" | "posted_at";
 type SortDir = "desc" | "asc";
@@ -244,10 +265,14 @@ const looksLikeUuid = (value: string): boolean => UUID_RE.test(value);
 const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running"]);
 const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
 const SOCIAL_TIME_ZONE = "America/New_York";
+const DATE_TOKEN_RE = /^\d{4}-\d{2}-\d{2}$/;
+const COMMENT_SYNC_MAX_PASSES = 8;
+const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = {
-  weekDetail: 20_000,
+  weekDetail: 45_000,
   syncRuns: 15_000,
   syncJobs: 15_000,
+  commentsCoverage: 35_000,
 } as const;
 const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 
@@ -314,6 +339,44 @@ const fmtDateTime = (iso: string | null | undefined): string => {
   });
 };
 
+const dateTokenFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: SOCIAL_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const dayLabelFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: SOCIAL_TIME_ZONE,
+  month: "short",
+  day: "numeric",
+});
+
+const toLocalDateToken = (iso: string | null | undefined): string | null => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = dateTokenFormatter.formatToParts(date);
+  const values: Record<string, string> = {};
+  for (const part of parts) {
+    if (part.type === "literal") continue;
+    values[part.type] = part.value;
+  }
+  if (!values.year || !values.month || !values.day) return null;
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
+const toDayFilterLabel = (token: string | null): string | null => {
+  if (!token || !DATE_TOKEN_RE.test(token)) return null;
+  const [yearRaw, monthRaw, dayRaw] = token.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  return dayLabelFormatter.format(date);
+};
+
 function getNum(post: AnyPost, key: string): number {
   return (post as unknown as Record<string, number>)[key] ?? 0;
 }
@@ -346,6 +409,11 @@ function formatSavedVsActualComments(saved: number, actual: number): string {
 
 function isCommentsCoverageIncomplete(saved: number, actual: number): boolean {
   return saved < actual;
+}
+
+function formatCoverageLabel(saved: number, actual: number): string {
+  const pct = actual > 0 ? Math.max(0, Math.min(100, (saved / actual) * 100)) : 100;
+  return `${fmtNum(saved)}/${fmtNum(actual)} (${pct.toFixed(1)}%)`;
 }
 
 function getReportedCommentCountFromStats(platform: string, stats: Record<string, number>): number {
@@ -495,12 +563,14 @@ function ThreadedCommentItem({
 function PostStatsDrawer({
   showId,
   seasonNumber,
+  seasonId,
   platform,
   sourceId,
   onClose,
 }: {
   showId: string;
   seasonNumber: string;
+  seasonId?: string | null;
   platform: string;
   sourceId: string;
   onClose: () => void;
@@ -513,10 +583,22 @@ function PostStatsDrawer({
 
   const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
     const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
-    const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
-    const res = await fetch(url, {
-      headers,
-    });
+    const params = new URLSearchParams();
+    if (seasonId) {
+      params.set("season_id", seasonId);
+    }
+    const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}${
+      params.toString() ? `?${params.toString()}` : ""
+    }`;
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers,
+        cache: "no-store",
+      },
+      REQUEST_TIMEOUT_MS.weekDetail,
+      "Post detail request timed out",
+    );
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(
@@ -524,7 +606,7 @@ function PostStatsDrawer({
       );
     }
     return (await res.json()) as PostDetailResponse;
-  }, [showId, seasonNumber, platform, sourceId]);
+  }, [seasonId, seasonNumber, showId, platform, sourceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -558,18 +640,29 @@ function PostStatsDrawer({
       setRefreshing(true);
       setRefreshError(null);
       const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
-      const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json",
+      const params = new URLSearchParams();
+      if (seasonId) {
+        params.set("season_id", seasonId);
+      }
+      const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}${
+        params.toString() ? `?${params.toString()}` : ""
+      }`;
+      const res = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            max_comments_per_post: 100000,
+            fetch_replies: true,
+          }),
         },
-        body: JSON.stringify({
-          max_comments_per_post: 100000,
-          fetch_replies: true,
-        }),
-      });
+        REQUEST_TIMEOUT_MS.weekDetail,
+        "Post comments refresh request timed out",
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as Record<string, string>).error || `HTTP ${res.status}`);
@@ -580,7 +673,7 @@ function PostStatsDrawer({
     } finally {
       setRefreshing(false);
     }
-  }, [showId, seasonNumber, platform, sourceId]);
+  }, [seasonId, showId, seasonNumber, platform, sourceId]);
 
   const reportedCommentsCount = data
     ? getReportedCommentCountFromStats(data.platform, data.stats)
@@ -830,11 +923,13 @@ function PostCard({
   post,
   showId,
   seasonNumber,
+  seasonId,
 }: {
   platform: string;
   post: AnyPost;
   showId: string;
   seasonNumber: string;
+  seasonId?: string | null;
 }) {
   const [statsOpen, setStatsOpen] = useState(false);
   const hashtags = getStrArr(post, "hashtags");
@@ -996,6 +1091,7 @@ function PostCard({
         <PostStatsDrawer
           showId={showId}
           seasonNumber={seasonNumber}
+          seasonId={seasonId}
           platform={platform}
           sourceId={post.source_id}
           onClose={() => setStatsOpen(false)}
@@ -1011,6 +1107,7 @@ function PostCard({
 
 export default function WeekDetailPage() {
   const { hasAccess: isAdmin, checking: authLoading } = useAdminGuard();
+  const router = useRouter();
   const params = useParams<{ showId: string; seasonNumber: string; weekIndex: string }>();
   const searchParams = useSearchParams();
   const { showId: showRouteParam, seasonNumber, weekIndex } = params;
@@ -1045,6 +1142,12 @@ export default function WeekDetailPage() {
   })();
   const socialPlatform = searchParams.get("social_platform");
   const socialView = searchParams.get("social_view");
+  const dayParam = searchParams.get("day");
+  const dayFilterFromQuery = dayParam && DATE_TOKEN_RE.test(dayParam) ? dayParam : null;
+  const socialPlatformFilterFromQuery: PlatformFilter =
+    socialPlatform === "instagram" || socialPlatform === "tiktok" || socialPlatform === "twitter" || socialPlatform === "youtube"
+      ? socialPlatform
+      : "all";
 
   const [data, setData] = useState<WeekDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1060,15 +1163,41 @@ export default function WeekDetailPage() {
   const [syncRun, setSyncRun] = useState<SocialRun | null>(null);
   const [syncJobs, setSyncJobs] = useState<SocialJob[]>([]);
   const [syncPollError, setSyncPollError] = useState<string | null>(null);
+  const [syncLastSuccessAt, setSyncLastSuccessAt] = useState<Date | null>(null);
   const [syncStartedAt, setSyncStartedAt] = useState<Date | null>(null);
+  const [syncPass, setSyncPass] = useState(0);
+  const [syncCoveragePreview, setSyncCoveragePreview] = useState<CommentsCoverageResponse | null>(null);
   const syncPollGenerationRef = useRef(0);
   const syncPollFailureCountRef = useRef(0);
+  const syncSessionGenerationRef = useRef(0);
+  const syncSessionStateRef = useRef<{
+    dateStart: string;
+    dateEnd: string;
+    platforms: Array<Exclude<PlatformFilter, "all">> | null;
+    maxPasses: number;
+    maxDurationMs: number;
+    startedAtMs: number;
+    pass: number;
+  } | null>(null);
   const resolvedSeasonId = useMemo(() => {
     if (data?.season?.season_id && looksLikeUuid(data.season.season_id)) {
       return data.season.season_id;
     }
     return seasonIdHint;
   }, [data, seasonIdHint]);
+
+  useEffect(() => {
+    setPlatformFilter(socialPlatformFilterFromQuery);
+  }, [socialPlatformFilterFromQuery]);
+
+  const activeDayFilter = useMemo(() => {
+    if (!dayFilterFromQuery || !data?.week) return null;
+    const weekStartToken = toLocalDateToken(data.week.start);
+    const weekEndToken = toLocalDateToken(data.week.end);
+    if (!weekStartToken || !weekEndToken) return null;
+    if (dayFilterFromQuery < weekStartToken || dayFilterFromQuery > weekEndToken) return null;
+    return dayFilterFromQuery;
+  }, [data, dayFilterFromQuery]);
 
   useEffect(() => {
     if (authLoading || !isAdmin) return;
@@ -1168,6 +1297,13 @@ export default function WeekDetailPage() {
     if (isAdmin) fetchData();
   }, [fetchData, hasValidNumericPathParams, invalidPathParamsError, isAdmin]);
 
+  useEffect(() => {
+    return () => {
+      syncSessionGenerationRef.current += 1;
+      syncSessionStateRef.current = null;
+    };
+  }, []);
+
   const fetchSyncProgress = useCallback(
     async (
       runId: string,
@@ -1187,12 +1323,12 @@ export default function WeekDetailPage() {
       }
       const jobsParams = new URLSearchParams({
         run_id: runId,
-        limit: "250",
+        limit: "100",
       });
       if (resolvedSeasonId) {
         jobsParams.set("season_id", resolvedSeasonId);
       }
-      const [runsResponse, jobsResponse] = await Promise.all([
+      const [runsResult, jobsResult] = await Promise.allSettled([
         fetchWithTimeout(
           `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runParams.toString()}`,
           { headers, cache: "no-store" },
@@ -1206,48 +1342,201 @@ export default function WeekDetailPage() {
           "Sync jobs request timed out",
         ),
       ]);
+      let runsError: string | null = null;
+      let jobsError: string | null = null;
+      let nextRun: SocialRun | null = null;
+      let nextJobs: SocialJob[] = [];
+      let runsLoaded = false;
+      let jobsLoaded = false;
 
-      if (!runsResponse.ok) {
-        const body = (await runsResponse.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Failed to load sync runs");
-      }
-      if (!jobsResponse.ok) {
-        const body = (await jobsResponse.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Failed to load sync jobs");
+      if (runsResult.status === "fulfilled") {
+        const runsResponse = runsResult.value;
+        if (!runsResponse.ok) {
+          const body = (await runsResponse.json().catch(() => ({}))) as { error?: string };
+          runsError = body.error ?? "Failed to load sync runs";
+        } else {
+          const runsPayload = (await runsResponse.json()) as { runs?: SocialRun[] };
+          nextRun = (runsPayload.runs ?? []).find((run) => run.id === runId) ?? null;
+          runsLoaded = true;
+        }
+      } else {
+        runsError = runsResult.reason instanceof Error ? runsResult.reason.message : "Failed to load sync runs";
       }
 
-      const runsPayload = (await runsResponse.json()) as { runs?: SocialRun[] };
-      const jobsPayload = (await jobsResponse.json()) as { jobs?: SocialJob[] };
-      const nextRun = (runsPayload.runs ?? []).find((run) => run.id === runId) ?? null;
-      const nextJobs = jobsPayload.jobs ?? [];
-      setSyncRun((current) => {
-        if (options?.preserveLastGoodRunIfMissing && !nextRun && current?.id === runId) {
-          return current;
+      if (jobsResult.status === "fulfilled") {
+        const jobsResponse = jobsResult.value;
+        if (!jobsResponse.ok) {
+          const body = (await jobsResponse.json().catch(() => ({}))) as { error?: string };
+          jobsError = body.error ?? "Failed to load sync jobs";
+        } else {
+          const jobsPayload = (await jobsResponse.json()) as { jobs?: SocialJob[] };
+          nextJobs = jobsPayload.jobs ?? [];
+          jobsLoaded = true;
         }
-        return nextRun;
-      });
-      setSyncJobs((current) => {
-        if (options?.preserveLastGoodJobsIfEmpty && nextJobs.length === 0 && current.length > 0) {
-          return current;
-        }
-        return nextJobs;
-      });
-      return { run: nextRun, jobs: nextJobs };
+      } else {
+        jobsError = jobsResult.reason instanceof Error ? jobsResult.reason.message : "Failed to load sync jobs";
+      }
+
+      if (!runsLoaded && !jobsLoaded) {
+        throw new Error(
+          runsError && jobsError ? `${runsError}; ${jobsError}` : runsError ?? jobsError ?? "Failed to load sync progress",
+        );
+      }
+
+      let effectiveRun: SocialRun | null = nextRun;
+      let effectiveJobs = nextJobs;
+      if (runsLoaded) {
+        setSyncRun((current) => {
+          const resolved =
+            options?.preserveLastGoodRunIfMissing && !nextRun && current?.id === runId ? current : nextRun;
+          effectiveRun = resolved;
+          return resolved;
+        });
+      }
+      if (jobsLoaded) {
+        setSyncJobs((current) => {
+          const resolved =
+            options?.preserveLastGoodJobsIfEmpty && nextJobs.length === 0 && current.length > 0 ? current : nextJobs;
+          effectiveJobs = resolved;
+          return resolved;
+        });
+      }
+      return { run: effectiveRun, jobs: effectiveJobs };
     },
     [hasValidNumericPathParams, invalidPathParamsError, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
   );
 
+  const queueSyncPass = useCallback(
+    async ({
+      pass,
+      dateStart,
+      dateEnd,
+      platforms,
+    }: {
+      pass: number;
+      dateStart: string;
+      dateEnd: string;
+      platforms: Array<Exclude<PlatformFilter, "all">> | null;
+    }) => {
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const payload: {
+        source_scope: SourceScope;
+        platforms?: Array<Exclude<PlatformFilter, "all">>;
+        max_posts_per_target: number;
+        max_comments_per_post: number;
+        max_replies_per_post: number;
+        fetch_replies: boolean;
+        ingest_mode: "comments_only";
+        sync_strategy: "incremental";
+        allow_inline_dev_fallback: boolean;
+        date_start: string;
+        date_end: string;
+      } = {
+        source_scope: sourceScope,
+        max_posts_per_target: 100000,
+        max_comments_per_post: 100000,
+        max_replies_per_post: 100000,
+        fetch_replies: true,
+        ingest_mode: "comments_only",
+        sync_strategy: "incremental",
+        allow_inline_dev_fallback: true,
+        date_start: dateStart,
+        date_end: dateEnd,
+      };
+      if (platforms && platforms.length > 0) {
+        payload.platforms = platforms;
+      }
+
+      const ingestParams = new URLSearchParams();
+      if (resolvedSeasonId) {
+        ingestParams.set("season_id", resolvedSeasonId);
+      }
+      const response = await fetch(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest${ingestParams.toString() ? `?${ingestParams.toString()}` : ""}`,
+        {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Failed to start sync pass ${pass}`);
+      }
+
+      const result = (await response.json().catch(() => ({}))) as {
+        run_id?: string;
+        queued_or_started_jobs?: number;
+      };
+      const runId = typeof result.run_id === "string" ? result.run_id : null;
+      const jobs = Number(result.queued_or_started_jobs ?? 0);
+      if (!runId) {
+        throw new Error(`Sync pass ${pass} started without a run id`);
+      }
+      setSyncRunId(runId);
+      setSyncRun(null);
+      setSyncJobs([]);
+      syncPollFailureCountRef.current = 0;
+      setSyncPass(pass);
+      void fetchSyncProgress(runId).catch(() => {});
+      return { runId, jobs };
+    },
+    [fetchSyncProgress, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+  );
+
+  const fetchCommentsCoverage = useCallback(
+    async ({
+      dateStart,
+      dateEnd,
+      platforms,
+    }: {
+      dateStart: string;
+      dateEnd: string;
+      platforms: Array<Exclude<PlatformFilter, "all">> | null;
+    }) => {
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const coverageParams = new URLSearchParams({
+        source_scope: sourceScope,
+        timezone: SOCIAL_TIME_ZONE,
+        date_start: dateStart,
+        date_end: dateEnd,
+      });
+      if (platforms && platforms.length > 0) {
+        coverageParams.set("platforms", platforms.join(","));
+      }
+      if (resolvedSeasonId) {
+        coverageParams.set("season_id", resolvedSeasonId);
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/comments-coverage?${coverageParams.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.commentsCoverage,
+        "Comments coverage request timed out",
+      );
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Failed to fetch comments coverage");
+      }
+      return (await response.json()) as CommentsCoverageResponse;
+    },
+    [resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+  );
+
   const syncAllCommentsForWeek = useCallback(async () => {
     if (!data) return;
+    const generation = ++syncSessionGenerationRef.current;
     try {
       setSyncingComments(true);
       setSyncError(null);
       setSyncPollError(null);
       setSyncMessage(null);
+      setSyncCoveragePreview(null);
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
       }
-      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
 
       const selectedPlatformEntries =
         platformFilter === "all"
@@ -1275,108 +1564,59 @@ export default function WeekDetailPage() {
           `All selected posts are already up to date (${postsAlreadyUpToDate} checked). No comment sync needed.`,
         );
         setSyncingComments(false);
+        syncSessionStateRef.current = null;
         return;
       }
 
-      const payload: {
-        source_scope: SourceScope;
-        platforms?: Array<Exclude<PlatformFilter, "all">>;
-        max_posts_per_target: number;
-        max_comments_per_post: number;
-        max_replies_per_post: number;
-        fetch_replies: boolean;
-        ingest_mode: "comments_only";
-        sync_strategy: "incremental";
-        date_start: string;
-        date_end: string;
-      } = {
-        source_scope: sourceScope,
-        max_posts_per_target: 100000,
-        max_comments_per_post: 100000,
-        max_replies_per_post: 100000,
-        fetch_replies: true,
-        ingest_mode: "comments_only",
-        sync_strategy: "incremental",
-        date_start: data.week.start,
-        date_end: data.week.end,
-      };
-
-      if (platformFilter !== "all") {
-        payload.platforms = [platformFilter];
-      } else {
+      let selectedPlatforms: Array<Exclude<PlatformFilter, "all">> | null =
+        platformFilter === "all" ? null : [platformFilter];
+      if (platformFilter === "all") {
         const scopedPlatformCount = platformEntries.length;
         const stalePlatformList = Array.from(stalePlatforms);
         if (stalePlatformList.length > 0 && stalePlatformList.length < scopedPlatformCount) {
-          payload.platforms = stalePlatformList;
+          selectedPlatforms = stalePlatformList;
         }
       }
 
-      const ingestParams = new URLSearchParams();
-      if (resolvedSeasonId) {
-        ingestParams.set("season_id", resolvedSeasonId);
-      }
-      const response = await fetch(
-        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest${ingestParams.toString() ? `?${ingestParams.toString()}` : ""}`,
-        {
-          method: "POST",
-          headers: {
-            ...headers,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Failed to start comment sync");
-      }
-
-      const result = (await response.json().catch(() => ({}))) as {
-        run_id?: string;
-        queued_or_started_jobs?: number;
+      syncSessionStateRef.current = {
+        dateStart: data.week.start,
+        dateEnd: data.week.end,
+        platforms: selectedPlatforms,
+        maxPasses: COMMENT_SYNC_MAX_PASSES,
+        maxDurationMs: COMMENT_SYNC_MAX_DURATION_MS,
+        startedAtMs: Date.now(),
+        pass: 1,
       };
 
-      const runId = typeof result.run_id === "string" ? result.run_id : null;
-      const jobs = Number(result.queued_or_started_jobs ?? 0);
       const platformLabel = platformFilter === "all" ? "all platforms" : PLATFORM_LABELS[platformFilter];
       const weekLabel = data.week.label || (data.week.week_index === 0 ? "Pre-Season" : `Week ${data.week.week_index}`);
+      setSyncStartedAt(new Date(syncSessionStateRef.current.startedAtMs));
+      setSyncPass(1);
+      const kickoff = await queueSyncPass({
+        pass: 1,
+        dateStart: data.week.start,
+        dateEnd: data.week.end,
+        platforms: selectedPlatforms,
+      });
+      if (generation !== syncSessionGenerationRef.current) return;
       setSyncMessage(
-        runId
-          ? `Sync queued for ${weekLabel} (${platformLabel}) · run ${runId.slice(0, 8)} · ${jobs} job(s) · ${postsNeedingSync} post(s) need updates, ${postsAlreadyUpToDate} up to date.`
-          : `Sync queued for ${weekLabel} (${platformLabel}).`
+        `Pass 1/${COMMENT_SYNC_MAX_PASSES} queued for ${weekLabel} (${platformLabel}) · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · ${postsNeedingSync} post(s) need updates, ${postsAlreadyUpToDate} up to date.`,
       );
-
-      if (runId) {
-        setSyncRunId(runId);
-        setSyncRun(null);
-        setSyncJobs([]);
-        syncPollFailureCountRef.current = 0;
-        setSyncStartedAt(new Date());
-        void fetchSyncProgress(runId).catch(() => {});
-      } else {
-        setSyncingComments(false);
-      }
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : "Failed to sync comments");
       setSyncingComments(false);
+      syncSessionStateRef.current = null;
     }
   }, [
     data,
-    fetchSyncProgress,
     hasValidNumericPathParams,
     invalidPathParamsError,
     platformFilter,
-    resolvedSeasonId,
-    seasonNumber,
-    showIdForApi,
-    sourceScope,
+    queueSyncPass,
   ]);
-
-  const syncRunStatus = syncRun?.status ?? null;
 
   useEffect(() => {
     if (!syncRunId || !syncingComments) return;
-    if (syncRunStatus && TERMINAL_RUN_STATUSES.has(syncRunStatus)) return;
 
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -1397,8 +1637,10 @@ export default function WeekDetailPage() {
         if (cancelled || generation !== syncPollGenerationRef.current) return;
         syncPollFailureCountRef.current = 0;
         setSyncPollError(null);
+        setSyncLastSuccessAt(new Date());
         const currentRun = snapshot.run;
         if (currentRun && TERMINAL_RUN_STATUSES.has(currentRun.status)) {
+          const session = syncSessionStateRef.current;
           const summary = currentRun.summary ?? {};
           const completedJobs = Number(summary.completed_jobs ?? 0);
           const failedJobs = Number(summary.failed_jobs ?? 0);
@@ -1411,17 +1653,76 @@ export default function WeekDetailPage() {
               : currentRun.status === "failed"
                 ? "failed"
                 : "complete";
-          let message = `Ingest ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
+          let terminalMessage = `Pass ${session?.pass ?? 1}/${session?.maxPasses ?? COMMENT_SYNC_MAX_PASSES} ingest ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
           if (totalJobs > 0) {
-            message += ` of ${totalJobs}`;
+            terminalMessage += ` of ${totalJobs}`;
           }
-          message += `, ${totalItems.toLocaleString()} scraped`;
+          terminalMessage += `, ${totalItems.toLocaleString()} scraped`;
           if (failedJobs > 0) {
-            message += ` · ${failedJobs} failed`;
+            terminalMessage += ` · ${failedJobs} failed`;
           }
-          setSyncMessage(message);
-          setSyncingComments(false);
-          void fetchData();
+
+          if (!session || currentRun.status === "cancelled") {
+            setSyncMessage(terminalMessage);
+            setSyncingComments(false);
+            syncSessionStateRef.current = null;
+            void fetchData();
+            return;
+          }
+
+          const coverage = await fetchCommentsCoverage({
+            dateStart: session.dateStart,
+            dateEnd: session.dateEnd,
+            platforms: session.platforms,
+          });
+          if (cancelled || generation !== syncPollGenerationRef.current) return;
+          setSyncCoveragePreview(coverage);
+
+          const coverageSaved = Number(coverage.total_saved_comments ?? 0);
+          const coverageReported = Number(coverage.total_reported_comments ?? 0);
+          const coverageLabel = formatCoverageLabel(coverageSaved, coverageReported);
+          if (coverage.up_to_date) {
+            setSyncMessage(`${terminalMessage} · Coverage ${coverageLabel} · Up-to-Date.`);
+            setSyncingComments(false);
+            syncSessionStateRef.current = null;
+            void fetchData();
+            return;
+          }
+
+          const elapsedMs = Date.now() - session.startedAtMs;
+          const nextPass = session.pass + 1;
+          const withinGuardrail = nextPass <= session.maxPasses && elapsedMs < session.maxDurationMs;
+          if (!withinGuardrail) {
+            setSyncMessage(
+              `${terminalMessage} · Coverage ${coverageLabel} · Stalled (guardrail reached after ${session.pass}/${session.maxPasses} passes).`,
+            );
+            setSyncingComments(false);
+            syncSessionStateRef.current = null;
+            void fetchData();
+            return;
+          }
+
+          const stalePlatforms = Object.entries(coverage.by_platform ?? {})
+            .filter(([, value]) => !value.up_to_date)
+            .map(([platform]) => platform)
+            .filter((platform): platform is Exclude<PlatformFilter, "all"> =>
+              platform === "instagram" || platform === "tiktok" || platform === "twitter" || platform === "youtube",
+            );
+          session.pass = nextPass;
+          session.platforms = stalePlatforms.length > 0 ? stalePlatforms : session.platforms;
+          setSyncPass(session.pass);
+          setSyncMessage(`${terminalMessage} · Coverage ${coverageLabel} · Auto-continuing pass ${session.pass}/${session.maxPasses}...`);
+
+          const kickoff = await queueSyncPass({
+            pass: session.pass,
+            dateStart: session.dateStart,
+            dateEnd: session.dateEnd,
+            platforms: session.platforms,
+          });
+          if (cancelled || generation !== syncPollGenerationRef.current) return;
+          setSyncMessage(
+            `Pass ${session.pass}/${session.maxPasses} queued · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · Coverage ${coverageLabel}.`,
+          );
           return;
         }
       } catch (err) {
@@ -1444,32 +1745,27 @@ export default function WeekDetailPage() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [fetchData, fetchSyncProgress, syncRunId, syncRunStatus, syncStartedAt, syncingComments]);
+  }, [
+    fetchCommentsCoverage,
+    fetchData,
+    fetchSyncProgress,
+    queueSyncPass,
+    syncRunId,
+    syncStartedAt,
+    syncingComments,
+  ]);
 
   useEffect(() => {
-    if (!syncingComments || !syncRunId || !syncRun) return;
-    if (!TERMINAL_RUN_STATUSES.has(syncRun.status)) return;
+    if (!syncingComments && syncPass !== 0) {
+      setSyncPass(0);
+    }
+  }, [syncPass, syncingComments]);
 
-    const summary = syncRun.summary ?? {};
-    const completedJobs = Number(summary.completed_jobs ?? 0);
-    const failedJobs = Number(summary.failed_jobs ?? 0);
-    const totalJobs = Math.max(Number(summary.total_jobs ?? 0), completedJobs + failedJobs);
-    const totalItems = Number(summary.items_found_total ?? 0);
-    const elapsed = syncStartedAt ? ` in ${Math.round((Date.now() - syncStartedAt.getTime()) / 1000)}s` : "";
-    const finalVerb =
-      syncRun.status === "cancelled" ? "cancelled" : syncRun.status === "failed" ? "failed" : "complete";
-    let message = `Ingest ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
-    if (totalJobs > 0) {
-      message += ` of ${totalJobs}`;
+  useEffect(() => {
+    if (!syncingComments) {
+      syncSessionStateRef.current = null;
     }
-    message += `, ${totalItems.toLocaleString()} scraped`;
-    if (failedJobs > 0) {
-      message += ` · ${failedJobs} failed`;
-    }
-    setSyncMessage(message);
-    setSyncingComments(false);
-    void fetchData();
-  }, [fetchData, syncRun, syncRunId, syncStartedAt, syncingComments]);
+  }, [syncingComments]);
 
   // Build merged post list with sort + search
   const allPosts = useMemo(() => {
@@ -1479,6 +1775,12 @@ export default function WeekDetailPage() {
     for (const [plat, pdata] of Object.entries(data.platforms)) {
       if (platformFilter !== "all" && plat !== platformFilter) continue;
       for (const post of pdata.posts) {
+        if (activeDayFilter) {
+          const postDayToken = toLocalDateToken(post.posted_at);
+          if (!postDayToken || postDayToken !== activeDayFilter) {
+            continue;
+          }
+        }
         if (needle) {
           const text = (post.text ?? "").toLowerCase();
           const author = (post.author ?? "").toLowerCase();
@@ -1505,11 +1807,31 @@ export default function WeekDetailPage() {
       });
     }
     return entries;
-  }, [data, platformFilter, sortField, sortDir, searchText]);
+  }, [activeDayFilter, data, platformFilter, sortField, sortDir, searchText]);
 
   // Filtered totals
   const filteredTotals = useMemo(() => {
     if (!data) return { posts: 0, total_comments: 0, total_engagement: 0 };
+    if (activeDayFilter) {
+      let posts = 0;
+      let totalComments = 0;
+      let totalEngagement = 0;
+      const platformEntries =
+        platformFilter === "all"
+          ? Object.entries(data.platforms)
+          : [[platformFilter, data.platforms[platformFilter]] as [string, PlatformData | undefined]];
+      for (const [platform, platformData] of platformEntries) {
+        if (!platformData) continue;
+        for (const post of platformData.posts) {
+          const postDayToken = toLocalDateToken(post.posted_at);
+          if (!postDayToken || postDayToken !== activeDayFilter) continue;
+          posts += 1;
+          totalComments += getActualCommentsForPost(platform, post);
+          totalEngagement += Number(post.engagement ?? 0);
+        }
+      }
+      return { posts, total_comments: totalComments, total_engagement: totalEngagement };
+    }
     if (platformFilter === "all") {
       return {
         posts: data.totals.posts,
@@ -1521,7 +1843,7 @@ export default function WeekDetailPage() {
     return pd?.totals
       ? { posts: pd.totals.posts, total_comments: pd.totals.total_comments, total_engagement: pd.totals.total_engagement }
       : { posts: 0, total_comments: 0, total_engagement: 0 };
-  }, [data, platformFilter]);
+  }, [activeDayFilter, data, platformFilter]);
 
   const filteredCommentCoverage = useMemo(() => {
     if (!data) return { saved: 0, actual: 0, incomplete: false };
@@ -1534,6 +1856,10 @@ export default function WeekDetailPage() {
     for (const [platform, platformData] of platformEntries) {
       if (!platformData) continue;
       for (const post of platformData.posts) {
+        if (activeDayFilter) {
+          const postDayToken = toLocalDateToken(post.posted_at);
+          if (!postDayToken || postDayToken !== activeDayFilter) continue;
+        }
         saved += getSavedCommentsForPost(post);
         actual += getActualCommentsForPost(platform, post);
       }
@@ -1543,13 +1869,34 @@ export default function WeekDetailPage() {
       actual,
       incomplete: isCommentsCoverageIncomplete(saved, actual),
     };
-  }, [data, platformFilter]);
+  }, [activeDayFilter, data, platformFilter]);
 
   const commentsSavedPct = useMemo(() => {
-    if (filteredCommentCoverage.actual <= 0) return 100;
-    const ratio = (filteredCommentCoverage.saved / filteredCommentCoverage.actual) * 100;
+    const effectiveCoverage =
+      syncingComments && syncCoveragePreview
+        ? {
+            saved: Number(syncCoveragePreview.total_saved_comments ?? 0),
+            actual: Number(syncCoveragePreview.total_reported_comments ?? 0),
+            incomplete: !Boolean(syncCoveragePreview.up_to_date),
+          }
+        : filteredCommentCoverage;
+    if (effectiveCoverage.actual <= 0) return 100;
+    const ratio = (effectiveCoverage.saved / effectiveCoverage.actual) * 100;
     return Math.max(0, Math.min(100, ratio));
-  }, [filteredCommentCoverage.actual, filteredCommentCoverage.saved]);
+  }, [filteredCommentCoverage, syncCoveragePreview, syncingComments]);
+
+  const displayedCommentCoverage = useMemo(() => {
+    if (syncingComments && syncCoveragePreview) {
+      const saved = Number(syncCoveragePreview.total_saved_comments ?? 0);
+      const actual = Number(syncCoveragePreview.total_reported_comments ?? 0);
+      return {
+        saved,
+        actual,
+        incomplete: isCommentsCoverageIncomplete(saved, actual),
+      };
+    }
+    return filteredCommentCoverage;
+  }, [filteredCommentCoverage, syncCoveragePreview, syncingComments]);
 
   const syncProgress = useMemo(() => {
     const summary = syncRun?.summary ?? {};
@@ -1667,7 +2014,10 @@ export default function WeekDetailPage() {
         const itemsLabel =
           !counters && typeof job.items_found === "number" ? ` · ${job.items_found.toLocaleString()} items` : "";
         const errorLabel = job.status === "failed" && job.error_message ? ` · ${job.error_message}` : "";
-        return `${timestamp} · ${platform}${account} ${stage} ${job.status}${countersLabel}${itemsLabel}${persistLabel}${activityLabel}${skippedLabel}${errorLabel}`;
+        return {
+          id: job.id,
+          line: `${timestamp} · ${platform}${account} ${stage} ${job.status}${countersLabel}${itemsLabel}${persistLabel}${activityLabel}${skippedLabel}${errorLabel}`,
+        };
       });
   }, [syncJobs]);
 
@@ -1756,6 +2106,36 @@ export default function WeekDetailPage() {
 
       {data && !loading && (
         <>
+          {activeDayFilter && (
+            <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+              <span className="font-semibold">
+                Day filter: {toDayFilterLabel(activeDayFilter) ?? activeDayFilter}
+              </span>
+              <span className="text-xs text-zinc-500">
+                Showing posts captured on this local day only.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextQuery = new URLSearchParams(searchParams.toString());
+                  nextQuery.delete("day");
+                  router.replace(
+                    buildSeasonSocialWeekUrl({
+                      showSlug: showSlugForRouting,
+                      seasonNumber,
+                      weekIndex: weekIndexInt,
+                      query: nextQuery,
+                    }) as Route,
+                    { scroll: false },
+                  );
+                }}
+                className="ml-auto rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+              >
+                Clear day filter
+              </button>
+            </div>
+          )}
+
           {/* Platform filter tabs */}
           <div className="flex flex-wrap gap-2 mb-4">
             {PLATFORM_FILTERS.map((tab) => (
@@ -1931,14 +2311,19 @@ export default function WeekDetailPage() {
                   Progress refresh issue: {syncPollError}. Retrying automatically.
                 </p>
               )}
+              {syncingComments && syncLastSuccessAt && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Last successful progress refresh: {fmtDateTime(syncLastSuccessAt.toISOString())}
+                </p>
+              )}
 
               {syncLogs.length > 0 && (
                 <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
                   <p className="text-xs font-medium text-gray-700">Recent Run Log</p>
                   <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
-                    {syncLogs.map((line, index) => (
-                      <p key={`${line}-${index}`} className="text-xs text-gray-600">
-                        {line}
+                    {syncLogs.map((entry) => (
+                      <p key={entry.id} className="text-xs text-gray-600">
+                        {entry.line}
                       </p>
                     ))}
                   </div>
@@ -1971,12 +2356,12 @@ export default function WeekDetailPage() {
               <div className="text-2xl font-bold text-gray-900">{commentsSavedPct.toFixed(1)}%</div>
               <div className="text-xs text-gray-500 mt-1">of Comments Saved</div>
               <div className="text-xs text-gray-500 mt-1">
-                {formatSavedVsActualComments(filteredCommentCoverage.saved, filteredCommentCoverage.actual)}
-                {filteredCommentCoverage.incomplete ? "*" : ""} Comments (Saved/Actual)
+                {formatSavedVsActualComments(displayedCommentCoverage.saved, displayedCommentCoverage.actual)}
+                {displayedCommentCoverage.incomplete ? "*" : ""} Comments (Saved/Actual)
               </div>
             </div>
           </div>
-          {filteredCommentCoverage.incomplete && (
+          {displayedCommentCoverage.incomplete && (
             <p className="mb-5 -mt-3 text-xs text-gray-500">
               * Not all platform-reported comments are saved in Supabase yet.
             </p>
@@ -1985,7 +2370,7 @@ export default function WeekDetailPage() {
           {/* Post cards */}
           {allPosts.length === 0 ? (
             <div className="text-center text-gray-500 py-12">
-              No posts found for this week.
+              {activeDayFilter ? "No posts found for this day." : "No posts found for this week."}
             </div>
           ) : (
             <div className="space-y-4">
@@ -1996,6 +2381,7 @@ export default function WeekDetailPage() {
                   post={post}
                   showId={showIdForApi}
                   seasonNumber={seasonNumber}
+                  seasonId={resolvedSeasonId}
                 />
               ))}
             </div>

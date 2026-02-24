@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
+
 const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
@@ -22,7 +24,7 @@ describe("show cast-matrix sync proxy route", () => {
     getBackendApiUrlMock.mockReset();
     vi.restoreAllMocks();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/shows/show-1/cast-matrix/sync"
     );

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
+const SHOW_ROLES_CACHE_NAMESPACE = "admin-show-roles";
+const CAST_ROLE_MEMBERS_CACHE_NAMESPACE = "admin-show-cast-role-members";
 
 interface RouteParams {
   params: Promise<{ showId: string }>;
@@ -11,7 +14,7 @@ interface RouteParams {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   let backendUrl: string | null = null;
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { showId } = await params;
 
     if (!showId) {
@@ -52,6 +55,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             : "Cast matrix sync failed";
       return NextResponse.json({ error }, { status: response.status });
     }
+    invalidateRouteResponseCache(SHOW_ROLES_CACHE_NAMESPACE, `${user.uid}:${showId}:`);
+    invalidateRouteResponseCache(CAST_ROLE_MEMBERS_CACHE_NAMESPACE, `${user.uid}:${showId}:`);
 
     return NextResponse.json(data);
   } catch (error) {

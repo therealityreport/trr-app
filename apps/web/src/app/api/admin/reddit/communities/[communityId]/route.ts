@@ -65,7 +65,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       network_focus_targets?: unknown;
       franchise_focus_targets?: unknown;
       episode_title_patterns?: unknown;
-      episode_required_flares?: unknown;
     };
 
     let analysisFlares: string[] | undefined;
@@ -127,17 +126,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
       episodeTitlePatterns = body.episode_title_patterns as string[];
     }
-
-    let episodeRequiredFlares: string[] | undefined;
-    if (body.episode_required_flares !== undefined) {
-      if (!Array.isArray(body.episode_required_flares)) {
-        return NextResponse.json({ error: "episode_required_flares must be an array of strings" }, { status: 400 });
-      }
-      const hasInvalidValue = body.episode_required_flares.some((value) => typeof value !== "string");
-      if (hasInvalidValue) {
-        return NextResponse.json({ error: "episode_required_flares must be an array of strings" }, { status: 400 });
-      }
-      episodeRequiredFlares = body.episode_required_flares as string[];
+    if ("episode_required_flares" in body) {
+      return NextResponse.json(
+        { error: "episode_required_flares is no longer supported; use analysis_all_flares" },
+        { status: 400 },
+      );
     }
 
     let subreddit: string | undefined;
@@ -167,7 +160,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       networkFocusTargets,
       franchiseFocusTargets,
       episodeTitlePatterns,
-      episodeRequiredFlares,
     });
 
     if (!community) {

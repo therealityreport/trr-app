@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 
@@ -194,5 +194,79 @@ describe("ImageLightbox metadata panel", () => {
 
     expect(screen.getAllByRole("button", { name: "Edit" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "Star/Flag" }).length).toBeGreaterThan(0);
+  });
+
+  it("supports setting featured poster through management actions", async () => {
+    const onSetFeaturedPoster = vi.fn(async () => {});
+
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        canManage
+        onSetFeaturedPoster={onSetFeaturedPoster}
+      />
+    );
+
+    openMetadataPanel();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Set as Featured Poster" })[0]);
+    await waitFor(() => expect(onSetFeaturedPoster).toHaveBeenCalledTimes(1));
+  });
+
+  it("supports setting featured backdrop through management actions", async () => {
+    const onSetFeaturedBackdrop = vi.fn(async () => {});
+
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        canManage
+        onSetFeaturedBackdrop={onSetFeaturedBackdrop}
+      />
+    );
+
+    openMetadataPanel();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Set as Featured Backdrop" })[0]);
+    await waitFor(() => expect(onSetFeaturedBackdrop).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows featured state labels and disabled reasons for ineligible featured actions", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        canManage
+        isFeaturedPoster
+        actionDisabledReasons={{
+          featuredBackdrop: "Featured backdrop selection is unavailable for this image.",
+        }}
+      />
+    );
+
+    openMetadataPanel();
+
+    const featuredPosterButtons = screen.getAllByRole("button", { name: "Featured Poster" });
+    expect(featuredPosterButtons.length).toBeGreaterThan(0);
+
+    const featuredBackdropButtons = screen.getAllByRole("button", {
+      name: "Set as Featured Backdrop",
+    });
+    expect(featuredBackdropButtons.length).toBeGreaterThan(0);
+    expect(featuredBackdropButtons[0]).toBeDisabled();
+    expect(featuredBackdropButtons[0]).toHaveAttribute(
+      "title",
+      "Featured backdrop selection is unavailable for this image."
+    );
   });
 });

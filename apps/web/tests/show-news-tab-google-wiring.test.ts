@@ -16,6 +16,16 @@ describe("show news tab google wiring", () => {
     expect(contents).toMatch(/setNewsPersonFilter/);
     expect(contents).toMatch(/setNewsTopicFilter/);
     expect(contents).toMatch(/setNewsSeasonFilter/);
+    expect(contents).toMatch(/newsRequestSeqRef/);
+    expect(contents).toMatch(/newsInFlightQueryKeyRef/);
+    expect(contents).toMatch(/pendingNewsReloadRef/);
+    expect(contents).toMatch(/pendingNewsReloadArgsRef/);
+    expect(contents).toMatch(/newsCursorQueryKeyRef/);
+    expect(contents).toMatch(/shouldAppend && \(!newsNextCursor \|\| newsCursorQueryKeyRef\.current !== queryKey\)/);
+    expect(contents).toMatch(/setNewsNextCursor\(null\);\s*newsCursorQueryKeyRef\.current = null;/);
+    expect(contents).toMatch(/Failed to load more news:/);
+    expect(contents).toMatch(/setNewsFacets/);
+    expect(contents).not.toMatch(/filteredUnifiedNews/);
   });
 
   it("wires Google News URL settings persistence via entity links", () => {

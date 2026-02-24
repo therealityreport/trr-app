@@ -37,8 +37,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const proxyParams = new URLSearchParams(request.nextUrl.searchParams);
     proxyParams.delete("format");
+    const seasonIdHintRaw = proxyParams.get("season_id");
+    if (seasonIdHintRaw && !isValidUuid(seasonIdHintRaw)) {
+      return NextResponse.json(
+        { error: "season_id must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    const seasonIdHint = seasonIdHintRaw ?? undefined;
+    proxyParams.delete("season_id");
     const response = await fetchSeasonBackendResponse(showId, seasonNumber, seasonPath, {
       queryString: proxyParams.toString(),
+      seasonIdHint,
       fallbackError: `Failed to export ${format.toUpperCase()}`,
       retries: 2,
       timeoutMs: 45_000,

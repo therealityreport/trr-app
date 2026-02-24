@@ -83,6 +83,9 @@ describe("Admin networks page auth + sync UI", () => {
       generated_at: "2026-02-19T00:00:00.000Z",
     };
     const syncPayload = {
+      run_id: "network-streaming-20260224T210000Z",
+      status: "stopped",
+      resume_cursor: { entity_type: "network", entity_key: "bravo" },
       entities_synced: 2,
       providers_synced: 4,
       links_enriched: 3,
@@ -155,7 +158,16 @@ describe("Admin networks page auth + sync UI", () => {
       headers: {
         "Content-Type": "application/json",
       },
+      body: JSON.stringify({
+        unresolved_only: false,
+        refresh_external_sources: false,
+        batch_size: 25,
+        max_runtime_sec: 840,
+      }),
     });
+
+    expect(screen.getByText(/Run: network-streaming-20260224T210000Z/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume Sync" })).toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: /Hide unresolved/ })).toBeInTheDocument();
     expect(screen.getAllByText("Bravo").length).toBeGreaterThan(0);

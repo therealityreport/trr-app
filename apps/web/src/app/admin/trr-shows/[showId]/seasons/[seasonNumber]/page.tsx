@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useDeferredValue, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -24,6 +24,12 @@ import SeasonSocialAnalyticsSection, {
 } from "@/components/admin/season-social-analytics-section";
 import SeasonSurveysTab from "@/components/admin/season-tabs/SeasonSurveysTab";
 import SeasonOverviewTab from "@/components/admin/season-tabs/SeasonOverviewTab";
+import SeasonEpisodesTab from "@/components/admin/season-tabs/SeasonEpisodesTab";
+import SeasonAssetsTab from "@/components/admin/season-tabs/SeasonAssetsTab";
+import SeasonVideosTab from "@/components/admin/season-tabs/SeasonVideosTab";
+import SeasonFandomTab from "@/components/admin/season-tabs/SeasonFandomTab";
+import SeasonCastTab from "@/components/admin/season-tabs/SeasonCastTab";
+import SeasonSocialTab from "@/components/admin/season-tabs/SeasonSocialTab";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { resolveGalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import {
@@ -86,10 +92,16 @@ import {
 } from "@/lib/admin/show-admin-routes";
 import {
   parseSeasonCastRouteState,
+  writeShowCastRouteState,
   writeSeasonCastRouteState,
 } from "@/lib/admin/cast-route-state";
-import { fetchWithTimeout } from "@/lib/admin/admin-fetch";
-import { fetchAllPaginatedGalleryRows } from "@/lib/admin/paginated-gallery-fetch";
+import {
+  AdminRequestError,
+  adminGetJson,
+  adminMutation,
+  fetchWithTimeout,
+} from "@/lib/admin/admin-fetch";
+import { fetchAllPaginatedGalleryRowsWithMeta } from "@/lib/admin/paginated-gallery-fetch";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 interface TrrShow {
@@ -174,6 +186,11 @@ interface BravoVideoItem {
   runtime?: string | null;
   kicker?: string | null;
   image_url?: string | null;
+  hosted_image_url?: string | null;
+  original_image_url?: string | null;
+  media_asset_id?: string | null;
+  thumbnail_sync_status?: string | null;
+  thumbnail_sync_error?: string | null;
   clip_url: string;
   season_number?: number | null;
   published_at?: string | null;
@@ -263,6 +280,7 @@ const SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS = 2;
 const SEASON_CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const SEASON_CAST_INCREMENTAL_INITIAL_LIMIT = 48;
 const SEASON_CAST_INCREMENTAL_BATCH_SIZE = 48;
+const SEASON_BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
 const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
 
 const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
@@ -424,6 +442,7 @@ function GalleryImage({
   src,
   srcCandidates,
   diagnosticKey,
+  onFallbackEvent,
   alt,
   sizes = "200px",
   className = "object-cover",
@@ -432,6 +451,7 @@ function GalleryImage({
   src: string;
   srcCandidates?: string[];
   diagnosticKey?: string;
+  onFallbackEvent?: (event: "attempt" | "recovered" | "failed") => void;
   alt: string;
   sizes?: string;
   className?: string;
@@ -452,12 +472,26 @@ function GalleryImage({
   const [hasError, setHasError] = useState(false);
   const [currentSrc, setCurrentSrc] = useState(src);
   const [fallbackIndex, setFallbackIndex] = useState(0);
+  const telemetryStateRef = useRef({
+    attempted: false,
+    recovered: false,
+    failed: false,
+  });
 
   useEffect(() => {
     setHasError(false);
     setCurrentSrc(src);
     setFallbackIndex(0);
-  }, [src, fallbackCandidates]);
+    telemetryStateRef.current = {
+      attempted: false,
+      recovered: false,
+      failed: false,
+    };
+    if (onFallbackEvent && !telemetryStateRef.current.attempted) {
+      onFallbackEvent("attempt");
+      telemetryStateRef.current.attempted = true;
+    }
+  }, [src, fallbackCandidates, onFallbackEvent]);
 
   const handleError = () => {
     const nextCandidate = fallbackCandidates[fallbackIndex] ?? null;
@@ -471,6 +505,10 @@ function GalleryImage({
         asset: diagnosticKey,
         attempted: fallbackCandidates.length + 1,
       });
+    }
+    if (onFallbackEvent && !telemetryStateRef.current.failed) {
+      onFallbackEvent("failed");
+      telemetryStateRef.current.failed = true;
     }
     setHasError(true);
   };
@@ -497,6 +535,12 @@ function GalleryImage({
       sizes={sizes}
       unoptimized
       onError={handleError}
+      onLoad={() => {
+        if (onFallbackEvent && currentSrc !== src && !telemetryStateRef.current.recovered) {
+          onFallbackEvent("recovered");
+          telemetryStateRef.current.recovered = true;
+        }
+      }}
     />
   );
 }
@@ -782,6 +826,10 @@ export default function SeasonDetailPage() {
 
   useEffect(() => {
     activeSeasonRequestKeyRef.current = `${showId}:${seasonNumber}`;
+    bravoVideoSyncAttemptedRef.current = false;
+    bravoVideoSyncInFlightRef.current = null;
+    setBravoVideoSyncWarning(null);
+    setBravoVideoSyncing(false);
   }, [seasonNumber, showId]);
 
   const [show, setShow] = useState<TrrShow | null>(null);
@@ -790,6 +838,12 @@ export default function SeasonDetailPage() {
   const [episodes, setEpisodes] = useState<TrrEpisode[]>([]);
   const [assets, setAssets] = useState<SeasonAsset[]>([]);
   const [assetsVisibleCount, setAssetsVisibleCount] = useState(120);
+  const [assetsTruncatedWarning, setAssetsTruncatedWarning] = useState<string | null>(null);
+  const [galleryFallbackTelemetry, setGalleryFallbackTelemetry] = useState({
+    fallbackRecoveredCount: 0,
+    allCandidatesFailedCount: 0,
+    totalImageAttempts: 0,
+  });
   const [cast, setCast] = useState<SeasonCastMember[]>([]);
   const [seasonCastSource, setSeasonCastSource] = useState<SeasonCastSource>("season_evidence");
   const [seasonCastEligibilityWarning, setSeasonCastEligibilityWarning] = useState<string | null>(null);
@@ -797,6 +851,10 @@ export default function SeasonDetailPage() {
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
   const [bravoVideosLoading, setBravoVideosLoading] = useState(false);
   const [bravoVideosError, setBravoVideosError] = useState<string | null>(null);
+  const [bravoVideoSyncing, setBravoVideoSyncing] = useState(false);
+  const [bravoVideoSyncWarning, setBravoVideoSyncWarning] = useState<string | null>(null);
+  const bravoVideoSyncAttemptedRef = useRef(false);
+  const bravoVideoSyncInFlightRef = useRef<Promise<boolean> | null>(null);
   const [seasonFandomData, setSeasonFandomData] = useState<TrrSeasonFandom[]>([]);
   const [seasonFandomLoading, setSeasonFandomLoading] = useState(false);
   const [seasonFandomError, setSeasonFandomError] = useState<string | null>(null);
@@ -876,9 +934,31 @@ export default function SeasonDetailPage() {
   const showCastFetchAttemptedRef = useRef(false);
   const castRoleMembersLoadInFlightRef = useRef<Promise<void> | null>(null);
   const castRoleMembersLoadedOnceRef = useRef(false);
+
+  const trackGalleryFallbackEvent = useCallback((event: "attempt" | "recovered" | "failed") => {
+    setGalleryFallbackTelemetry((prev) => {
+      if (event === "attempt") {
+        return {
+          ...prev,
+          totalImageAttempts: prev.totalImageAttempts + 1,
+        };
+      }
+      if (event === "recovered") {
+        return {
+          ...prev,
+          fallbackRecoveredCount: prev.fallbackRecoveredCount + 1,
+        };
+      }
+      return {
+        ...prev,
+        allCandidatesFailedCount: prev.allCandidatesFailedCount + 1,
+      };
+    });
+  }, []);
   const castRoleMembersSnapshotRef = useRef<CastRoleMember[]>([]);
   const castRefreshAbortControllerRef = useRef<AbortController | null>(null);
   const castEnrichAbortControllerRef = useRef<AbortController | null>(null);
+  const personRefreshAbortControllersRef = useRef<Record<string, AbortController>>({});
   const appendRefreshLog = useCallback(
     (
       entry: Omit<SeasonRefreshLogEntry, "id" | "ts"> & {
@@ -947,6 +1027,12 @@ export default function SeasonDetailPage() {
     () => parseSeasonCastRouteState(new URLSearchParams(searchParams.toString())),
     [searchParams]
   );
+  const abortInFlightPersonRefreshRuns = useCallback(() => {
+    for (const controller of Object.values(personRefreshAbortControllersRef.current)) {
+      controller.abort();
+    }
+    personRefreshAbortControllersRef.current = {};
+  }, []);
 
   useEffect(() => {
     setActiveTab(seasonRouteState.tab);
@@ -977,6 +1063,7 @@ export default function SeasonDetailPage() {
     }, 250);
     return () => clearTimeout(timeoutId);
   }, [castSearchQuery]);
+  const castSearchQueryDeferred = useDeferredValue(castSearchQuery.trim().toLowerCase());
 
   const showSlugForRouting = useMemo(() => {
     const canonical = show?.canonical_slug?.trim();
@@ -1281,15 +1368,14 @@ export default function SeasonDetailPage() {
         let lastError: unknown = null;
         for (let attempt = 1; attempt <= SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS; attempt += 1) {
           try {
-            const response = await fetchWithTimeout(
+            const data = await adminGetJson<unknown[]>(
               `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
-              { headers, cache: "no-store" },
-              SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS
+              {
+                headers,
+                cache: "no-store",
+                timeoutMs: SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS,
+              }
             );
-            const data = (await response.json().catch(() => ({}))) as { error?: string };
-            if (!response.ok) {
-              throw new Error(data.error || "Failed to load cast role members");
-            }
             setCastRoleMembers(
               (Array.isArray(data) ? data : []).map((row) => {
                 const roles = Array.isArray((row as { roles?: unknown }).roles)
@@ -1331,13 +1417,16 @@ export default function SeasonDetailPage() {
           }
         }
 
-        const message = isAbortError(lastError)
-          ? `Timed out loading cast role members after ${Math.round(
-              SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS / 1000
-            )}s`
-          : lastError instanceof Error
+        const message =
+          lastError instanceof AdminRequestError
             ? lastError.message
-            : "Failed to load cast role members";
+            : isAbortError(lastError)
+              ? `Timed out loading cast role members after ${Math.round(
+                  SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS / 1000
+                )}s`
+              : lastError instanceof Error
+                ? lastError.message
+                : "Failed to load cast role members";
         const hasPriorData =
           castRoleMembersLoadedOnceRef.current || castRoleMembersSnapshotRef.current.length > 0;
         if (hasPriorData) {
@@ -1367,41 +1456,127 @@ export default function SeasonDetailPage() {
     ]
   );
 
-  const fetchSeasonBravoVideos = useCallback(async () => {
+  const syncSeasonBravoVideoThumbnails = useCallback(
+    async (
+      options?: { force?: boolean; signal?: AbortSignal }
+    ): Promise<boolean> => {
+      const force = options?.force ?? false;
+      const signal = options?.signal;
+      const requestShowId = showId;
+      const requestSeasonNumber = seasonNumber;
+      const requestKey = `${requestShowId}:${requestSeasonNumber}`;
+      if (!requestShowId || !Number.isFinite(requestSeasonNumber)) return false;
+      if (signal?.aborted) return false;
+      if (bravoVideoSyncInFlightRef.current) {
+        return await bravoVideoSyncInFlightRef.current;
+      }
+
+      const request = (async (): Promise<boolean> => {
+        try {
+          if (!isCurrentSeasonRequest(requestKey)) return false;
+          setBravoVideoSyncing(true);
+          setBravoVideoSyncWarning(null);
+          const headers = await getAuthHeaders();
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${requestShowId}/bravo/videos/sync-thumbnails`,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({ force }),
+              cache: "no-store",
+            },
+            SEASON_BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS,
+            signal
+          );
+          const data = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            video_thumbnail_sync?: { attempted?: number; synced?: number; failed?: number };
+          };
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to sync season video thumbnails");
+          }
+          const attempted = Number(data.video_thumbnail_sync?.attempted ?? 0);
+          const synced = Number(data.video_thumbnail_sync?.synced ?? 0);
+          const failed = Number(data.video_thumbnail_sync?.failed ?? 0);
+          if (!isCurrentSeasonRequest(requestKey)) return false;
+          if (attempted > 0 || synced > 0 || failed > 0) {
+            setBravoVideoSyncWarning(
+              `Video thumbnail sync: ${synced} synced, ${failed} failed${attempted > 0 ? ` (${attempted} attempted)` : ""}.`
+            );
+          }
+          return true;
+        } catch (error) {
+          if (!isCurrentSeasonRequest(requestKey) || signal?.aborted || isAbortError(error)) return false;
+          setBravoVideoSyncWarning(
+            error instanceof Error ? error.message : "Failed to sync season video thumbnails"
+          );
+          return false;
+        } finally {
+          if (isCurrentSeasonRequest(requestKey)) {
+            setBravoVideoSyncing(false);
+          }
+        }
+      })();
+
+      bravoVideoSyncInFlightRef.current = request;
+      try {
+        return await request;
+      } finally {
+        if (bravoVideoSyncInFlightRef.current === request) {
+          bravoVideoSyncInFlightRef.current = null;
+        }
+      }
+    },
+    [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]
+  );
+
+  const fetchSeasonBravoVideos = useCallback(async (options?: { signal?: AbortSignal; forceSync?: boolean }) => {
+    const signal = options?.signal;
+    const forceSync = options?.forceSync ?? false;
     const requestShowId = showId;
     const requestSeasonNumber = seasonNumber;
     const requestKey = `${requestShowId}:${requestSeasonNumber}`;
     if (!requestShowId) return;
     if (!Number.isFinite(requestSeasonNumber)) return;
+    if (signal?.aborted) return;
     if (!isCurrentSeasonRequest(requestKey)) return;
     setBravoVideosLoading(true);
     setBravoVideosError(null);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(
+      if (forceSync || !bravoVideoSyncAttemptedRef.current) {
+        bravoVideoSyncAttemptedRef.current = true;
+        await syncSeasonBravoVideoThumbnails({ force: forceSync, signal });
+      }
+
+      const response = await fetchWithTimeout(
         `/api/admin/trr-api/shows/${requestShowId}/bravo/videos?season_number=${requestSeasonNumber}&merge_person_sources=true`,
         {
           headers,
           cache: "no-store",
-        }
+          signal,
+        },
+        SEASON_ASSET_LOAD_TIMEOUT_MS,
+        signal
       );
       const data = (await response.json().catch(() => ({}))) as {
         videos?: BravoVideoItem[];
         error?: string;
       };
+      if (signal?.aborted) return;
       if (!response.ok) {
         throw new Error(data.error || "Failed to fetch season videos");
       }
       if (!isCurrentSeasonRequest(requestKey)) return;
       setBravoVideos(Array.isArray(data.videos) ? data.videos : []);
     } catch (err) {
-      if (!isCurrentSeasonRequest(requestKey)) return;
+      if (!isCurrentSeasonRequest(requestKey) || signal?.aborted || isAbortError(err)) return;
       setBravoVideosError(err instanceof Error ? err.message : "Failed to fetch season videos");
     } finally {
       if (!isCurrentSeasonRequest(requestKey)) return;
       setBravoVideosLoading(false);
     }
-  }, [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId]);
+  }, [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId, syncSeasonBravoVideoThumbnails]);
 
   const fetchSeasonFandomData = useCallback(async () => {
     const requestShowId = showId;
@@ -1635,6 +1810,7 @@ export default function SeasonDetailPage() {
   useEffect(() => {
     castRefreshAbortControllerRef.current?.abort();
     castEnrichAbortControllerRef.current?.abort();
+    abortInFlightPersonRefreshRuns();
     castRefreshAbortControllerRef.current = null;
     castEnrichAbortControllerRef.current = null;
     setAllowPlaceholderMediaOverride(false);
@@ -1664,7 +1840,7 @@ export default function SeasonDetailPage() {
     setAssetsRefreshLogOpen(false);
     setCastRefreshLogOpen(false);
     refreshLogCounterRef.current = 0;
-  }, [season?.id]);
+  }, [abortInFlightPersonRefreshRuns, season?.id]);
 
   useEffect(() => {
     showCastFetchAttemptedRef.current = false;
@@ -1672,6 +1848,10 @@ export default function SeasonDetailPage() {
     setTrrShowCastError(null);
     setTrrShowCastLoading(false);
   }, [showId, season?.id]);
+
+  useEffect(() => () => {
+    abortInFlightPersonRefreshRuns();
+  }, [abortInFlightPersonRefreshRuns]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -1698,21 +1878,35 @@ export default function SeasonDetailPage() {
   useEffect(() => {
     if (!hasAccess || !showId) return;
     if (activeTab !== "videos") return;
-    void fetchSeasonBravoVideos();
+    const controller = new AbortController();
+    void fetchSeasonBravoVideos({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
   }, [activeTab, fetchSeasonBravoVideos, hasAccess, showId]);
 
   const fetchAssets = useCallback(async () => {
     if (!showId) return;
+    setAssetsTruncatedWarning(null);
+    setGalleryFallbackTelemetry({
+      fallbackRecoveredCount: 0,
+      allCandidatesFailedCount: 0,
+      totalImageAttempts: 0,
+    });
     const headers = await getAuthHeaders();
     const sourcesParam = advancedFilters.sources.length
       ? `&sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
       : "";
     const fetchAssetRows = async (url: string): Promise<SeasonAsset[]> => {
-      let response: Response;
       try {
-        response = await fetchWithTimeout(url, { headers }, SEASON_ASSET_LOAD_TIMEOUT_MS);
+        const data = await adminGetJson<{ assets?: unknown }>(url, {
+          headers,
+          timeoutMs: SEASON_ASSET_LOAD_TIMEOUT_MS,
+        });
+        const payload = data.assets;
+        return Array.isArray(payload) ? (payload as SeasonAsset[]) : [];
       } catch (error) {
-        if (isAbortError(error)) {
+        if (isAbortError(error) || (error instanceof AdminRequestError && error.status === 408)) {
           throw new Error(
             `Timed out loading season assets after ${Math.round(
               SEASON_ASSET_LOAD_TIMEOUT_MS / 1000
@@ -1721,13 +1915,9 @@ export default function SeasonDetailPage() {
         }
         throw error;
       }
-      if (!response.ok) throw new Error("Failed to fetch season media");
-      const data = await response.json().catch(() => ({}));
-      const payload = (data as { assets?: unknown }).assets;
-      return Array.isArray(payload) ? (payload as SeasonAsset[]) : [];
     };
 
-    const assets = await fetchAllPaginatedGalleryRows({
+    const result = await fetchAllPaginatedGalleryRowsWithMeta({
       pageSize: SEASON_ASSET_PAGE_SIZE,
       maxPages: SEASON_ASSET_MAX_PAGES,
       fetchPage: (offset, limit) =>
@@ -1735,7 +1925,12 @@ export default function SeasonDetailPage() {
           `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=${limit}&offset=${offset}${sourcesParam}`
         ),
     });
-    setAssets(assets);
+    setAssets(result.rows);
+    setAssetsTruncatedWarning(
+      result.truncated
+        ? `Showing first ${result.rows.length} assets due to pagination cap. Narrow filters to refine.`
+        : null
+    );
   }, [showId, seasonNumber, getAuthHeaders, advancedFilters.sources]);
 
   useEffect(() => {
@@ -1758,19 +1953,7 @@ export default function SeasonDetailPage() {
     );
   }, []);
 
-  const runBatchJobs = useCallback(async () => {
-    if (!showId || !seasonNumber) return;
-    if (batchJobsRunning) return;
-
-    if (batchJobOperations.length === 0) {
-      setBatchJobsError("Select at least one operation.");
-      return;
-    }
-    if (batchJobContentSections.length === 0) {
-      setBatchJobsError("Select at least one content type.");
-      return;
-    }
-
+  const seasonBatchTargetPlan = useMemo(() => {
     const advancedFiltered = applyAdvancedFiltersToSeasonAssets(assets, advancedFilters, {
       showName: show?.name ?? undefined,
       getSeasonNumber: () => seasonNumber,
@@ -1802,6 +1985,7 @@ export default function SeasonDetailPage() {
     );
     const selectedSections = new Set(batchJobContentSections);
     const dedupeTargets = new Set<string>();
+    const sectionCounts = new Map<AssetSectionKey, number>();
     const selectedVisibleAssets = ASSET_SECTION_ORDER.flatMap((section) =>
       selectedSections.has(section) ? visibleSections[section] : []
     );
@@ -1818,6 +2002,7 @@ export default function SeasonDetailPage() {
         const key = `${origin}:${rawId}`;
         if (dedupeTargets.has(key)) return null;
         dedupeTargets.add(key);
+        sectionCounts.set(section, (sectionCounts.get(section) ?? 0) + 1);
         return {
           origin,
           id: rawId,
@@ -1825,6 +2010,38 @@ export default function SeasonDetailPage() {
         };
       })
       .filter((item): item is { origin: string; id: string; content_type: string } => item !== null);
+
+    const selectedSectionLabels = ASSET_SECTION_ORDER.filter(
+      (section) => selectedSections.has(section) && (sectionCounts.get(section) ?? 0) > 0
+    ).map((section) => ASSET_SECTION_LABELS[section]);
+
+    return {
+      targets,
+      selectedSectionLabels,
+    };
+  }, [
+    advancedFilters,
+    assets,
+    assetsVisibleCount,
+    batchJobContentSections,
+    galleryDiagnosticFilter,
+    seasonNumber,
+    show?.name,
+  ]);
+
+  const runBatchJobs = useCallback(async () => {
+    if (!showId || !seasonNumber) return;
+    if (batchJobsRunning) return;
+
+    if (batchJobOperations.length === 0) {
+      setBatchJobsError("Select at least one operation.");
+      return;
+    }
+    if (batchJobContentSections.length === 0) {
+      setBatchJobsError("Select at least one content type.");
+      return;
+    }
+    const { targets } = seasonBatchTargetPlan;
 
     if (targets.length === 0) {
       setBatchJobsError("No matching season assets found for the selected content types.");
@@ -1950,20 +2167,30 @@ export default function SeasonDetailPage() {
       setBatchJobsLiveCounts(null);
     }
   }, [
-    advancedFilters,
-    assets,
-    assetsVisibleCount,
     batchJobsLiveCounts,
     batchJobContentSections,
     batchJobOperations,
     batchJobsRunning,
     fetchAssets,
-    galleryDiagnosticFilter,
     getAuthHeaders,
     seasonNumber,
-    show?.name,
+    seasonBatchTargetPlan,
     showId,
   ]);
+
+  const seasonBatchPreflightSummary = useMemo(() => {
+    const sectionsText =
+      seasonBatchTargetPlan.selectedSectionLabels.length > 0
+        ? seasonBatchTargetPlan.selectedSectionLabels
+            .map((label) => label.toLowerCase())
+            .join(", ")
+        : "no sections";
+    const operationsText =
+      batchJobOperations.length > 0
+        ? batchJobOperations.map((operation) => BATCH_JOB_OPERATION_LABELS[operation]).join(", ")
+        : "no operations";
+    return `Will process ${seasonBatchTargetPlan.targets.length} assets across ${sectionsText} with ${operationsText}.`;
+  }, [batchJobOperations, seasonBatchTargetPlan]);
 
   const handleRefreshImages = useCallback(async () => {
     if (!showId) return;
@@ -3107,14 +3334,14 @@ export default function SeasonDetailPage() {
       setCastFailedMembersOpen(summary.failedMembers.length > 0);
       setCastEnrichNotice(
         summary.failed > 0
-          ? `Cast media enrich completed with issues (${summary.succeeded}/${summary.attempted} succeeded).`
-          : `Cast media enrich complete (${summary.succeeded}/${summary.attempted}).`
+          ? `Cast & crew media enrich completed with issues (${summary.succeeded}/${summary.attempted} succeeded).`
+          : `Cast & crew media enrich complete (${summary.succeeded}/${summary.attempted}).`
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to enrich season cast media";
       if (runController.signal.aborted || /canceled/i.test(message)) {
         setCastEnrichError(null);
-        setCastEnrichNotice("Season cast media enrich canceled.");
+        setCastEnrichNotice("Season cast & crew media enrich canceled.");
       } else {
         setCastEnrichError(message);
       }
@@ -3149,6 +3376,7 @@ export default function SeasonDetailPage() {
 
     try {
       const summary = await runSeasonCastMediaEnrich(retryMembers, { signal: runController.signal });
+      await Promise.all([fetchCastRoleMembers({ force: true }), fetchShowCastForBrand()]);
       setCastRunFailedMembers(summary.failedMembers);
       setCastFailedMembersOpen(summary.failedMembers.length > 0);
       setCastEnrichNotice(
@@ -3160,7 +3388,7 @@ export default function SeasonDetailPage() {
       const message = err instanceof Error ? err.message : "Failed to retry failed cast members";
       if (runController.signal.aborted || /canceled/i.test(message)) {
         setCastEnrichError(null);
-        setCastEnrichNotice("Season cast media enrich canceled.");
+        setCastEnrichNotice("Season cast & crew media enrich canceled.");
       } else {
         setCastEnrichError(message);
       }
@@ -3171,17 +3399,29 @@ export default function SeasonDetailPage() {
       setEnrichingCast(false);
       setCastRefreshProgress(null);
     }
-  }, [cast, castRunFailedMembers, enrichingCast, refreshingCast, runSeasonCastMediaEnrich]);
+  }, [
+    cast,
+    castRunFailedMembers,
+    enrichingCast,
+    fetchCastRoleMembers,
+    fetchShowCastForBrand,
+    refreshingCast,
+    runSeasonCastMediaEnrich,
+  ]);
 
   const cancelSeasonCastRefresh = useCallback(() => {
     castRefreshAbortControllerRef.current?.abort();
     castEnrichAbortControllerRef.current?.abort();
-  }, []);
+    abortInFlightPersonRefreshRuns();
+  }, [abortInFlightPersonRefreshRuns]);
 
   const handleRefreshSeasonCastMember = useCallback(
     async (personId: string, label: string) => {
       if (!personId) return;
       if (refreshingCast || enrichingCast) return;
+      personRefreshAbortControllersRef.current[personId]?.abort();
+      const runController = new AbortController();
+      personRefreshAbortControllersRef.current[personId] = runController;
       setRefreshingPersonIds((prev) => ({ ...prev, [personId]: true }));
       setRefreshingPersonProgress((prev) => ({
         ...prev,
@@ -3195,16 +3435,28 @@ export default function SeasonDetailPage() {
       setCastRefreshError(null);
       setCastRefreshNotice(null);
       try {
-        await refreshSeasonPersonImages(personId, (progress) => {
-          setRefreshingPersonProgress((prev) => ({
-            ...prev,
-            [personId]: progress,
-          }));
-        });
+        await refreshSeasonPersonImages(
+          personId,
+          (progress) => {
+            setRefreshingPersonProgress((prev) => ({
+              ...prev,
+              [personId]: progress,
+            }));
+          },
+          { signal: runController.signal }
+        );
+        await Promise.all([fetchCastRoleMembers({ force: true }), fetchShowCastForBrand()]);
         setCastRefreshNotice(`Refreshed person for ${label}.`);
       } catch (err) {
+        if (runController.signal.aborted) {
+          setCastRefreshError(null);
+          return;
+        }
         setCastRefreshError(err instanceof Error ? err.message : "Failed to refresh cast member");
       } finally {
+        if (personRefreshAbortControllersRef.current[personId] === runController) {
+          delete personRefreshAbortControllersRef.current[personId];
+        }
         setRefreshingPersonIds((prev) => {
           const next = { ...prev };
           delete next[personId];
@@ -3217,7 +3469,7 @@ export default function SeasonDetailPage() {
         });
       }
     },
-    [enrichingCast, refreshingCast, refreshSeasonPersonImages]
+    [enrichingCast, fetchCastRoleMembers, fetchShowCastForBrand, refreshingCast, refreshSeasonPersonImages]
   );
 
   const openAddBackdrops = useCallback(async () => {
@@ -3588,16 +3840,16 @@ export default function SeasonDetailPage() {
       try {
         const headers = await getAuthHeaders();
         const endpoint = `/api/admin/trr-api/${base.prefix}/${base.id}/variants`;
-        await fetchWithTimeout(
+        await adminMutation(
           endpoint,
           {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
             body: JSON.stringify({ force: true }),
+            timeoutMs: SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS,
           },
-          SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS
         );
-        await fetchWithTimeout(
+        await adminMutation(
           endpoint,
           {
             method: "POST",
@@ -3606,8 +3858,8 @@ export default function SeasonDetailPage() {
               force: true,
               crop: buildAssetAutoCropPayloadWithFallback(asset),
             }),
+            timeoutMs: SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS,
           },
-          SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS
         );
       } catch (error) {
         console.warn("[season-gallery] auto-crop rebuild after star toggle failed", {
@@ -3833,8 +4085,20 @@ export default function SeasonDetailPage() {
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [cast, showCastByPersonId]);
 
+  const castUniqueMembers = useMemo(() => {
+    const seen = new Set<string>();
+    const next: SeasonCastMember[] = [];
+    for (const member of cast) {
+      const personId = String(member.person_id || "").trim();
+      if (!personId || seen.has(personId)) continue;
+      seen.add(personId);
+      next.push(member);
+    }
+    return next;
+  }, [cast]);
+
   const castMergedMembers = useMemo(() => {
-    return cast.map((member) => {
+    return castUniqueMembers.map((member) => {
       const scoped = castRoleMemberByPersonId.get(member.person_id);
       const showCastMember = showCastByPersonId.get(member.person_id);
       const roles = scoped?.roles.length
@@ -3858,14 +4122,13 @@ export default function SeasonDetailPage() {
         credit_category: creditCategory,
       };
     });
-  }, [cast, castRoleMemberByPersonId, showCastByPersonId]);
+  }, [castRoleMemberByPersonId, castUniqueMembers, showCastByPersonId]);
 
   const castDisplayMembers = useMemo(() => {
     const filtered = castMergedMembers.filter((member) => {
-      const normalizedSearch = castSearchQuery.trim().toLowerCase();
-      if (normalizedSearch.length > 0) {
+      if (castSearchQueryDeferred.length > 0) {
         const name = (member.person_name || "").toLowerCase();
-        if (!name.includes(normalizedSearch)) {
+        if (!name.includes(castSearchQueryDeferred)) {
           return false;
         }
       }
@@ -3912,7 +4175,7 @@ export default function SeasonDetailPage() {
     castCreditFilters,
     castHasImageFilter,
     castRoleFilters,
-    castSearchQuery,
+    castSearchQueryDeferred,
     castSortBy,
     castSortOrder,
   ]);
@@ -3937,7 +4200,7 @@ export default function SeasonDetailPage() {
   const showFallbackCastWarning =
     seasonCastSource === "show_fallback" &&
     Boolean(seasonCastEligibilityWarning) &&
-    cast.every((member) => (member.episodes_in_season ?? 0) <= 0);
+    castUniqueMembers.every((member) => (member.episodes_in_season ?? 0) <= 0);
 
   const castSeasonMembers = useMemo(
     () => castDisplayMembers.filter((member) => !isCrewCreditCategory(member.credit_category)),
@@ -3955,6 +4218,15 @@ export default function SeasonDetailPage() {
     () => crewSeasonMembers.slice(0, crewRenderLimit),
     [crewRenderLimit, crewSeasonMembers]
   );
+  const renderedCastCount = visibleCastSeasonMembers.length;
+  const matchedCastCount = castSeasonMembers.length;
+  const totalCastCount = castDisplayTotals.cast;
+  const renderedCrewCount = visibleCrewSeasonMembers.length;
+  const matchedCrewCount = crewSeasonMembers.length;
+  const totalCrewCount = castDisplayTotals.crew;
+  const renderedVisibleCount = renderedCastCount + renderedCrewCount;
+  const matchedVisibleCount = castDisplayMembers.length;
+  const totalVisibleCount = castDisplayTotals.total;
   const castRenderProgressLabel = useMemo(() => {
     const rendered =
       Math.min(castRenderLimit, castSeasonMembers.length) +
@@ -3966,6 +4238,36 @@ export default function SeasonDetailPage() {
   const castRoleMembersWarningWithSnapshotAge = withSnapshotAgeSuffix(
     castRoleMembersWarning,
     lastSuccessfulCastRoleMembersAt
+  );
+  const seasonHasPersonRefreshInFlight = Object.keys(refreshingPersonIds).length > 0;
+  const seasonCastAnyJobRunning = refreshingCast || enrichingCast || seasonHasPersonRefreshInFlight;
+  const buildShowCastRoleEditorQuery = useCallback(
+    (personId: string) => {
+      const roleAndCreditFilters = [
+        ...castRoleFilters.map((value) => `role:${value}`),
+        ...castCreditFilters.map((value) => `credit:${value}`),
+      ];
+      const castQuery = writeShowCastRouteState(new URLSearchParams(), {
+        searchQuery: castSearchQueryDebounced,
+        sortBy: castSortBy,
+        sortOrder: castSortOrder,
+        hasImageFilter: castHasImageFilter,
+        seasonFilters: Number.isFinite(seasonNumber) ? [seasonNumber] : [],
+        filters: roleAndCreditFilters,
+      });
+      castQuery.set("cast_person", personId);
+      castQuery.set("cast_open_role_editor", "1");
+      return castQuery;
+    },
+    [
+      castCreditFilters,
+      castHasImageFilter,
+      castRoleFilters,
+      castSearchQueryDebounced,
+      castSortBy,
+      castSortOrder,
+      seasonNumber,
+    ]
   );
 
   useEffect(() => {
@@ -4027,6 +4329,19 @@ export default function SeasonDetailPage() {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return value;
     return parsed.toLocaleDateString();
+  };
+
+  const resolveBravoVideoThumbnailUrl = (video: BravoVideoItem): string | null => {
+    if (typeof video.hosted_image_url === "string" && video.hosted_image_url.trim()) {
+      return video.hosted_image_url.trim();
+    }
+    if (typeof video.image_url === "string" && video.image_url.trim()) {
+      return video.image_url.trim();
+    }
+    if (typeof video.original_image_url === "string" && video.original_image_url.trim()) {
+      return video.original_image_url.trim();
+    }
+    return null;
   };
 
   const advancedFilteredMediaAssets = useMemo(() => {
@@ -4341,7 +4656,8 @@ export default function SeasonDetailPage() {
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           {activeTab === "episodes" && (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <SeasonEpisodesTab>
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
@@ -4508,11 +4824,13 @@ export default function SeasonDetailPage() {
                   <p className="text-sm text-zinc-500">No episodes available for coverage matrix.</p>
                 )}
               </section>
-            </div>
+              </div>
+            </SeasonEpisodesTab>
           )}
 
           {activeTab === "assets" && (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <SeasonAssetsTab>
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
@@ -4633,6 +4951,9 @@ export default function SeasonDetailPage() {
                 current={batchJobsProgress?.current}
                 total={batchJobsProgress?.total}
               />
+              {assetsTruncatedWarning && (
+                <p className="mb-4 text-xs font-medium text-amber-700">{assetsTruncatedWarning}</p>
+              )}
               <RefreshActivityLog
                 title="Refresh Activity"
                 entries={refreshLogEntries}
@@ -4689,6 +5010,12 @@ export default function SeasonDetailPage() {
                         <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
                           Unclassified {galleryDiagnostics.unclassified}
                         </span>
+                        <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                          Fallback recovered {galleryFallbackTelemetry.fallbackRecoveredCount}
+                        </span>
+                        <span className="rounded-full bg-white px-2 py-1 text-zinc-600">
+                          Fallback failed {galleryFallbackTelemetry.allCandidatesFailedCount}
+                        </span>
                       </div>
                       <svg
                         className={`h-4 w-4 text-zinc-500 transition-transform ${
@@ -4736,6 +5063,11 @@ export default function SeasonDetailPage() {
                             .join(", ")}
                         </p>
                       )}
+                      <p className="mt-2 text-xs text-zinc-500">
+                        Fallback diagnostics: {galleryFallbackTelemetry.fallbackRecoveredCount} recovered,{" "}
+                        {galleryFallbackTelemetry.allCandidatesFailedCount} failed,{" "}
+                        {galleryFallbackTelemetry.totalImageAttempts} attempted.
+                      </p>
                       <div className="mt-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Missing Variant Breakdown
@@ -4774,6 +5106,7 @@ export default function SeasonDetailPage() {
                               src={getAssetDisplayUrl(asset)}
                               srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                               diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                               alt={asset.caption || "Season backdrop"}
                               sizes="300px"
                               className="object-cover"
@@ -4798,6 +5131,7 @@ export default function SeasonDetailPage() {
                               src={getAssetDisplayUrl(asset)}
                               srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                               diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                               alt={asset.caption || "Poster"}
                               sizes="180px"
                             />
@@ -4821,6 +5155,7 @@ export default function SeasonDetailPage() {
                               src={getAssetDisplayUrl(asset)}
                               srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                               diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                               alt={asset.caption || "Episode still"}
                               sizes="150px"
                             />
@@ -4844,6 +5179,7 @@ export default function SeasonDetailPage() {
                               src={getAssetDisplayUrl(asset)}
                               srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                               diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                               alt={asset.caption || "Profile picture"}
                               sizes="180px"
                             />
@@ -4872,6 +5208,7 @@ export default function SeasonDetailPage() {
                               src={getAssetDisplayUrl(asset)}
                               srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                               diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                               alt={asset.caption || "Cast photo"}
                               sizes="180px"
                             />
@@ -4900,6 +5237,7 @@ export default function SeasonDetailPage() {
                             src={getAssetDisplayUrl(asset)}
                             srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                             diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                             alt={asset.caption || "Confessional"}
                             sizes="180px"
                           />
@@ -4928,6 +5266,7 @@ export default function SeasonDetailPage() {
                             src={getAssetDisplayUrl(asset)}
                             srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                             diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                             alt={asset.caption || "Reunion"}
                             sizes="180px"
                           />
@@ -4951,6 +5290,7 @@ export default function SeasonDetailPage() {
                             src={getAssetDisplayUrl(asset)}
                             srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                             diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                             alt={asset.caption || "Intro Card"}
                             sizes="180px"
                           />
@@ -4974,6 +5314,7 @@ export default function SeasonDetailPage() {
                             src={getAssetDisplayUrl(asset)}
                             srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
                             diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                             alt={asset.caption || "Other media"}
                             sizes="180px"
                           />
@@ -5029,11 +5370,13 @@ export default function SeasonDetailPage() {
                   )}
                 </div>
               )}
-            </div>
+              </div>
+            </SeasonAssetsTab>
           )}
 
           {activeTab === "videos" && (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <SeasonVideosTab>
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
@@ -5045,7 +5388,7 @@ export default function SeasonDetailPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={fetchSeasonBravoVideos}
+                  onClick={() => void fetchSeasonBravoVideos({ forceSync: true })}
                   disabled={bravoVideosLoading}
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                 >
@@ -5054,18 +5397,26 @@ export default function SeasonDetailPage() {
               </div>
 
               {bravoVideosError && <p className="mb-4 text-sm text-red-600">{bravoVideosError}</p>}
+              {bravoVideoSyncing && (
+                <p className="mb-4 text-sm text-zinc-500">Syncing high-quality video thumbnails...</p>
+              )}
+              {bravoVideoSyncWarning && !bravoVideosError && (
+                <p className="mb-4 text-sm text-amber-700">{bravoVideoSyncWarning}</p>
+              )}
               {!bravoVideosLoading && bravoVideos.length === 0 && !bravoVideosError && (
                 <p className="text-sm text-zinc-500">No persisted Bravo videos found for this season.</p>
               )}
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {bravoVideos.map((video) => (
+                {bravoVideos.map((video) => {
+                  const thumbnailUrl = resolveBravoVideoThumbnailUrl(video);
+                  return (
                   <article key={`${video.clip_url}-${video.published_at ?? "unknown"}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
                     <a href={video.clip_url} target="_blank" rel="noopener noreferrer" className="group block">
                       <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
-                        {video.image_url ? (
+                        {thumbnailUrl ? (
                           <GalleryImage
-                            src={video.image_url}
+                            src={thumbnailUrl}
                             alt={video.title || "Bravo video"}
                             sizes="400px"
                             className="object-cover transition group-hover:scale-105"
@@ -5086,13 +5437,16 @@ export default function SeasonDetailPage() {
                       )}
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
-            </div>
+              </div>
+            </SeasonVideosTab>
           )}
 
           {activeTab === "fandom" && (
-            <div className="space-y-6">
+            <SeasonFandomTab>
+              <div className="space-y-6">
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -5162,11 +5516,13 @@ export default function SeasonDetailPage() {
                   </div>
                 ))
               )}
-            </div>
+              </div>
+            </SeasonFandomTab>
           )}
 
           {activeTab === "cast" && (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <SeasonCastTab>
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
@@ -5178,13 +5534,16 @@ export default function SeasonDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {castSeasonMembers.length}/{castDisplayTotals.cast} cast · {crewSeasonMembers.length}/{castDisplayTotals.crew} crew · {castDisplayMembers.length}/{castDisplayTotals.total} visible
+                    {renderedCastCount}/{matchedCastCount}/{totalCastCount} cast ·{" "}
+                    {renderedCrewCount}/{matchedCrewCount}/{totalCrewCount} crew ·{" "}
+                    {renderedVisibleCount}/{matchedVisibleCount}/{totalVisibleCount} visible
                     {archiveCast.length > 0 ? ` · ${archiveCast.length} archive-only` : ""}
                   </span>
                   <button
                     type="button"
                     onClick={refreshSeasonCast}
-                    disabled={refreshingCast || enrichingCast}
+                    disabled={seasonCastAnyJobRunning}
+                    title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
                     {refreshingCast ? "Syncing..." : "Sync Cast"}
@@ -5192,12 +5551,13 @@ export default function SeasonDetailPage() {
                   <button
                     type="button"
                     onClick={enrichSeasonCastMedia}
-                    disabled={refreshingCast || enrichingCast}
+                    disabled={seasonCastAnyJobRunning}
+                    title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {enrichingCast ? "Enriching..." : "Enrich Media"}
+                    {enrichingCast ? "Enriching..." : "Enrich Cast & Crew Media"}
                   </button>
-                  {(refreshingCast || enrichingCast) && (
+                  {seasonCastAnyJobRunning && (
                     <button
                       type="button"
                       onClick={cancelSeasonCastRefresh}
@@ -5408,6 +5768,7 @@ export default function SeasonDetailPage() {
                           <button
                             key={`season-role-filter-${role}`}
                             type="button"
+                            aria-pressed={active}
                             onClick={() =>
                               setCastRoleFilters((prev) =>
                                 active
@@ -5442,6 +5803,7 @@ export default function SeasonDetailPage() {
                           <button
                             key={`season-credit-filter-${category}`}
                             type="button"
+                            aria-pressed={active}
                             onClick={() =>
                               setCastCreditFilters((prev) =>
                                 active
@@ -5465,13 +5827,19 @@ export default function SeasonDetailPage() {
               </div>
 
               {castRoleMembersLoading && (
-                <p className="mb-2 text-sm text-zinc-500">Loading cast intelligence...</p>
+                <p className="mb-2 text-sm text-zinc-500" aria-live="polite">
+                  Loading cast intelligence...
+                </p>
               )}
               {trrShowCastLoading && (
-                <p className="mb-4 text-sm text-zinc-500">Loading supplemental show cast data...</p>
+                <p className="mb-4 text-sm text-zinc-500" aria-live="polite">
+                  Loading supplemental show cast data...
+                </p>
               )}
               {castRenderProgressLabel && (
-                <p className="mb-3 text-xs text-zinc-500">{castRenderProgressLabel}</p>
+                <p className="mb-3 text-xs text-zinc-500" role="status" aria-live="polite">
+                  {castRenderProgressLabel}
+                </p>
               )}
 
               <div className="space-y-8">
@@ -5552,8 +5920,8 @@ export default function SeasonDetailPage() {
                                 member.person_name || "Cast member"
                               )
                             }
-                            disabled={refreshingCast || enrichingCast || Boolean(refreshingPersonIds[member.person_id])}
-                            title={refreshingCast || enrichingCast ? "Cast sync in progress" : undefined}
+                            disabled={seasonCastAnyJobRunning || Boolean(refreshingPersonIds[member.person_id])}
+                            title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
                             className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
                           >
                             {refreshingPersonIds[member.person_id] ? "Refreshing..." : "Refresh Person"}
@@ -5563,18 +5931,13 @@ export default function SeasonDetailPage() {
                               buildShowAdminUrl({
                                 showSlug: showSlugForRouting,
                                 tab: "cast",
-                                query: (() => {
-                                  const nextQuery = new URLSearchParams(searchParams.toString());
-                                  nextQuery.set("cast_person", member.person_id);
-                                  nextQuery.set("cast_open_role_editor", "1");
-                                  return nextQuery;
-                                })(),
+                                query: buildShowCastRoleEditorQuery(member.person_id),
                               }) as Route
                             }
                             className={`mt-2 block w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-center text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 ${
-                              refreshingCast || enrichingCast ? "pointer-events-none opacity-50" : ""
+                              seasonCastAnyJobRunning ? "pointer-events-none opacity-50" : ""
                             }`}
-                            title={refreshingCast || enrichingCast ? "Cast sync in progress" : undefined}
+                            title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
                           >
                             Edit Roles
                           </Link>
@@ -5666,8 +6029,8 @@ export default function SeasonDetailPage() {
                                 member.person_name || "Crew member"
                               )
                             }
-                            disabled={refreshingCast || enrichingCast || Boolean(refreshingPersonIds[member.person_id])}
-                            title={refreshingCast || enrichingCast ? "Cast sync in progress" : undefined}
+                            disabled={seasonCastAnyJobRunning || Boolean(refreshingPersonIds[member.person_id])}
+                            title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
                             className="mt-3 w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50"
                           >
                             {refreshingPersonIds[member.person_id] ? "Refreshing..." : "Refresh Person"}
@@ -5677,18 +6040,13 @@ export default function SeasonDetailPage() {
                               buildShowAdminUrl({
                                 showSlug: showSlugForRouting,
                                 tab: "cast",
-                                query: (() => {
-                                  const nextQuery = new URLSearchParams(searchParams.toString());
-                                  nextQuery.set("cast_person", member.person_id);
-                                  nextQuery.set("cast_open_role_editor", "1");
-                                  return nextQuery;
-                                })(),
+                                query: buildShowCastRoleEditorQuery(member.person_id),
                               }) as Route
                             }
                             className={`mt-2 block w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-center text-xs font-semibold text-blue-700 transition hover:bg-blue-50 ${
-                              refreshingCast || enrichingCast ? "pointer-events-none opacity-50" : ""
+                              seasonCastAnyJobRunning ? "pointer-events-none opacity-50" : ""
                             }`}
-                            title={refreshingCast || enrichingCast ? "Cast sync in progress" : undefined}
+                            title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
                           >
                             Edit Roles
                           </Link>
@@ -5798,7 +6156,8 @@ export default function SeasonDetailPage() {
                   <p className="text-sm text-zinc-500">No cast found for this season.</p>
                 )}
               </div>
-            </div>
+              </div>
+            </SeasonCastTab>
           )}
 
           {activeTab === "surveys" && (
@@ -5811,7 +6170,8 @@ export default function SeasonDetailPage() {
           )}
 
           {activeTab === "social" && (
-            <div className="space-y-3">
+            <SeasonSocialTab>
+              <div className="space-y-3">
               {seasonSupplementalWarning && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
                   Season supplemental data warning: {seasonSupplementalWarning}. Social analytics remains available.
@@ -5825,7 +6185,8 @@ export default function SeasonDetailPage() {
                 showName={show.name}
                 analyticsView={socialAnalyticsView}
               />
-            </div>
+              </div>
+            </SeasonSocialTab>
           )}
 
           {activeTab === "overview" && (
@@ -6008,6 +6369,9 @@ export default function SeasonDetailPage() {
                 ))}
               </div>
             </div>
+            <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+              {seasonBatchPreflightSummary}
+            </p>
           </div>
 
           <div className="mt-5 flex justify-end gap-2">

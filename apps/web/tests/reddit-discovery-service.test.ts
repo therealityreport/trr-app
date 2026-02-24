@@ -314,6 +314,37 @@ describe("reddit-discovery-service", () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]?.reddit_post_id).toBe("episode-match");
     expect(result.candidates[0]?.num_comments).toBe(88);
+    expect(result.candidates[0]?.episode_number).toBe(4);
+    expect(result.candidates[0]?.discussion_type).toBe("live");
+    expect(result.episode_matrix).toEqual([
+      {
+        episode_number: 4,
+        live: {
+          post_count: 1,
+          total_comments: 88,
+          total_upvotes: 200,
+          top_post_id: "episode-match",
+          top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-match/test/",
+        },
+        post: {
+          post_count: 0,
+          total_comments: 0,
+          total_upvotes: 0,
+          top_post_id: null,
+          top_post_url: null,
+        },
+        weekly: {
+          post_count: 0,
+          total_comments: 0,
+          total_upvotes: 0,
+          top_post_id: null,
+          top_post_url: null,
+        },
+        total_posts: 1,
+        total_comments: 88,
+        total_upvotes: 200,
+      },
+    ]);
   });
 
   it("enforces required flair filter for non-show-focused episode discovery", async () => {
@@ -323,7 +354,7 @@ describe("reddit-discovery-service", () => {
           makeListing([
             {
               id: "flair-pass",
-              title: "RHOSLC Season 6 Live Episode Discussion",
+              title: "RHOSLC Season 6 Episode 5 Live Episode Discussion",
               selftext: "Thread text",
               url: "https://www.reddit.com/r/BravoRealHousewives/comments/flair-pass/test/",
               permalink: "/r/BravoRealHousewives/comments/flair-pass/test/",
@@ -335,7 +366,7 @@ describe("reddit-discovery-service", () => {
             },
             {
               id: "flair-fail",
-              title: "RHOSLC Season 6 Live Episode Discussion",
+              title: "RHOSLC Season 6 Episode 6 Live Episode Discussion",
               selftext: "Thread text",
               url: "https://www.reddit.com/r/BravoRealHousewives/comments/flair-fail/test/",
               permalink: "/r/BravoRealHousewives/comments/flair-fail/test/",
@@ -373,7 +404,7 @@ describe("reddit-discovery-service", () => {
           makeListing([
             {
               id: "show-focused-candidate",
-              title: "RHOSLC Season 6 Live Episode Discussion",
+              title: "RHOSLC Season 6 Episode 9 Live Episode Discussion",
               selftext: "Thread text",
               url: "https://www.reddit.com/r/realhousewivesofSLC/comments/show-focused-candidate/test/",
               permalink: "/r/realhousewivesofSLC/comments/show-focused-candidate/test/",
@@ -412,7 +443,7 @@ describe("reddit-discovery-service", () => {
           makeListing([
             {
               id: "period-inside",
-              title: "RHOSLC Season 6 Live Episode Discussion",
+              title: "RHOSLC Season 6 Episode 2 Live Episode Discussion",
               selftext: "Thread text",
               url: "https://www.reddit.com/r/BravoRealHousewives/comments/period-inside/test/",
               permalink: "/r/BravoRealHousewives/comments/period-inside/test/",
@@ -424,7 +455,7 @@ describe("reddit-discovery-service", () => {
             },
             {
               id: "period-outside",
-              title: "RHOSLC Season 6 Live Episode Discussion",
+              title: "RHOSLC Season 6 Episode 3 Live Episode Discussion",
               selftext: "Thread text",
               url: "https://www.reddit.com/r/BravoRealHousewives/comments/period-outside/test/",
               permalink: "/r/BravoRealHousewives/comments/period-outside/test/",
@@ -455,5 +486,315 @@ describe("reddit-discovery-service", () => {
     });
 
     expect(result.candidates.map((candidate) => candidate.reddit_post_id)).toEqual(["period-inside"]);
+  });
+
+  it("parses Episode, E, and SxE formats and excludes titles without episode number", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify(
+          makeListing([
+            {
+              id: "episode-format",
+              title: "RHOSLC Season 6 Episode 7 Live Episode Discussion",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-format/test/",
+              permalink: "/r/BravoRealHousewives/comments/episode-format/test/",
+              author: "user1",
+              score: 100,
+              num_comments: 30,
+              created_utc: 1_706_001_700,
+              link_flair_text: "Salt Lake City",
+            },
+            {
+              id: "sxe-format",
+              title: "RHOSLC S6E8 Post Episode Discussion",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/sxe-format/test/",
+              permalink: "/r/BravoRealHousewives/comments/sxe-format/test/",
+              author: "user2",
+              score: 95,
+              num_comments: 28,
+              created_utc: 1_706_001_701,
+              link_flair_text: "Salt Lake City",
+            },
+            {
+              id: "e-format",
+              title: "RHOSLC Season 6 E9 Weekly Episode Discussion",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/e-format/test/",
+              permalink: "/r/BravoRealHousewives/comments/e-format/test/",
+              author: "user3",
+              score: 90,
+              num_comments: 25,
+              created_utc: 1_706_001_702,
+              link_flair_text: "Salt Lake City",
+            },
+            {
+              id: "missing-episode-number",
+              title: "RHOSLC Season 6 Live Episode Discussion",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/missing-episode-number/test/",
+              permalink: "/r/BravoRealHousewives/comments/missing-episode-number/test/",
+              author: "user4",
+              score: 80,
+              num_comments: 20,
+              created_utc: 1_706_001_703,
+              link_flair_text: "Salt Lake City",
+            },
+          ]),
+        ),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      episodeTitlePatterns: [
+        "Live Episode Discussion",
+        "Post Episode Discussion",
+        "Weekly Episode Discussion",
+      ],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["new"],
+    });
+
+    expect(result.candidates.map((candidate) => candidate.reddit_post_id)).toEqual([
+      "episode-format",
+      "sxe-format",
+      "e-format",
+    ]);
+    expect(result.candidates.map((candidate) => candidate.episode_number)).toEqual([7, 8, 9]);
+    expect(result.candidates.map((candidate) => candidate.discussion_type)).toEqual([
+      "live",
+      "post",
+      "weekly",
+    ]);
+  });
+
+  it("continues discovery when one sort fails and returns per-sort diagnostics", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/new.json")) {
+        return new Response(
+          JSON.stringify(
+            makeListing([
+              {
+                id: "new-pass",
+                title: "RHOSLC Season 6 Episode 1 Live Episode Discussion",
+                selftext: "Thread text",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/new-pass/test/",
+                permalink: "/r/BravoRealHousewives/comments/new-pass/test/",
+                author: "user1",
+                score: 100,
+                num_comments: 30,
+                created_utc: 1_706_100_000,
+                link_flair_text: "Salt Lake City",
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/hot.json")) {
+        return new Response("temporary error", { status: 503 });
+      }
+      if (url.includes("/top.json")) {
+        return new Response(
+          JSON.stringify(
+            makeListing([
+              {
+                id: "top-pass",
+                title: "RHOSLC Season 6 Episode 2 Post Episode Discussion",
+                selftext: "Thread text",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/top-pass/test/",
+                permalink: "/r/BravoRealHousewives/comments/top-pass/test/",
+                author: "user2",
+                score: 80,
+                num_comments: 10,
+                created_utc: 1_706_100_001,
+                link_flair_text: "Salt Lake City",
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      episodeTitlePatterns: ["Live Episode Discussion", "Post Episode Discussion"],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["new", "hot", "top"],
+    });
+
+    expect(result.candidates.map((candidate) => candidate.reddit_post_id)).toEqual([
+      "new-pass",
+      "top-pass",
+    ]);
+    expect(result.successful_sorts).toEqual(["new", "top"]);
+    expect(result.failed_sorts).toEqual(["hot"]);
+    expect(result.rate_limited_sorts).toEqual([]);
+  });
+
+  it("retries retryable reddit failures before succeeding", async () => {
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(new Response("rate limit", { status: 429 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify(
+            makeListing([
+              {
+                id: "retried-pass",
+                title: "RHOSLC Season 6 Episode 3 Weekly Episode Discussion",
+                selftext: "Thread text",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/retried-pass/test/",
+                permalink: "/r/BravoRealHousewives/comments/retried-pass/test/",
+                author: "user3",
+                score: 60,
+                num_comments: 14,
+                created_utc: 1_706_100_002,
+                link_flair_text: "Salt Lake City",
+              },
+            ]),
+          ),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      episodeTitlePatterns: ["Weekly Episode Discussion"],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["new"],
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("matches discussion type aliases when canonical patterns are configured", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify(
+          makeListing([
+            {
+              id: "live-alias",
+              title: "RHOSLC Season 6 Episode 1 Live Thread",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/live-alias/test/",
+              permalink: "/r/BravoRealHousewives/comments/live-alias/test/",
+              author: "user1",
+              score: 50,
+              num_comments: 12,
+              created_utc: 1_706_100_010,
+              link_flair_text: "Salt Lake City",
+            },
+            {
+              id: "post-alias",
+              title: "RHOSLC Season 6 Episode 1 Post-Episode Discussion",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/post-alias/test/",
+              permalink: "/r/BravoRealHousewives/comments/post-alias/test/",
+              author: "user2",
+              score: 51,
+              num_comments: 13,
+              created_utc: 1_706_100_011,
+              link_flair_text: "Salt Lake City",
+            },
+            {
+              id: "weekly-alias",
+              title: "RHOSLC Season 6 Episode 1 Weekly Thread",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/weekly-alias/test/",
+              permalink: "/r/BravoRealHousewives/comments/weekly-alias/test/",
+              author: "user3",
+              score: 52,
+              num_comments: 14,
+              created_utc: 1_706_100_012,
+              link_flair_text: "Salt Lake City",
+            },
+          ]),
+        ),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      episodeTitlePatterns: [
+        "Live Episode Discussion",
+        "Post Episode Discussion",
+        "Weekly Episode Discussion",
+      ],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["new"],
+    });
+
+    expect(result.candidates.map((candidate) => candidate.discussion_type)).toEqual([
+      "live",
+      "post",
+      "weekly",
+    ]);
+  });
+
+  it("rejects ambiguous episode numbers extracted from conflicting title tokens", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify(
+          makeListing([
+            {
+              id: "ambiguous-episode",
+              title: "RHOSLC Season 6 Episode 5 S6E6 Live Episode Discussion",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/ambiguous-episode/test/",
+              permalink: "/r/BravoRealHousewives/comments/ambiguous-episode/test/",
+              author: "user1",
+              score: 42,
+              num_comments: 7,
+              created_utc: 1_706_100_020,
+              link_flair_text: "Salt Lake City",
+            },
+          ]),
+        ),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      episodeTitlePatterns: ["Live Episode Discussion"],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["new"],
+    });
+
+    expect(result.candidates).toHaveLength(0);
   });
 });

@@ -10,8 +10,8 @@ describe("person credits show-scope wiring", () => {
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/Cast Credits/);
-    expect(contents).toMatch(/Crew Credits/);
+    expect(contents).toMatch(/>Cast<\/h4>/);
+    expect(contents).toMatch(/>Crew<\/h4>/);
     expect(contents).not.toMatch(/>Current Show<\/h5>/);
     expect(contents).not.toMatch(/>Other Shows<\/h5>/);
     expect(contents).not.toMatch(/<h4 className="text-base font-semibold text-zinc-900">Other Shows<\/h4>/);

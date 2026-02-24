@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
 const MUTATION_BACKEND_TIMEOUT_MS = 60_000;
+const SHOW_ROLES_CACHE_NAMESPACE = "admin-show-roles";
 
 interface RouteParams {
   params: Promise<{ showId: string; roleId: string }>;
@@ -11,7 +13,7 @@ interface RouteParams {
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { showId, roleId } = await params;
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/roles/${roleId}`);
     if (!backendUrl) return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
@@ -49,6 +51,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (!response.ok) {
       return NextResponse.json({ error: (data as { error?: string; detail?: string }).error || (data as { detail?: string }).detail || "Failed to update role" }, { status: response.status });
     }
+    invalidateRouteResponseCache(SHOW_ROLES_CACHE_NAMESPACE, `${user.uid}:${showId}:`);
 
     return NextResponse.json(data);
   } catch (error) {

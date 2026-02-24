@@ -46,6 +46,9 @@ export interface PhotoMetadata {
   people: string[];
   titles: string[];
   fetchedAt: Date | null;
+  galleryStatus?: string | null;
+  galleryStatusReason?: string | null;
+  galleryStatusCheckedAt?: Date | null;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -734,6 +737,18 @@ export function mapPhotoToMetadata(
   const fallbackPeople = (options?.fallbackPeople ?? []).filter(
     (name) => typeof name === "string" && name.trim().length > 0
   );
+  const galleryStatus =
+    typeof metadata.gallery_status === "string" && metadata.gallery_status.trim().length > 0
+      ? metadata.gallery_status.trim()
+      : null;
+  const galleryStatusReason =
+    typeof metadata.gallery_status_reason === "string" &&
+    metadata.gallery_status_reason.trim().length > 0
+      ? metadata.gallery_status_reason.trim()
+      : null;
+  const galleryStatusCheckedAt = parseDateValue(
+    metadata.gallery_status_checked_at ?? metadata.gallery_status_checkedAt ?? null
+  );
 
   return {
     source: photo.source,
@@ -770,6 +785,9 @@ export function mapPhotoToMetadata(
     people: [...new Set([...(photo.people_names ?? []), ...fallbackPeople])],
     titles: [...new Set(photo.title_names ?? [])],
     fetchedAt: photo.fetched_at ? new Date(photo.fetched_at) : null,
+    galleryStatus,
+    galleryStatusReason,
+    galleryStatusCheckedAt,
   };
 }
 
@@ -1016,6 +1034,18 @@ export function mapSeasonAssetToMetadata(
     : [];
   const titlesFallback = showName ? [showName] : [];
   const titles = [...new Set([...titlesFromMeta, ...titlesFromTags, ...titlesFallback])];
+  const galleryStatus =
+    typeof metadata.gallery_status === "string" && metadata.gallery_status.trim().length > 0
+      ? metadata.gallery_status.trim()
+      : null;
+  const galleryStatusReason =
+    typeof metadata.gallery_status_reason === "string" &&
+    metadata.gallery_status_reason.trim().length > 0
+      ? metadata.gallery_status_reason.trim()
+      : null;
+  const galleryStatusCheckedAt = parseDateValue(
+    metadata.gallery_status_checked_at ?? metadata.gallery_status_checkedAt ?? null
+  );
 
   return {
     source: asset.source,
@@ -1052,5 +1082,8 @@ export function mapSeasonAssetToMetadata(
     people,
     titles,
     fetchedAt: asset.fetched_at ? new Date(asset.fetched_at) : null,
+    galleryStatus,
+    galleryStatusReason,
+    galleryStatusCheckedAt,
   };
 }

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
+const CAST_ROLE_MEMBERS_CACHE_NAMESPACE = "admin-show-cast-role-members";
 
 interface RouteParams {
   params: Promise<{ showId: string; personId: string }>;
@@ -10,7 +12,7 @@ interface RouteParams {
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { showId, personId } = await params;
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/cast/${personId}/roles`);
     if (!backendUrl) return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
@@ -32,6 +34,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!response.ok) {
       return NextResponse.json({ error: (data as { error?: string; detail?: string }).error || (data as { detail?: string }).detail || "Failed to assign roles" }, { status: response.status });
     }
+    invalidateRouteResponseCache(CAST_ROLE_MEMBERS_CACHE_NAMESPACE, `${user.uid}:${showId}:`);
 
     return NextResponse.json(data);
   } catch (error) {

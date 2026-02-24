@@ -142,10 +142,7 @@ export function classifySeasonAssetSection(
   const kind = normalizeToken(asset.kind);
   const hasProfileSignal =
     isProfilePictureAsset(asset, metadata) ||
-    hasExplicitProfilePictureContentType(metadata) ||
-    kind === "profile" ||
-    kind === "profile picture" ||
-    kind === "profile_picture";
+    hasExplicitProfilePictureContentType(metadata);
   const mapped = mapSeasonAssetToMetadata(asset, options?.seasonNumber, options?.showName);
   const contentType = normalizeContentTypeToken(mapped.contentType ?? mapped.sectionTag ?? null, "OTHER");
   const isOfficialSeasonAnnouncement = isOfficialSeasonAnnouncementAsset(asset, metadata);

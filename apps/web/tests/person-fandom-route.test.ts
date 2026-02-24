@@ -26,6 +26,7 @@ describe("person fandom route", () => {
     getBackendApiUrlMock.mockReturnValue("http://backend/api/v1/admin/person/person-1/fandom");
     vi.stubGlobal("fetch", fetchMock);
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    delete process.env.TRR_BACKEND_SERVICE_TOKEN;
   });
 
   it("forwards showId query param to repository for show-scoped relationship fallback", async () => {

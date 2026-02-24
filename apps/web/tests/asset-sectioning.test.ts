@@ -94,6 +94,18 @@ describe("asset-sectioning", () => {
     expect(classifySeasonAssetSection(looselyProfileTagged)).toBe("other");
   });
 
+  it("requires explicit profile signals for profile picture section", () => {
+    const profileByKindOnly = makeAsset({
+      id: "asset-profile-kind-only",
+      kind: "profile",
+      context_type: null,
+      context_section: null,
+      metadata: {},
+    });
+
+    expect(classifySeasonAssetSection(profileByKindOnly)).toBe("other");
+  });
+
   it("groups assets by section with optional other exclusion", () => {
     const grouped = groupSeasonAssetsBySection(
       [
