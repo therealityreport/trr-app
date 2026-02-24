@@ -2,6 +2,26 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-24) — Season refresh request-id diagnostics + RHOSLC E2E runbook
+
+- February 24, 2026: Implemented end-to-end request-id correlation for season image refresh and added RHOSLC manual E2E validation runbook.
+  - Files:
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/refresh-photos/stream/route.ts`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/tests/show-refresh-photos-stream-route.test.ts`
+    - `apps/web/tests/season-refresh-request-id-wiring.test.ts` (new)
+    - `docs/cross-collab/rhoslc-media-refresh-e2e-checklist.md` (new)
+  - Changes:
+    - Season `Refresh Images` now creates per-click request ids (`show + season + timestamp + counter`) and sends them in `x-trr-request-id`.
+    - Season refresh activity logs now store `requestId` and render log message prefixes as `[req:<id>] ...` for direct traceability.
+    - Season refresh stream progress state now carries optional `requestId`.
+    - `refresh-photos/stream` proxy now forwards `x-trr-request-id` to backend and injects `request_id` into proxy-origin SSE error payloads.
+    - Added RHOSLC runbook for normal + degraded (Screenalytics-down) manual checks:
+      - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/cross-collab/rhoslc-media-refresh-e2e-checklist.md`
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/show-refresh-photos-stream-route.test.ts tests/season-refresh-request-id-wiring.test.ts` (pass)
+    - `pnpm -C apps/web exec eslint 'src/app/api/admin/trr-api/shows/[showId]/refresh-photos/stream/route.ts' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' tests/show-refresh-photos-stream-route.test.ts tests/season-refresh-request-id-wiring.test.ts` (pass)
+
 ## Latest Update (2026-02-24) — PR #52 CI unblock (timeout assertion drift)
 
 - February 24, 2026: Fixed the remaining Node 20 CI failure on `codex/2026-02-24-trr-app-sync` by removing a stale hardcoded timeout expectation in one route test.
