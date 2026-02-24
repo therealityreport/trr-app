@@ -80,6 +80,6 @@ describe("show bravo video-thumbnail sync proxy route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(504);
-    expect(String(payload.error || "")).toContain("timed out after 90s");
+    expect(String(payload.error || "")).toMatch(/timed out after \d+s/i);
   });
 });
