@@ -2,6 +2,33 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-24) — Networks UI release deployment + lockfile rebaseline
+
+- February 24, 2026: Isolated and deployed the `/admin/networks` completion-policy UI updates from a clean release branch.
+  - Branch:
+    - `codex/networks-ui-release`
+  - Commits:
+    - `7a2098ee20348a3ffb203d8820c375e14d7a0c53` (networks UI/repository tests updates)
+    - `b1d743d0f1b8fb5955fe013bce17edb9e76f0b66` (app-local lockfile refresh for Vercel frozen-lockfile)
+  - Files:
+    - `apps/web/src/app/admin/networks/page.tsx`
+    - `apps/web/src/app/admin/networks/[entityType]/[entitySlug]/page.tsx`
+    - `apps/web/src/app/api/admin/networks-streaming/detail/route.ts`
+    - `apps/web/src/lib/admin/networks-streaming-entity.ts`
+    - `apps/web/tests/admin-networks-page-auth.test.tsx`
+    - `apps/web/tests/admin-network-detail-page.test.tsx`
+    - `apps/web/tests/networks-streaming-sync-proxy-route.test.ts`
+    - `apps/web/pnpm-lock.yaml`
+  - Validation:
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+    - `pnpm -C apps/web exec vitest run tests/admin-breadcrumbs.test.ts tests/admin-breadcrumbs-component.test.tsx tests/admin-networks-page-auth.test.tsx tests/admin-network-detail-page.test.tsx tests/networks-streaming-sync-proxy-route.test.ts` (`17 passed`)
+    - `pnpm -C apps/web run build` (pass, with `.env.local`)
+  - Deploy:
+    - Initial production deploy failed due app-local lockfile drift (`ERR_PNPM_OUTDATED_LOCKFILE`).
+    - After lockfile refresh, production deploy succeeded:
+      - `https://web-k36zx80k4-the-reality-reports-projects.vercel.app` (`Ready`)
+      - aliased to `https://web-the-reality-reports-projects.vercel.app`
+
 ## Latest Update (2026-02-24) — Phase 4 completion (E2E hardening + final validation)
 
 - February 24, 2026: Completed Phase 4 validation/hardening pass for shows/seasons admin with deterministic Playwright coverage and final command checks.
