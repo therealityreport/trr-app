@@ -753,13 +753,13 @@ const isTransientDevRestartMessage = (message: string | null | undefined): boole
   return TRANSIENT_DEV_RESTART_PATTERNS.some((pattern) => normalized.includes(pattern));
 };
 
-const parseResponseJson = async <T>(response: Response, fallbackMessage: string): Promise<T> => {
+async function parseResponseJson<T>(response: Response, fallbackMessage: string): Promise<T> {
   try {
     return (await response.json()) as T;
   } catch {
     throw new Error(`${fallbackMessage}. Response payload unavailable.`);
   }
-};
+}
 
 const fetchAdminWithTimeout = async (
   input: RequestInfo | URL,
