@@ -8,7 +8,7 @@ import {
 } from "@/lib/admin/image-url-candidates";
 
 describe("person gallery detail priority", () => {
-  it("prefers uncropped detail/original before crop detail", () => {
+  it("prefers hosted/original/source before generated detail/crop detail", () => {
     const candidates = getPersonPhotoDetailUrlCandidates({
       detail_url: "https://cdn.example.com/detail.webp",
       hosted_url: "https://cdn.example.com/hosted.jpg",
@@ -18,10 +18,10 @@ describe("person gallery detail priority", () => {
     });
 
     expect(candidates).toEqual([
-      "https://cdn.example.com/detail.webp",
       "https://cdn.example.com/hosted.jpg",
       "https://origin.example.com/original.jpg",
       "https://origin.example.com/source.jpg",
+      "https://cdn.example.com/detail.webp",
       "https://cdn.example.com/crop-detail.webp",
     ]);
   });

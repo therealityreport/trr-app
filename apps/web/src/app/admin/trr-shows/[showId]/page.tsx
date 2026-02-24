@@ -659,14 +659,26 @@ const isTransientNotAuthenticatedError = (error: unknown): boolean =>
 const fetchWithTimeout = async (
   input: RequestInfo | URL,
   init: RequestInit,
-  timeoutMs: number
+  timeoutMs: number,
+  externalSignal?: AbortSignal
 ): Promise<Response> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const forwardAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", forwardAbort, { once: true });
+    }
+  }
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeoutId);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", forwardAbort);
+    }
   }
 };
 
@@ -706,6 +718,15 @@ const inferBravoPersonUrl = (personName: string | null | undefined): string | nu
     .replace(/(^-|-$)/g, "");
   if (!slug) return null;
   return `https://www.bravotv.com/people/${slug}`;
+};
+
+const isBravoNetworkName = (value: unknown): boolean => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  if (!normalized) return false;
+  return normalized === "bravo" || normalized === "bravotv" || normalized.includes("bravo");
 };
 
 const normalizeBravoSocialKey = (value: string): string => {
@@ -1463,6 +1484,8 @@ export default function TrrShowDetailPage() {
   const [refreshingPersonProgress, setRefreshingPersonProgress] = useState<
     Record<string, RefreshProgressState>
   >({});
+  const castRefreshAbortControllerRef = useRef<AbortController | null>(null);
+  const castMediaEnrichAbortControllerRef = useRef<AbortController | null>(null);
 
   const showRouteState = useMemo(
     () => parseShowRouteState(pathname, new URLSearchParams(searchParams.toString())),
@@ -1805,10 +1828,11 @@ export default function TrrShowDetailPage() {
     async (
       personId: string,
       onProgress?: (progress: RefreshProgressState) => void,
-      options?: { mode?: PersonRefreshMode }
+      options?: { mode?: PersonRefreshMode; signal?: AbortSignal }
     ) => {
       const headers = await getAuthHeaders();
       const mode = options?.mode ?? "full";
+      const externalSignal = options?.signal;
       const isIngestOnly = mode === "ingest_only";
       const isProfileOnly = mode === "profile_only";
       const baseProgressMessage = isIngestOnly
@@ -1845,8 +1869,16 @@ export default function TrrShowDetailPage() {
             }
           : { skip_mirror: false, show_id: showId };
 
+      if (externalSignal?.aborted) {
+        throw new Error("Cast refresh canceled.");
+      }
+
       try {
         const streamController = new AbortController();
+        const forwardExternalAbort = () => streamController.abort();
+        if (externalSignal) {
+          externalSignal.addEventListener("abort", forwardExternalAbort, { once: true });
+        }
         const streamTimeout = setTimeout(
           () => streamController.abort(),
           PERSON_REFRESH_STREAM_TIMEOUT_MS
@@ -1974,10 +2006,16 @@ export default function TrrShowDetailPage() {
 
           return completePayload ?? {};
         } finally {
+          if (externalSignal) {
+            externalSignal.removeEventListener("abort", forwardExternalAbort);
+          }
           clearStreamIdleTimeout();
           clearTimeout(streamTimeout);
         }
       } catch (streamErr) {
+        if (isAbortError(streamErr) && externalSignal?.aborted) {
+          throw new Error("Cast refresh canceled.");
+        }
         console.warn("Person refresh stream failed, falling back to non-stream.", streamErr);
       }
 
@@ -1989,6 +2027,10 @@ export default function TrrShowDetailPage() {
       });
 
       const fallbackController = new AbortController();
+      const forwardExternalAbort = () => fallbackController.abort();
+      if (externalSignal) {
+        externalSignal.addEventListener("abort", forwardExternalAbort, { once: true });
+      }
       const fallbackTimeout = setTimeout(
         () => fallbackController.abort(),
         PERSON_REFRESH_FALLBACK_TIMEOUT_MS
@@ -2002,6 +2044,9 @@ export default function TrrShowDetailPage() {
           signal: fallbackController.signal,
         });
       } catch (fallbackErr) {
+        if (isAbortError(fallbackErr) && externalSignal?.aborted) {
+          throw new Error("Cast refresh canceled.");
+        }
         if (isAbortError(fallbackErr)) {
           throw new Error(
             `Timed out ${
@@ -2013,6 +2058,9 @@ export default function TrrShowDetailPage() {
         }
         throw fallbackErr;
       } finally {
+        if (externalSignal) {
+          externalSignal.removeEventListener("abort", forwardExternalAbort);
+        }
         clearTimeout(fallbackTimeout);
       }
 
@@ -2037,9 +2085,21 @@ export default function TrrShowDetailPage() {
   );
 
   const reprocessPersonImages = useCallback(
-    async (personId: string, onProgress?: (progress: RefreshProgressState) => void) => {
+    async (
+      personId: string,
+      onProgress?: (progress: RefreshProgressState) => void,
+      options?: { signal?: AbortSignal }
+    ) => {
       const headers = await getAuthHeaders();
+      const externalSignal = options?.signal;
+      if (externalSignal?.aborted) {
+        throw new Error("Cast media enrich canceled.");
+      }
       const streamController = new AbortController();
+      const forwardExternalAbort = () => streamController.abort();
+      if (externalSignal) {
+        externalSignal.addEventListener("abort", forwardExternalAbort, { once: true });
+      }
       const streamTimeout = setTimeout(
         () => streamController.abort(),
         PERSON_REFRESH_STREAM_TIMEOUT_MS
@@ -2166,6 +2226,9 @@ export default function TrrShowDetailPage() {
         }
         throw new Error("Reprocess stream ended before completion.");
       } catch (streamErr) {
+        if (isAbortError(streamErr) && externalSignal?.aborted) {
+          throw new Error("Cast media enrich canceled.");
+        }
         if (isAbortError(streamErr)) {
           throw new Error(
             `Timed out enriching cast media after ${Math.round(PERSON_REFRESH_STREAM_TIMEOUT_MS / 1000)}s.`
@@ -2173,6 +2236,9 @@ export default function TrrShowDetailPage() {
         }
         throw streamErr;
       } finally {
+        if (externalSignal) {
+          externalSignal.removeEventListener("abort", forwardExternalAbort);
+        }
         clearStreamIdleTimeout();
         clearTimeout(streamTimeout);
       }
@@ -2308,6 +2374,7 @@ export default function TrrShowDetailPage() {
           await refreshPersonImages(
             member.person_id,
             (progress) => {
+              throwIfAborted();
               setRefreshTargetProgress((prev) => ({
                 ...prev,
                 cast_credits: {
@@ -2327,12 +2394,15 @@ export default function TrrShowDetailPage() {
                 },
               }));
             },
-            { mode }
+            { mode, signal: options?.signal }
           );
           succeeded += 1;
         } catch (err) {
           console.warn(`Failed to ${failureVerb} cast media for ${label}:`, err);
           const errorText = err instanceof Error ? err.message : "unknown error";
+          if (options?.signal?.aborted || /canceled/i.test(errorText)) {
+            throw new Error(`${stageLabel} canceled.`);
+          }
           appendRefreshLog({
             category,
             message: `Failed to ${failureVerb} ${label}: ${errorText}`,
@@ -2376,7 +2446,7 @@ export default function TrrShowDetailPage() {
   );
 
   const reprocessCastMedia = useCallback(
-    async (members: TrrCastMember[]) => {
+    async (members: TrrCastMember[], options?: { signal?: AbortSignal }) => {
       const uniqueMembers = Array.from(
         new Map(
           members
@@ -2389,6 +2459,12 @@ export default function TrrShowDetailPage() {
       if (total === 0) {
         return { attempted: 0, succeeded: 0, failed: 0 };
       }
+      const throwIfAborted = () => {
+        if (options?.signal?.aborted) {
+          throw new Error("Cast media enrich canceled.");
+        }
+      };
+      throwIfAborted();
 
       let succeeded = 0;
       let failed = 0;
@@ -2443,7 +2519,9 @@ export default function TrrShowDetailPage() {
         });
 
         try {
+          throwIfAborted();
           await reprocessPersonImages(member.person_id, (progress) => {
+            throwIfAborted();
             setRefreshTargetProgress((prev) => ({
               ...prev,
               cast_credits: {
@@ -2458,11 +2536,14 @@ export default function TrrShowDetailPage() {
                     : formatCastBatchMemberMessage(label, { completed, total, inFlight }),
                 current: completed,
                 total,
-              },
-            }));
-          });
+                },
+              }));
+          }, { signal: options?.signal });
           succeeded += 1;
         } catch (err) {
+          if (options?.signal?.aborted) {
+            throw new Error("Cast media enrich canceled.");
+          }
           console.warn(`Failed to enrich cast media for ${label}:`, err);
           const errorText = err instanceof Error ? err.message : "unknown error";
           appendRefreshLog({
@@ -2481,6 +2562,7 @@ export default function TrrShowDetailPage() {
 
       const runWorker = async () => {
         while (true) {
+          throwIfAborted();
           const memberIndex = nextIndex;
           nextIndex += 1;
           if (memberIndex >= total) {
@@ -2736,7 +2818,7 @@ export default function TrrShowDetailPage() {
           { count: number; premiereDate: string | null; finaleDate: string | null }
         > = {};
         for (const result of results) {
-          if ("summary" in result) {
+          if ("summary" in result && result.summary) {
             nextSummaries[result.seasonId] = result.summary;
             continue;
           }
@@ -5112,6 +5194,22 @@ export default function TrrShowDetailPage() {
     () => castDisplayMembers.filter((member) => isCrewCreditCategory(member.credit_category)),
     [castDisplayMembers]
   );
+  const castDisplayTotals = useMemo(() => {
+    let castTotal = 0;
+    let crewTotal = 0;
+    for (const member of castDisplayBaseMembers) {
+      if (isCrewCreditCategory(member.credit_category)) {
+        crewTotal += 1;
+      } else {
+        castTotal += 1;
+      }
+    }
+    return {
+      cast: castTotal,
+      crew: crewTotal,
+      total: castDisplayBaseMembers.length,
+    };
+  }, [castDisplayBaseMembers]);
 
   const pendingLinkCount = useMemo(
     () => showLinks.filter((link) => link.status === "pending").length,
@@ -6801,6 +6899,8 @@ export default function TrrShowDetailPage() {
     ) {
       return;
     }
+    const runController = new AbortController();
+    castRefreshAbortControllerRef.current = runController;
     setCastMediaEnrichNotice(null);
     setCastMediaEnrichError(null);
     setCastRefreshPipelineRunning(true);
@@ -6821,11 +6921,10 @@ export default function TrrShowDetailPage() {
       return next;
     });
 
-    const isBravoShow = (show?.networks ?? []).some(
-      (network) => String(network ?? "").trim().toLowerCase() === "bravo"
-    );
+    const isBravoShow = (show?.networks ?? []).some((network) => isBravoNetworkName(network));
     let rosterMembers: TrrCastMember[] = [];
     let latestPhaseStates: CastRefreshPhaseState[] = [];
+    let completedSuccessfully = false;
 
     try {
       const phases: CastRefreshPhaseDefinition[] = [
@@ -6970,6 +7069,7 @@ export default function TrrShowDetailPage() {
 
       await runPhasedCastRefresh({
         phases,
+        signal: runController.signal,
         onPhaseStatesChange: (states) => {
           latestPhaseStates = states;
           setCastRefreshPhaseStates(states);
@@ -6997,7 +7097,11 @@ export default function TrrShowDetailPage() {
           }));
         },
       });
-      await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 });
+      await fetchCast({
+        rosterMode: "imdb_show_membership",
+        minEpisodes: 0,
+        signal: runController.signal,
+      });
       await fetchCastRoleMembers({ force: true });
       setCastRoleMembersWarning(null);
       setRefreshTargetNotice((prev) => ({
@@ -7005,8 +7109,27 @@ export default function TrrShowDetailPage() {
         cast_credits:
           "Cast refresh complete: credits synced, profile links synced, bios refreshed, network augmentation applied, media ingest complete.",
       }));
+      completedSuccessfully = true;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Cast refresh failed";
+      if (runController.signal.aborted || /canceled/i.test(message)) {
+        setRefreshTargetError((prev) => {
+          const next = { ...prev };
+          delete next.cast_credits;
+          return next;
+        });
+        setRefreshTargetNotice((prev) => ({
+          ...prev,
+          cast_credits: "Cast refresh canceled.",
+        }));
+        appendRefreshLog({
+          category: "Cast & Credits",
+          message: "Cast refresh canceled.",
+          current: null,
+          total: null,
+        });
+        return;
+      }
       const failedPhase =
         latestPhaseStates.find((phase) => phase.status === "failed" || phase.status === "timed_out")
         ?? null;
@@ -7026,7 +7149,13 @@ export default function TrrShowDetailPage() {
         total: null,
       });
     } finally {
+      if (castRefreshAbortControllerRef.current === runController) {
+        castRefreshAbortControllerRef.current = null;
+      }
       setCastRefreshPipelineRunning(false);
+      if (completedSuccessfully) {
+        setCastRefreshPhaseStates([]);
+      }
     }
   }, [
     appendRefreshLog,
@@ -7053,6 +7182,8 @@ export default function TrrShowDetailPage() {
     ) {
       return;
     }
+    const runController = new AbortController();
+    castMediaEnrichAbortControllerRef.current = runController;
     setCastMediaEnriching(true);
     setCastMediaEnrichNotice(null);
     setCastMediaEnrichError(null);
@@ -7072,17 +7203,36 @@ export default function TrrShowDetailPage() {
             rosterMode: "imdb_show_membership",
             minEpisodes: 0,
             throwOnError: true,
+            signal: runController.signal,
           });
         },
         reprocessCastMemberMedia: async (members) => {
-          await reprocessCastMedia(members);
+          await reprocessCastMedia(members, { signal: runController.signal });
         },
       });
-      await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 });
+      await fetchCast({
+        rosterMode: "imdb_show_membership",
+        minEpisodes: 0,
+        signal: runController.signal,
+      });
       setCastMediaEnrichNotice("Cast media enrich complete (count, word detection, crop, resize).");
     } catch (err) {
+      if (runController.signal.aborted) {
+        setCastMediaEnrichError(null);
+        setCastMediaEnrichNotice("Cast media enrich canceled.");
+        appendRefreshLog({
+          category: "Cast Media Enrich",
+          message: "Cast media enrich canceled.",
+          current: null,
+          total: null,
+        });
+        return;
+      }
       setCastMediaEnrichError(err instanceof Error ? err.message : "Failed to enrich cast media");
     } finally {
+      if (castMediaEnrichAbortControllerRef.current === runController) {
+        castMediaEnrichAbortControllerRef.current = null;
+      }
       setCastMediaEnriching(false);
       setRefreshTargetProgress((prev) => {
         const next = { ...prev };
@@ -7091,6 +7241,7 @@ export default function TrrShowDetailPage() {
       });
     }
   }, [
+    appendRefreshLog,
     castMatrixSyncLoading,
     castMediaEnriching,
     castRefreshPipelineRunning,
@@ -7099,6 +7250,11 @@ export default function TrrShowDetailPage() {
     refreshingTargets,
     reprocessCastMedia,
   ]);
+
+  const cancelShowCastWorkflow = useCallback(() => {
+    castRefreshAbortControllerRef.current?.abort();
+    castMediaEnrichAbortControllerRef.current?.abort();
+  }, []);
 
   const missingCastPhotoCount = useMemo(() => {
     const countMissing = (members: TrrCastMember[]) =>
@@ -7783,13 +7939,12 @@ export default function TrrShowDetailPage() {
     activeTargetProgress?.current ?? refreshAllProgress?.current ?? null;
   const globalRefreshTotal = activeTargetProgress?.total ?? refreshAllProgress?.total ?? null;
   const castTabProgress =
-    (refreshingTargets.cast_credits || castRefreshPipelineRunning || castMediaEnriching) &&
-    refreshTargetProgress.cast_credits
-      ? refreshTargetProgress.cast_credits
-      : globalRefreshProgress;
-  const showCastTabProgress =
-    (isShowRefreshBusy || castRefreshPipelineRunning || castMediaEnriching) &&
-    Boolean(castTabProgress?.message || castTabProgress?.stage || castTabProgress?.total !== null);
+    refreshingTargets.cast_credits || castRefreshPipelineRunning || castMediaEnriching
+      ? refreshTargetProgress.cast_credits ?? null
+      : null;
+  const showCastTabProgress = Boolean(
+    castTabProgress?.message || castTabProgress?.stage || castTabProgress?.total !== null
+  );
   const castRefreshActivePhase =
     castRefreshPhaseStates.find((phase) => phase.status === "running") ?? null;
   const castRefreshPhasePanelStates =
@@ -9265,7 +9420,7 @@ export default function TrrShowDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {castGalleryMembers.length} cast · {crewGalleryMembers.length} crew · {castDisplayMembers.length} total
+                    {castGalleryMembers.length}/{castDisplayTotals.cast} cast · {crewGalleryMembers.length}/{castDisplayTotals.crew} crew · {castDisplayMembers.length}/{castDisplayTotals.total} visible
                   </span>
                   <button
                     type="button"
@@ -9293,6 +9448,15 @@ export default function TrrShowDetailPage() {
                   >
                     {castRefreshButtonLabel}
                   </button>
+                  {(castRefreshPipelineRunning || castMediaEnriching) && (
+                    <button
+                      type="button"
+                      onClick={cancelShowCastWorkflow}
+                      className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
               </div>
               {(refreshTargetNotice.cast_credits ||
@@ -9560,18 +9724,21 @@ export default function TrrShowDetailPage() {
                             : null;
 
                         return (
-                          <Link
+                          <div
                             key={member.id}
-                            href={buildPersonAdminUrl({
-                              showSlug: showSlugForRouting,
-                              personSlug: buildPersonRouteSlug({
-                                personName: member.full_name || member.cast_member_name || null,
-                                personId: member.person_id,
-                              }),
-                              tab: "overview",
-                            }) as Route}
                             className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
                           >
+                            <Link
+                              href={buildPersonAdminUrl({
+                                showSlug: showSlugForRouting,
+                                personSlug: buildPersonRouteSlug({
+                                  personName: member.full_name || member.cast_member_name || null,
+                                  personId: member.person_id,
+                                }),
+                                tab: "overview",
+                              }) as Route}
+                              className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+                            >
                             <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
                               {thumbnailUrl ? (
                                 <CastPhoto
@@ -9610,11 +9777,10 @@ export default function TrrShowDetailPage() {
                                 ))}
                               </div>
                             )}
+                            </Link>
                             <button
                               type="button"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
+                              onClick={() => {
                                 handleRefreshCastMember(
                                   member.person_id,
                                   member.full_name || member.cast_member_name || "Cast member"
@@ -9629,9 +9795,7 @@ export default function TrrShowDetailPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
+                              onClick={() => {
                                 void assignRolesToCastMember(
                                   member.person_id,
                                   member.full_name || member.cast_member_name || "Cast member"
@@ -9648,7 +9812,7 @@ export default function TrrShowDetailPage() {
                               current={refreshingPersonProgress[member.person_id]?.current}
                               total={refreshingPersonProgress[member.person_id]?.total}
                             />
-                          </Link>
+                          </div>
                         );
                       })}
                     </div>
@@ -9668,18 +9832,21 @@ export default function TrrShowDetailPage() {
                             ? `${member.total_episodes} episodes`
                             : null;
                         return (
-                          <Link
+                          <div
                             key={`crew-${member.id}`}
-                            href={buildPersonAdminUrl({
-                              showSlug: showSlugForRouting,
-                              personSlug: buildPersonRouteSlug({
-                                personName: member.full_name || member.cast_member_name || null,
-                                personId: member.person_id,
-                              }),
-                              tab: "overview",
-                            }) as Route}
                             className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
                           >
+                            <Link
+                              href={buildPersonAdminUrl({
+                                showSlug: showSlugForRouting,
+                                personSlug: buildPersonRouteSlug({
+                                  personName: member.full_name || member.cast_member_name || null,
+                                  personId: member.person_id,
+                                }),
+                                tab: "overview",
+                              }) as Route}
+                              className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                            >
                             <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
                               {thumbnailUrl ? (
                                 <CastPhoto
@@ -9718,11 +9885,10 @@ export default function TrrShowDetailPage() {
                                 ))}
                               </div>
                             )}
+                            </Link>
                             <button
                               type="button"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
+                              onClick={() => {
                                 handleRefreshCastMember(
                                   member.person_id,
                                   member.full_name || member.cast_member_name || "Crew member"
@@ -9735,9 +9901,7 @@ export default function TrrShowDetailPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
+                              onClick={() => {
                                 void assignRolesToCastMember(
                                   member.person_id,
                                   member.full_name || member.cast_member_name || "Crew member"
@@ -9754,7 +9918,7 @@ export default function TrrShowDetailPage() {
                               current={refreshingPersonProgress[member.person_id]?.current}
                               total={refreshingPersonProgress[member.person_id]?.total}
                             />
-                          </Link>
+                          </div>
                         );
                       })}
                     </div>

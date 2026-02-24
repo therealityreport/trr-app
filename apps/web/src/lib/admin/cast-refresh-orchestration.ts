@@ -97,11 +97,14 @@ export const createInitialCastRefreshPhaseStates = (
 
 export const runWithTimeout = async <T>(
   phase: Pick<CastRefreshPhaseDefinition, "id" | "timeoutMs">,
-  task: (signal: AbortSignal) => Promise<T>
+  task: (signal: AbortSignal) => Promise<T>,
+  options?: { signal?: AbortSignal }
 ): Promise<T> => {
   const controller = new AbortController();
   let settled = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const parentSignal = options?.signal;
+  let removeParentAbortListener: (() => void) | null = null;
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
@@ -122,6 +125,28 @@ export const runWithTimeout = async <T>(
     );
   });
 
+  const parentAbortPromise = parentSignal
+    ? new Promise<never>((_, reject) => {
+        const onParentAbort = () => {
+          if (settled) return;
+          controller.abort();
+          reject(new Error("Cast refresh canceled."));
+        };
+        if (parentSignal.aborted) {
+          onParentAbort();
+          return;
+        }
+        parentSignal.addEventListener("abort", onParentAbort, { once: true });
+        removeParentAbortListener = () =>
+          parentSignal.removeEventListener("abort", onParentAbort);
+        controller.signal.addEventListener(
+          "abort",
+          () => removeParentAbortListener?.(),
+          { once: true }
+        );
+      })
+    : null;
+
   const taskPromise = (async () => {
     const result = await task(controller.signal);
     settled = true;
@@ -129,24 +154,32 @@ export const runWithTimeout = async <T>(
   })();
 
   try {
-    return await Promise.race([taskPromise, timeoutPromise]);
+    return await Promise.race(
+      parentAbortPromise ? [taskPromise, timeoutPromise, parentAbortPromise] : [taskPromise, timeoutPromise]
+    );
   } finally {
     settled = true;
     if (timeoutId) {
       clearTimeout(timeoutId);
       timeoutId = null;
     }
+    (removeParentAbortListener as (() => void) | null)?.();
+    removeParentAbortListener = null;
   }
 };
 
 export const runPhasedCastRefresh = async (options: {
   phases: CastRefreshPhaseDefinition[];
   onPhaseStatesChange?: (states: CastRefreshPhaseState[]) => void;
+  signal?: AbortSignal;
 }): Promise<CastRefreshPhaseState[]> => {
   let states = createInitialCastRefreshPhaseStates(options.phases);
   emitPhaseStates(states, options.onPhaseStatesChange);
 
   for (const phase of options.phases) {
+    if (options.signal?.aborted) {
+      throw new Error("Cast refresh canceled.");
+    }
     states = withPhaseState(states, phase.id, (state) => ({
       ...state,
       status: "running",
@@ -161,21 +194,24 @@ export const runPhasedCastRefresh = async (options: {
     emitPhaseStates(states, options.onPhaseStatesChange);
 
     try {
-      const result = await runWithTimeout(phase, (signal) =>
-        phase.run({
-          signal,
-          phase,
-          updateProgress: (progress) => {
-            states = withPhaseState(states, phase.id, (state) => ({
-              ...state,
-              progress: {
-                ...state.progress,
-                ...progress,
-              },
-            }));
-            emitPhaseStates(states, options.onPhaseStatesChange);
-          },
-        })
+      const result = await runWithTimeout(
+        phase,
+        (signal) =>
+          phase.run({
+            signal,
+            phase,
+            updateProgress: (progress) => {
+              states = withPhaseState(states, phase.id, (state) => ({
+                ...state,
+                progress: {
+                  ...state.progress,
+                  ...progress,
+                },
+              }));
+              emitPhaseStates(states, options.onPhaseStatesChange);
+            },
+          }),
+        { signal: options.signal }
       );
 
       if (result && typeof result === "object" && result.skipped) {

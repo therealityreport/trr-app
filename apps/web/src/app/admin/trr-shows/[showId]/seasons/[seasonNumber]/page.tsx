@@ -18,7 +18,9 @@ import FandomSyncModal, {
   type FandomSyncPreviewResponse,
 } from "@/components/admin/FandomSyncModal";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
-import SeasonSocialAnalyticsSection from "@/components/admin/season-social-analytics-section";
+import SeasonSocialAnalyticsSection, {
+  type SocialAnalyticsView,
+} from "@/components/admin/season-social-analytics-section";
 import SurveysSection from "@/components/admin/surveys-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import { resolveGalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
@@ -245,6 +247,19 @@ const SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 120_000;
 const SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS = 2;
 const SEASON_CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
+
+const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
+  { id: "bravo", label: "BRAVO ANALYTICS" },
+  { id: "sentiment", label: "SENTIMENT ANALYSIS" },
+  { id: "hashtags", label: "HASHTAGS ANALYSIS" },
+  { id: "advanced", label: "ADVANCED ANALYTICS" },
+  { id: "reddit", label: "REDDIT ANALYTICS" },
+];
+
+const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {
+  if (!value) return false;
+  return SEASON_SOCIAL_ANALYTICS_VIEWS.some((item) => item.id === value);
+};
 
 const BATCH_JOB_OPERATION_LABELS = {
   count: "Count",
@@ -835,6 +850,8 @@ export default function SeasonDetailPage() {
   const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
   const showCastFetchAttemptedRef = useRef(false);
   const castRoleMembersLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const castRoleMembersLoadedOnceRef = useRef(false);
+  const castRoleMembersSnapshotRef = useRef<CastRoleMember[]>([]);
   const castRefreshAbortControllerRef = useRef<AbortController | null>(null);
   const appendRefreshLog = useCallback(
     (
@@ -850,6 +867,14 @@ export default function SeasonDetailPage() {
     },
     []
   );
+
+  useEffect(() => {
+    castRoleMembersLoadedOnceRef.current = castRoleMembersLoadedOnce;
+  }, [castRoleMembersLoadedOnce]);
+
+  useEffect(() => {
+    castRoleMembersSnapshotRef.current = castRoleMembers;
+  }, [castRoleMembers]);
 
   const [episodeLightbox, setEpisodeLightbox] = useState<{
     episode: TrrEpisode;
@@ -937,6 +962,32 @@ export default function SeasonDetailPage() {
           tab: "assets",
           assetsSubTab: view,
           query: preservedQuery,
+        }) as Route,
+        { scroll: false }
+      );
+    },
+    [router, searchParams, seasonNumber, showSlugForRouting]
+  );
+
+  const socialAnalyticsView = useMemo<SocialAnalyticsView>(() => {
+    const value = searchParams.get("social_view");
+    return isSocialAnalyticsView(value) ? value : "bravo";
+  }, [searchParams]);
+
+  const setSocialAnalyticsView = useCallback(
+    (view: SocialAnalyticsView) => {
+      const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      if (view === "bravo") {
+        nextQuery.delete("social_view");
+      } else {
+        nextQuery.set("social_view", view);
+      }
+      router.replace(
+        buildSeasonAdminUrl({
+          showSlug: showSlugForRouting,
+          seasonNumber,
+          tab: "social",
+          query: nextQuery,
         }) as Route,
         { scroll: false }
       );
@@ -1198,7 +1249,8 @@ export default function SeasonDetailPage() {
           : lastError instanceof Error
             ? lastError.message
             : "Failed to load cast role members";
-        const hasPriorData = castRoleMembersLoadedOnce || castRoleMembers.length > 0;
+        const hasPriorData =
+          castRoleMembersLoadedOnceRef.current || castRoleMembersSnapshotRef.current.length > 0;
         if (hasPriorData) {
           setCastRoleMembersWarning(`${message}. Showing last successful cast intelligence snapshot.`);
           setCastRoleMembersError(null);
@@ -1220,8 +1272,6 @@ export default function SeasonDetailPage() {
       }
     },
     [
-      castRoleMembers,
-      castRoleMembersLoadedOnce,
       getAuthHeaders,
       seasonNumber,
       showId,
@@ -1514,7 +1564,9 @@ export default function SeasonDetailPage() {
     setCastCreditFilters([]);
     setCastHasImageFilter("all");
     setCastRoleMembers([]);
+    setCastRoleMembersLoadedOnce(false);
     setCastRoleMembersError(null);
+    setCastRoleMembersWarning(null);
     setRefreshLogEntries([]);
     setAssetsRefreshLogOpen(false);
     setCastRefreshLogOpen(false);
@@ -2069,6 +2121,14 @@ export default function SeasonDetailPage() {
     if (!showId) return;
     if (refreshingCast) return;
 
+    const runController = new AbortController();
+    castRefreshAbortControllerRef.current = runController;
+    const throwIfCanceled = () => {
+      if (runController.signal.aborted) {
+        throw new Error("Season cast refresh canceled.");
+      }
+    };
+
     setRefreshingCast(true);
     setCastRefreshError(null);
     setCastRefreshNotice(null);
@@ -2088,6 +2148,7 @@ export default function SeasonDetailPage() {
 
     try {
       const headers = await getAuthHeaders();
+      throwIfCanceled();
       let streamFailed = false;
       let sawComplete = false;
       let completionSummary: string | null = null;
@@ -2095,6 +2156,8 @@ export default function SeasonDetailPage() {
 
       try {
         const streamController = new AbortController();
+        const forwardRunAbort = () => streamController.abort();
+        runController.signal.addEventListener("abort", forwardRunAbort, { once: true });
         const streamTimeout = setTimeout(
           () => streamController.abort(),
           SEASON_STREAM_MAX_DURATION_MS
@@ -2246,6 +2309,7 @@ export default function SeasonDetailPage() {
         } finally {
           clearStreamIdleTimeout();
           clearTimeout(streamTimeout);
+          runController.signal.removeEventListener("abort", forwardRunAbort);
           if (reader && shouldStopReading) {
             try {
               await reader.cancel();
@@ -2264,6 +2328,9 @@ export default function SeasonDetailPage() {
           });
         }
       } catch (streamErr) {
+        if (runController.signal.aborted) {
+          throw new Error("Season cast refresh canceled.");
+        }
         streamFailed = true;
         console.warn("Season cast refresh stream failed, falling back to non-stream.", streamErr);
         appendRefreshLog({
@@ -2276,6 +2343,7 @@ export default function SeasonDetailPage() {
       }
 
       if (streamFailed) {
+        throwIfCanceled();
         setCastRefreshProgress({
           stage: "Fallback",
           message: "Refreshing cast credits...",
@@ -2297,9 +2365,13 @@ export default function SeasonDetailPage() {
               headers: { ...headers, "Content-Type": "application/json" },
               body: JSON.stringify({ targets: ["cast_credits"] }),
             },
-            SEASON_REFRESH_FALLBACK_TIMEOUT_MS
+            SEASON_REFRESH_FALLBACK_TIMEOUT_MS,
+            runController.signal
           );
         } catch (error) {
+          if (isAbortError(error) && runController.signal.aborted) {
+            throw new Error("Season cast refresh canceled.");
+          }
           if (isAbortError(error)) {
             appendRefreshLog({
               scope: "cast",
@@ -2341,14 +2413,19 @@ export default function SeasonDetailPage() {
         });
       }
 
+      throwIfCanceled();
       let castResponse: Response;
       try {
         castResponse = await fetchWithTimeout(
           `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500`,
           { headers },
-          SEASON_CAST_LOAD_TIMEOUT_MS
+          SEASON_CAST_LOAD_TIMEOUT_MS,
+          runController.signal
         );
       } catch (error) {
+        if (isAbortError(error) && runController.signal.aborted) {
+          throw new Error("Season cast refresh canceled.");
+        }
         if (isAbortError(error)) {
           throw new Error(
             `Timed out loading refreshed season cast after ${Math.round(
@@ -2388,9 +2465,13 @@ export default function SeasonDetailPage() {
         archiveCastResponse = await fetchWithTimeout(
           `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/cast?limit=500&include_archive_only=true`,
           { headers },
-          SEASON_CAST_LOAD_TIMEOUT_MS
+          SEASON_CAST_LOAD_TIMEOUT_MS,
+          runController.signal
         );
       } catch (error) {
+        if (isAbortError(error) && runController.signal.aborted) {
+          throw new Error("Season cast refresh canceled.");
+        }
         if (isAbortError(error)) {
           throw new Error(
             `Timed out loading archive cast after ${Math.round(
@@ -2431,21 +2512,31 @@ export default function SeasonDetailPage() {
 
       let castProfilesFailed = 0;
       const castProfilesTotal = castMembersToSync.length;
+      let castProfilesCompleted = 0;
+      let castProfilesInFlight = 0;
+      let nextMemberIndex = 0;
+      const profileWorkerCount = Math.max(
+        1,
+        Math.min(SEASON_CAST_PROFILE_SYNC_CONCURRENCY, castProfilesTotal || 1)
+      );
 
-      for (const [index, member] of castMembersToSync.entries()) {
-        const displayName = member.person_name || `Cast member ${index + 1}`;
+      const syncCastMemberProfile = async (memberIndex: number) => {
+        throwIfCanceled();
+        const member = castMembersToSync[memberIndex];
+        const displayName = member.person_name || `Cast member ${memberIndex + 1}`;
+        castProfilesInFlight += 1;
         appendRefreshLog({
           scope: "cast",
           stage: "cast_profile_sync",
-          message: `Syncing ${displayName} (${index + 1}/${castProfilesTotal})`,
+          message: `Syncing ${displayName} (${castProfilesCompleted + 1}/${castProfilesTotal})`,
           level: "info",
-          current: index,
+          current: castProfilesCompleted,
           total: castProfilesTotal,
         });
         setCastRefreshProgress({
           stage: "Cast Profiles & Media",
-          message: `Syncing ${displayName} from TMDb/IMDb/Fandom (${index + 1}/${castProfilesTotal})...`,
-          current: index,
+          message: `Syncing ${displayName} from TMDb/IMDb/Fandom (${castProfilesCompleted + 1}/${castProfilesTotal}, ${castProfilesInFlight} in flight)...`,
+          current: castProfilesCompleted,
           total: castProfilesTotal,
         });
 
@@ -2458,7 +2549,10 @@ export default function SeasonDetailPage() {
         try {
           let personStreamFailed = false;
           try {
+            throwIfCanceled();
             const personStreamController = new AbortController();
+            const forwardRunAbort = () => personStreamController.abort();
+            runController.signal.addEventListener("abort", forwardRunAbort, { once: true });
             const personStreamTimeout = setTimeout(
               () => personStreamController.abort(),
               SEASON_PERSON_STREAM_MAX_DURATION_MS
@@ -2541,13 +2635,25 @@ export default function SeasonDetailPage() {
                         (payload as { message?: unknown }).message,
                         `Syncing ${displayName}...`
                       ),
-                      current: index,
+                      current: castProfilesCompleted,
                       total: castProfilesTotal,
                     });
                   } else if (eventType === "complete") {
                     shouldStopPersonStream = true;
                   } else if (eventType === "error") {
-                    throw new Error("Failed to sync cast member profile/media");
+                    const errorPayload =
+                      payload && typeof payload === "object"
+                        ? (payload as { error?: unknown; detail?: unknown })
+                        : null;
+                    const errorText =
+                      typeof errorPayload?.error === "string" && errorPayload.error
+                        ? errorPayload.error
+                        : "Failed to sync cast member profile/media";
+                    const detailText =
+                      typeof errorPayload?.detail === "string" && errorPayload.detail
+                        ? errorPayload.detail
+                        : null;
+                    throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
                   }
 
                   if (shouldStopPersonStream) {
@@ -2563,6 +2669,7 @@ export default function SeasonDetailPage() {
             } finally {
               clearPersonStreamIdleTimeout();
               clearTimeout(personStreamTimeout);
+              runController.signal.removeEventListener("abort", forwardRunAbort);
               if (personReader && shouldStopPersonStream) {
                 try {
                   await personReader.cancel();
@@ -2572,25 +2679,29 @@ export default function SeasonDetailPage() {
               }
             }
           } catch (personStreamErr) {
-              personStreamFailed = true;
-              console.warn(
-                `Season cast member stream refresh failed for ${displayName}; using non-stream fallback.`,
-                personStreamErr
-              );
-              appendRefreshLog({
-                scope: "cast",
-                stage: "cast_profile_stream_failed",
-                message: `Stream failed for ${displayName}; running fallback.`,
-                detail: personStreamErr instanceof Error ? personStreamErr.message : String(personStreamErr),
-                level: "info",
-                current: index,
-                total: castProfilesTotal,
-              });
+            if (runController.signal.aborted) {
+              throw new Error("Season cast refresh canceled.");
             }
+            personStreamFailed = true;
+            console.warn(
+              `Season cast member stream refresh failed for ${displayName}; using non-stream fallback.`,
+              personStreamErr
+            );
+            appendRefreshLog({
+              scope: "cast",
+              stage: "cast_profile_stream_failed",
+              message: `Stream failed for ${displayName}; running fallback.`,
+              detail: personStreamErr instanceof Error ? personStreamErr.message : String(personStreamErr),
+              level: "info",
+              current: castProfilesCompleted,
+              total: castProfilesTotal,
+            });
+          }
 
-            if (personStreamFailed) {
-              let personFallbackResponse: Response;
-              try {
+          if (personStreamFailed) {
+            throwIfCanceled();
+            let personFallbackResponse: Response;
+            try {
               personFallbackResponse = await fetchWithTimeout(
                 `/api/admin/trr-api/people/${member.person_id}/refresh-images`,
                 {
@@ -2598,61 +2709,87 @@ export default function SeasonDetailPage() {
                   headers: { ...headers, "Content-Type": "application/json" },
                   body: JSON.stringify(requestBody),
                 },
-                SEASON_PERSON_FALLBACK_TIMEOUT_MS
+                SEASON_PERSON_FALLBACK_TIMEOUT_MS,
+                runController.signal
               );
             } catch (error) {
-                if (isAbortError(error)) {
-                  throw new Error(
-                    `Timed out syncing cast member profile/media after ${Math.round(
-                      SEASON_PERSON_FALLBACK_TIMEOUT_MS / 1000
-                    )}s.`
-                  );
-                }
-                throw error;
+              if (isAbortError(error) && runController.signal.aborted) {
+                throw new Error("Season cast refresh canceled.");
               }
-            const personFallbackData = await personFallbackResponse.json().catch(() => ({}));
-              if (!personFallbackResponse.ok) {
-                const message =
-                  typeof (personFallbackData as { error?: unknown }).error === "string"
-                    ? (personFallbackData as { error: string }).error
-                    : "Failed to sync cast member profile/media";
-                throw new Error(message);
+              if (isAbortError(error)) {
+                throw new Error(
+                  `Timed out syncing cast member profile/media after ${Math.round(
+                    SEASON_PERSON_FALLBACK_TIMEOUT_MS / 1000
+                  )}s.`
+                );
               }
+              throw error;
             }
-            appendRefreshLog({
-              scope: "cast",
-              stage: "cast_profile_complete",
-              message: `Synced ${displayName}.`,
-              level: "success",
-              current: index + 1,
-              total: castProfilesTotal,
-            });
-          } catch (castProfileErr) {
-            console.warn(
-              `Failed syncing season cast profile/media for ${displayName}:`,
-              castProfileErr
-            );
-            castProfilesFailed += 1;
-            appendRefreshLog({
-              scope: "cast",
-              stage: "cast_profile_failed",
-              message: `Failed syncing ${displayName}.`,
-              detail: castProfileErr instanceof Error ? castProfileErr.message : String(castProfileErr),
-              level: "error",
-              current: index + 1,
-              total: castProfilesTotal,
-            });
-          } finally {
-            setCastRefreshProgress({
-              stage: "Cast Profiles & Media",
-              message: `Synced ${index + 1}/${castProfilesTotal} cast profiles/media...`,
-            current: index + 1,
+            const personFallbackData = await personFallbackResponse.json().catch(() => ({}));
+            if (!personFallbackResponse.ok) {
+              const message =
+                typeof (personFallbackData as { error?: unknown }).error === "string"
+                  ? (personFallbackData as { error: string }).error
+                  : "Failed to sync cast member profile/media";
+              throw new Error(message);
+            }
+          }
+          appendRefreshLog({
+            scope: "cast",
+            stage: "cast_profile_complete",
+            message: `Synced ${displayName}.`,
+            level: "success",
+            current: castProfilesCompleted + 1,
+            total: castProfilesTotal,
+          });
+        } catch (castProfileErr) {
+          if (runController.signal.aborted) {
+            throw new Error("Season cast refresh canceled.");
+          }
+          console.warn(
+            `Failed syncing season cast profile/media for ${displayName}:`,
+            castProfileErr
+          );
+          castProfilesFailed += 1;
+          appendRefreshLog({
+            scope: "cast",
+            stage: "cast_profile_failed",
+            message: `Failed syncing ${displayName}.`,
+            detail: castProfileErr instanceof Error ? castProfileErr.message : String(castProfileErr),
+            level: "error",
+            current: castProfilesCompleted + 1,
+            total: castProfilesTotal,
+          });
+        } finally {
+          castProfilesCompleted += 1;
+          castProfilesInFlight = Math.max(0, castProfilesInFlight - 1);
+          setCastRefreshProgress({
+            stage: "Cast Profiles & Media",
+            message: `Synced ${castProfilesCompleted}/${castProfilesTotal} cast profiles/media... (${castProfilesInFlight} in flight)`,
+            current: castProfilesCompleted,
             total: castProfilesTotal,
           });
         }
+      };
+
+      const runProfileWorker = async () => {
+        while (true) {
+          throwIfCanceled();
+          const memberIndex = nextMemberIndex;
+          nextMemberIndex += 1;
+          if (memberIndex >= castProfilesTotal) {
+            return;
+          }
+          await syncCastMemberProfile(memberIndex);
+        }
+      };
+
+      if (castProfilesTotal > 0) {
+        await Promise.all(Array.from({ length: profileWorkerCount }, () => runProfileWorker()));
       }
 
-      await Promise.all([fetchCastRoleMembers(), fetchShowCastForBrand()]);
+      throwIfCanceled();
+      await Promise.all([fetchCastRoleMembers({ force: true }), fetchShowCastForBrand()]);
 
       const castProfileSummary =
         castProfilesTotal > 0
@@ -2684,15 +2821,29 @@ export default function SeasonDetailPage() {
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to refresh season cast";
-      setCastRefreshError(errorMessage);
-      appendRefreshLog({
-        scope: "cast",
-        stage: "error",
-        message: "Season cast refresh failed.",
-        detail: errorMessage,
-        level: "error",
-      });
+      if (runController.signal.aborted || /canceled/i.test(errorMessage)) {
+        setCastRefreshError(null);
+        setCastRefreshNotice("Season cast refresh canceled.");
+        appendRefreshLog({
+          scope: "cast",
+          stage: "canceled",
+          message: "Season cast refresh canceled.",
+          level: "info",
+        });
+      } else {
+        setCastRefreshError(errorMessage);
+        appendRefreshLog({
+          scope: "cast",
+          stage: "error",
+          message: "Season cast refresh failed.",
+          detail: errorMessage,
+          level: "error",
+        });
+      }
     } finally {
+      if (castRefreshAbortControllerRef.current === runController) {
+        castRefreshAbortControllerRef.current = null;
+      }
       setRefreshingCast(false);
       setCastRefreshProgress(null);
     }
@@ -2706,6 +2857,10 @@ export default function SeasonDetailPage() {
     fetchCastRoleMembers,
     fetchShowCastForBrand,
   ]);
+
+  const cancelSeasonCastRefresh = useCallback(() => {
+    castRefreshAbortControllerRef.current?.abort();
+  }, []);
 
   const openAddBackdrops = useCallback(async () => {
     if (!season?.id) return;
@@ -3320,8 +3475,8 @@ export default function SeasonDetailPage() {
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [cast, showCastByPersonId]);
 
-  const castDisplayMembers = useMemo(() => {
-    const merged = cast.map((member) => {
+  const castMergedMembers = useMemo(() => {
+    return cast.map((member) => {
       const scoped = castRoleMemberByPersonId.get(member.person_id);
       const showCastMember = showCastByPersonId.get(member.person_id);
       const roles = scoped?.roles.length
@@ -3345,8 +3500,10 @@ export default function SeasonDetailPage() {
         credit_category: creditCategory,
       };
     });
+  }, [cast, castRoleMemberByPersonId, showCastByPersonId]);
 
-    const filtered = merged.filter((member) => {
+  const castDisplayMembers = useMemo(() => {
+    const filtered = castMergedMembers.filter((member) => {
       if (
         castRoleFilters.length > 0 &&
         !member.roles.some((role) =>
@@ -3386,15 +3543,30 @@ export default function SeasonDetailPage() {
     });
     return sorted;
   }, [
-    cast,
+    castMergedMembers,
     castCreditFilters,
     castHasImageFilter,
     castRoleFilters,
-    castRoleMemberByPersonId,
     castSortBy,
     castSortOrder,
-    showCastByPersonId,
   ]);
+
+  const castDisplayTotals = useMemo(() => {
+    let castTotal = 0;
+    let crewTotal = 0;
+    for (const member of castMergedMembers) {
+      if (isCrewCreditCategory(member.credit_category)) {
+        crewTotal += 1;
+      } else {
+        castTotal += 1;
+      }
+    }
+    return {
+      cast: castTotal,
+      crew: crewTotal,
+      total: castMergedMembers.length,
+    };
+  }, [castMergedMembers]);
 
   const showFallbackCastWarning =
     seasonCastSource === "show_fallback" &&
@@ -3710,6 +3882,23 @@ export default function SeasonDetailPage() {
                 </button>
               ))}
             </nav>
+            {activeTab === "social" && (
+              <nav className="pb-4 flex flex-wrap gap-2">
+                {SEASON_SOCIAL_ANALYTICS_VIEWS.map((view) => (
+                  <button
+                    key={view.id}
+                    onClick={() => setSocialAnalyticsView(view.id)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                      socialAnalyticsView === view.id
+                        ? "border-zinc-800 bg-zinc-800 text-white"
+                        : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                    }`}
+                  >
+                    {view.label}
+                  </button>
+                ))}
+              </nav>
+            )}
           </div>
         </div>
 
@@ -4549,7 +4738,7 @@ export default function SeasonDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {castSeasonMembers.length} cast · {crewSeasonMembers.length} crew · {cast.length} active
+                    {castSeasonMembers.length}/{castDisplayTotals.cast} cast · {crewSeasonMembers.length}/{castDisplayTotals.crew} crew · {castDisplayMembers.length}/{castDisplayTotals.total} visible
                     {archiveCast.length > 0 ? ` · ${archiveCast.length} archive-only` : ""}
                   </span>
                   <button
@@ -4560,6 +4749,15 @@ export default function SeasonDetailPage() {
                   >
                     {refreshingCast ? "Refreshing..." : "Refresh"}
                   </button>
+                  {refreshingCast && (
+                    <button
+                      type="button"
+                      onClick={cancelSeasonCastRefresh}
+                      className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
               </div>
               {(castRefreshNotice || castRefreshError) && (
@@ -4588,8 +4786,29 @@ export default function SeasonDetailPage() {
                 onToggle={() => setCastRefreshLogOpen((prev) => !prev)}
               />
 
+              {castRoleMembersWarning && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <span>{castRoleMembersWarning}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchCastRoleMembers({ force: true })}
+                    className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
               {(castRoleMembersError || trrShowCastError) && (
-                <p className="mb-4 text-sm text-red-600">{castRoleMembersError || trrShowCastError}</p>
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <span>{castRoleMembersError || trrShowCastError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchCastRoleMembers({ force: true })}
+                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  >
+                    Retry
+                  </button>
+                </div>
               )}
 
               <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
@@ -4982,6 +5201,7 @@ export default function SeasonDetailPage() {
                 seasonNumber={season.season_number}
                 seasonId={season.id}
                 showName={show.name}
+                analyticsView={socialAnalyticsView}
               />
             </div>
           )}

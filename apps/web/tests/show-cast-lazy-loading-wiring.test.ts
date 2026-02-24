@@ -7,8 +7,8 @@ describe("show detail cast lazy-loading wiring", () => {
   const contents = fs.readFileSync(filePath, "utf8");
 
   it("keeps initial page load Promise.all free of fetchCast", () => {
-    expect(contents).toMatch(/await Promise\.all\(\[fetchSeasons\(\), checkCoverage\(\)\]\)/);
-    expect(contents).not.toMatch(/await Promise\.all\(\[fetchSeasons\(\), fetchCast\(\), checkCoverage\(\)\]\)/);
+    expect(contents).toMatch(/await Promise\.allSettled\(\[fetchSeasons\(\), checkCoverage\(\)\]\)/);
+    expect(contents).not.toMatch(/await Promise\.allSettled\(\[fetchSeasons\(\), fetchCast\(\), checkCoverage\(\)\]\)/);
   });
 
   it("loads cast lazily on cast tab entry", () => {
@@ -31,6 +31,37 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(
       /Cast refresh complete: credits synced, profile links synced, bios refreshed, network augmentation applied, media ingest complete\./
     );
+  });
+
+  it("threads abort signals through cast refresh/person media paths", () => {
+    expect(contents).toMatch(/options\?: \{ mode\?: PersonRefreshMode; signal\?: AbortSignal \}/);
+    expect(contents).toMatch(/\{ mode, signal: options\?\.signal \}/);
+    expect(contents).toMatch(/runPhasedCastRefresh\(\{\s*phases,\s*signal: runController\.signal,/s);
+    expect(contents).toMatch(/if \(options\?\.signal\?\.aborted \|\| \/canceled\/i\.test\(errorText\)\)/);
+  });
+
+  it("keeps cast tab progress scoped to cast workflows only", () => {
+    expect(contents).toMatch(/const castTabProgress =\s*refreshingTargets\.cast_credits \|\| castRefreshPipelineRunning \|\| castMediaEnriching/s);
+    expect(contents).not.toMatch(/:\s*globalRefreshProgress;/);
+  });
+
+  it("shows filtered\\/total cast counters and exposes cancel for running cast jobs", () => {
+    expect(contents).toMatch(/const castDisplayTotals = useMemo/);
+    expect(contents).toMatch(/castGalleryMembers\.length}\/\{castDisplayTotals\.cast} cast/);
+    expect(contents).toMatch(/crewGalleryMembers\.length}\/\{castDisplayTotals\.crew} crew/);
+    expect(contents).toMatch(/castDisplayMembers\.length}\/\{castDisplayTotals\.total} visible/);
+    expect(contents).toMatch(/const cancelShowCastWorkflow = useCallback/);
+    expect(contents).toMatch(/castRefreshAbortControllerRef\.current\?\.abort\(\)/);
+    expect(contents).toMatch(/castMediaEnrichAbortControllerRef\.current\?\.abort\(\)/);
+    expect(contents).toMatch(/\(castRefreshPipelineRunning \|\| castMediaEnriching\) &&/);
+    expect(contents).toMatch(/if \(completedSuccessfully\) \{\s*setCastRefreshPhaseStates\(\[\]\);/s);
+  });
+
+  it("uses valid interactive structure for cast cards by separating link and action buttons", () => {
+    expect(contents).toMatch(/<div\s+key=\{member\.id\}/);
+    expect(contents).toMatch(/className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"/);
+    expect(contents).toMatch(/className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"/);
+    expect(contents).not.toMatch(/event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*handleRefreshCastMember/s);
   });
 
   it("uses canonical 5-phase cast refresh orchestration with phase-aware button labels", () => {

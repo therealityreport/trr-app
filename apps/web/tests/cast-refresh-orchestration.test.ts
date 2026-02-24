@@ -147,4 +147,37 @@ describe("cast refresh orchestration", () => {
     expect(latestSnapshot[0]).toBe("timed_out");
     expect(latestSnapshot[1]).toBe("pending");
   });
+
+  it("supports external cancel signal and stops before next phase", async () => {
+    const controller = new AbortController();
+    const events: string[] = [];
+
+    const runPromise = runPhasedCastRefresh({
+      phases: [
+        {
+          id: "credits_sync",
+          label: "Credits",
+          timeoutMs: 1_000,
+          run: async () => {
+            events.push("credits-started");
+            controller.abort();
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            events.push("credits-finished");
+          },
+        },
+        {
+          id: "profile_links_sync",
+          label: "Links",
+          timeoutMs: 1_000,
+          run: async () => {
+            events.push("links-started");
+          },
+        },
+      ],
+      signal: controller.signal,
+    });
+
+    await expect(runPromise).rejects.toThrow(/canceled/i);
+    expect(events).not.toContain("links-started");
+  });
 });

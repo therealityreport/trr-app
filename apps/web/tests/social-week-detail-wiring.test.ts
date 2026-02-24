@@ -25,6 +25,7 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/social\/runs\?\$\{runParams\.toString\(\)\}/);
     expect(contents).toMatch(/social\/jobs\?\$\{jobsParams\.toString\(\)\}/);
     expect(contents).toMatch(/social\/ingest\$\{ingestParams\.toString\(\) \? `\?\$\{ingestParams\.toString\(\)\}` : ""\}/);
+    expect(contents).toMatch(/runParams = new URLSearchParams\(\{\s*source_scope:\s*sourceScope,\s*run_id:\s*runId,\s*limit:\s*"1"/s);
   });
 
   it("uses timeout-bounded fetches for week detail and sync polling", () => {
@@ -39,6 +40,9 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/Week detail request timed out/);
     expect(contents).toMatch(/Sync runs request timed out/);
     expect(contents).toMatch(/Sync jobs request timed out/);
+    expect(contents).toMatch(/SYNC_POLL_BACKOFF_MS/);
+    expect(contents).toMatch(/syncPollFailureCountRef/);
+    expect(contents).toMatch(/if \(syncPollFailureCountRef\.current >= 2\)/);
   });
 
   it("preserves social_view and social_platform in back link query", () => {

@@ -249,6 +249,7 @@ const REQUEST_TIMEOUT_MS = {
   syncRuns: 15_000,
   syncJobs: 15_000,
 } as const;
+const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -1061,6 +1062,7 @@ export default function WeekDetailPage() {
   const [syncPollError, setSyncPollError] = useState<string | null>(null);
   const [syncStartedAt, setSyncStartedAt] = useState<Date | null>(null);
   const syncPollGenerationRef = useRef(0);
+  const syncPollFailureCountRef = useRef(0);
   const resolvedSeasonId = useMemo(() => {
     if (data?.season?.season_id && looksLikeUuid(data.season.season_id)) {
       return data.season.season_id;
@@ -1167,14 +1169,18 @@ export default function WeekDetailPage() {
   }, [fetchData, hasValidNumericPathParams, invalidPathParamsError, isAdmin]);
 
   const fetchSyncProgress = useCallback(
-    async (runId: string, options?: { preserveLastGoodJobsIfEmpty?: boolean }) => {
+    async (
+      runId: string,
+      options?: { preserveLastGoodJobsIfEmpty?: boolean; preserveLastGoodRunIfMissing?: boolean },
+    ) => {
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
       }
       const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
       const runParams = new URLSearchParams({
         source_scope: sourceScope,
-        limit: "100",
+        run_id: runId,
+        limit: "1",
       });
       if (resolvedSeasonId) {
         runParams.set("season_id", resolvedSeasonId);
@@ -1214,7 +1220,12 @@ export default function WeekDetailPage() {
       const jobsPayload = (await jobsResponse.json()) as { jobs?: SocialJob[] };
       const nextRun = (runsPayload.runs ?? []).find((run) => run.id === runId) ?? null;
       const nextJobs = jobsPayload.jobs ?? [];
-      setSyncRun(nextRun);
+      setSyncRun((current) => {
+        if (options?.preserveLastGoodRunIfMissing && !nextRun && current?.id === runId) {
+          return current;
+        }
+        return nextRun;
+      });
       setSyncJobs((current) => {
         if (options?.preserveLastGoodJobsIfEmpty && nextJobs.length === 0 && current.length > 0) {
           return current;
@@ -1339,6 +1350,7 @@ export default function WeekDetailPage() {
         setSyncRunId(runId);
         setSyncRun(null);
         setSyncJobs([]);
+        syncPollFailureCountRef.current = 0;
         setSyncStartedAt(new Date());
         void fetchSyncProgress(runId).catch(() => {});
       } else {
@@ -1370,11 +1382,20 @@ export default function WeekDetailPage() {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const generation = ++syncPollGenerationRef.current;
 
+    const nextPollDelayMs = (failureCount: number): number => {
+      const index = Math.min(failureCount, SYNC_POLL_BACKOFF_MS.length - 1);
+      return SYNC_POLL_BACKOFF_MS[index];
+    };
+
     const poll = async () => {
       if (cancelled || generation !== syncPollGenerationRef.current) return;
       try {
-        const snapshot = await fetchSyncProgress(syncRunId, { preserveLastGoodJobsIfEmpty: true });
+        const snapshot = await fetchSyncProgress(syncRunId, {
+          preserveLastGoodJobsIfEmpty: true,
+          preserveLastGoodRunIfMissing: true,
+        });
         if (cancelled || generation !== syncPollGenerationRef.current) return;
+        syncPollFailureCountRef.current = 0;
         setSyncPollError(null);
         const currentRun = snapshot.run;
         if (currentRun && TERMINAL_RUN_STATUSES.has(currentRun.status)) {
@@ -1405,13 +1426,17 @@ export default function WeekDetailPage() {
         }
       } catch (err) {
         if (cancelled || generation !== syncPollGenerationRef.current) return;
-        setSyncPollError(err instanceof Error ? err.message : "Failed to refresh sync progress");
+        syncPollFailureCountRef.current += 1;
+        if (syncPollFailureCountRef.current >= 2) {
+          setSyncPollError(err instanceof Error ? err.message : "Failed to refresh sync progress");
+        }
       }
 
       if (cancelled || generation !== syncPollGenerationRef.current) return;
+      const delayMs = nextPollDelayMs(syncPollFailureCountRef.current);
       timeoutId = setTimeout(() => {
         void poll();
-      }, 3000);
+      }, delayMs);
     };
 
     void poll();

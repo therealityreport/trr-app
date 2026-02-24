@@ -2,6 +2,55 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-24) — Lightbox uncropped guarantee via hosted/original-first detail candidates
+
+- February 24, 2026: Updated lightbox detail URL precedence to avoid stale crop-framed renders when uncropped hosted/original URLs are available.
+  - Files:
+    - `apps/web/src/lib/admin/image-url-candidates.ts`
+    - `apps/web/tests/image-url-candidates.test.ts`
+    - `apps/web/tests/person-gallery-detail-priority.test.ts`
+  - Changes:
+    - `buildDetailImageUrlCandidates(...)` order is now:
+      - `hostedUrl -> originalUrl -> sourceUrl -> detailUrl -> cropDetailUrl`
+    - This preserves crop-detail as last-resort fallback, while preferring uncropped mirrored/source framing for lightbox display.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/image-url-candidates.test.ts tests/person-gallery-detail-priority.test.ts tests/trr-shows-repository-person-crop-scope.test.ts` (`3 files, 8 tests passed`)
+
+## Latest Update (2026-02-24) — Cast tab quality hardening (show + season)
+
+- February 24, 2026: Implemented cast-tab reliability and UX hardening across show and season admin pages, focused on cancellation, timeout behavior, progressive integrity, and actionable retry states.
+  - Files:
+    - `apps/web/src/lib/admin/cast-refresh-orchestration.ts`
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/tests/show-cast-lazy-loading-wiring.test.ts`
+    - `apps/web/tests/season-cast-tab-quality-wiring.test.ts` (new)
+    - `apps/web/tests/cast-refresh-orchestration.test.ts`
+  - Changes:
+    - Added external abort-signal support to phased cast orchestration:
+      - `runWithTimeout(...)` and `runPhasedCastRefresh(...)` now accept parent cancellation signals and fail fast on cancel.
+    - Show cast refresh hardening:
+      - threaded `AbortSignal` from phase runner through `refreshCastProfilesAndMedia -> refreshPersonImages` (stream + fallback),
+      - cancellation now stops phase processing instead of silently counting canceled member operations as regular failures,
+      - cast refresh success now clears phase panel state after completion to avoid stale completed pipeline UI,
+      - network augmentation detection normalized with broader Bravo variants (`bravo`, `bravotv`, `bravo tv`),
+      - added explicit Cancel action for top-level cast refresh/enrich workflows.
+    - Show cast tab UX fixes:
+      - cast progress bar is now cast-scoped only (no fallback to unrelated global refresh progress),
+      - cast count chip now shows filtered/total semantics (`x/y cast`, `x/y crew`, `x/y visible`),
+      - cast/crew cards were restructured to avoid invalid interactive nesting (buttons are no longer descendants of the card link).
+    - Season cast tab hardening:
+      - cast-role-members loader now uses timeout + retry and stale-snapshot warning behavior,
+      - added warning + error retry cards for cast intelligence failures,
+      - per-member season profile/media sync now runs with bounded concurrency (`3`) instead of strict serial execution,
+      - per-member stream error handling now surfaces backend `error/detail` payload content,
+      - added explicit Cancel action for season cast refresh,
+      - season cast count chip now shows filtered/total semantics aligned with active filters.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/show-cast-lazy-loading-wiring.test.ts tests/season-cast-tab-quality-wiring.test.ts tests/cast-refresh-orchestration.test.ts` (`3 files, 21 tests passed`)
+    - `pnpm -C apps/web exec vitest run tests/cast-episode-scope.test.ts tests/cast-role-season-filtering.test.ts tests/job-live-counts.test.ts tests/season-cast-route-fallback.test.ts tests/show-cast-role-members-proxy-route.test.ts` (`5 files, 22 tests passed`)
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/cast-refresh-orchestration.ts' 'tests/show-cast-lazy-loading-wiring.test.ts' 'tests/season-cast-tab-quality-wiring.test.ts' 'tests/cast-refresh-orchestration.test.ts'` (pass; 2 pre-existing `@next/next/no-img-element` warnings in `[showId]/page.tsx`)
+
 ## Latest Update (2026-02-24) — Reddit Community View URL simplification + season/period-aware episode refresh
 
 - February 24, 2026: Implemented the Community View + episode-refresh workflow refactor in `apps/web` to remove verbose query coupling and make episode discovery season-period aware.
@@ -5183,3 +5232,19 @@ Continuation (same session, 2026-02-24) — Week-detail breadcrumb show crumb cl
 - Validation:
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run -c vitest.config.ts tests/admin-breadcrumbs.test.ts tests/social-week-detail-wiring.test.ts` (`10 passed`)
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web run lint` (pass; warnings only, no errors)
+
+Continuation (same session, 2026-02-24) — Week-view sync progress refresh stability during comment fill:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
+- Root cause focus:
+  - Week-detail polling retried immediately on transient misses and showed timeout banner on single failures.
+  - Poll request shape for runs was broad (`limit=100`) instead of run-scoped, increasing backend load under active ingest.
+- Changes:
+  - Runs polling is now run-scoped: `run_id=<syncRunId>&limit=1` (plus `season_id` hint when available).
+  - Added adaptive poll backoff (`3s -> 6s -> 10s -> 15s`) during failure streaks, reset on success.
+  - Added consecutive-failure threshold for bannering: `Progress refresh issue...` now shows only after 2 consecutive poll failures.
+  - Preserved last-good run/jobs snapshot during transient empty/missing responses to reduce UI churn.
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run tests/social-week-detail-wiring.test.ts tests/season-social-analytics-section.test.tsx` (`41 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts' tests/social-week-detail-wiring.test.ts` (pass)
