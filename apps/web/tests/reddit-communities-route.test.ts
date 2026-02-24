@@ -112,6 +112,13 @@ describe("/api/admin/reddit/communities route", () => {
       subreddit: "BravoRealHousewives",
       post_flares: [],
       post_flares_updated_at: null,
+      analysis_flares: [],
+      analysis_all_flares: [],
+      is_show_focused: false,
+      network_focus_targets: ["Bravo"],
+      franchise_focus_targets: ["Real Housewives"],
+      episode_title_patterns: ["Live Episode Discussion"],
+      episode_required_flares: ["Salt Lake City"],
     });
 
     const request = new NextRequest("http://localhost/api/admin/reddit/communities", {
@@ -120,6 +127,11 @@ describe("/api/admin/reddit/communities route", () => {
         trr_show_id: SHOW_ID,
         trr_show_name: "The Real Housewives of Salt Lake City",
         subreddit: "r/BravoRealHousewives",
+        is_show_focused: false,
+        network_focus_targets: ["Bravo"],
+        franchise_focus_targets: ["Real Housewives"],
+        episode_title_patterns: ["Live Episode Discussion"],
+        episode_required_flares: ["Salt Lake City"],
       }),
       headers: { "Content-Type": "application/json" },
     });
@@ -136,7 +148,52 @@ describe("/api/admin/reddit/communities route", () => {
         trrShowId: SHOW_ID,
         trrShowName: "The Real Housewives of Salt Lake City",
         subreddit: "BravoRealHousewives",
+        isShowFocused: false,
+        networkFocusTargets: ["Bravo"],
+        franchiseFocusTargets: ["Real Housewives"],
+        episodeTitlePatterns: ["Live Episode Discussion"],
+        episodeRequiredFlares: ["Salt Lake City"],
       }),
     );
+  });
+
+  it("rejects invalid focus target payloads", async () => {
+    const request = new NextRequest("http://localhost/api/admin/reddit/communities", {
+      method: "POST",
+      body: JSON.stringify({
+        trr_show_id: SHOW_ID,
+        trr_show_name: "The Real Housewives of Salt Lake City",
+        subreddit: "BravoRealHousewives",
+        network_focus_targets: ["Bravo", 123],
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("network_focus_targets");
+    expect(createRedditCommunityMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid episode rule payloads", async () => {
+    const request = new NextRequest("http://localhost/api/admin/reddit/communities", {
+      method: "POST",
+      body: JSON.stringify({
+        trr_show_id: SHOW_ID,
+        trr_show_name: "The Real Housewives of Salt Lake City",
+        subreddit: "BravoRealHousewives",
+        episode_title_patterns: ["Live Episode Discussion", 1],
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("episode_title_patterns");
+    expect(createRedditCommunityMock).not.toHaveBeenCalled();
   });
 });

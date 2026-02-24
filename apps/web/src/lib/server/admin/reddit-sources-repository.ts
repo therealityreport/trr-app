@@ -2,6 +2,14 @@ import "server-only";
 
 import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
 import { sanitizeRedditFlairList } from "@/lib/server/admin/reddit-flair-normalization";
+import {
+  resolveCommunityFocusState,
+  sanitizeFocusTargets,
+} from "@/lib/server/admin/reddit-community-focus";
+import {
+  sanitizeEpisodeRequiredFlares,
+  sanitizeEpisodeTitlePatterns,
+} from "@/lib/server/admin/reddit-episode-rules";
 
 export interface RedditCommunityRow {
   id: string;
@@ -13,6 +21,11 @@ export interface RedditCommunityRow {
   post_flares: string[];
   analysis_flares: string[];
   analysis_all_flares: string[];
+  is_show_focused: boolean;
+  network_focus_targets: string[];
+  franchise_focus_targets: string[];
+  episode_title_patterns: string[];
+  episode_required_flares: string[];
   post_flares_updated_at: string | null;
   is_active: boolean;
   created_by_firebase_uid: string;
@@ -62,6 +75,11 @@ export interface CreateRedditCommunityInput {
   displayName?: string | null;
   notes?: string | null;
   isActive?: boolean;
+  isShowFocused?: boolean;
+  networkFocusTargets?: string[];
+  franchiseFocusTargets?: string[];
+  episodeTitlePatterns?: string[];
+  episodeRequiredFlares?: string[];
 }
 
 export interface UpdateRedditCommunityInput {
@@ -71,6 +89,11 @@ export interface UpdateRedditCommunityInput {
   isActive?: boolean;
   analysisFlares?: string[];
   analysisAllFlares?: string[];
+  isShowFocused?: boolean;
+  networkFocusTargets?: string[];
+  franchiseFocusTargets?: string[];
+  episodeTitlePatterns?: string[];
+  episodeRequiredFlares?: string[];
 }
 
 export interface ListRedditThreadsOptions {
@@ -116,10 +139,24 @@ const THREADS_TABLE = "admin.reddit_threads";
 
 const SUBREDDIT_RE = /^[A-Za-z0-9_]{2,21}$/;
 
-interface RedditCommunityRowRaw extends Omit<RedditCommunityRow, "post_flares" | "analysis_flares" | "analysis_all_flares"> {
+interface RedditCommunityRowRaw
+  extends Omit<
+    RedditCommunityRow,
+    | "post_flares"
+    | "analysis_flares"
+    | "analysis_all_flares"
+    | "network_focus_targets"
+    | "franchise_focus_targets"
+    | "episode_title_patterns"
+    | "episode_required_flares"
+  > {
   post_flares: unknown;
   analysis_flares: unknown;
   analysis_all_flares: unknown;
+  network_focus_targets: unknown;
+  franchise_focus_targets: unknown;
+  episode_title_patterns: unknown;
+  episode_required_flares: unknown;
 }
 
 const toThreadsArray = (value: unknown): RedditThreadRow[] => {
@@ -133,6 +170,24 @@ const toFlairArray = (subreddit: string, value: unknown): string[] => {
   return sanitizeRedditFlairList(subreddit, raw);
 };
 
+const toFocusTargets = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const raw = value.filter((item): item is string => typeof item === "string");
+  return sanitizeFocusTargets(raw);
+};
+
+const toEpisodeTitlePatterns = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const raw = value.filter((item): item is string => typeof item === "string");
+  return sanitizeEpisodeTitlePatterns(raw);
+};
+
+const toEpisodeRequiredFlares = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const raw = value.filter((item): item is string => typeof item === "string");
+  return sanitizeEpisodeRequiredFlares(raw);
+};
+
 const toNumberOrZero = (value: number | null | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return value;
@@ -143,7 +198,39 @@ const toCommunityRow = (row: RedditCommunityRowRaw): RedditCommunityRow => ({
   post_flares: toFlairArray(row.subreddit, row.post_flares),
   analysis_flares: toFlairArray(row.subreddit, row.analysis_flares),
   analysis_all_flares: toFlairArray(row.subreddit, row.analysis_all_flares),
+  network_focus_targets: toFocusTargets(row.network_focus_targets),
+  franchise_focus_targets: toFocusTargets(row.franchise_focus_targets),
+  episode_title_patterns: toEpisodeTitlePatterns(row.episode_title_patterns),
+  episode_required_flares: toEpisodeRequiredFlares(row.episode_required_flares),
 });
+
+interface SanitizedAnalysisModes {
+  analysisFlares: string[];
+  analysisAllFlares: string[];
+}
+
+const sanitizeAnalysisFlareModes = (
+  subreddit: string,
+  values: {
+    existingAnalysisFlares: string[];
+    existingAnalysisAllFlares: string[];
+    analysisFlares?: string[];
+    analysisAllFlares?: string[];
+  },
+): SanitizedAnalysisModes => {
+  const nextAll = values.analysisAllFlares
+    ? sanitizeRedditFlairList(subreddit, values.analysisAllFlares)
+    : values.existingAnalysisAllFlares;
+  const scanBeforeOverlap = values.analysisFlares
+    ? sanitizeRedditFlairList(subreddit, values.analysisFlares)
+    : values.existingAnalysisFlares;
+  const allKeys = new Set(nextAll.map((value) => value.toLowerCase()));
+  const nextScan = scanBeforeOverlap.filter((value) => !allKeys.has(value.toLowerCase()));
+  return {
+    analysisFlares: nextScan,
+    analysisAllFlares: nextAll,
+  };
+};
 
 export const normalizeSubreddit = (value: string): string => {
   let cleaned = value.trim();
@@ -226,6 +313,12 @@ export async function createRedditCommunity(
   input: CreateRedditCommunityInput,
 ): Promise<RedditCommunityRow> {
   return withAuthTransaction(authContext, async (client) => {
+    const focusState = resolveCommunityFocusState({
+      isShowFocused: input.isShowFocused,
+      networkFocusTargets: input.networkFocusTargets,
+      franchiseFocusTargets: input.franchiseFocusTargets,
+    });
+
     const result = await client.query<RedditCommunityRowRaw>(
       `INSERT INTO ${COMMUNITIES_TABLE} (
         trr_show_id,
@@ -234,8 +327,13 @@ export async function createRedditCommunity(
         display_name,
         notes,
         is_active,
+        is_show_focused,
+        network_focus_targets,
+        franchise_focus_targets,
+        episode_title_patterns,
+        episode_required_flares,
         created_by_firebase_uid
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12)
       RETURNING *`,
       [
         input.trrShowId,
@@ -244,6 +342,11 @@ export async function createRedditCommunity(
         input.displayName ?? null,
         input.notes ?? null,
         input.isActive ?? true,
+        focusState.is_show_focused,
+        JSON.stringify(focusState.network_focus_targets),
+        JSON.stringify(focusState.franchise_focus_targets),
+        JSON.stringify(sanitizeEpisodeTitlePatterns(input.episodeTitlePatterns ?? [])),
+        JSON.stringify(sanitizeEpisodeRequiredFlares(input.episodeRequiredFlares ?? [])),
         authContext.firebaseUid,
       ],
     );
@@ -260,18 +363,46 @@ export async function updateRedditCommunity(
     const sets: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
-    let subredditForFlairSanitization: string | null = input.subreddit ?? null;
+    const shouldResolveFocus =
+      input.isShowFocused !== undefined ||
+      input.networkFocusTargets !== undefined ||
+      input.franchiseFocusTargets !== undefined;
+    const shouldResolveAnalysis =
+      input.analysisFlares !== undefined || input.analysisAllFlares !== undefined;
+    const shouldResolveEpisodeRules =
+      input.episodeTitlePatterns !== undefined || input.episodeRequiredFlares !== undefined;
 
-    if ((input.analysisFlares !== undefined || input.analysisAllFlares !== undefined) && !subredditForFlairSanitization) {
-      const communityLookup = await client.query<{ subreddit: string }>(
+    interface CommunityUpdateLookup {
+      subreddit: string;
+      is_show_focused: boolean;
+      network_focus_targets: unknown;
+      franchise_focus_targets: unknown;
+      analysis_flares: unknown;
+      analysis_all_flares: unknown;
+      episode_title_patterns: unknown;
+      episode_required_flares: unknown;
+    }
+
+    let lookupRow: CommunityUpdateLookup | null = null;
+    if (shouldResolveFocus || shouldResolveAnalysis || shouldResolveEpisodeRules) {
+      const communityLookup = await client.query<CommunityUpdateLookup>(
         `SELECT subreddit
+               , is_show_focused
+               , network_focus_targets
+               , franchise_focus_targets
+               , analysis_flares
+               , analysis_all_flares
+               , episode_title_patterns
+               , episode_required_flares
            FROM ${COMMUNITIES_TABLE}
           WHERE id = $1::uuid
           LIMIT 1`,
         [id],
       );
-      subredditForFlairSanitization = communityLookup.rows[0]?.subreddit ?? null;
+      lookupRow = communityLookup.rows[0] ?? null;
     }
+
+    const subredditForFlairSanitization = input.subreddit ?? lookupRow?.subreddit ?? "";
 
     if (input.subreddit !== undefined) {
       sets.push(`subreddit = $${idx++}`);
@@ -289,19 +420,61 @@ export async function updateRedditCommunity(
       sets.push(`is_active = $${idx++}`);
       values.push(input.isActive);
     }
-    if (input.analysisFlares !== undefined) {
-      sets.push(`analysis_flares = $${idx++}::jsonb`);
-      values.push(
-        JSON.stringify(sanitizeRedditFlairList(subredditForFlairSanitization ?? "", input.analysisFlares)),
+    if (shouldResolveFocus) {
+      const focusState = resolveCommunityFocusState(
+        {
+          isShowFocused: input.isShowFocused,
+          networkFocusTargets: input.networkFocusTargets,
+          franchiseFocusTargets: input.franchiseFocusTargets,
+        },
+        lookupRow
+          ? {
+              is_show_focused: lookupRow.is_show_focused,
+              network_focus_targets: toFocusTargets(lookupRow.network_focus_targets),
+              franchise_focus_targets: toFocusTargets(lookupRow.franchise_focus_targets),
+            }
+          : undefined,
       );
+      sets.push(`is_show_focused = $${idx++}`);
+      values.push(focusState.is_show_focused);
+      sets.push(`network_focus_targets = $${idx++}::jsonb`);
+      values.push(JSON.stringify(focusState.network_focus_targets));
+      sets.push(`franchise_focus_targets = $${idx++}::jsonb`);
+      values.push(JSON.stringify(focusState.franchise_focus_targets));
     }
-    if (input.analysisAllFlares !== undefined) {
+
+    if (shouldResolveAnalysis) {
+      const existingAnalysisFlares = lookupRow
+        ? toFlairArray(subredditForFlairSanitization, lookupRow.analysis_flares)
+        : [];
+      const existingAnalysisAllFlares = lookupRow
+        ? toFlairArray(subredditForFlairSanitization, lookupRow.analysis_all_flares)
+        : [];
+      const sanitizedAnalysis = sanitizeAnalysisFlareModes(subredditForFlairSanitization, {
+        existingAnalysisFlares,
+        existingAnalysisAllFlares,
+        analysisFlares: input.analysisFlares,
+        analysisAllFlares: input.analysisAllFlares,
+      });
+      sets.push(`analysis_flares = $${idx++}::jsonb`);
+      values.push(JSON.stringify(sanitizedAnalysis.analysisFlares));
       sets.push(`analysis_all_flares = $${idx++}::jsonb`);
-      values.push(
-        JSON.stringify(
-          sanitizeRedditFlairList(subredditForFlairSanitization ?? "", input.analysisAllFlares),
-        ),
+      values.push(JSON.stringify(sanitizedAnalysis.analysisAllFlares));
+    }
+
+    if (shouldResolveEpisodeRules) {
+      const nextEpisodeTitlePatterns = sanitizeEpisodeTitlePatterns(
+        input.episodeTitlePatterns ??
+          (lookupRow ? toEpisodeTitlePatterns(lookupRow.episode_title_patterns) : []),
       );
+      const nextEpisodeRequiredFlares = sanitizeEpisodeRequiredFlares(
+        input.episodeRequiredFlares ??
+          (lookupRow ? toEpisodeRequiredFlares(lookupRow.episode_required_flares) : []),
+      );
+      sets.push(`episode_title_patterns = $${idx++}::jsonb`);
+      values.push(JSON.stringify(nextEpisodeTitlePatterns));
+      sets.push(`episode_required_flares = $${idx++}::jsonb`);
+      values.push(JSON.stringify(nextEpisodeRequiredFlares));
     }
 
     if (sets.length === 0) {

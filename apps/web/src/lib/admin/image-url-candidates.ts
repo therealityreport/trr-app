@@ -68,11 +68,11 @@ export const buildCardImageUrlCandidates = (input: ImageCardCandidateInput): str
 
 export const buildDetailImageUrlCandidates = (input: ImageDetailCandidateInput): string[] => {
   return dedupeCandidates([
-    normalizeImageUrl(input.cropDetailUrl),
     normalizeImageUrl(input.detailUrl),
     normalizeImageUrl(input.hostedUrl),
     normalizeImageUrl(input.originalUrl),
     normalizeImageUrl(input.sourceUrl),
+    normalizeImageUrl(input.cropDetailUrl),
   ]);
 };
 

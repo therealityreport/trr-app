@@ -591,4 +591,73 @@ describe("mapSeasonAssetToMetadata", () => {
 
     expect(meta.peopleCount).toBe(2);
   });
+
+  it("uses IMDb tag payload for people and titles when flattened fields are missing", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "imdb-tags-1",
+        type: "show",
+        source: "imdb",
+        kind: "media",
+        hosted_url: "https://cdn.example.com/imdb.jpg",
+        width: null,
+        height: null,
+        caption: null,
+        metadata: {
+          tags: {
+            people: [
+              { imdb_id: "nm100", name: "Meredith Marks" },
+              { imdb_id: "nm200", name: "Lisa Barlow" },
+            ],
+            titles: [
+              { imdb_id: "tt8819906", title: "The Real Housewives of Salt Lake City" },
+              { imdb_id: "tt9999999", title: "Reunion Part 1" },
+            ],
+          },
+        },
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: "image/jpeg",
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      5,
+      "RHOSLC",
+    );
+
+    expect(meta.people).toEqual(["Meredith Marks", "Lisa Barlow"]);
+    expect(meta.titles).toEqual([
+      "The Real Housewives of Salt Lake City",
+      "Reunion Part 1",
+      "RHOSLC",
+    ]);
+  });
+
+  it("maps IMDb Still Frame tag type to Episode Still content type", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "imdb-still-frame",
+        type: "show",
+        source: "imdb",
+        kind: "media",
+        hosted_url: "https://cdn.example.com/imdb-still.jpg",
+        width: null,
+        height: null,
+        caption: null,
+        metadata: {
+          tags: {
+            image_type: "Still Frame",
+          },
+        },
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: "image/jpeg",
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      5,
+      "RHOSLC",
+    );
+
+    expect(meta.contentType).toBe("EPISODE STILL");
+    expect(meta.sectionTag).toBe("EPISODE STILL");
+  });
 });

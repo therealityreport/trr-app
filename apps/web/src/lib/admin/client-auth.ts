@@ -6,6 +6,7 @@ import { auth } from "@/lib/firebase";
 
 const DEFAULT_TOKEN_RETRY_DELAYS_MS = [150, 300, 600] as const;
 const DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS = 2500;
+const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,6 +31,14 @@ function getAdminAuthReadyTimeoutMs(): number {
     return DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS;
   }
   return parsed;
+}
+
+function isClientLocalHostname(): boolean {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.trim().toLowerCase();
+  if (!hostname) return false;
+  if (LOCALHOST_HOSTNAMES.has(hostname)) return true;
+  return hostname.endsWith(".localhost");
 }
 
 async function waitForAuthStateReadyWithTimeout(): Promise<void> {
@@ -62,6 +71,13 @@ export interface ClientAuthOptions {
 export async function getClientAuthHeaders(
   options?: ClientAuthOptions,
 ): Promise<{ Authorization: string }> {
+  const bypassAllowed =
+    Boolean(options?.allowDevAdminBypass) &&
+    (process.env.NODE_ENV !== "production" || isDevAdminBypassEnabledClient() || isClientLocalHostname());
+  if (bypassAllowed && !options?.preferredUser?.uid) {
+    return { Authorization: "Bearer dev-admin-bypass" };
+  }
+
   const retryDelaysMs =
     options?.tokenRetryDelaysMs && options.tokenRetryDelaysMs.length > 0
       ? options.tokenRetryDelaysMs
@@ -93,7 +109,7 @@ export async function getClientAuthHeaders(
     }
   }
 
-  if (options?.allowDevAdminBypass && isDevAdminBypassEnabledClient()) {
+  if (bypassAllowed) {
     return { Authorization: "Bearer dev-admin-bypass" };
   }
 

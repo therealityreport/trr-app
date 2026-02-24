@@ -52,14 +52,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const forwardedSearchParams = new URLSearchParams(request.nextUrl.searchParams.toString());
+    const seasonIdHintRaw = forwardedSearchParams.get("season_id");
+    if (seasonIdHintRaw && !isValidUuid(seasonIdHintRaw)) {
+      return NextResponse.json(
+        { error: "season_id must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    const seasonIdHint = seasonIdHintRaw ?? undefined;
+    forwardedSearchParams.delete("season_id");
+
     const data = await fetchSeasonBackendJson(
       showId,
       seasonNumber,
       `/analytics/posts/${platform}/${sourceId}`,
       {
-        queryString: request.nextUrl.searchParams.toString(),
+        queryString: forwardedSearchParams.toString(),
+        seasonIdHint,
         fallbackError: "Failed to fetch post comments",
-        retries: 2,
+        retries: 0,
         timeoutMs: 20_000,
       },
     );
@@ -101,11 +113,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const forwardedSearchParams = new URLSearchParams(request.nextUrl.searchParams.toString());
+    const seasonIdHintRaw = forwardedSearchParams.get("season_id");
+    if (seasonIdHintRaw && !isValidUuid(seasonIdHintRaw)) {
+      return NextResponse.json(
+        { error: "season_id must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    const seasonIdHint = seasonIdHintRaw ?? undefined;
+    forwardedSearchParams.delete("season_id");
+
     const data = await fetchSeasonBackendJson(
       showId,
       seasonNumber,
       `/analytics/posts/${platform}/${sourceId}/refresh`,
       {
+        queryString: forwardedSearchParams.toString(),
+        seasonIdHint,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: await request.text(),

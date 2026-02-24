@@ -73,7 +73,10 @@ export default function SocialPostsSection({
   const [submitting, setSubmitting] = useState(false);
 
   // Helper to get auth headers
-  const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
+  const getAuthHeaders = useCallback(
+    async () => getClientAuthHeaders({ allowDevAdminBypass: true }),
+    [],
+  );
 
   // Fetch posts
   const fetchPosts = useCallback(async () => {

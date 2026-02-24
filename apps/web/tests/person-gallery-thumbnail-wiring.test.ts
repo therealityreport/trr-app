@@ -15,6 +15,10 @@ describe("person gallery thumbnail wiring", () => {
     expect(contents).toMatch(/resolveThumbnailPresentation\(/);
     expect(contents).toMatch(/objectPosition:\s*presentation\.objectPosition/);
     expect(contents).toMatch(/transform:\s*presentation\.zoom/);
+    expect(contents).toMatch(/object-cover/);
+    expect(contents).toMatch(/cursor-zoom-in/);
+    expect(contents).toMatch(/select-none/);
+    expect(contents).not.toMatch(/exactViewportStyle/);
   });
 
   it("prefers original/source before hosted fallback", () => {

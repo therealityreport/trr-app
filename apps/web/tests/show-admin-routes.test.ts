@@ -80,7 +80,7 @@ describe("show-admin-routes", () => {
         "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4",
         new URLSearchParams()
       )
-    ).toMatchObject({ tab: "episodes", assetsSubTab: "media", source: "path" });
+    ).toMatchObject({ tab: "overview", assetsSubTab: "media", source: "path" });
 
     expect(
       parseSeasonRouteState(
@@ -102,6 +102,13 @@ describe("show-admin-routes", () => {
         new URLSearchParams("tab=fandom")
       )
     ).toMatchObject({ tab: "fandom", assetsSubTab: "media", source: "query" });
+
+    expect(
+      parseSeasonRouteState(
+        "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4",
+        new URLSearchParams("tab=details")
+      )
+    ).toMatchObject({ tab: "overview", assetsSubTab: "media", source: "query" });
   });
 
   it("builds canonical season URLs", () => {
@@ -111,6 +118,22 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
       })
     ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonNumber: 4,
+        tab: "overview",
+      })
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonNumber: 4,
+        tab: "episodes",
+      })
+    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=episodes");
 
     expect(
       buildSeasonAdminUrl({
@@ -174,7 +197,9 @@ describe("show-admin-routes", () => {
       ),
     );
 
-    expect(cleaned.toString()).toBe("platform=youtube");
+    expect(cleaned.toString()).toBe(
+      "source_scope=bravo&social_view=advanced&social_platform=reddit&platform=youtube",
+    );
   });
 
   it("parses person path tabs and legacy query fallback", () => {

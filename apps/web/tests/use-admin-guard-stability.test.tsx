@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => {
     router,
     replace: router.replace,
     isClientAdmin: vi.fn(() => true),
+    isDevAdminBypassEnabledClient: vi.fn(() => false),
+    isLocalDevHostname: vi.fn(() => false),
     getCurrentUser: () => currentUser,
     setCurrentUser(user: unknown) {
       currentUser = user;
@@ -47,6 +49,10 @@ const mocks = vi.hoisted(() => {
       this.replace.mockReset();
       this.isClientAdmin.mockReset();
       this.isClientAdmin.mockReturnValue(true);
+      this.isDevAdminBypassEnabledClient.mockReset();
+      this.isDevAdminBypassEnabledClient.mockReturnValue(false);
+      this.isLocalDevHostname.mockReset();
+      this.isLocalDevHostname.mockReturnValue(false);
       this.onAuthStateChanged.mockClear();
       this.authStateReady.mockClear();
     },
@@ -74,15 +80,27 @@ vi.mock("@/lib/admin/client-access", () => ({
     (mocks.isClientAdmin as (...inner: unknown[]) => unknown)(...args),
 }));
 
+vi.mock("@/lib/admin/dev-admin-bypass", () => ({
+  isDevAdminBypassEnabledClient: (...args: unknown[]) =>
+    (mocks.isDevAdminBypassEnabledClient as (...inner: unknown[]) => unknown)(...args),
+  isLocalDevHostname: (...args: unknown[]) =>
+    (mocks.isLocalDevHostname as (...inner: unknown[]) => unknown)(...args),
+}));
+
 function GuardObserver({ onUserKey }: { onUserKey: (value: string | null) => void }) {
-  const { userKey, checking, hasAccess } = useAdminGuard();
+  const { user, userKey, checking, hasAccess } = useAdminGuard();
 
   useEffect(() => {
     onUserKey(userKey);
   }, [onUserKey, userKey]);
 
   return (
-    <div data-access={hasAccess ? "1" : "0"} data-checking={checking ? "1" : "0"} data-testid="guard-state">
+    <div
+      data-access={hasAccess ? "1" : "0"}
+      data-checking={checking ? "1" : "0"}
+      data-testid="guard-state"
+      data-user-present={user ? "1" : "0"}
+    >
       {userKey ?? ""}
     </div>
   );
@@ -241,6 +259,7 @@ describe("useAdminGuard stability", () => {
     await act(async () => {
       mocks.emit(null);
       await vi.advanceTimersByTimeAsync(1000);
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
       mocks.emit({ uid: "u4", email: "admin@example.com", displayName: "Admin User" });
       await vi.advanceTimersByTimeAsync(3000);
     });
@@ -268,10 +287,65 @@ describe("useAdminGuard stability", () => {
     mocks.replace.mockClear();
     await act(async () => {
       mocks.emit(null);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
       await vi.advanceTimersByTimeAsync(2600);
     });
     expect(mocks.replace).toHaveBeenCalledTimes(1);
     expect(mocks.replace).toHaveBeenCalledWith("/");
     vi.useRealTimers();
+  });
+
+  it("updates user from auth emissions when dev bypass is enabled and initial currentUser is null", async () => {
+    mocks.isDevAdminBypassEnabledClient.mockReturnValue(true);
+    const onUserKey = vi.fn();
+
+    render(<GuardObserver onUserKey={onUserKey} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-access", "1");
+    });
+    expect(screen.getByTestId("guard-state")).toHaveTextContent("dev-admin-bypass");
+
+    await act(async () => {
+      mocks.emit({ uid: "u-bypass", email: "admin@example.com", displayName: "Bypass Admin" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("guard-state")).toHaveTextContent(
+        "u-bypass|admin@example.com|Bypass Admin",
+      );
+    });
+    expect(onUserKey).toHaveBeenCalledWith("u-bypass|admin@example.com|Bypass Admin");
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("returns a non-null user object in dev bypass mode without Firebase auth user", async () => {
+    mocks.isDevAdminBypassEnabledClient.mockReturnValue(true);
+
+    render(<GuardObserver onUserKey={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-access", "1");
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-user-present", "1");
+    });
+    expect(screen.getByTestId("guard-state")).toHaveTextContent("dev-admin-bypass");
+  });
+
+  it("uses local-host bypass fallback when env bypass helper is disabled", async () => {
+    mocks.isDevAdminBypassEnabledClient.mockReturnValue(false);
+    mocks.isLocalDevHostname.mockReturnValue(true);
+
+    render(<GuardObserver onUserKey={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-access", "1");
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-user-present", "1");
+    });
+    expect(screen.getByTestId("guard-state")).toHaveTextContent("dev-admin-bypass");
+    expect(mocks.replace).not.toHaveBeenCalled();
   });
 });

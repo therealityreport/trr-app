@@ -52,11 +52,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const forwardedSearchParams = new URLSearchParams(request.nextUrl.searchParams.toString());
+    const seasonIdHintRaw = forwardedSearchParams.get("season_id");
+    if (seasonIdHintRaw && !isValidUuid(seasonIdHintRaw)) {
+      return NextResponse.json(
+        { error: "season_id must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    const seasonIdHint = seasonIdHintRaw ?? undefined;
+    forwardedSearchParams.delete("season_id");
+
     const data = await fetchSeasonBackendJson(showId, seasonNumber, "/targets", {
-      queryString: request.nextUrl.searchParams.toString(),
+      queryString: forwardedSearchParams.toString(),
+      seasonIdHint,
       fallbackError: "Failed to fetch social targets",
-      retries: 2,
-      timeoutMs: 45_000,
+      retries: 0,
+      timeoutMs: 12_000,
     });
     return NextResponse.json(data);
   } catch (error) {

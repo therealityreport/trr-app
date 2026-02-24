@@ -36,6 +36,62 @@ const safeCount = (value: unknown): number => toWholeCount(value) ?? 0;
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 
+const COUNT_SIGNAL_KEYS = [
+  "synced",
+  "show_images_upserted",
+  "season_images_upserted",
+  "episode_images_upserted",
+  "cast_photos_upserted",
+  "photos_upserted",
+  "mirrored",
+  "show_images_mirrored",
+  "season_images_mirrored",
+  "episode_images_mirrored",
+  "cast_photos_mirrored",
+  "media_assets_mirrored",
+  "photos_mirrored",
+  "counted",
+  "auto_counts_succeeded",
+  "cropped",
+  "centering_succeeded",
+  "id_text",
+  "text_overlay_succeeded",
+  "resized",
+  "resize_succeeded",
+] as const;
+
+const hasLiveCountSignal = (liveCountsRecord: Record<string, unknown> | null): boolean => {
+  if (!liveCountsRecord) return false;
+  return (
+    toWholeCount(liveCountsRecord.synced) !== null ||
+    toWholeCount(liveCountsRecord.mirrored) !== null ||
+    toWholeCount(liveCountsRecord.counted) !== null ||
+    toWholeCount(liveCountsRecord.cropped) !== null ||
+    toWholeCount(liveCountsRecord.id_text) !== null ||
+    toWholeCount(liveCountsRecord.resized) !== null
+  );
+};
+
+const hasOperationCountSignal = (operationCounts: Record<string, unknown> | null): boolean => {
+  if (!operationCounts) return false;
+  return (
+    readOperationSucceeded(operationCounts, "count") !== null ||
+    readOperationSucceeded(operationCounts, "crop") !== null ||
+    readOperationSucceeded(operationCounts, "id_text") !== null ||
+    readOperationSucceeded(operationCounts, "resize") !== null
+  );
+};
+
+const hasPayloadCountSignal = (payload: Record<string, unknown>): boolean => {
+  const liveCountsRecord = asRecord(payload.live_counts);
+  if (hasLiveCountSignal(liveCountsRecord)) return true;
+
+  const operationCounts = asRecord(payload.operation_counts);
+  if (hasOperationCountSignal(operationCounts)) return true;
+
+  return COUNT_SIGNAL_KEYS.some((key) => toWholeCount(payload[key]) !== null);
+};
+
 const readOperationSucceeded = (
   operationCounts: Record<string, unknown> | null,
   key: "count" | "crop" | "id_text" | "resize"
@@ -106,6 +162,7 @@ export const resolveJobLiveCounts = (
 ): JobLiveCounts | null => {
   const payloadRecord = asRecord(payload);
   if (!payloadRecord) return previous;
+  if (!hasPayloadCountSignal(payloadRecord)) return previous;
 
   const liveCountsRecord = asRecord(payloadRecord.live_counts);
   const inferred = inferCountsFromPayload(payloadRecord);

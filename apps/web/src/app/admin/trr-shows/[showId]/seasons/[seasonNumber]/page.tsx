@@ -6,6 +6,8 @@ import Link from "next/link";
 import Image from "next/image";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildSeasonBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
@@ -46,6 +48,7 @@ import {
 } from "@/lib/admin/gallery-diagnostics";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
 import {
+  THUMBNAIL_DEFAULTS,
   isThumbnailCropMode,
   resolveThumbnailPresentation,
 } from "@/lib/thumbnail-crop";
@@ -173,7 +176,7 @@ interface TrrSeasonFandom {
   source_variants?: unknown;
 }
 
-type TabId = "episodes" | "assets" | "videos" | "fandom" | "cast" | "surveys" | "social" | "details";
+type TabId = "overview" | "episodes" | "assets" | "videos" | "fandom" | "cast" | "surveys" | "social";
 type SeasonCastSource = "season_evidence" | "show_fallback";
 type GalleryDiagnosticFilter = "all" | "missing-variants" | "oversized" | "unclassified";
 type RefreshProgressState = {
@@ -238,13 +241,16 @@ const SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const SEASON_PERSON_STREAM_MAX_DURATION_MS = 6 * 60 * 1000;
 const SEASON_PERSON_FALLBACK_TIMEOUT_MS = 4 * 60 * 1000;
 const SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
+const SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 120_000;
+const SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS = 2;
+const SEASON_CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
 
 const BATCH_JOB_OPERATION_LABELS = {
   count: "Count",
   crop: "Crop",
   id_text: "ID Text",
-  resize: "Resize",
+  resize: "Auto-Crop",
 } as const;
 
 type BatchJobOperation = keyof typeof BATCH_JOB_OPERATION_LABELS;
@@ -336,14 +342,26 @@ const isTransientNotAuthenticatedError = (error: unknown): boolean =>
 const fetchWithTimeout = async (
   input: RequestInfo | URL,
   init: RequestInit,
-  timeoutMs: number
+  timeoutMs: number,
+  externalSignal?: AbortSignal
 ): Promise<Response> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const forwardAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", forwardAbort, { once: true });
+    }
+  }
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeoutId);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", forwardAbort);
+    }
   }
 };
 
@@ -517,6 +535,37 @@ const getAssetDisplayUrl = (asset: SeasonAsset): string =>
 
 const getAssetDetailUrl = (asset: SeasonAsset): string =>
   firstImageUrlCandidate(getSeasonAssetDetailUrlCandidates(asset)) ?? asset.hosted_url;
+
+const buildAssetAutoCropPayload = (asset: SeasonAsset): Record<string, unknown> | null => {
+  if (
+    !isThumbnailCropMode(asset.thumbnail_crop_mode) ||
+    typeof asset.thumbnail_focus_x !== "number" ||
+    !Number.isFinite(asset.thumbnail_focus_x) ||
+    typeof asset.thumbnail_focus_y !== "number" ||
+    !Number.isFinite(asset.thumbnail_focus_y) ||
+    typeof asset.thumbnail_zoom !== "number" ||
+    !Number.isFinite(asset.thumbnail_zoom)
+  ) {
+    return null;
+  }
+  return {
+    x: asset.thumbnail_focus_x,
+    y: asset.thumbnail_focus_y,
+    zoom: asset.thumbnail_zoom,
+    mode: asset.thumbnail_crop_mode,
+  };
+};
+
+const buildAssetAutoCropPayloadWithFallback = (
+  asset: SeasonAsset
+): Record<string, unknown> =>
+  buildAssetAutoCropPayload(asset) ?? {
+    x: THUMBNAIL_DEFAULTS.x,
+    y: THUMBNAIL_DEFAULTS.y,
+    zoom: THUMBNAIL_DEFAULTS.zoom,
+    mode: "auto",
+    strategy: "resize_center_fallback_v1",
+  };
 
 const isCrewCreditCategory = (value: string | null | undefined): boolean => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -733,7 +782,7 @@ export default function SeasonDetailPage() {
   const [fandomSyncPreviewLoading, setFandomSyncPreviewLoading] = useState(false);
   const [fandomSyncCommitLoading, setFandomSyncCommitLoading] = useState(false);
   const [fandomSyncError, setFandomSyncError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("episodes");
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
   const [allowPlaceholderMediaOverride, setAllowPlaceholderMediaOverride] = useState(false);
   const [galleryDiagnosticFilter, setGalleryDiagnosticFilter] =
@@ -741,6 +790,7 @@ export default function SeasonDetailPage() {
   const [galleryDiagnosticsOpen, setGalleryDiagnosticsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [seasonSupplementalWarning, setSeasonSupplementalWarning] = useState<string | null>(null);
   const [refreshingAssets, setRefreshingAssets] = useState(false);
   const [assetsRefreshNotice, setAssetsRefreshNotice] = useState<string | null>(null);
   const [assetsRefreshError, setAssetsRefreshError] = useState<string | null>(null);
@@ -774,14 +824,18 @@ export default function SeasonDetailPage() {
   const [trrShowCastLoading, setTrrShowCastLoading] = useState(false);
   const [trrShowCastError, setTrrShowCastError] = useState<string | null>(null);
   const [castRoleMembers, setCastRoleMembers] = useState<CastRoleMember[]>([]);
+  const [castRoleMembersLoadedOnce, setCastRoleMembersLoadedOnce] = useState(false);
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
+  const [castRoleMembersWarning, setCastRoleMembersWarning] = useState<string | null>(null);
   const [castSortBy, setCastSortBy] = useState<"episodes" | "season" | "name">("episodes");
   const [castSortOrder, setCastSortOrder] = useState<"desc" | "asc">("desc");
   const [castRoleFilters, setCastRoleFilters] = useState<string[]>([]);
   const [castCreditFilters, setCastCreditFilters] = useState<string[]>([]);
   const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
   const showCastFetchAttemptedRef = useRef(false);
+  const castRoleMembersLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const castRefreshAbortControllerRef = useRef<AbortController | null>(null);
   const appendRefreshLog = useCallback(
     (
       entry: Omit<SeasonRefreshLogEntry, "id" | "ts"> & {
@@ -1068,57 +1122,111 @@ export default function SeasonDetailPage() {
     }
   }, [getAuthHeaders, showId]);
 
-  const fetchCastRoleMembers = useCallback(async () => {
-    if (!showId) return;
-    if (!Number.isFinite(seasonNumber)) return;
-    setCastRoleMembersLoading(true);
-    setCastRoleMembersError(null);
-    try {
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      params.set("seasons", String(seasonNumber));
-      const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
-        { headers, cache: "no-store" }
-      );
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error || "Failed to load cast role members");
-      setCastRoleMembers(
-        (Array.isArray(data) ? data : []).map((row) => {
-          const roles = Array.isArray((row as { roles?: unknown }).roles)
-            ? ((row as { roles: unknown[] }).roles.filter(
-                (value): value is string => typeof value === "string" && value.trim().length > 0
-              ) as string[])
-            : [];
-          return {
-            person_id: String((row as { person_id?: unknown }).person_id ?? ""),
-            person_name:
-              typeof (row as { person_name?: unknown }).person_name === "string"
-                ? (row as { person_name: string }).person_name
-                : null,
-            total_episodes:
-              typeof (row as { total_episodes?: unknown }).total_episodes === "number"
-                ? (row as { total_episodes: number }).total_episodes
-                : null,
-            latest_season:
-              typeof (row as { latest_season?: unknown }).latest_season === "number"
-                ? (row as { latest_season: number }).latest_season
-                : null,
-            roles,
-            photo_url:
-              typeof (row as { photo_url?: unknown }).photo_url === "string"
-                ? (row as { photo_url: string }).photo_url
-                : null,
-          };
-        })
-      );
-    } catch (err) {
-      setCastRoleMembers([]);
-      setCastRoleMembersError(err instanceof Error ? err.message : "Failed to load cast role members");
-    } finally {
-      setCastRoleMembersLoading(false);
-    }
-  }, [getAuthHeaders, seasonNumber, showId]);
+  const fetchCastRoleMembers = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!showId) return;
+      if (!Number.isFinite(seasonNumber)) return;
+      if (castRoleMembersLoadInFlightRef.current) {
+        await castRoleMembersLoadInFlightRef.current;
+        if (!force) return;
+      }
+
+      const request = (async () => {
+        setCastRoleMembersLoading(true);
+        setCastRoleMembersError(null);
+        setCastRoleMembersWarning(null);
+        const headers = await getAuthHeaders();
+        const params = new URLSearchParams();
+        params.set("seasons", String(seasonNumber));
+
+        let lastError: unknown = null;
+        for (let attempt = 1; attempt <= SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS; attempt += 1) {
+          try {
+            const response = await fetchWithTimeout(
+              `/api/admin/trr-api/shows/${showId}/cast-role-members?${params.toString()}`,
+              { headers, cache: "no-store" },
+              SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS
+            );
+            const data = (await response.json().catch(() => ({}))) as { error?: string };
+            if (!response.ok) {
+              throw new Error(data.error || "Failed to load cast role members");
+            }
+            setCastRoleMembers(
+              (Array.isArray(data) ? data : []).map((row) => {
+                const roles = Array.isArray((row as { roles?: unknown }).roles)
+                  ? ((row as { roles: unknown[] }).roles.filter(
+                      (value): value is string => typeof value === "string" && value.trim().length > 0
+                    ) as string[])
+                  : [];
+                return {
+                  person_id: String((row as { person_id?: unknown }).person_id ?? ""),
+                  person_name:
+                    typeof (row as { person_name?: unknown }).person_name === "string"
+                      ? (row as { person_name: string }).person_name
+                      : null,
+                  total_episodes:
+                    typeof (row as { total_episodes?: unknown }).total_episodes === "number"
+                      ? (row as { total_episodes: number }).total_episodes
+                      : null,
+                  latest_season:
+                    typeof (row as { latest_season?: unknown }).latest_season === "number"
+                      ? (row as { latest_season: number }).latest_season
+                      : null,
+                  roles,
+                  photo_url:
+                    typeof (row as { photo_url?: unknown }).photo_url === "string"
+                      ? (row as { photo_url: string }).photo_url
+                      : null,
+                };
+              })
+            );
+            setCastRoleMembersLoadedOnce(true);
+            setCastRoleMembersWarning(null);
+            return;
+          } catch (error) {
+            lastError = error;
+            if (attempt < SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS) {
+              continue;
+            }
+          }
+        }
+
+        const message = isAbortError(lastError)
+          ? `Timed out loading cast role members after ${Math.round(
+              SEASON_CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS / 1000
+            )}s`
+          : lastError instanceof Error
+            ? lastError.message
+            : "Failed to load cast role members";
+        const hasPriorData = castRoleMembersLoadedOnce || castRoleMembers.length > 0;
+        if (hasPriorData) {
+          setCastRoleMembersWarning(`${message}. Showing last successful cast intelligence snapshot.`);
+          setCastRoleMembersError(null);
+        } else {
+          setCastRoleMembers([]);
+          setCastRoleMembersLoadedOnce(false);
+          setCastRoleMembersError(message);
+        }
+      })();
+
+      castRoleMembersLoadInFlightRef.current = request;
+      try {
+        await request;
+      } finally {
+        if (castRoleMembersLoadInFlightRef.current === request) {
+          castRoleMembersLoadInFlightRef.current = null;
+        }
+        setCastRoleMembersLoading(false);
+      }
+    },
+    [
+      castRoleMembers,
+      castRoleMembersLoadedOnce,
+      getAuthHeaders,
+      seasonNumber,
+      showId,
+    ]
+  );
 
   const fetchSeasonBravoVideos = useCallback(async () => {
     const requestShowId = showId;
@@ -1268,6 +1376,7 @@ export default function SeasonDetailPage() {
     try {
       if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setLoading(true);
+      setSeasonSupplementalWarning(null);
       const headers = await getAuthHeaders();
 
       const [showResponse, seasonsResponse] = await Promise.all([
@@ -1296,6 +1405,7 @@ export default function SeasonDetailPage() {
       if (!foundSeason) {
         if (!isCurrentSeasonRequest(requestKey, requestId)) return;
         setError("Season not found");
+        setSeasonSupplementalWarning(null);
         setSeason(null);
         setEpisodes([]);
         setAssets([]);
@@ -1308,50 +1418,74 @@ export default function SeasonDetailPage() {
       }
 
       setSeason(foundSeason);
-      const [episodesResponse, castResponse, castWithArchiveResponse] = await Promise.all([
-        fetch(`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`, { headers }),
-        fetch(`/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500`, { headers }),
-        fetch(
-          `/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500&include_archive_only=true`,
-          { headers }
-        ),
-      ]);
-
-      if (!episodesResponse.ok) throw new Error("Failed to fetch episodes");
-      if (!castResponse.ok) throw new Error("Failed to fetch season cast");
-      if (!castWithArchiveResponse.ok) throw new Error("Failed to fetch season archive cast");
-
-      const episodesData = await episodesResponse.json();
-      const castData = await castResponse.json();
-      const castWithArchiveData = await castWithArchiveResponse.json();
-      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
-
-      setEpisodes(episodesData.episodes ?? []);
-      setCast(castData.cast ?? []);
-      setSeasonCastSource(
-        castData.cast_source === "show_fallback" ? "show_fallback" : "season_evidence"
-      );
-      setSeasonCastEligibilityWarning(
-        typeof castData.eligibility_warning === "string" && castData.eligibility_warning.trim()
-          ? castData.eligibility_warning
-          : null
-      );
-      const allSeasonCast = Array.isArray(castWithArchiveData.cast)
-        ? (castWithArchiveData.cast as SeasonCastMember[])
-        : [];
-      setArchiveCast(
-        allSeasonCast.filter(
-          (member) =>
-            (member.episodes_in_season ?? 0) <= 0 &&
-            ((member.archive_episodes_in_season as number | null | undefined) ?? 0) > 0
-        )
-      );
-      await Promise.all([fetchSeasonBravoVideos(), fetchSeasonFandomData()]);
-      if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setError(null);
+      setEpisodes([]);
+      setCast([]);
+      setArchiveCast([]);
+      setSeasonCastSource("season_evidence");
+      setSeasonCastEligibilityWarning(null);
+
+      try {
+        const [episodesResponse, castResponse, castWithArchiveResponse] = await Promise.all([
+          fetch(`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`, { headers }),
+          fetch(`/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500`, { headers }),
+          fetch(
+            `/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500&include_archive_only=true`,
+            { headers }
+          ),
+        ]);
+
+        if (!episodesResponse.ok) throw new Error("Failed to fetch episodes");
+        if (!castResponse.ok) throw new Error("Failed to fetch season cast");
+        if (!castWithArchiveResponse.ok) throw new Error("Failed to fetch season archive cast");
+
+        const episodesData = await episodesResponse.json();
+        const castData = await castResponse.json();
+        const castWithArchiveData = await castWithArchiveResponse.json();
+        if (!isCurrentSeasonRequest(requestKey, requestId)) return;
+
+        setEpisodes(episodesData.episodes ?? []);
+        setCast(castData.cast ?? []);
+        setSeasonCastSource(
+          castData.cast_source === "show_fallback" ? "show_fallback" : "season_evidence"
+        );
+        setSeasonCastEligibilityWarning(
+          typeof castData.eligibility_warning === "string" && castData.eligibility_warning.trim()
+            ? castData.eligibility_warning
+            : null
+        );
+        const allSeasonCast = Array.isArray(castWithArchiveData.cast)
+          ? (castWithArchiveData.cast as SeasonCastMember[])
+          : [];
+        setArchiveCast(
+          allSeasonCast.filter(
+            (member) =>
+              (member.episodes_in_season ?? 0) <= 0 &&
+              ((member.archive_episodes_in_season as number | null | undefined) ?? 0) > 0
+          )
+        );
+        setSeasonSupplementalWarning(null);
+        void Promise.allSettled([fetchSeasonBravoVideos(), fetchSeasonFandomData()]).then((results) => {
+          if (!isCurrentSeasonRequest(requestKey, requestId)) return;
+          const failures = results
+            .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+            .map((result) => (result.reason instanceof Error ? result.reason.message : "supplemental request failed"));
+          if (failures.length === 0) {
+            setSeasonSupplementalWarning(null);
+            return;
+          }
+          setSeasonSupplementalWarning(failures.join(" · "));
+        });
+      } catch (err) {
+        if (!isCurrentSeasonRequest(requestKey, requestId)) return;
+        const message = err instanceof Error ? err.message : "Failed to load season supplemental data";
+        console.warn("[season] Supplemental season data unavailable:", message);
+        setSeasonSupplementalWarning(message);
+      }
     } catch (err) {
       if (!isCurrentSeasonRequest(requestKey, requestId)) return;
       setError(err instanceof Error ? err.message : "Failed to load season");
+      setSeasonSupplementalWarning(null);
       setSeason(null);
       setEpisodes([]);
       setAssets([]);
@@ -2843,23 +2977,10 @@ export default function SeasonDetailPage() {
           : typeof textPayload.hasTextOverlay === "boolean"
             ? textPayload.hasTextOverlay
             : null;
-
-      const hasManualCrop =
-        asset.thumbnail_crop_mode === "manual" &&
-        typeof asset.thumbnail_focus_x === "number" &&
-        typeof asset.thumbnail_focus_y === "number" &&
-        typeof asset.thumbnail_zoom === "number";
-      if (hasManualCrop) {
-        await callStep("Variants (Manual Crop)", `${prefix}/variants`, {
-          force: true,
-          crop: {
-            x: asset.thumbnail_focus_x,
-            y: asset.thumbnail_focus_y,
-            zoom: asset.thumbnail_zoom,
-            mode: "manual",
-          },
-        });
-      }
+      await callStep("Variants (Auto-Crop)", `${prefix}/variants`, {
+        force: true,
+        crop: buildAssetAutoCropPayloadWithFallback(asset),
+      });
 
       applyAssetPatch(asset, {
         people_count:
@@ -2942,6 +3063,50 @@ export default function SeasonDetailPage() {
     [getAuthHeaders]
   );
 
+  const triggerGalleryAssetAutoCrop = useCallback(
+    async (asset: SeasonAsset) => {
+      const base =
+        asset.origin_table === "media_assets"
+          ? { id: asset.media_asset_id ?? asset.id, prefix: "media-assets" }
+          : asset.origin_table === "cast_photos"
+            ? { id: asset.id, prefix: "cast-photos" }
+            : null;
+      if (!base?.id) return;
+      try {
+        const headers = await getAuthHeaders();
+        const endpoint = `/api/admin/trr-api/${base.prefix}/${base.id}/variants`;
+        await fetchWithTimeout(
+          endpoint,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ force: true }),
+          },
+          SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS
+        );
+        await fetchWithTimeout(
+          endpoint,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              force: true,
+              crop: buildAssetAutoCropPayloadWithFallback(asset),
+            }),
+          },
+          SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS
+        );
+      } catch (error) {
+        console.warn("[season-gallery] auto-crop rebuild after star toggle failed", {
+          assetId: asset.id,
+          origin: asset.origin_table,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [getAuthHeaders]
+  );
+
   const toggleStarGalleryAsset = useCallback(
     async (asset: SeasonAsset, starred: boolean) => {
       const origin = asset.origin_table ?? null;
@@ -2971,8 +3136,11 @@ export default function SeasonDetailPage() {
           return { ...a, metadata: meta };
         })
       );
+      if (starred) {
+        void triggerGalleryAssetAutoCrop(asset);
+      }
     },
-    [getAuthHeaders]
+    [getAuthHeaders, triggerGalleryAssetAutoCrop]
   );
 
   const updateGalleryAssetContentType = useCallback(
@@ -3476,9 +3644,10 @@ export default function SeasonDetailPage() {
             </div>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                  Season
-                </p>
+                <AdminBreadcrumbs
+                  items={buildSeasonBreadcrumb(show.name, season.season_number)}
+                  className="mb-1"
+                />
                 <h1 className="text-3xl font-bold text-zinc-900">
                   {show.name} · Season {season.season_number}
                 </h1>
@@ -3518,6 +3687,7 @@ export default function SeasonDetailPage() {
             <nav className="flex flex-wrap gap-2 py-4">
               {(
                 [
+                  { id: "overview", label: "Overview" },
                   { id: "episodes", label: "Seasons & Episodes" },
                   { id: "assets", label: "Assets" },
                   { id: "videos", label: "Videos" },
@@ -3525,7 +3695,6 @@ export default function SeasonDetailPage() {
                   { id: "cast", label: "Cast" },
                   { id: "surveys", label: "Surveys" },
                   { id: "social", label: "Social Media" },
-                  { id: "details", label: "Details" },
                 ] as const
               ).map((tab) => (
                 <button
@@ -4801,21 +4970,28 @@ export default function SeasonDetailPage() {
           )}
 
           {activeTab === "social" && (
-            <SeasonSocialAnalyticsSection
-              showId={showId}
-              showSlug={showSlugForRouting}
-              seasonNumber={season.season_number}
-              seasonId={season.id}
-              showName={show.name}
-            />
+            <div className="space-y-3">
+              {seasonSupplementalWarning && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                  Season supplemental data warning: {seasonSupplementalWarning}. Social analytics remains available.
+                </div>
+              )}
+              <SeasonSocialAnalyticsSection
+                showId={showId}
+                showSlug={showSlugForRouting}
+                seasonNumber={season.season_number}
+                seasonId={season.id}
+                showName={show.name}
+              />
+            </div>
           )}
 
-          {activeTab === "details" && (
+          {activeTab === "overview" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Details
+                    Overview
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
                     {show.name} · Season {season.season_number}

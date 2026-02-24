@@ -174,5 +174,19 @@ describe("admin client auth helper", () => {
     });
 
     expect(headers).toEqual({ Authorization: "Bearer dev-admin-bypass" });
+    expect(mocks.authStateReady).not.toHaveBeenCalled();
+  });
+
+  it("allows local host bypass when explicitly requested even if env bypass helper is disabled", async () => {
+    mocks.setCurrentUser(null);
+    mocks.setBypassEnabled(false);
+
+    const headers = await getClientAuthHeaders({
+      allowDevAdminBypass: true,
+      tokenRetryDelaysMs: [0],
+      forceRefreshOnFinalAttempt: false,
+    });
+
+    expect(headers).toEqual({ Authorization: "Bearer dev-admin-bypass" });
   });
 });

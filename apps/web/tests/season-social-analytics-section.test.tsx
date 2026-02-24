@@ -1,15 +1,24 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 
 import SeasonSocialAnalyticsSection, {
+  buildRunsRequestKey,
+  buildSocialRequestKey,
   formatIngestErrorMessage,
-} from "@/components/admin/season-social-analytics-section";
-import { auth } from "@/lib/firebase";
+  shouldSetPollingRetry,
+} from "../src/components/admin/season-social-analytics-section";
+import { auth } from "../src/lib/firebase";
 
 vi.mock("@/components/admin/social-posts-section", () => ({
   __esModule: true,
   default: () => <div data-testid="social-posts-section" />,
+}));
+
+vi.mock("@/components/admin/reddit-sources-manager", () => ({
+  __esModule: true,
+  default: () => <div data-testid="reddit-sources-manager" />,
 }));
 
 const { routerReplaceMock } = vi.hoisted(() => ({
@@ -53,6 +62,18 @@ type AnalyticsPayload = {
         negative: number;
       };
     };
+    data_quality?: {
+      comments_saved_pct_overall: number | null;
+      platform_comments_saved_pct: {
+        instagram: number | null;
+        youtube: number | null;
+        tiktok: number | null;
+        twitter: number | null;
+      };
+      last_post_at: string | null;
+      last_comment_at: string | null;
+      data_freshness_minutes: number | null;
+    };
   };
   weekly: Array<{
     week_index: number;
@@ -85,8 +106,16 @@ type AnalyticsPayload = {
       tiktok: number;
       twitter: number;
     };
+    reported_comments?: {
+      instagram: number;
+      youtube: number;
+      tiktok: number;
+      twitter: number;
+    };
     total_posts: number;
     total_comments: number;
+    total_reported_comments?: number;
+    comments_saved_pct?: number | null;
   }>;
   weekly_platform_engagement: Array<{
     week_index: number;
@@ -126,6 +155,47 @@ type AnalyticsPayload = {
       total_comments: number;
     }>;
   }>;
+  weekly_flags?: Array<{
+    week_index: number;
+    code: "zero_activity" | "spike" | "drop" | "comment_gap";
+    severity: "info" | "warn";
+    message: string;
+  }>;
+  benchmark?: {
+    week_index: number;
+    current: {
+      posts: number;
+      comments: number;
+      engagement: number;
+    };
+    previous_week: {
+      week_index: number | null;
+      metrics: {
+        posts: number;
+        comments: number;
+        engagement: number;
+      };
+      delta_pct: {
+        posts: number | null;
+        comments: number | null;
+        engagement: number | null;
+      };
+    };
+    trailing_3_week_avg: {
+      window_size: number;
+      metrics: {
+        posts: number;
+        comments: number;
+        engagement: number;
+      };
+      delta_pct: {
+        posts: number | null;
+        comments: number | null;
+        engagement: number | null;
+      };
+    };
+    consistency_score_pct?: Partial<Record<"instagram" | "youtube" | "tiktok" | "twitter", number | null>>;
+  };
   platform_breakdown: Array<{
     platform: string;
     posts: number;
@@ -213,6 +283,18 @@ const analyticsBase: AnalyticsPayload = {
         negative: 6,
       },
     },
+    data_quality: {
+      comments_saved_pct_overall: 40,
+      platform_comments_saved_pct: {
+        instagram: 40,
+        youtube: 40,
+        tiktok: 40,
+        twitter: 40,
+      },
+      last_post_at: "2026-01-20T12:00:00Z",
+      last_comment_at: "2026-01-20T13:00:00Z",
+      data_freshness_minutes: 120,
+    },
   },
   weekly: [
     {
@@ -262,8 +344,16 @@ const analyticsBase: AnalyticsPayload = {
         tiktok: 2,
         twitter: 2,
       },
+      reported_comments: {
+        instagram: 5,
+        youtube: 5,
+        tiktok: 5,
+        twitter: 5,
+      },
       total_posts: 4,
       total_comments: 8,
+      total_reported_comments: 20,
+      comments_saved_pct: 40.0,
     },
     {
       week_index: 2,
@@ -399,6 +489,34 @@ const analyticsBase: AnalyticsPayload = {
       ],
     },
   ],
+  weekly_flags: [
+    {
+      week_index: 2,
+      code: "zero_activity",
+      severity: "info",
+      message: "No posts captured in this week window.",
+    },
+  ],
+  benchmark: {
+    week_index: 2,
+    current: { posts: 0, comments: 0, engagement: 0 },
+    previous_week: {
+      week_index: 1,
+      metrics: { posts: 4, comments: 8, engagement: 1000 },
+      delta_pct: { posts: -100, comments: -100, engagement: -100 },
+    },
+    trailing_3_week_avg: {
+      window_size: 1,
+      metrics: { posts: 4, comments: 8, engagement: 1000 },
+      delta_pct: { posts: -100, comments: -100, engagement: -100 },
+    },
+    consistency_score_pct: {
+      instagram: 14.3,
+      youtube: 14.3,
+      tiktok: 14.3,
+      twitter: 14.3,
+    },
+  },
   platform_breakdown: [],
   themes: {
     positive: [],
@@ -430,6 +548,9 @@ function mockSeasonSocialFetch(analytics: AnalyticsPayload) {
     if (url.includes("/social/jobs?")) {
       return jsonResponse({ jobs: [] });
     }
+    if (url.includes("/social/runs/summary?")) {
+      return jsonResponse({ summaries: [] });
+    }
     if (url.includes("/social/runs?")) {
       return jsonResponse({ runs: [] });
     }
@@ -442,6 +563,7 @@ function mockSeasonSocialFetch(analytics: AnalyticsPayload) {
 describe("SeasonSocialAnalyticsSection weekly trend", () => {
   beforeEach(() => {
     routerReplaceMock.mockClear();
+    window.localStorage.clear();
     (auth as unknown as { currentUser?: { getIdToken: () => Promise<string> } }).currentUser = {
       getIdToken: vi.fn().mockResolvedValue("test-token"),
     };
@@ -478,6 +600,48 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(within(weekTwoRow).getByTestId("weekly-heatmap-total-2")).toHaveTextContent("0 posts");
   });
 
+  it("requires two consecutive poll failures before setting retry state", () => {
+    expect(shouldSetPollingRetry(0)).toBe(false);
+    expect(shouldSetPollingRetry(1)).toBe(false);
+    expect(shouldSetPollingRetry(2)).toBe(true);
+  });
+
+  it("builds unique in-flight request keys across filter/scope/view changes", () => {
+    const base = buildSocialRequestKey({
+      seasonId: "season-1",
+      sourceScope: "bravo",
+      platformFilter: "all",
+      weekFilter: "all",
+      analyticsView: "bravo",
+    });
+    const differentWeek = buildSocialRequestKey({
+      seasonId: "season-1",
+      sourceScope: "bravo",
+      platformFilter: "all",
+      weekFilter: 2,
+      analyticsView: "bravo",
+    });
+    const differentPlatform = buildSocialRequestKey({
+      seasonId: "season-1",
+      sourceScope: "bravo",
+      platformFilter: "youtube",
+      weekFilter: "all",
+      analyticsView: "bravo",
+    });
+    const differentScope = buildRunsRequestKey({
+      seasonId: "season-1",
+      sourceScope: "creator",
+    });
+    const baseRuns = buildRunsRequestKey({
+      seasonId: "season-1",
+      sourceScope: "bravo",
+    });
+
+    expect(base).not.toBe(differentWeek);
+    expect(base).not.toBe(differentPlatform);
+    expect(baseRuns).not.toBe(differentScope);
+  });
+
   it("builds weekly table links to canonical week detail routes", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
@@ -495,7 +659,29 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     expect(href).toContain("/admin/trr-shows/show-1/seasons/6/social/week/1");
     expect(href).toContain("source_scope=bravo");
+    expect(href).toContain("season_id=season-1");
     expect(href).not.toContain("?tab=social/week");
+  });
+
+  it("preserves active platform tab in week detail links", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Weekly Trend");
+    const platformTabs = screen.getByRole("navigation");
+    fireEvent.click(within(platformTabs).getByRole("button", { name: "YouTube" }));
+
+    const weekOneLink = await screen.findByRole("link", { name: "Week 1" });
+    const href = weekOneLink.getAttribute("href") ?? "";
+    expect(href).toContain("social_platform=youtube");
   });
 
   it("renders platform tabs above the Filters scope card", async () => {
@@ -596,6 +782,178 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.getByTestId("weekly-heatmap-total-1")).toHaveTextContent("8 comments");
   });
 
+  it("renders data quality badges and supports density query toggle", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Coverage");
+    expect(screen.getByText("40.0%")).toBeInTheDocument();
+    expect(screen.getByText("2h ago")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Comfortable" }));
+    expect(window.location.search).toContain("social_density=comfortable");
+
+    const tile = screen.getByTestId("weekly-heatmap-day-1-0").firstElementChild;
+    expect(tile?.className).toContain("h-11");
+  });
+
+  it("shows weekly flag chips and can hide them via alerts toggle", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("zero activity");
+    fireEvent.click(screen.getByRole("button", { name: "Alerts On" }));
+    expect(window.location.search).toContain("social_alerts=off");
+    expect(screen.queryByText("zero activity")).not.toBeInTheDocument();
+  });
+
+  it("shows simplified weekly coverage labels and progress percent in the bravo table", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />
+    );
+
+    expect(await screen.findByRole("columnheader", { name: "PROGRESS" })).toBeInTheDocument();
+    expect(await screen.findAllByText("40.0% saved to DB")).toHaveLength(5);
+    expect(screen.queryByText("40.0% saved to DB (8/20)")).not.toBeInTheDocument();
+    expect(await screen.findByText("50.0% saved")).toBeInTheDocument();
+  });
+
+  it("renders week date ranges under weekly heatmap headers", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByTestId("weekly-heatmap-row-1");
+    const dateLabels = screen.getAllByText(/Jan \d{1,2} to Jan \d{1,2}/);
+    expect(dateLabels.length).toBeGreaterThan(0);
+  });
+
+  it("shows Up-to-Date when platform coverage reaches 100%", async () => {
+    const analyticsUpToDate: AnalyticsPayload = {
+      ...analyticsBase,
+      weekly_platform_posts: analyticsBase.weekly_platform_posts.map((row) =>
+        row.week_index === 1
+          ? {
+              ...row,
+              comments: {
+                ...row.comments,
+                youtube: 5,
+              },
+              reported_comments: {
+                ...(row.reported_comments ?? {
+                  instagram: 0,
+                  youtube: 0,
+                  tiktok: 0,
+                  twitter: 0,
+                }),
+                youtube: 5,
+              },
+            }
+          : row,
+      ),
+    };
+    mockSeasonSocialFetch(analyticsUpToDate);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const upToDateLabels = await screen.findAllByText("Up-to-Date");
+    expect(upToDateLabels.length).toBeGreaterThan(0);
+  });
+
+  it("hydrates from cached social snapshot and suppresses transient timeout banners", async () => {
+    const cacheKey = "trr:season-social-analytics:v1:show-1:6:season-1:bravo:all:all";
+    window.localStorage.setItem(
+      cacheKey,
+      JSON.stringify({
+        version: 1,
+        saved_at: "2026-02-24T11:00:00.000Z",
+        analytics: analyticsBase,
+        runs: [],
+        targets: [],
+        last_updated: "2026-02-24T11:00:00.000Z",
+        section_last_success_at: {
+          analytics: "2026-02-24T11:00:00.000Z",
+          targets: "2026-02-24T11:00:00.000Z",
+          runs: "2026-02-24T11:00:00.000Z",
+        },
+      }),
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) {
+        throw new Error("Social analytics request timed out");
+      }
+      if (url.includes("/social/targets?")) {
+        throw new Error("Social targets request timed out");
+      }
+      if (url.includes("/social/runs?")) {
+        throw new Error("Social runs request timed out");
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({ jobs: [] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Weekly Trend");
+    await waitFor(() => {
+      expect(
+        screen.getByText("Showing last successful social data while live refresh retries."),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Social analytics request timed out")).not.toBeInTheDocument();
+    expect(screen.queryByText("Social targets request timed out")).not.toBeInTheDocument();
+    expect(screen.queryByText("Social runs request timed out")).not.toBeInTheDocument();
+  });
+
   it("uses platform-specific day values and shows YouTube posts schedule label", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
@@ -681,6 +1039,95 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await screen.findByText("Weekly Trend");
     expect(screen.getByText("Ingest + Export")).toBeInTheDocument();
+
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="reddit"
+      />,
+    );
+
+    expect(await screen.findByTestId("reddit-sources-manager")).toBeInTheDocument();
+    expect(screen.queryByText("Weekly Trend")).not.toBeInTheDocument();
+  });
+
+  it("renders advanced run health and benchmark panel", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/runs/summary?")) {
+        return jsonResponse({
+          summaries: [
+            {
+              run_id: "run-1",
+              status: "completed",
+              duration_seconds: 180,
+              success_rate_pct: 75,
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="advanced"
+      />,
+    );
+
+    await screen.findByText("Run Health");
+    expect(screen.getByText("75.0%")).toBeInTheDocument();
+    expect(screen.getByText("3m 0s")).toBeInTheDocument();
+    expect(screen.getByText("Consistency & Momentum")).toBeInTheDocument();
+  });
+
+  it("does not crash when benchmark delta payload is partially missing", async () => {
+    const analyticsWithPartialBenchmark = {
+      ...analyticsBase,
+      benchmark: {
+        ...analyticsBase.benchmark!,
+        previous_week: {
+          ...analyticsBase.benchmark!.previous_week,
+          delta_pct: undefined,
+        },
+      },
+    } as unknown as AnalyticsPayload;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsWithPartialBenchmark);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/runs/summary?")) return jsonResponse({ summaries: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="advanced"
+      />,
+    );
+
+    await screen.findByText("Consistency & Momentum");
+    expect(screen.getAllByText("N/A").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument();
   });
 
   it("renders leaderboard thumbnails for content and discussion cards", async () => {
@@ -860,6 +1307,174 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(await screen.findByText(/targets unavailable/i)).toBeInTheDocument();
   });
 
+  it("renders runs and targets when analytics request fails", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) {
+        return ({
+          ok: false,
+          status: 503,
+          json: async () => ({ error: "analytics unavailable" }),
+        }) as Response;
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({
+          targets: [{ platform: "youtube", accounts: ["bravo"], hashtags: [], keywords: [], is_active: true }],
+        });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: "run-1-abcdef",
+              status: "completed",
+              created_at: "2026-02-17T10:00:00Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({ jobs: [] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    expect(await screen.findByText(/analytics unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText("Configured Targets")).toBeInTheDocument();
+    expect(screen.getByText("YouTube: bravo")).toBeInTheDocument();
+    const runSelect = screen.getByRole("combobox", { name: /Run/i });
+    expect(within(runSelect).getByRole("option", { name: /run-1-ab/i })).toBeInTheDocument();
+  });
+
+  it("exits loading and remains interactive when analytics request times out", async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) {
+        return await new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal | undefined;
+          signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        });
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({ targets: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({ runs: [] });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({ jobs: [] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    await Promise.resolve();
+    expect(screen.getByRole("combobox", { name: /Run/i })).toBeInTheDocument();
+    expect(screen.queryByText("Loading social analytics...")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(22_001);
+    });
+    await Promise.resolve();
+    expect(screen.getByText(/Social analytics request timed out/i)).toBeInTheDocument();
+  });
+
+  it("includes season_id hint in social landing requests", async () => {
+    const requestedUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByTestId("weekly-heatmap-row-1");
+    const socialRequests = requestedUrls.filter(
+      (url) =>
+        url.includes("/social/analytics?") || url.includes("/social/runs?") || url.includes("/social/targets?"),
+    );
+    expect(socialRequests.length).toBeGreaterThan(0);
+    expect(socialRequests.every((url) => url.includes("season_id=season-1"))).toBe(true);
+  });
+
+  it("shows stale-data timestamp when analytics refresh fails after a successful load", async () => {
+    let analyticsCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) {
+        analyticsCalls += 1;
+        if (analyticsCalls === 1) return jsonResponse(analyticsBase);
+        return ({
+          ok: false,
+          status: 503,
+          json: async () => ({ error: "analytics unavailable" }),
+        }) as Response;
+      }
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByTestId("weekly-heatmap-row-1");
+    fireEvent.change(screen.getByRole("combobox", { name: /Week/i }), {
+      target: { value: "1" },
+    });
+
+    expect(await screen.findByText(/analytics unavailable/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Showing last successful data from/i)).toBeInTheDocument();
+    expect(screen.getByTestId("weekly-heatmap-row-1")).toBeInTheDocument();
+  });
+
   it("shows strict run-scoped jobs empty state when no run is selected", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
@@ -933,6 +1548,12 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.some((call) => String(call[0]).includes("run_id=run-1-abcdef")),
+      ).toBe(true);
+      expect(
+        fetchMock.mock.calls.some(
+          (call) =>
+            String(call[0]).includes("/social/jobs?") && String(call[0]).includes("season_id=season-1"),
+        ),
       ).toBe(true);
     });
   });
@@ -1010,6 +1631,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   it("uses incremental sync strategy by default for ingest payload", async () => {
     const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
     const capturedPayloads: Array<Record<string, unknown>> = [];
+    const ingestUrls: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
@@ -1027,6 +1649,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       }
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
       if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+        ingestUrls.push(url);
         if (typeof init?.body === "string") {
           capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
         }
@@ -1053,6 +1676,57 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
     expect(capturedPayloads[0]?.sync_strategy).toBe("incremental");
     expect(capturedPayloads[0]?.allow_inline_dev_fallback).toBe(true);
+    expect(ingestUrls[0]).toContain("season_id=season-1");
+  });
+
+  it("supports day-specific ingest runs", async () => {
+    const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
+    const capturedPayloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+        if (typeof init?.body === "string") {
+          capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 2 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Specific Day");
+    fireEvent.change(screen.getByLabelText(/Specific Day/i), {
+      target: { value: "2026-01-09" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Run Specific Day \(All Platforms\)/i }));
+
+    await waitFor(() => {
+      expect(capturedPayloads.length).toBeGreaterThan(0);
+    });
+    const dayPayload = capturedPayloads[0];
+    expect(typeof dayPayload.date_start).toBe("string");
+    expect(typeof dayPayload.date_end).toBe("string");
+    const start = new Date(String(dayPayload.date_start));
+    const end = new Date(String(dayPayload.date_end));
+    expect(Number.isNaN(start.getTime())).toBe(false);
+    expect(Number.isNaN(end.getTime())).toBe(false);
+    expect(start.toISOString()).toBe("2026-01-09T05:00:00.000Z");
+    expect(end.toISOString()).toBe("2026-01-10T04:59:59.999Z");
+    expect(end.getTime()).toBeGreaterThan(start.getTime());
+    expect(end.getTime() - start.getTime()).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
   });
 
   it("sends full_refresh strategy when full refresh mode is selected", async () => {

@@ -61,6 +61,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       is_active?: unknown;
       analysis_flares?: unknown;
       analysis_all_flares?: unknown;
+      is_show_focused?: unknown;
+      network_focus_targets?: unknown;
+      franchise_focus_targets?: unknown;
+      episode_title_patterns?: unknown;
+      episode_required_flares?: unknown;
     };
 
     let analysisFlares: string[] | undefined;
@@ -87,6 +92,54 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       analysisAllFlares = body.analysis_all_flares as string[];
     }
 
+    let networkFocusTargets: string[] | undefined;
+    if (body.network_focus_targets !== undefined) {
+      if (!Array.isArray(body.network_focus_targets)) {
+        return NextResponse.json({ error: "network_focus_targets must be an array of strings" }, { status: 400 });
+      }
+      const hasInvalidValue = body.network_focus_targets.some((value) => typeof value !== "string");
+      if (hasInvalidValue) {
+        return NextResponse.json({ error: "network_focus_targets must be an array of strings" }, { status: 400 });
+      }
+      networkFocusTargets = body.network_focus_targets as string[];
+    }
+
+    let franchiseFocusTargets: string[] | undefined;
+    if (body.franchise_focus_targets !== undefined) {
+      if (!Array.isArray(body.franchise_focus_targets)) {
+        return NextResponse.json({ error: "franchise_focus_targets must be an array of strings" }, { status: 400 });
+      }
+      const hasInvalidValue = body.franchise_focus_targets.some((value) => typeof value !== "string");
+      if (hasInvalidValue) {
+        return NextResponse.json({ error: "franchise_focus_targets must be an array of strings" }, { status: 400 });
+      }
+      franchiseFocusTargets = body.franchise_focus_targets as string[];
+    }
+
+    let episodeTitlePatterns: string[] | undefined;
+    if (body.episode_title_patterns !== undefined) {
+      if (!Array.isArray(body.episode_title_patterns)) {
+        return NextResponse.json({ error: "episode_title_patterns must be an array of strings" }, { status: 400 });
+      }
+      const hasInvalidValue = body.episode_title_patterns.some((value) => typeof value !== "string");
+      if (hasInvalidValue) {
+        return NextResponse.json({ error: "episode_title_patterns must be an array of strings" }, { status: 400 });
+      }
+      episodeTitlePatterns = body.episode_title_patterns as string[];
+    }
+
+    let episodeRequiredFlares: string[] | undefined;
+    if (body.episode_required_flares !== undefined) {
+      if (!Array.isArray(body.episode_required_flares)) {
+        return NextResponse.json({ error: "episode_required_flares must be an array of strings" }, { status: 400 });
+      }
+      const hasInvalidValue = body.episode_required_flares.some((value) => typeof value !== "string");
+      if (hasInvalidValue) {
+        return NextResponse.json({ error: "episode_required_flares must be an array of strings" }, { status: 400 });
+      }
+      episodeRequiredFlares = body.episode_required_flares as string[];
+    }
+
     let subreddit: string | undefined;
     if (body.subreddit !== undefined) {
       if (typeof body.subreddit !== "string") {
@@ -110,6 +163,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       isActive: typeof body.is_active === "boolean" ? body.is_active : undefined,
       analysisFlares,
       analysisAllFlares,
+      isShowFocused: typeof body.is_show_focused === "boolean" ? body.is_show_focused : undefined,
+      networkFocusTargets,
+      franchiseFocusTargets,
+      episodeTitlePatterns,
+      episodeRequiredFlares,
     });
 
     if (!community) {

@@ -2,6 +2,7 @@ import {
   normalizeRedditFlairLabel,
   sanitizeRedditFlairList,
 } from "@/lib/server/admin/reddit-flair-normalization";
+import { sanitizeEpisodeTitlePatterns } from "@/lib/server/admin/reddit-episode-rules";
 
 export type RedditListingSort = "new" | "hot" | "top";
 
@@ -37,6 +38,7 @@ export interface DiscoverSubredditThreadsInput {
   showName: string;
   showAliases?: string[] | null;
   castNames?: string[] | null;
+  isShowFocused?: boolean;
   analysisFlares?: string[] | null;
   analysisAllFlares?: string[] | null;
   sortModes?: RedditListingSort[];
@@ -50,6 +52,50 @@ export interface DiscoverSubredditThreadsResult {
   terms: string[];
   hints: RedditDiscoveryHints;
   threads: RedditDiscoveryThread[];
+}
+
+export interface RedditEpisodeDiscussionCandidate {
+  reddit_post_id: string;
+  title: string;
+  text: string | null;
+  url: string;
+  permalink: string | null;
+  author: string | null;
+  score: number;
+  num_comments: number;
+  posted_at: string | null;
+  link_flair_text: string | null;
+  source_sorts: RedditListingSort[];
+  match_reasons: string[];
+}
+
+export interface DiscoverEpisodeDiscussionThreadsInput {
+  subreddit: string;
+  showName: string;
+  showAliases?: string[] | null;
+  seasonNumber: number;
+  episodeTitlePatterns?: string[] | null;
+  episodeRequiredFlares?: string[] | null;
+  isShowFocused?: boolean;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  sortModes?: RedditListingSort[];
+  limitPerMode?: number;
+}
+
+export interface DiscoverEpisodeDiscussionThreadsResult {
+  subreddit: string;
+  fetched_at: string;
+  sources_fetched: RedditListingSort[];
+  candidates: RedditEpisodeDiscussionCandidate[];
+  filters_applied: {
+    season_number: number;
+    title_patterns: string[];
+    required_flares: string[];
+    show_focused: boolean;
+    period_start: string | null;
+    period_end: string | null;
+  };
 }
 
 export class RedditDiscoveryError extends Error {
@@ -85,6 +131,7 @@ interface RedditListingPayload {
 
 const DEFAULT_SORTS: RedditListingSort[] = ["new", "hot", "top"];
 const DEFAULT_LIMIT_PER_MODE = 35;
+const DEFAULT_EPISODE_LIMIT_PER_MODE = 65;
 const MAX_LIMIT_PER_MODE = 80;
 const DEFAULT_REDDIT_TIMEOUT_MS = 12_000;
 const DEFAULT_REDDIT_USER_AGENT = "TRRAdminRedditDiscovery/1.0 (+https://thereality.report)";
@@ -218,6 +265,19 @@ const containsTerm = (haystack: string, term: string): boolean => {
 const findMatchedTerms = (text: string, terms: string[]): string[] =>
   terms.filter((term) => containsTerm(text, term));
 
+const hasSeasonToken = (text: string, seasonNumber: number): boolean => {
+  if (!Number.isFinite(seasonNumber) || seasonNumber <= 0) return false;
+  const seasonRegex = new RegExp(`\\bseason\\s*${seasonNumber}\\b`, "i");
+  const shortRegex = new RegExp(`\\bs\\s*0*${seasonNumber}\\b`, "i");
+  return seasonRegex.test(text) || shortRegex.test(text);
+};
+
+const parseIsoDate = (value: string | null | undefined): Date | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const toIsoOrNull = (createdUtc: number | undefined): string | null => {
   if (!Number.isFinite(createdUtc)) return null;
   return new Date((createdUtc as number) * 1000).toISOString();
@@ -335,6 +395,7 @@ const applyMatchMetadata = (
   terms: string[],
   castTerms: string[],
   subreddit: string,
+  isShowFocused: boolean,
   analysisScanFlares: string[],
   analysisAllFlares: string[],
 ): { threads: RedditDiscoveryThread[]; hints: RedditDiscoveryHints } => {
@@ -346,7 +407,8 @@ const applyMatchMetadata = (
       .map((flair) => flair.toLowerCase())
       .filter((flair) => !analysisAllFlairKeys.has(flair)),
   );
-  const hasAnalysisFlairFilter = analysisAllFlairKeys.size > 0 || analysisScanFlairKeys.size > 0;
+  const hasAnalysisFlairFilter =
+    !isShowFocused && (analysisAllFlairKeys.size > 0 || analysisScanFlairKeys.size > 0);
   const threadsWithMeta: RedditDiscoveryThread[] = [];
 
   for (const thread of threads) {
@@ -369,7 +431,9 @@ const applyMatchMetadata = (
     const flairKey = normalizedThreadFlair?.toLowerCase() ?? null;
     const matchesAllPostsFlair = Boolean(flairKey && analysisAllFlairKeys.has(flairKey));
     const matchesScanFlair = Boolean(flairKey && analysisScanFlairKeys.has(flairKey));
-    const passesFlairFilter = hasAnalysisFlairFilter ? matchesAllPostsFlair || matchesScanFlair : true;
+    const passesFlairFilter = hasAnalysisFlairFilter
+      ? matchesAllPostsFlair || matchesScanFlair
+      : true;
     const shouldInclude = !hasAnalysisFlairFilter
       ? true
       : matchesAllPostsFlair || (matchesScanFlair && isShowMatch);
@@ -431,6 +495,7 @@ export async function discoverSubredditThreads(
   const castTerms = buildCastTerms(input.castNames ?? []);
   const analysisScanFlares = sanitizeRedditFlairList(subreddit, input.analysisFlares ?? []);
   const analysisAllFlares = sanitizeRedditFlairList(subreddit, input.analysisAllFlares ?? []);
+  const isShowFocused = input.isShowFocused ?? false;
 
   if (terms.length === 0) {
     throw new RedditDiscoveryError("Show terms are required for discovery", 400);
@@ -445,6 +510,7 @@ export async function discoverSubredditThreads(
     terms,
     castTerms,
     subreddit,
+    isShowFocused,
     analysisScanFlares,
     analysisAllFlares,
   );
@@ -462,5 +528,122 @@ export async function discoverSubredditThreads(
     terms,
     hints,
     threads,
+  };
+}
+
+export async function discoverEpisodeDiscussionThreads(
+  input: DiscoverEpisodeDiscussionThreadsInput,
+): Promise<DiscoverEpisodeDiscussionThreadsResult> {
+  const subreddit = input.subreddit.trim();
+  const sortModes = input.sortModes?.length ? input.sortModes : DEFAULT_SORTS;
+  const limitPerMode = Math.min(
+    Math.max(input.limitPerMode ?? DEFAULT_EPISODE_LIMIT_PER_MODE, 1),
+    MAX_LIMIT_PER_MODE,
+  );
+  const seasonNumber = Math.max(1, Math.floor(input.seasonNumber));
+  const showTerms = buildShowTerms(input.showName, input.showAliases ?? []);
+  const titlePatterns = sanitizeEpisodeTitlePatterns(input.episodeTitlePatterns ?? []);
+  const requiredFlares = sanitizeRedditFlairList(subreddit, input.episodeRequiredFlares ?? []);
+  const requiredFlairKeys = new Set(requiredFlares.map((flair) => flair.toLowerCase()));
+  const isShowFocused = input.isShowFocused ?? false;
+  const periodStartDate = parseIsoDate(input.periodStart);
+  const periodEndDate = parseIsoDate(input.periodEnd);
+
+  if (input.periodStart && !periodStartDate) {
+    throw new RedditDiscoveryError("period_start must be a valid ISO datetime", 400);
+  }
+  if (input.periodEnd && !periodEndDate) {
+    throw new RedditDiscoveryError("period_end must be a valid ISO datetime", 400);
+  }
+  if (periodStartDate && periodEndDate && periodStartDate.getTime() > periodEndDate.getTime()) {
+    throw new RedditDiscoveryError("period_start must be before period_end", 400);
+  }
+
+  if (showTerms.length === 0) {
+    throw new RedditDiscoveryError("Show terms are required for discovery", 400);
+  }
+  if (titlePatterns.length === 0) {
+    throw new RedditDiscoveryError("At least one episode title pattern is required", 400);
+  }
+
+  const fetchedBySort = await Promise.all(
+    sortModes.map(async (sort) => fetchSort(subreddit, sort, limitPerMode)),
+  );
+  const mergedThreads = mergeByPostId(fetchedBySort.flat());
+
+  const candidates: RedditEpisodeDiscussionCandidate[] = [];
+  for (const thread of mergedThreads) {
+    const title = normalizeText(thread.title);
+    const text = normalizeText(`${thread.title} ${thread.text ?? ""}`);
+    const matchedPatterns = titlePatterns.filter((pattern) =>
+      title.includes(normalizeText(pattern)),
+    );
+    if (matchedPatterns.length === 0) continue;
+
+    const matchedShowTerms = findMatchedTerms(text, showTerms);
+    if (matchedShowTerms.length === 0) continue;
+
+    if (!hasSeasonToken(text, seasonNumber)) continue;
+
+    const postedAtDate = parseIsoDate(thread.posted_at);
+    if (periodStartDate || periodEndDate) {
+      if (!postedAtDate) continue;
+      if (periodStartDate && postedAtDate.getTime() < periodStartDate.getTime()) continue;
+      if (periodEndDate && postedAtDate.getTime() > periodEndDate.getTime()) continue;
+    }
+
+    const normalizedThreadFlair = thread.link_flair_text
+      ? normalizeRedditFlairLabel(subreddit, thread.link_flair_text)
+      : null;
+    if (!isShowFocused && requiredFlairKeys.size > 0) {
+      const flairKey = normalizedThreadFlair?.toLowerCase() ?? null;
+      if (!flairKey || !requiredFlairKeys.has(flairKey)) {
+        continue;
+      }
+    }
+
+    const matchReasons = [
+      `title pattern: ${matchedPatterns[0]}`,
+      `show term: ${matchedShowTerms[0]}`,
+      `season: ${seasonNumber}`,
+    ];
+    if (normalizedThreadFlair) {
+      matchReasons.push(`flair: ${normalizedThreadFlair}`);
+    }
+
+    candidates.push({
+      reddit_post_id: thread.reddit_post_id,
+      title: thread.title,
+      text: thread.text,
+      url: thread.url,
+      permalink: thread.permalink,
+      author: thread.author,
+      score: thread.score,
+      num_comments: thread.num_comments,
+      posted_at: thread.posted_at,
+      link_flair_text: normalizedThreadFlair ?? thread.link_flair_text,
+      source_sorts: thread.source_sorts,
+      match_reasons: matchReasons,
+    });
+  }
+
+  candidates.sort((a, b) => {
+    if (b.num_comments !== a.num_comments) return b.num_comments - a.num_comments;
+    return b.score - a.score;
+  });
+
+  return {
+    subreddit,
+    fetched_at: new Date().toISOString(),
+    sources_fetched: sortModes,
+    candidates,
+    filters_applied: {
+      season_number: seasonNumber,
+      title_patterns: titlePatterns,
+      required_flares: requiredFlares,
+      show_focused: isShowFocused,
+      period_start: periodStartDate?.toISOString() ?? null,
+      period_end: periodEndDate?.toISOString() ?? null,
+    },
   };
 }

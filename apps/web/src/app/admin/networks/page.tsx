@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming-entity";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 type NetworksStreamingType = "network" | "streaming";
@@ -56,6 +59,10 @@ interface NetworksStreamingSyncResult {
   logos_mirrored: number;
   variants_black_mirrored: number;
   variants_white_mirrored: number;
+  logo_assets_discovered: number;
+  logo_assets_mirrored: number;
+  logo_assets_skipped: number;
+  logo_assets_failed: number;
   completion_total: number;
   completion_resolved: number;
   completion_unresolved: number;
@@ -105,8 +112,6 @@ const parseErrorPayload = async (response: Response): Promise<string> => {
     return fallback;
   }
 };
-
-const normalizeEntityKey = (name: string): string => name.trim().toLowerCase();
 
 const csvEscape = (value: string): string => {
   const escaped = value.replace(/"/g, '""');
@@ -414,10 +419,10 @@ export default function AdminNetworksPage() {
       <div className="min-h-screen bg-zinc-50">
         <header className="border-b border-zinc-200 bg-white px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Admin Tools</p>
-              <h1 className="text-3xl font-bold text-zinc-900">Networks &amp; Streaming</h1>
-              <p className="text-sm text-zinc-500">
+            <div className="min-w-0">
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Networks & Streaming")} className="mb-1" />
+              <h1 className="break-words text-3xl font-bold text-zinc-900">Networks &amp; Streaming</h1>
+              <p className="break-words text-sm text-zinc-500">
                 Coverage and sync health across network/streaming dimensions from the full Supabase show inventory.
               </p>
             </div>
@@ -435,7 +440,7 @@ export default function AdminNetworksPage() {
         <main className="mx-auto max-w-6xl px-6 py-8">
           <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-4 border-b border-zinc-200 pb-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-3">
+              <div className="min-w-0 space-y-3">
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
                     Available Shows: {summary?.totals.total_available_shows ?? "-"}
@@ -522,10 +527,12 @@ export default function AdminNetworksPage() {
             {syncResult ? (
               <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
                 <p className="font-semibold">Sync complete</p>
-                <p className="mt-1">
+                <p className="mt-1 [overflow-wrap:anywhere]">
                   Entities synced: {syncResult.entities_synced} | Providers synced: {syncResult.providers_synced} | Links enriched: {" "}
                   {syncResult.links_enriched} | Logos mirrored: {syncResult.logos_mirrored} | Black variants: {" "}
-                  {syncResult.variants_black_mirrored} | White variants: {syncResult.variants_white_mirrored} | Unresolved: {" "}
+                  {syncResult.variants_black_mirrored} | White variants: {syncResult.variants_white_mirrored} | Assets discovered: {" "}
+                  {syncResult.logo_assets_discovered} | Assets mirrored: {syncResult.logo_assets_mirrored} | Assets skipped: {" "}
+                  {syncResult.logo_assets_skipped} | Assets failed: {syncResult.logo_assets_failed} | Unresolved: {" "}
                   {syncResult.unresolved_logos_count} | Failures: {syncResult.failures}
                 </p>
               </div>
@@ -603,7 +610,14 @@ export default function AdminNetworksPage() {
                         return (
                           <tr key={`${row.type}:${row.name}`}>
                             <td className="px-3 py-2 text-zinc-700">{row.type === "network" ? "Network" : "Streaming"}</td>
-                            <td className="px-3 py-2 font-medium text-zinc-900">{row.name}</td>
+                            <td className="max-w-[300px] px-3 py-2 font-medium text-zinc-900 [overflow-wrap:anywhere]">
+                              <Link
+                                href={`/admin/networks/${row.type}/${toEntitySlug(row.name)}`}
+                                className="text-zinc-900 underline-offset-2 hover:underline"
+                              >
+                                {row.name}
+                              </Link>
+                            </td>
                             <td className="px-3 py-2 text-right tabular-nums text-zinc-700">{row.available_show_count}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-zinc-700">{row.added_show_count}</td>
                             <td className="px-3 py-2">
@@ -720,13 +734,13 @@ export default function AdminNetworksPage() {
                           return (
                             <tr key={`${item.type}:${item.id}:${item.reason}`}>
                               <td className="px-2 py-2 text-zinc-700">{item.type}</td>
-                              <td className="px-2 py-2 font-medium text-zinc-900">
+                              <td className="max-w-[260px] px-2 py-2 font-medium text-zinc-900 [overflow-wrap:anywhere]">
                                 {item.name}
                                 {matchingSummary?.last_attempt_at ? (
                                   <div className="text-[10px] text-zinc-500">last attempt: {matchingSummary.last_attempt_at}</div>
                                 ) : null}
                               </td>
-                              <td className="px-2 py-2 text-zinc-700">{item.reason}</td>
+                              <td className="max-w-[220px] px-2 py-2 text-zinc-700 [overflow-wrap:anywhere]">{item.reason}</td>
                               <td className="px-2 py-2">
                                 <div className="grid gap-1 md:grid-cols-2">
                                   <input

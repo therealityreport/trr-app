@@ -26,6 +26,7 @@ export interface AuthenticatedUser {
 
 const DEV_ADMIN_BYPASS_UID = "dev-admin-bypass";
 const DEV_ADMIN_BYPASS_EMAIL = "dev-admin@localhost";
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 type TokenKind = "id" | "session";
 type ShadowMismatchField = "uid" | "email" | "name";
@@ -378,7 +379,15 @@ async function verifyToken(
 function isLocalHostname(value: string | null | undefined): boolean {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
-  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "[::1]";
+  return (
+    LOOPBACK_HOSTS.has(normalized) ||
+    normalized.endsWith(".localhost")
+  );
+}
+
+function isLoopbackHost(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return LOOPBACK_HOSTS.has(value.trim().toLowerCase());
 }
 
 function parseOptionalBoolean(value: string | undefined): boolean | null {
@@ -392,6 +401,79 @@ function parseOptionalBoolean(value: string | undefined): boolean | null {
     return false;
   }
   return null;
+}
+
+function normalizeHost(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  // Bracketed IPv6 form from URL.hostname / Host header.
+  if (normalized.startsWith("[")) {
+    const closingBracket = normalized.indexOf("]");
+    if (closingBracket >= 0) {
+      return normalized.slice(0, closingBracket + 1);
+    }
+  }
+
+  // host:port (single-colon non-IPv6 host)
+  const firstColon = normalized.indexOf(":");
+  const lastColon = normalized.lastIndexOf(":");
+  if (firstColon > -1 && firstColon === lastColon) {
+    const maybePort = normalized.slice(lastColon + 1);
+    if (/^\d+$/.test(maybePort)) {
+      return normalized.slice(0, lastColon);
+    }
+  }
+
+  return normalized;
+}
+
+function parseHostAllowlist(raw: string | undefined): Set<string> {
+  return new Set(
+    (raw ?? "")
+      .split(",")
+      .map((entry) => normalizeHost(entry))
+      .filter((entry): entry is string => Boolean(entry)),
+  );
+}
+
+function resolveDefaultAdminOrigin(): string | null {
+  if (process.env.NODE_ENV === "development") return "http://admin.localhost:3000";
+  return null;
+}
+
+function resolveAdminAllowedHosts(): Set<string> {
+  const hosts = parseHostAllowlist(process.env.ADMIN_APP_HOSTS);
+  const configuredOrigin = process.env.ADMIN_APP_ORIGIN?.trim() || resolveDefaultAdminOrigin();
+  if (configuredOrigin) {
+    try {
+      const originHost = normalizeHost(new URL(configuredOrigin).hostname);
+      if (originHost) hosts.add(originHost);
+    } catch {
+      // Ignore invalid origin values; host allowlist can still come from ADMIN_APP_HOSTS.
+    }
+  }
+  return hosts;
+}
+
+function isAdminHostEnforced(): boolean {
+  const explicit = parseOptionalBoolean(process.env.ADMIN_ENFORCE_HOST);
+  if (explicit !== null) return explicit;
+  return process.env.NODE_ENV === "production";
+}
+
+const adminAllowedHosts = resolveAdminAllowedHosts();
+
+function isRequestHostAllowedForAdmin(request: NextRequest): boolean {
+  if (!isAdminHostEnforced()) return true;
+  if (adminAllowedHosts.size === 0) return false;
+
+  const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);
+  if (!requestHost) return false;
+  if (adminAllowedHosts.has(requestHost)) return true;
+  if (!isLoopbackHost(requestHost)) return false;
+  return Array.from(adminAllowedHosts).some((allowedHost) => isLoopbackHost(allowedHost));
 }
 
 function isDevAdminBypassEnabled(request: NextRequest): boolean {
@@ -530,6 +612,10 @@ export function resetAuthDiagnosticsSnapshot(): AuthDiagnosticsSnapshot {
 }
 
 export async function requireAdmin(request: NextRequest): Promise<AuthenticatedUser> {
+  if (!isRequestHostAllowedForAdmin(request)) {
+    throw new Error("forbidden");
+  }
+
   if (isDevAdminBypassEnabled(request)) {
     const existingUser = await getUserFromRequest(request);
     return existingUser ?? buildDevBypassUser();

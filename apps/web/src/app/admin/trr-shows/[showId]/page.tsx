@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import SeasonSocialAnalyticsSection, {
@@ -55,6 +56,7 @@ import {
   cleanLegacyRoutingQuery,
   parseShowRouteState,
 } from "@/lib/admin/show-admin-routes";
+import { buildShowBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import {
   buildPipelineRows,
   isRefreshLogTerminalSuccess,
@@ -73,6 +75,7 @@ import {
   normalizeContentTypeToken,
 } from "@/lib/media/content-type";
 import {
+  THUMBNAIL_DEFAULTS,
   isThumbnailCropMode,
   resolveThumbnailPresentation,
 } from "@/lib/thumbnail-crop";
@@ -94,6 +97,13 @@ import {
   resolveJobLiveCounts,
   type JobLiveCounts,
 } from "@/lib/admin/job-live-counts";
+import {
+  type CastRefreshPhaseDefinition,
+  type CastRefreshPhaseId,
+  type CastRefreshPhaseState,
+  runCastEnrichMediaWorkflow,
+  runPhasedCastRefresh,
+} from "@/lib/admin/cast-refresh-orchestration";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -116,6 +126,8 @@ interface TrrShow {
   tmdb_status: string | null;
   tmdb_vote_average: number | null;
   imdb_rating_value: number | null;
+  primary_poster_image_id?: string | null;
+  primary_backdrop_image_id?: string | null;
   logo_url?: string | null;
   streaming_providers?: string[] | null;
   watch_providers?: string[] | null;
@@ -245,7 +257,26 @@ interface UnifiedNewsItem {
 interface BravoPreviewPerson {
   name?: string | null;
   canonical_url?: string | null;
+  bio?: string | null;
+  hero_image_url?: string | null;
+  social_links?: Record<string, string> | null;
 }
+
+interface BravoPersonCandidateResult {
+  url: string;
+  source?: "bravo" | "fandom";
+  name?: string | null;
+  status?: "pending" | "in_progress" | "ok" | "missing" | "error" | string;
+  error?: string | null;
+  person?: BravoPreviewPerson | null;
+}
+
+type BravoCandidateSummary = {
+  tested: number;
+  valid: number;
+  missing: number;
+  errors: number;
+};
 
 type BravoImportImageKind =
   | "poster"
@@ -287,7 +318,9 @@ type RefreshLogEntry = {
 type ShowRefreshRunOptions = {
   photoMode?: "fast" | "full";
   includeCastProfiles?: boolean;
+  suppressSuccessNotice?: boolean;
 };
+type PersonRefreshMode = "full" | "ingest_only" | "profile_only";
 
 type HealthStatus = "ready" | "missing" | "stale";
 type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "knowledge" | "fandom";
@@ -319,13 +352,13 @@ const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
 
 const SHOW_PAGE_TABS: ShowTab[] = [
   { id: "details", label: "Overview" },
-  { id: "settings", label: "Settings" },
   { id: "seasons", label: "Seasons" },
   { id: "assets", label: "Assets" },
   { id: "news", label: "News" },
   { id: "cast", label: "Cast" },
   { id: "surveys", label: "Surveys" },
   { id: "social", label: "Social" },
+  { id: "settings", label: "Settings" },
 ];
 
 const SHOW_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
@@ -333,6 +366,7 @@ const SHOW_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: strin
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
+  { id: "reddit", label: "REDDIT ANALYTICS" },
 ];
 
 const SHOW_SOCIAL_PLATFORM_TABS: Array<{ key: PlatformTab; label: string }> = [
@@ -341,7 +375,6 @@ const SHOW_SOCIAL_PLATFORM_TABS: Array<{ key: PlatformTab; label: string }> = [
   { key: "tiktok", label: "TikTok" },
   { key: "twitter", label: "Twitter/X" },
   { key: "youtube", label: "YouTube" },
-  { key: "reddit", label: "Reddit" },
 ];
 
 const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {
@@ -358,7 +391,7 @@ const BATCH_JOB_OPERATION_LABELS = {
   count: "Count",
   crop: "Crop",
   id_text: "ID Text",
-  resize: "Resize",
+  resize: "Auto-Crop",
 } as const;
 
 type BatchJobOperation = keyof typeof BATCH_JOB_OPERATION_LABELS;
@@ -441,6 +474,8 @@ const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
   pruning: "Cleanup",
   auto_count: "Auto Count",
   word_id: "Word Detection",
+  centering_cropping: "Centering/Cropping",
+  resizing: "Resizing",
 };
 
 const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
@@ -453,17 +488,52 @@ const GALLERY_ASSET_LOAD_TIMEOUT_MS = 60_000;
 const ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const BRAVO_LOAD_TIMEOUT_MS = 15_000;
+const SHOW_CORE_LOAD_TIMEOUT_MS = 15_000;
 const ROLE_LOAD_TIMEOUT_MS = 30_000;
-const CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 75_000;
+const CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 125_000;
+const SEASON_EPISODE_SUMMARY_TIMEOUT_MS = 12_000;
+
+const CAST_REFRESH_PHASE_TIMEOUTS: Record<CastRefreshPhaseId, number> = {
+  credits_sync: 6 * 60 * 1000,
+  profile_links_sync: 4 * 60 * 1000,
+  bio_sync: 4 * 60 * 1000,
+  network_augmentation: 5 * 60 * 1000,
+  media_ingest: 20 * 60 * 1000,
+};
+
+const CAST_REFRESH_PHASE_BUTTON_LABELS: Record<CastRefreshPhaseId, string> = {
+  credits_sync: "Syncing Credits...",
+  profile_links_sync: "Syncing Links...",
+  bio_sync: "Syncing Bios...",
+  network_augmentation: "Syncing Bravo...",
+  media_ingest: "Ingesting Media...",
+};
+
+const CAST_REFRESH_PHASE_STAGES: Record<CastRefreshPhaseId, string> = {
+  credits_sync: "Credits",
+  profile_links_sync: "Profile Links",
+  bio_sync: "Bios",
+  network_augmentation: "Network/Bravo",
+  media_ingest: "Media",
+};
+
+const CAST_REFRESH_PHASE_ORDER: CastRefreshPhaseId[] = [
+  "credits_sync",
+  "profile_links_sync",
+  "bio_sync",
+  "network_augmentation",
+  "media_ingest",
+];
 
 const SEASON_PAGE_TABS = [
+  { tab: "overview", label: "Overview" },
   { tab: "episodes", label: "Seasons & Episodes" },
   { tab: "assets", label: "Assets" },
   { tab: "videos", label: "Videos" },
+  { tab: "fandom", label: "Fandom" },
   { tab: "cast", label: "Cast" },
   { tab: "surveys", label: "Surveys" },
   { tab: "social", label: "Social Media" },
-  { tab: "details", label: "Details" },
 ] as const;
 
 const UUID_RE =
@@ -636,6 +706,38 @@ const inferBravoPersonUrl = (personName: string | null | undefined): string | nu
     .replace(/(^-|-$)/g, "");
   if (!slug) return null;
   return `https://www.bravotv.com/people/${slug}`;
+};
+
+const normalizeBravoSocialKey = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return "link";
+  if (normalized.includes("instagram")) return "instagram";
+  if (normalized === "x" || normalized.includes("twitter")) return "x";
+  if (normalized.includes("facebook")) return "facebook";
+  if (normalized.includes("tiktok")) return "tiktok";
+  if (normalized.includes("youtube")) return "youtube";
+  return normalized;
+};
+
+const formatBravoSocialLabel = (key: string): string => {
+  if (key === "x") return "X";
+  if (key === "instagram") return "Instagram";
+  if (key === "facebook") return "Facebook";
+  if (key === "tiktok") return "TikTok";
+  if (key === "youtube") return "YouTube";
+  return key.replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const extractBravoSocialHandle = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const handle = segments.at(-1) ?? "";
+    if (!handle) return null;
+    return handle.startsWith("@") ? handle : `@${handle}`;
+  } catch {
+    return null;
+  }
 };
 
 const BRAVO_IMPORT_IMAGE_KIND_OPTIONS: Array<{ value: BravoImportImageKind; label: string }> = [
@@ -882,6 +984,44 @@ const getAssetDisplayUrl = (asset: SeasonAsset): string =>
 const getAssetDetailUrl = (asset: SeasonAsset): string =>
   firstImageUrlCandidate(getSeasonAssetDetailUrlCandidates(asset)) ?? asset.hosted_url;
 
+const getFeaturedShowImageKind = (asset: SeasonAsset): "poster" | "backdrop" | null => {
+  const normalizedKind = String(asset.kind ?? "").trim().toLowerCase();
+  if (normalizedKind === "poster") return "poster";
+  if (normalizedKind === "backdrop") return "backdrop";
+  return null;
+};
+
+const buildAssetAutoCropPayload = (asset: SeasonAsset): Record<string, unknown> | null => {
+  if (
+    !isThumbnailCropMode(asset.thumbnail_crop_mode) ||
+    typeof asset.thumbnail_focus_x !== "number" ||
+    !Number.isFinite(asset.thumbnail_focus_x) ||
+    typeof asset.thumbnail_focus_y !== "number" ||
+    !Number.isFinite(asset.thumbnail_focus_y) ||
+    typeof asset.thumbnail_zoom !== "number" ||
+    !Number.isFinite(asset.thumbnail_zoom)
+  ) {
+    return null;
+  }
+  return {
+    x: asset.thumbnail_focus_x,
+    y: asset.thumbnail_focus_y,
+    zoom: asset.thumbnail_zoom,
+    mode: asset.thumbnail_crop_mode,
+  };
+};
+
+const buildAssetAutoCropPayloadWithFallback = (
+  asset: SeasonAsset
+): Record<string, unknown> =>
+  buildAssetAutoCropPayload(asset) ?? {
+    x: THUMBNAIL_DEFAULTS.x,
+    y: THUMBNAIL_DEFAULTS.y,
+    zoom: THUMBNAIL_DEFAULTS.zoom,
+    mode: "auto",
+    strategy: "resize_center_fallback_v1",
+  };
+
 const isCrewCreditCategory = (value: string | null | undefined): boolean => {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (!normalized) return false;
@@ -910,6 +1050,9 @@ const NETWORK_LOGO_DOMAIN_BY_NAME: Record<string, string> = {
 };
 
 const getNetworkLogoUrl = (network: string | null | undefined): string | null => {
+  if (process.env.NODE_ENV !== "production") {
+    return null;
+  }
   if (!network) return null;
   const normalized = network.trim().toLowerCase();
   if (!normalized) return null;
@@ -1072,6 +1215,7 @@ export default function TrrShowDetailPage() {
   const [castRoleMembersLoadedOnce, setCastRoleMembersLoadedOnce] = useState(false);
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
+  const [castRoleMembersWarning, setCastRoleMembersWarning] = useState<string | null>(null);
   const [castMatrixSyncLoading, setCastMatrixSyncLoading] = useState(false);
   const [castMatrixSyncError, setCastMatrixSyncError] = useState<string | null>(null);
   const [castMatrixSyncResult, setCastMatrixSyncResult] = useState<CastMatrixSyncResult | null>(
@@ -1111,6 +1255,22 @@ export default function TrrShowDetailPage() {
   const [syncBravoStep, setSyncBravoStep] = useState<"preview" | "confirm">("preview");
   const [syncBravoImages, setSyncBravoImages] = useState<Array<{ url: string; alt?: string | null }>>([]);
   const [syncBravoPreviewPeople, setSyncBravoPreviewPeople] = useState<BravoPreviewPerson[]>([]);
+  const [syncFandomPreviewPeople, setSyncFandomPreviewPeople] = useState<BravoPreviewPerson[]>([]);
+  const [syncBravoPersonCandidateResults, setSyncBravoPersonCandidateResults] = useState<
+    BravoPersonCandidateResult[]
+  >([]);
+  const [syncFandomPersonCandidateResults, setSyncFandomPersonCandidateResults] = useState<
+    BravoPersonCandidateResult[]
+  >([]);
+  const [syncBravoPreviewResult, setSyncBravoPreviewResult] = useState<Record<string, unknown> | null>(null);
+  const [syncBravoCandidateSummary, setSyncBravoCandidateSummary] =
+    useState<BravoCandidateSummary | null>(null);
+  const [syncFandomCandidateSummary, setSyncFandomCandidateSummary] =
+    useState<BravoCandidateSummary | null>(null);
+  const [syncFandomDomainsUsed, setSyncFandomDomainsUsed] = useState<string[]>([]);
+  const [syncBravoProbeTotal, setSyncBravoProbeTotal] = useState(0);
+  const [syncBravoProbeStatusMessage, setSyncBravoProbeStatusMessage] = useState<string | null>(null);
+  const [syncBravoProbeActive, setSyncBravoProbeActive] = useState(false);
   const [syncBravoDiscoveredPersonUrls, setSyncBravoDiscoveredPersonUrls] = useState<string[]>([]);
   const [syncBravoPreviewVideos, setSyncBravoPreviewVideos] = useState<BravoVideoItem[]>([]);
   const [syncBravoPreviewNews, setSyncBravoPreviewNews] = useState<BravoNewsItem[]>([]);
@@ -1122,12 +1282,15 @@ export default function TrrShowDetailPage() {
   const [syncBravoCommitLoading, setSyncBravoCommitLoading] = useState(false);
   const [syncBravoError, setSyncBravoError] = useState<string | null>(null);
   const [syncBravoNotice, setSyncBravoNotice] = useState<string | null>(null);
+  const syncBravoPreviewAbortControllerRef = useRef<AbortController | null>(null);
+  const syncBravoPreviewRunRef = useRef(0);
   const [openSeasonId, setOpenSeasonId] = useState<string | null>(null);
   const hasAutoOpenedSeasonRef = useRef(false);
   const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<
     Record<string, { count: number; premiereDate: string | null; finaleDate: string | null }>
   >({});
   const [seasonSummariesLoading, setSeasonSummariesLoading] = useState(false);
+  const [socialDependencyError, setSocialDependencyError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detailsForm, setDetailsForm] = useState<{
@@ -1289,6 +1452,13 @@ export default function TrrShowDetailPage() {
   // Refresh images state
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [castRefreshPipelineRunning, setCastRefreshPipelineRunning] = useState(false);
+  const [castRefreshPhaseStates, setCastRefreshPhaseStates] = useState<CastRefreshPhaseState[]>(
+    []
+  );
+  const [castMediaEnriching, setCastMediaEnriching] = useState(false);
+  const [castMediaEnrichNotice, setCastMediaEnrichNotice] = useState<string | null>(null);
+  const [castMediaEnrichError, setCastMediaEnrichError] = useState<string | null>(null);
   const [refreshingPersonIds, setRefreshingPersonIds] = useState<Record<string, boolean>>({});
   const [refreshingPersonProgress, setRefreshingPersonProgress] = useState<
     Record<string, RefreshProgressState>
@@ -1305,6 +1475,17 @@ export default function TrrShowDetailPage() {
       setAssetsView(showRouteState.assetsSubTab);
     }
   }, [showRouteState.assetsSubTab, showRouteState.tab]);
+
+  useEffect(() => {
+    if (!refreshLogOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setRefreshLogOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [refreshLogOpen]);
 
   const showSlugForRouting = useMemo(() => {
     const canonical = show?.canonical_slug?.trim();
@@ -1474,7 +1655,7 @@ export default function TrrShowDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [checking, getAuthHeaders, hasAccess, showRouteParam, user]);
+  }, [checking, getAuthHeaders, hasAccess, showRouteParam]);
 
   useEffect(() => {
     if (!showSlugForRouting) return;
@@ -1587,7 +1768,9 @@ export default function TrrShowDetailPage() {
       const latest = entries.length > 0 ? entries[entries.length - 1] : null;
       const failed = isRefreshTopicFailed(latest);
       const done = !failed && isRefreshTopicDone(latest);
-      const forceActivePeopleTopic = topic.key === "people" && Boolean(refreshingTargets.cast_credits);
+      const forceActivePeopleTopic =
+        topic.key === "people" &&
+        Boolean(refreshingTargets.cast_credits || castRefreshPipelineRunning || castMediaEnriching);
       const status: "pending" | "active" | "done" | "failed" = failed
         ? "failed"
         : forceActivePeopleTopic
@@ -1610,16 +1793,57 @@ export default function TrrShowDetailPage() {
       ...groups.filter((group) => group.status !== "done"),
       ...groups.filter((group) => group.status === "done"),
     ];
-  }, [refreshLogEntries, refreshingTargets.cast_credits]);
+  }, [
+    castMediaEnriching,
+    castRefreshPipelineRunning,
+    refreshLogEntries,
+    refreshingTargets.cast_credits,
+  ]);
 
   // Refresh images for a person with streaming progress when available.
   const refreshPersonImages = useCallback(
     async (
       personId: string,
-      onProgress?: (progress: RefreshProgressState) => void
+      onProgress?: (progress: RefreshProgressState) => void,
+      options?: { mode?: PersonRefreshMode }
     ) => {
       const headers = await getAuthHeaders();
-      const body = { skip_mirror: false, show_id: showId };
+      const mode = options?.mode ?? "full";
+      const isIngestOnly = mode === "ingest_only";
+      const isProfileOnly = mode === "profile_only";
+      const baseProgressMessage = isIngestOnly
+        ? "Ingesting cast media..."
+        : isProfileOnly
+          ? "Syncing cast bios and profile intelligence..."
+          : "Refreshing cast media...";
+      const completeProgressMessage = isIngestOnly
+        ? "Cast media ingest complete."
+        : isProfileOnly
+          ? "Cast bios/profile sync complete."
+          : "Cast media refresh complete.";
+      const body = isIngestOnly
+        ? {
+            skip_mirror: false,
+            show_id: showId,
+            sources: ["imdb", "tmdb"],
+            skip_auto_count: true,
+            skip_word_detection: true,
+            skip_centering: true,
+            skip_resize: true,
+          }
+        : isProfileOnly
+          ? {
+              skip_mirror: true,
+              skip_prune: true,
+              show_id: showId,
+              limit_per_source: 1,
+              sources: ["tmdb", "fandom"],
+              skip_auto_count: true,
+              skip_word_detection: true,
+              skip_centering: true,
+              skip_resize: true,
+            }
+          : { skip_mirror: false, show_id: showId };
 
       try {
         const streamController = new AbortController();
@@ -1704,7 +1928,7 @@ export default function TrrShowDetailPage() {
                   message: buildProgressMessage(
                     stageLabel,
                     (payload as { message?: unknown }).message,
-                    "Refreshing cast media..."
+                    baseProgressMessage
                   ),
                   current,
                   total,
@@ -1759,7 +1983,7 @@ export default function TrrShowDetailPage() {
 
       onProgress?.({
         stage: "Fallback",
-        message: "Refreshing cast media...",
+        message: baseProgressMessage,
         current: null,
         total: null,
       });
@@ -1780,7 +2004,11 @@ export default function TrrShowDetailPage() {
       } catch (fallbackErr) {
         if (isAbortError(fallbackErr)) {
           throw new Error(
-            `Timed out refreshing cast media after ${Math.round(PERSON_REFRESH_FALLBACK_TIMEOUT_MS / 1000)}s.`
+            `Timed out ${
+              isIngestOnly ? "ingesting" : isProfileOnly ? "syncing cast bios/profiles for" : "refreshing"
+            } cast media after ${Math.round(
+              PERSON_REFRESH_FALLBACK_TIMEOUT_MS / 1000
+            )}s.`
           );
         }
         throw fallbackErr;
@@ -1799,7 +2027,7 @@ export default function TrrShowDetailPage() {
 
       onProgress?.({
         stage: "Complete",
-        message: "Cast media refresh complete.",
+        message: completeProgressMessage,
         current: 1,
         total: 1,
       });
@@ -1808,7 +2036,346 @@ export default function TrrShowDetailPage() {
     [getAuthHeaders, showId]
   );
 
+  const reprocessPersonImages = useCallback(
+    async (personId: string, onProgress?: (progress: RefreshProgressState) => void) => {
+      const headers = await getAuthHeaders();
+      const streamController = new AbortController();
+      const streamTimeout = setTimeout(
+        () => streamController.abort(),
+        PERSON_REFRESH_STREAM_TIMEOUT_MS
+      );
+      let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+      const bumpStreamIdleTimeout = () => {
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = setTimeout(
+          () => streamController.abort(),
+          PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS
+        );
+      };
+      const clearStreamIdleTimeout = () => {
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = null;
+      };
+
+      bumpStreamIdleTimeout();
+      try {
+        const streamResponse = await fetch(
+          `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            signal: streamController.signal,
+          }
+        );
+
+        if (!streamResponse.ok || !streamResponse.body) {
+          throw new Error("Person reprocess stream unavailable");
+        }
+
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let completePayload: Record<string, unknown> | null = null;
+        let shouldStopReading = false;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bumpStreamIdleTimeout();
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, "\n");
+
+          let boundaryIndex = buffer.indexOf("\n\n");
+          while (boundaryIndex !== -1) {
+            const rawEvent = buffer.slice(0, boundaryIndex);
+            buffer = buffer.slice(boundaryIndex + 2);
+
+            const lines = rawEvent.split("\n").filter(Boolean);
+            let eventType = "message";
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            const dataStr = dataLines.join("\n");
+            let payload: Record<string, unknown> | string = dataStr;
+            try {
+              payload = JSON.parse(dataStr) as Record<string, unknown>;
+            } catch {
+              payload = dataStr;
+            }
+
+            if (eventType === "progress" && payload && typeof payload === "object") {
+              const stageLabel = resolveStageLabel(
+                (payload as { stage?: unknown }).stage,
+                PERSON_REFRESH_STAGE_LABELS
+              );
+              const current = parseProgressNumber((payload as { current?: unknown }).current);
+              const total = parseProgressNumber((payload as { total?: unknown }).total);
+              onProgress?.({
+                stage: stageLabel,
+                message: buildProgressMessage(
+                  stageLabel,
+                  (payload as { message?: unknown }).message,
+                  "Enriching existing cast media..."
+                ),
+                current,
+                total,
+              });
+            } else if (eventType === "error") {
+              const message =
+                payload && typeof payload === "object"
+                  ? (payload as { error?: unknown; detail?: unknown })
+                  : null;
+              const errorText =
+                typeof message?.error === "string" && message.error
+                  ? message.error
+                  : "Failed to reprocess person images";
+              const detailText =
+                typeof message?.detail === "string" && message.detail ? message.detail : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            } else if (eventType === "complete") {
+              completePayload =
+                payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+              shouldStopReading = true;
+            }
+
+            if (shouldStopReading) {
+              break;
+            }
+            boundaryIndex = buffer.indexOf("\n\n");
+          }
+
+          if (shouldStopReading) {
+            break;
+          }
+        }
+
+        clearStreamIdleTimeout();
+        if (shouldStopReading) {
+          try {
+            await reader.cancel();
+          } catch {
+            // no-op
+          }
+          return completePayload ?? {};
+        }
+        throw new Error("Reprocess stream ended before completion.");
+      } catch (streamErr) {
+        if (isAbortError(streamErr)) {
+          throw new Error(
+            `Timed out enriching cast media after ${Math.round(PERSON_REFRESH_STREAM_TIMEOUT_MS / 1000)}s.`
+          );
+        }
+        throw streamErr;
+      } finally {
+        clearStreamIdleTimeout();
+        clearTimeout(streamTimeout);
+      }
+    },
+    [getAuthHeaders]
+  );
+
   const refreshCastProfilesAndMedia = useCallback(
+    async (
+      members: TrrCastMember[],
+      options?: {
+        mode?: PersonRefreshMode;
+        stageLabel?: string;
+        category?: string;
+        signal?: AbortSignal;
+      }
+    ) => {
+      const mode = options?.mode ?? "full";
+      const isIngestOnly = mode === "ingest_only";
+      const isProfileOnly = mode === "profile_only";
+      const stageLabel =
+        options?.stageLabel
+        ?? (isIngestOnly
+          ? "Cast Media Ingest"
+          : isProfileOnly
+            ? "Cast Bios"
+            : "Cast Profiles & Media");
+      const category =
+        options?.category
+        ?? (isIngestOnly ? "Cast Media Ingest" : isProfileOnly ? "Cast Bios" : "Cast Profiles");
+      const startMessage =
+        isIngestOnly
+          ? "Ingesting cast member media from IMDb/TMDb..."
+          : isProfileOnly
+            ? "Syncing cast bios and profile intelligence..."
+            : "Syncing cast profiles and media from TMDb/IMDb/Fandom...";
+      const completionPrefix =
+        isIngestOnly
+          ? "Completed cast media ingest"
+          : isProfileOnly
+            ? "Completed cast bios/profile sync"
+            : "Completed cast profile/media sync";
+      const failureVerb = isIngestOnly ? "ingest" : isProfileOnly ? "sync bios for" : "sync";
+
+      const uniqueMembers = Array.from(
+        new Map(
+          members
+            .filter((member) => typeof member.person_id === "string" && member.person_id.trim())
+            .map((member) => [member.person_id, member] as const)
+        ).values()
+      );
+
+      const total = uniqueMembers.length;
+      if (total === 0) {
+        return { attempted: 0, succeeded: 0, failed: 0 };
+      }
+      const throwIfAborted = () => {
+        if (options?.signal?.aborted) {
+          throw new Error(`${stageLabel} canceled.`);
+        }
+      };
+      throwIfAborted();
+
+      let succeeded = 0;
+      let failed = 0;
+      let completed = 0;
+      let dispatched = 0;
+      let inFlight = 0;
+      let nextIndex = 0;
+      const concurrency = Math.max(1, Math.min(CAST_PROFILE_SYNC_CONCURRENCY, total));
+      const longRunningHint = isIngestOnly && total > 30 ? " This may take several minutes." : "";
+
+      const batchCountsMessage = ({
+        completed: completedCount,
+        inFlight: inFlightCount,
+      }: {
+        completed: number;
+        inFlight: number;
+      }) =>
+        isIngestOnly
+          ? `Ingesting media: ${completedCount}/${total} complete (${inFlightCount} in flight)`
+          : formatCastBatchRunningMessage({ completed: completedCount, total, inFlight: inFlightCount });
+
+      const memberBatchMessage = (label: string, completedCount: number, inFlightCount: number) =>
+        isIngestOnly
+          ? `${batchCountsMessage({ completed: completedCount, inFlight: inFlightCount })} — ${label}`
+          : formatCastBatchMemberMessage(label, { completed: completedCount, total, inFlight: inFlightCount });
+
+      const setCastBatchProgress = (message: string, stage = stageLabel) => {
+        setRefreshTargetProgress((prev) => ({
+          ...prev,
+          cast_credits: {
+            stage,
+            message,
+            current: completed,
+            total,
+          },
+        }));
+      };
+
+      setRefreshTargetProgress((prev) => ({
+        ...prev,
+        cast_credits: {
+          stage: stageLabel,
+          message: `${batchCountsMessage({ completed, inFlight })}.${longRunningHint}`,
+          current: 0,
+          total,
+        },
+      }));
+      appendRefreshLog({
+        category,
+        message: `${startMessage} (${total} members, concurrency ${concurrency}).${longRunningHint}`,
+        current: 0,
+        total,
+      });
+
+      const syncMember = async (memberIndex: number) => {
+        const member = uniqueMembers[memberIndex];
+        const label =
+          member.full_name || member.cast_member_name || `Cast member ${memberIndex + 1}`;
+        throwIfAborted();
+        dispatched += 1;
+        inFlight += 1;
+        setCastBatchProgress(memberBatchMessage(label, completed, inFlight));
+        appendRefreshLog({
+          category,
+          message: memberBatchMessage(label, completed, inFlight),
+          current: completed,
+          total,
+        });
+
+        try {
+          await refreshPersonImages(
+            member.person_id,
+            (progress) => {
+              setRefreshTargetProgress((prev) => ({
+                ...prev,
+                cast_credits: {
+                  stage: progress.stage ?? stageLabel,
+                  message:
+                    progress.message
+                      ? isIngestOnly
+                        ? `${batchCountsMessage({ completed, inFlight })} — ${label}: ${progress.message}`
+                        : `${label}: ${progress.message} (${formatCastBatchCounts({
+                            completed,
+                            total,
+                            inFlight,
+                          })})`
+                      : memberBatchMessage(label, completed, inFlight),
+                  current: completed,
+                  total,
+                },
+              }));
+            },
+            { mode }
+          );
+          succeeded += 1;
+        } catch (err) {
+          console.warn(`Failed to ${failureVerb} cast media for ${label}:`, err);
+          const errorText = err instanceof Error ? err.message : "unknown error";
+          appendRefreshLog({
+            category,
+            message: `Failed to ${failureVerb} ${label}: ${errorText}`,
+            current: completed,
+            total,
+          });
+          failed += 1;
+        } finally {
+          completed += 1;
+          inFlight = Math.max(0, inFlight - 1);
+          setCastBatchProgress(batchCountsMessage({ completed, inFlight }));
+        }
+      };
+
+      const runWorker = async () => {
+        while (true) {
+          throwIfAborted();
+          const memberIndex = nextIndex;
+          nextIndex += 1;
+          if (memberIndex >= total) {
+            return;
+          }
+          await syncMember(memberIndex);
+        }
+      };
+
+      await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
+
+      setCastBatchProgress(
+        `${completionPrefix} (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`
+      );
+      appendRefreshLog({
+        category,
+        message: `${completionPrefix} (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}, dispatched ${dispatched}/${total}).`,
+        current: total,
+        total,
+      });
+      return { attempted: total, succeeded, failed };
+    },
+    [appendRefreshLog, refreshPersonImages]
+  );
+
+  const reprocessCastMedia = useCallback(
     async (members: TrrCastMember[]) => {
       const uniqueMembers = Array.from(
         new Map(
@@ -1826,12 +2393,11 @@ export default function TrrShowDetailPage() {
       let succeeded = 0;
       let failed = 0;
       let completed = 0;
-      let dispatched = 0;
       let inFlight = 0;
       let nextIndex = 0;
       const concurrency = Math.max(1, Math.min(CAST_PROFILE_SYNC_CONCURRENCY, total));
 
-      const setCastBatchProgress = (message: string, stage = "Cast Profiles & Media") => {
+      const setCastBatchProgress = (message: string, stage = "Cast Media Enrich") => {
         setRefreshTargetProgress((prev) => ({
           ...prev,
           cast_credits: {
@@ -1846,8 +2412,8 @@ export default function TrrShowDetailPage() {
       setRefreshTargetProgress((prev) => ({
         ...prev,
         cast_credits: {
-          stage: "Cast Profiles & Media",
-          message: `Syncing cast profiles and media from TMDb/IMDb/Fandom... (${formatCastBatchCounts({
+          stage: "Cast Media Enrich",
+          message: `Enriching existing cast media (count, word detection, crop, resize)... (${formatCastBatchCounts({
             completed,
             total,
             inFlight,
@@ -1857,32 +2423,31 @@ export default function TrrShowDetailPage() {
         },
       }));
       appendRefreshLog({
-        category: "Cast Profiles",
-        message: `Syncing cast profiles and media (${total} members, concurrency ${concurrency}, full pipeline enabled)...`,
+        category: "Cast Media Enrich",
+        message: `Enriching existing cast media (${total} members, concurrency ${concurrency}).`,
         current: 0,
         total,
       });
 
-      const syncMember = async (memberIndex: number) => {
+      const reprocessMember = async (memberIndex: number) => {
         const member = uniqueMembers[memberIndex];
         const label =
           member.full_name || member.cast_member_name || `Cast member ${memberIndex + 1}`;
-        dispatched += 1;
         inFlight += 1;
         setCastBatchProgress(formatCastBatchMemberMessage(label, { completed, total, inFlight }));
         appendRefreshLog({
-          category: "Cast Profiles",
+          category: "Cast Media Enrich",
           message: formatCastBatchMemberMessage(label, { completed, total, inFlight }),
           current: completed,
           total,
         });
 
         try {
-          await refreshPersonImages(member.person_id, (progress) => {
+          await reprocessPersonImages(member.person_id, (progress) => {
             setRefreshTargetProgress((prev) => ({
               ...prev,
               cast_credits: {
-                stage: progress.stage ?? "Cast Profiles & Media",
+                stage: progress.stage ?? "Cast Media Enrich",
                 message:
                   progress.message
                     ? `${label}: ${progress.message} (${formatCastBatchCounts({
@@ -1898,11 +2463,11 @@ export default function TrrShowDetailPage() {
           });
           succeeded += 1;
         } catch (err) {
-          console.warn(`Failed to refresh cast profile/media for ${label}:`, err);
+          console.warn(`Failed to enrich cast media for ${label}:`, err);
           const errorText = err instanceof Error ? err.message : "unknown error";
           appendRefreshLog({
-            category: "Cast Profiles",
-            message: `Failed to sync ${label}: ${errorText}`,
+            category: "Cast Media Enrich",
+            message: `Failed to enrich ${label}: ${errorText}`,
             current: completed,
             total,
           });
@@ -1921,24 +2486,24 @@ export default function TrrShowDetailPage() {
           if (memberIndex >= total) {
             return;
           }
-          await syncMember(memberIndex);
+          await reprocessMember(memberIndex);
         }
       };
 
       await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
 
       setCastBatchProgress(
-        `Completed cast profiles/media sync (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`
+        `Completed cast media enrich (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`
       );
       appendRefreshLog({
-        category: "Cast Profiles",
-        message: `Completed cast profile/media sync (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}, dispatched ${dispatched}/${total}).`,
+        category: "Cast Media Enrich",
+        message: `Completed cast media enrich (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`,
         current: total,
         total,
       });
       return { attempted: total, succeeded, failed };
     },
-    [appendRefreshLog, refreshPersonImages]
+    [appendRefreshLog, reprocessPersonImages]
   );
 
   // Fetch show details
@@ -1947,7 +2512,11 @@ export default function TrrShowDetailPage() {
     if (!requestShowId) return;
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/shows/${requestShowId}`, { headers });
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${requestShowId}`,
+        { headers },
+        SHOW_CORE_LOAD_TIMEOUT_MS,
+      );
       if (!response.ok) throw new Error("Failed to fetch show");
       const data = await response.json();
       if (!isCurrentShowId(requestShowId)) return;
@@ -1957,6 +2526,34 @@ export default function TrrShowDetailPage() {
       setError(err instanceof Error ? err.message : "Failed to load show");
     }
   }, [getAuthHeaders, isCurrentShowId, showId]);
+
+  const setFeaturedShowImage = useCallback(
+    async (kind: "poster" | "backdrop", showImageId: string | null) => {
+      if (!showId) return;
+      const headers = await getAuthHeaders();
+      const payload =
+        kind === "poster"
+          ? { primary_poster_image_id: showImageId }
+          : { primary_backdrop_image_id: showImageId };
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}`, {
+        method: "PUT",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message =
+          (data as { error?: string }).error ||
+          `Failed to set featured ${kind} (HTTP ${response.status})`;
+        throw new Error(message);
+      }
+      const nextShow = (data as { show?: TrrShow }).show ?? null;
+      if (nextShow) {
+        setShow(nextShow);
+      }
+    },
+    [getAuthHeaders, showId]
+  );
 
   const saveShowDetails = useCallback(async () => {
     if (!show) return;
@@ -2055,9 +2652,10 @@ export default function TrrShowDetailPage() {
     if (!requestShowId) return;
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50`,
-        { headers }
+        { headers },
+        SHOW_CORE_LOAD_TIMEOUT_MS,
       );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -2071,11 +2669,12 @@ export default function TrrShowDetailPage() {
       const nextSeasons = Array.isArray(seasons) ? (seasons as TrrSeason[]) : [];
       if (!isCurrentShowId(requestShowId)) return;
       setSeasons(nextSeasons);
+      setSocialDependencyError(null);
     } catch (err) {
       if (!isCurrentShowId(requestShowId)) return;
       const message = err instanceof Error ? err.message : "Failed to fetch seasons";
       console.warn("Failed to fetch seasons:", message);
-      setError(message);
+      setSocialDependencyError(message);
     }
   }, [getAuthHeaders, isCurrentShowId, showId]);
 
@@ -2092,9 +2691,10 @@ export default function TrrShowDetailPage() {
         const results = await Promise.all(
           seasonList.map(async (season) => {
             try {
-              const response = await fetch(
+              const response = await fetchWithTimeout(
                 `/api/admin/trr-api/seasons/${season.id}/episodes?limit=500`,
-                { headers }
+                { headers },
+                SEASON_EPISODE_SUMMARY_TIMEOUT_MS,
               );
               if (!response.ok) throw new Error("Failed to fetch episodes");
               const data = await response.json();
@@ -2121,24 +2721,35 @@ export default function TrrShowDetailPage() {
                 },
               };
             } catch (error) {
-              console.error("Failed to fetch season episodes:", error);
-              return null;
+              const message = error instanceof Error ? error.message : "failed";
+              return {
+                seasonId: season.id,
+                error: message,
+              };
             }
           })
         );
 
+        const failedSeasonIds: string[] = [];
         const nextSummaries: Record<
           string,
           { count: number; premiereDate: string | null; finaleDate: string | null }
         > = {};
         for (const result of results) {
-          if (result) {
+          if ("summary" in result) {
             nextSummaries[result.seasonId] = result.summary;
+            continue;
           }
+          failedSeasonIds.push(result.seasonId);
+        }
+        if (failedSeasonIds.length > 0) {
+          console.warn(
+            `[show] Season episode summaries unavailable for ${failedSeasonIds.length} season(s): ${failedSeasonIds.join(", ")}`,
+          );
         }
         setSeasonEpisodeSummaries(nextSummaries);
       } catch (error) {
-        console.error("Failed to compute season episode summaries:", error);
+        console.warn("Failed to compute season episode summaries:", error);
       } finally {
         setSeasonSummariesLoading(false);
       }
@@ -2154,6 +2765,7 @@ export default function TrrShowDetailPage() {
       photoFallbackMode?: CastPhotoFallbackMode;
       mergeMissingPhotosOnly?: boolean;
       throwOnError?: boolean;
+      signal?: AbortSignal;
     }): Promise<TrrCastMember[]> => {
       const rosterMode = options?.rosterMode ?? "imdb_show_membership";
       const minEpisodes =
@@ -2204,7 +2816,7 @@ export default function TrrShowDetailPage() {
         // Fetch all cast without filters - photo filtering done client-side if needed.
         const response = await fetch(
           `/api/admin/trr-api/shows/${requestShowId}/cast?${params.toString()}`,
-          { headers }
+          { headers, signal: options?.signal }
         );
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -2565,6 +3177,7 @@ export default function TrrShowDetailPage() {
       const request = (async () => {
         setCastRoleMembersLoading(true);
         setCastRoleMembersError(null);
+        setCastRoleMembersWarning(null);
         try {
           const headers = await getAuthHeaders();
           const params = new URLSearchParams();
@@ -2614,16 +3227,24 @@ export default function TrrShowDetailPage() {
           );
           castRoleMembersLoadKeyRef.current = fetchKey;
           setCastRoleMembersLoadedOnce(true);
+          setCastRoleMembersWarning(null);
         } catch (err) {
-          setCastRoleMembers([]);
-          setCastRoleMembersLoadedOnce(false);
-          setCastRoleMembersError(
-            isAbortError(err)
-              ? `Timed out loading cast role members after ${Math.round(CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS / 1000)}s`
-              : err instanceof Error
-                ? err.message
-                : "Failed to load cast role members"
-          );
+          const message = isAbortError(err)
+            ? `Timed out loading cast role members after ${Math.round(CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS / 1000)}s`
+            : err instanceof Error
+              ? err.message
+              : "Failed to load cast role members";
+          const hasPriorData = castRoleMembersLoadedOnce || castRoleMembers.length > 0;
+          if (hasPriorData) {
+            setCastRoleMembersWarning(
+              `${message}. Showing last successful cast intelligence snapshot.`
+            );
+            setCastRoleMembersError(null);
+          } else {
+            setCastRoleMembers([]);
+            setCastRoleMembersLoadedOnce(false);
+            setCastRoleMembersError(message);
+          }
         } finally {
           setCastRoleMembersLoading(false);
         }
@@ -2638,61 +3259,86 @@ export default function TrrShowDetailPage() {
         }
       }
     },
-    [castRoleMembersLoadedOnce, castSeasonFilters, getAuthHeaders, showId]
+    [castRoleMembers, castRoleMembersLoadedOnce, castSeasonFilters, getAuthHeaders, showId]
   );
 
-  const syncCastMatrixRoles = useCallback(async () => {
-    if (!showId) return;
-    setCastMatrixSyncLoading(true);
-    setCastMatrixSyncError(null);
-    try {
-      const headers = await getAuthHeaders();
-      const seasonNumbers = (
-        castSeasonFilters.length > 0
-          ? castSeasonFilters
-          : seasons
-              .map((season) => season.season_number)
-              .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
-      ).sort((a, b) => a - b);
-      const response = await fetch(`/api/admin/trr-api/shows/${showId}/cast-matrix/sync`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          season_numbers: seasonNumbers,
-          include_relationship_roles: true,
-          include_bravo_links: true,
-          include_bravo_images: true,
-          dry_run: false,
-        }),
-      });
-      const data = (await response.json().catch(() => ({}))) as CastMatrixSyncResult & {
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to sync cast matrix roles");
+  const syncCastMatrixRoles = useCallback(
+    async (options?: {
+      includeRelationshipRoles?: boolean;
+      includeBravoLinks?: boolean;
+      includeBravoImages?: boolean;
+      throwOnError?: boolean;
+      refreshAfterSync?: boolean;
+      signal?: AbortSignal;
+    }): Promise<CastMatrixSyncResult | null> => {
+      if (!showId) return null;
+      const includeRelationshipRoles = options?.includeRelationshipRoles ?? true;
+      const includeBravoLinks = options?.includeBravoLinks ?? true;
+      const includeBravoImages = options?.includeBravoImages ?? true;
+      const refreshAfterSync = options?.refreshAfterSync ?? true;
+
+      setCastMatrixSyncLoading(true);
+      setCastMatrixSyncError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const seasonNumbers = (
+          castSeasonFilters.length > 0
+            ? castSeasonFilters
+            : seasons
+                .map((season) => season.season_number)
+                .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+        ).sort((a, b) => a - b);
+        const response = await fetch(`/api/admin/trr-api/shows/${showId}/cast-matrix/sync`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            season_numbers: seasonNumbers,
+            include_relationship_roles: includeRelationshipRoles,
+            include_bravo_links: includeBravoLinks,
+            include_bravo_images: includeBravoImages,
+            dry_run: false,
+          }),
+          signal: options?.signal,
+        });
+        const data = (await response.json().catch(() => ({}))) as CastMatrixSyncResult & {
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to sync cast matrix roles");
+        }
+        setCastMatrixSyncResult(data);
+        if (refreshAfterSync) {
+          await Promise.all([
+            fetchCastRoleMembers({ force: true }),
+            fetchShowRoles({ force: true }),
+            fetchShowLinks(),
+            fetchCast({ signal: options?.signal }),
+          ]);
+        }
+        return data;
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to sync cast matrix roles";
+        setCastMatrixSyncError(message);
+        if (options?.throwOnError) {
+          throw (err instanceof Error ? err : new Error(message));
+        }
+        return null;
+      } finally {
+        setCastMatrixSyncLoading(false);
       }
-      setCastMatrixSyncResult(data);
-      await Promise.all([
-        fetchCastRoleMembers({ force: true }),
-        fetchShowRoles({ force: true }),
-        fetchShowLinks(),
-        fetchCast(),
-      ]);
-    } catch (err) {
-      setCastMatrixSyncError(err instanceof Error ? err.message : "Failed to sync cast matrix roles");
-    } finally {
-      setCastMatrixSyncLoading(false);
-    }
-  }, [
-    castSeasonFilters,
-    fetchCast,
-    fetchCastRoleMembers,
-    fetchShowLinks,
-    fetchShowRoles,
-    getAuthHeaders,
-    seasons,
-    showId,
-  ]);
+    },
+    [
+      castSeasonFilters,
+      fetchCast,
+      fetchCastRoleMembers,
+      fetchShowLinks,
+      fetchShowRoles,
+      getAuthHeaders,
+      seasons,
+      showId,
+    ]
+  );
 
   const renameShowRole = useCallback(
     async (role: ShowRole) => {
@@ -2996,8 +3642,19 @@ export default function TrrShowDetailPage() {
     return Array.from(urls).sort((a, b) => a.localeCompare(b));
   }, [cast]);
 
-  const hasExistingBravoSnapshot =
-    bravoLoaded || newsLoaded || bravoVideos.length > 0 || unifiedNews.length > 0;
+  const syncBravoCastCandidateNameByUrl = useMemo(() => {
+    const byUrl = new Map<string, string>();
+    for (const member of cast) {
+      const name = String(member.full_name || member.cast_member_name || "").trim();
+      if (!name) continue;
+      const inferred = inferBravoPersonUrl(name);
+      if (!inferred) continue;
+      if (!byUrl.has(inferred)) {
+        byUrl.set(inferred, name);
+      }
+    }
+    return byUrl;
+  }, [cast]);
 
   const syncBravoSeasonOptions = useMemo(() => {
     const numbers = seasons
@@ -3034,6 +3691,15 @@ export default function TrrShowDetailPage() {
     });
   }, [defaultSyncBravoSeasonNumber, syncBravoSeasonOptions]);
 
+  const abortSyncBravoPreviewStream = useCallback(() => {
+    const controller = syncBravoPreviewAbortControllerRef.current;
+    if (controller) {
+      controller.abort();
+      syncBravoPreviewAbortControllerRef.current = null;
+    }
+    setSyncBravoProbeActive(false);
+  }, []);
+
   const previewSyncByBravo = useCallback(async (options?: { urlOverride?: string; mode?: SyncBravoRunMode }) => {
     const selectedMode = options?.mode ?? syncBravoRunMode;
     const includeFullShowContent = selectedMode !== "cast-only";
@@ -3064,24 +3730,523 @@ export default function TrrShowDetailPage() {
       setSyncBravoError("Show URL is required.");
       return;
     }
+
+    abortSyncBravoPreviewStream();
+    const runId = syncBravoPreviewRunRef.current + 1;
+    syncBravoPreviewRunRef.current = runId;
+
     if (targetUrl !== syncBravoUrl) {
       setSyncBravoUrl(targetUrl);
     }
+
     setSyncBravoPreviewLoading(true);
     setSyncBravoError(null);
     setSyncBravoNotice(null);
+    setSyncFandomPreviewPeople([]);
+    setSyncFandomPersonCandidateResults([]);
+    setSyncBravoPersonCandidateResults([]);
+    setSyncBravoPreviewResult(null);
+    setSyncBravoCandidateSummary(null);
+    setSyncFandomCandidateSummary(null);
+    setSyncFandomDomainsUsed([]);
+    setSyncBravoProbeTotal(0);
+    setSyncBravoProbeStatusMessage(null);
     appendRefreshLog({
       category: "BravoTV",
       message:
         selectedMode === "cast-only" ? "Loading Bravo cast-only preview..." : "Loading Bravo preview...",
     });
+
+    let castOnlyController: AbortController | null = null;
+
     try {
       const headers = await getAuthHeaders();
+
+      if (selectedMode === "cast-only") {
+        const pendingRows: BravoPersonCandidateResult[] = syncBravoCastUrlCandidates.map((url) => ({
+          url,
+          source: "bravo",
+          name: syncBravoCastCandidateNameByUrl.get(url) ?? null,
+          status: "pending",
+          error: null,
+          person: null,
+        }));
+        const initialSummary: BravoCandidateSummary = {
+          tested: 0,
+          valid: 0,
+          missing: 0,
+          errors: 0,
+        };
+        let liveBravoSummary = initialSummary;
+        let liveFandomSummary = initialSummary;
+        let bravoTotal = pendingRows.length;
+        let fandomTotal = 0;
+        let finalPayload: Record<string, unknown> | null = null;
+
+        setSyncFandomPreviewPeople([]);
+        setSyncFandomPersonCandidateResults([]);
+        setSyncBravoPersonCandidateResults(pendingRows);
+        setSyncBravoCandidateSummary(initialSummary);
+        setSyncFandomCandidateSummary(initialSummary);
+        setSyncBravoProbeTotal(bravoTotal);
+        setSyncBravoProbeActive(bravoTotal > 0);
+        setSyncBravoProbeStatusMessage(
+          bravoTotal > 0
+            ? `Probing cast profiles: Bravo 0/${bravoTotal}, Fandom 0/0 (1 in flight).`
+            : "No canonical cast profile URLs to probe."
+        );
+        if (bravoTotal > 30) {
+          appendRefreshLog({
+            category: "BravoTV",
+            message: "Cast-only probe may take several minutes for large casts.",
+          });
+        }
+
+        castOnlyController = new AbortController();
+        syncBravoPreviewAbortControllerRef.current = castOnlyController;
+
+        const streamResponse = await fetch(
+          `/api/admin/trr-api/shows/${showId}/import-bravo/preview/stream`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              show_url: targetUrl,
+              cast_only: true,
+              include_people: true,
+              include_videos: false,
+              include_news: false,
+              person_url_candidates: syncBravoCastUrlCandidates,
+              season_number: syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? undefined,
+            }),
+            signal: castOnlyController.signal,
+          }
+        );
+
+        if (!streamResponse.ok || !streamResponse.body) {
+          const streamErrorText = (await streamResponse.text().catch(() => "")).trim();
+          throw new Error(
+            streamErrorText || `Bravo cast-only stream failed (HTTP ${streamResponse.status})`
+          );
+        }
+
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (runId !== syncBravoPreviewRunRef.current) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+
+          let boundaryIndex = buffer.indexOf("\n\n");
+          while (boundaryIndex !== -1) {
+            const rawEvent = buffer.slice(0, boundaryIndex);
+            buffer = buffer.slice(boundaryIndex + 2);
+
+            const lines = rawEvent.split("\n").filter(Boolean);
+            let eventType = "message";
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            const dataStr = dataLines.join("\n");
+            let payload: Record<string, unknown> | string = dataStr;
+            try {
+              payload = JSON.parse(dataStr) as Record<string, unknown>;
+            } catch {
+              payload = dataStr;
+            }
+            if (!payload || typeof payload !== "object") {
+              boundaryIndex = buffer.indexOf("\n\n");
+              continue;
+            }
+
+            if (eventType === "start") {
+              const startCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+              const seededRows = startCandidates
+                .map((candidate) => {
+                  if (!candidate || typeof candidate !== "object") return null;
+                  const url =
+                    typeof (candidate as { url?: unknown }).url === "string"
+                      ? String((candidate as { url?: unknown }).url).trim()
+                      : "";
+                  if (!url) return null;
+                  const nameRaw = (candidate as { name?: unknown }).name;
+                  const name = typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : null;
+                  return {
+                    url,
+                    source: "bravo",
+                    name,
+                    status: "pending",
+                    error: null,
+                    person: null,
+                  } satisfies BravoPersonCandidateResult;
+                })
+                .filter((value) => Boolean(value)) as BravoPersonCandidateResult[];
+
+              if (seededRows.length > 0) {
+                bravoTotal = seededRows.length;
+                setSyncBravoPersonCandidateResults(seededRows);
+              }
+              const totalRaw = (payload as { total?: unknown }).total;
+              if (typeof totalRaw === "number" && Number.isFinite(totalRaw) && totalRaw >= 0) {
+                bravoTotal = totalRaw;
+              }
+
+              const fandomCandidates = Array.isArray((payload as { fandom_candidates?: unknown }).fandom_candidates)
+                ? ((payload as { fandom_candidates?: Array<Record<string, unknown>> }).fandom_candidates ?? [])
+                : [];
+              const seededFandomRows = fandomCandidates
+                .map((candidate) => {
+                  if (!candidate || typeof candidate !== "object") return null;
+                  const url = typeof candidate.url === "string" ? candidate.url.trim() : "";
+                  if (!url) return null;
+                  const name = typeof candidate.name === "string" && candidate.name.trim() ? candidate.name.trim() : null;
+                  return {
+                    url,
+                    source: "fandom",
+                    name,
+                    status: "pending",
+                    error: null,
+                    person: null,
+                  } satisfies BravoPersonCandidateResult;
+                })
+                .filter((value) => Boolean(value)) as BravoPersonCandidateResult[];
+              if (seededFandomRows.length > 0) {
+                fandomTotal = seededFandomRows.length;
+                setSyncFandomPersonCandidateResults(seededFandomRows);
+              }
+              const fandomTotalRaw = (payload as { fandom_total?: unknown }).fandom_total;
+              if (
+                typeof fandomTotalRaw === "number" &&
+                Number.isFinite(fandomTotalRaw) &&
+                fandomTotalRaw >= 0
+              ) {
+                fandomTotal = fandomTotalRaw;
+              }
+              const fandomDomainsRaw = (payload as { fandom_domains_used?: unknown }).fandom_domains_used;
+              if (Array.isArray(fandomDomainsRaw)) {
+                const parsedDomains = fandomDomainsRaw
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => value.trim())
+                  .filter((value) => value.length > 0);
+                setSyncFandomDomainsUsed(parsedDomains);
+              }
+
+              const totalToProbe = bravoTotal + fandomTotal;
+              setSyncBravoProbeTotal(totalToProbe);
+              const inFlight = totalToProbe > 0 ? 1 : 0;
+              setSyncBravoProbeActive(inFlight > 0);
+              if (totalToProbe > 0) {
+                setSyncBravoProbeStatusMessage(
+                  `Probing cast profiles: Bravo ${liveBravoSummary.tested}/${bravoTotal}, Fandom ${liveFandomSummary.tested}/${fandomTotal} (${inFlight} in flight).`
+                );
+              }
+            } else if (eventType === "progress") {
+              const url = typeof payload.url === "string" ? payload.url.trim() : "";
+              if (!url) {
+                boundaryIndex = buffer.indexOf("\n\n");
+                continue;
+              }
+              const source = payload.source === "fandom" ? "fandom" : "bravo";
+              const statusRaw = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
+              const status = statusRaw || "in_progress";
+              const nameRaw = typeof payload.name === "string" ? payload.name.trim() : "";
+              const errorRaw =
+                typeof payload.error === "string" && payload.error.trim().length > 0
+                  ? payload.error.trim()
+                  : null;
+              const personRaw = payload.person;
+              const person =
+                personRaw && typeof personRaw === "object" && !Array.isArray(personRaw)
+                  ? (personRaw as BravoPreviewPerson)
+                  : null;
+
+              const setResults =
+                source === "fandom" ? setSyncFandomPersonCandidateResults : setSyncBravoPersonCandidateResults;
+              setResults((prev) => {
+                const next = [...prev];
+                const index = next.findIndex((row) => row.url === url);
+                const nextRow: BravoPersonCandidateResult = {
+                  ...(index >= 0 ? next[index] : {}),
+                  url,
+                  source,
+                  name: nameRaw || (index >= 0 ? next[index]?.name ?? null : null),
+                  status,
+                  error: errorRaw,
+                  person,
+                };
+                if (index >= 0) {
+                  next[index] = nextRow;
+                } else {
+                  next.push(nextRow);
+                }
+                return next;
+              });
+
+              if (person && typeof person.canonical_url === "string" && person.canonical_url.trim()) {
+                const personUrl = person.canonical_url.trim();
+                const setPeople = source === "fandom" ? setSyncFandomPreviewPeople : setSyncBravoPreviewPeople;
+                setPeople((prev) => {
+                  const byUrl = new Map<string, BravoPreviewPerson>();
+                  for (const existing of prev) {
+                    const existingUrl =
+                      typeof existing.canonical_url === "string" ? existing.canonical_url.trim() : "";
+                    if (!existingUrl) continue;
+                    byUrl.set(existingUrl, existing);
+                  }
+                  byUrl.set(personUrl, person);
+                  return Array.from(byUrl.values()).sort((a, b) => {
+                    const aKey = String(a.name || a.canonical_url || "").toLowerCase();
+                    const bKey = String(b.name || b.canonical_url || "").toLowerCase();
+                    return aKey.localeCompare(bKey);
+                  });
+                });
+              }
+
+              const testedRaw =
+                source === "fandom" ? payload.fandom_candidates_tested : payload.bravo_candidates_tested;
+              const validRaw =
+                source === "fandom" ? payload.fandom_candidates_valid : payload.bravo_candidates_valid;
+              const missingRaw =
+                source === "fandom" ? payload.fandom_candidates_missing : payload.bravo_candidates_missing;
+              const errorsRaw =
+                source === "fandom" ? payload.fandom_candidates_errors : payload.bravo_candidates_errors;
+              if (
+                typeof testedRaw === "number" &&
+                typeof validRaw === "number" &&
+                typeof missingRaw === "number" &&
+                typeof errorsRaw === "number"
+              ) {
+                const resolvedSummary = {
+                  tested: testedRaw,
+                  valid: validRaw,
+                  missing: missingRaw,
+                  errors: errorsRaw,
+                };
+                if (source === "fandom") {
+                  liveFandomSummary = resolvedSummary;
+                  setSyncFandomCandidateSummary(resolvedSummary);
+                } else {
+                  liveBravoSummary = resolvedSummary;
+                  setSyncBravoCandidateSummary(resolvedSummary);
+                }
+              } else {
+                let nextSummary = source === "fandom" ? liveFandomSummary : liveBravoSummary;
+                if (status === "ok") nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, valid: nextSummary.valid + 1 };
+                else if (status === "missing") {
+                  nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, missing: nextSummary.missing + 1 };
+                } else if (status === "error") {
+                  nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, errors: nextSummary.errors + 1 };
+                }
+                if (source === "fandom") {
+                  liveFandomSummary = nextSummary;
+                  setSyncFandomCandidateSummary(nextSummary);
+                } else {
+                  liveBravoSummary = nextSummary;
+                  setSyncBravoCandidateSummary(nextSummary);
+                }
+              }
+
+              const bravoInFlight = bravoTotal > liveBravoSummary.tested ? 1 : 0;
+              const fandomInFlight = fandomTotal > liveFandomSummary.tested ? 1 : 0;
+              const inFlight = bravoInFlight + fandomInFlight;
+              setSyncBravoProbeActive(inFlight > 0);
+              setSyncBravoProbeStatusMessage(
+                bravoTotal + fandomTotal > 0
+                  ? `Probing cast profiles: Bravo ${Math.min(liveBravoSummary.tested, bravoTotal)}/${bravoTotal}, Fandom ${Math.min(liveFandomSummary.tested, fandomTotal)}/${fandomTotal} (${inFlight} in flight).`
+                  : "No canonical cast profile URLs to probe."
+              );
+            } else if (eventType === "complete") {
+              finalPayload = payload;
+            } else if (eventType === "error") {
+              const detail =
+                typeof payload.detail === "string" && payload.detail.trim()
+                  ? payload.detail.trim()
+                  : null;
+              const errorLabel =
+                typeof payload.error === "string" && payload.error.trim()
+                  ? payload.error.trim()
+                  : "Bravo cast-only stream failed";
+              throw new Error(detail ? `${errorLabel}: ${detail}` : errorLabel);
+            }
+
+            boundaryIndex = buffer.indexOf("\n\n");
+          }
+        }
+
+        const completePayload = finalPayload ?? {};
+        const nextPeople = Array.isArray(completePayload.people)
+          ? completePayload.people.filter((person): person is BravoPreviewPerson => {
+              const personUrl = person?.canonical_url;
+              return typeof personUrl === "string" && personUrl.trim().length > 0;
+            })
+          : [];
+        const nextFandomPeople = Array.isArray(completePayload.fandom_people)
+          ? completePayload.fandom_people.filter((person): person is BravoPreviewPerson => {
+              const personUrl = person?.canonical_url;
+              return typeof personUrl === "string" && personUrl.trim().length > 0;
+            })
+          : [];
+        const nextCandidateResults = Array.isArray(completePayload.person_candidate_results)
+          ? completePayload.person_candidate_results
+              .map((row) => {
+                if (!row || typeof row !== "object") return null;
+                const url = typeof (row as { url?: unknown }).url === "string" ? String((row as { url?: unknown }).url).trim() : "";
+                if (!url) return null;
+                const nameRaw = (row as { name?: unknown }).name;
+                const errorRaw = (row as { error?: unknown }).error;
+                const personRaw = (row as { person?: unknown }).person;
+                return {
+                  url,
+                  source: "bravo",
+                  name: typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : null,
+                  status:
+                    typeof (row as { status?: unknown }).status === "string"
+                      ? String((row as { status?: unknown }).status)
+                      : undefined,
+                  error: typeof errorRaw === "string" && errorRaw.trim() ? errorRaw.trim() : null,
+                  person:
+                  personRaw && typeof personRaw === "object" && !Array.isArray(personRaw)
+                      ? (personRaw as BravoPreviewPerson)
+                      : null,
+                } satisfies BravoPersonCandidateResult;
+              })
+              .filter((value) => Boolean(value)) as BravoPersonCandidateResult[]
+          : [];
+        const nextFandomCandidateResults = Array.isArray(completePayload.fandom_candidate_results)
+          ? completePayload.fandom_candidate_results
+              .map((row) => {
+                if (!row || typeof row !== "object") return null;
+                const url = typeof (row as { url?: unknown }).url === "string" ? String((row as { url?: unknown }).url).trim() : "";
+                if (!url) return null;
+                const nameRaw = (row as { name?: unknown }).name;
+                const errorRaw = (row as { error?: unknown }).error;
+                const personRaw = (row as { person?: unknown }).person;
+                return {
+                  url,
+                  source: "fandom",
+                  name: typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : null,
+                  status:
+                    typeof (row as { status?: unknown }).status === "string"
+                      ? String((row as { status?: unknown }).status)
+                      : undefined,
+                  error: typeof errorRaw === "string" && errorRaw.trim() ? errorRaw.trim() : null,
+                  person:
+                    personRaw && typeof personRaw === "object" && !Array.isArray(personRaw)
+                      ? (personRaw as BravoPreviewPerson)
+                      : null,
+                } satisfies BravoPersonCandidateResult;
+              })
+              .filter((value) => Boolean(value)) as BravoPersonCandidateResult[]
+          : [];
+        const summary: BravoCandidateSummary = {
+          tested:
+            typeof completePayload.bravo_candidates_tested === "number"
+              ? completePayload.bravo_candidates_tested
+              : nextCandidateResults.filter((row) => {
+                  const status = String(row.status || "").trim().toLowerCase();
+                  return status === "ok" || status === "missing" || status === "error";
+                }).length,
+          valid:
+            typeof completePayload.bravo_candidates_valid === "number"
+              ? completePayload.bravo_candidates_valid
+              : nextCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "ok").length,
+          missing:
+            typeof completePayload.bravo_candidates_missing === "number"
+              ? completePayload.bravo_candidates_missing
+              : nextCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "missing")
+                  .length,
+          errors:
+            typeof completePayload.bravo_candidates_errors === "number"
+              ? completePayload.bravo_candidates_errors
+              : nextCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "error")
+                  .length,
+        };
+        const fandomSummary: BravoCandidateSummary = {
+          tested:
+            typeof completePayload.fandom_candidates_tested === "number"
+              ? completePayload.fandom_candidates_tested
+              : nextFandomCandidateResults.filter((row) => {
+                  const status = String(row.status || "").trim().toLowerCase();
+                  return status === "ok" || status === "missing" || status === "error";
+                }).length,
+          valid:
+            typeof completePayload.fandom_candidates_valid === "number"
+              ? completePayload.fandom_candidates_valid
+              : nextFandomCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "ok")
+                  .length,
+          missing:
+            typeof completePayload.fandom_candidates_missing === "number"
+              ? completePayload.fandom_candidates_missing
+              : nextFandomCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "missing")
+                  .length,
+          errors:
+            typeof completePayload.fandom_candidates_errors === "number"
+              ? completePayload.fandom_candidates_errors
+              : nextFandomCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "error")
+                  .length,
+        };
+        const nextFandomDomainsUsed = Array.isArray(completePayload.fandom_domains_used)
+          ? completePayload.fandom_domains_used
+              .filter((value): value is string => typeof value === "string")
+              .map((value) => value.trim())
+              .filter((value) => value.length > 0)
+          : [];
+        const nextDiscoveredUrls = Array.isArray(completePayload.discovered_person_urls)
+          ? completePayload.discovered_person_urls
+              .filter((url): url is string => typeof url === "string")
+              .map((url) => url.trim())
+              .filter((url) => url.length > 0)
+          : [];
+
+        setSyncBravoDescription("");
+        setSyncBravoAirs("");
+        setSyncBravoImages([]);
+        setSyncBravoImageKinds({});
+        setSyncBravoSelectedImages(new Set());
+        setSyncBravoPreviewPeople((prev) => (nextPeople.length > 0 ? nextPeople : prev));
+        setSyncFandomPreviewPeople((prev) => (nextFandomPeople.length > 0 ? nextFandomPeople : prev));
+        setSyncBravoPersonCandidateResults(nextCandidateResults.length > 0 ? nextCandidateResults : pendingRows);
+        setSyncFandomPersonCandidateResults(nextFandomCandidateResults);
+        setSyncBravoPreviewResult(completePayload);
+        setSyncBravoCandidateSummary(summary);
+        setSyncFandomCandidateSummary(fandomSummary);
+        setSyncFandomDomainsUsed(nextFandomDomainsUsed);
+        const resolvedBravoTotal = bravoTotal > 0 ? bravoTotal : summary.tested;
+        const resolvedFandomTotal = fandomTotal > 0 ? fandomTotal : fandomSummary.tested;
+        setSyncBravoProbeTotal(resolvedBravoTotal + resolvedFandomTotal);
+        setSyncBravoProbeActive(false);
+        setSyncBravoProbeStatusMessage(
+          `Probe complete: Bravo tested ${summary.tested}, valid ${summary.valid}, missing ${summary.missing}, error ${summary.errors}; Fandom tested ${fandomSummary.tested}, valid ${fandomSummary.valid}, missing ${fandomSummary.missing}, error ${fandomSummary.errors}.`
+        );
+        setSyncBravoDiscoveredPersonUrls(nextDiscoveredUrls);
+        setSyncBravoPreviewVideos([]);
+        setSyncBravoPreviewNews([]);
+        setSyncBravoPreviewSeasonFilter("all");
+        setSyncBravoNotice("Cast-only preview loaded from Bravo + Fandom.");
+        appendRefreshLog({
+          category: "BravoTV",
+          message: `Cast-only preview ready: Bravo tested ${summary.tested}, valid ${summary.valid}, missing ${summary.missing}, errors ${summary.errors}; Fandom tested ${fandomSummary.tested}, valid ${fandomSummary.valid}, missing ${fandomSummary.missing}, errors ${fandomSummary.errors}.`,
+        });
+        return;
+      }
+
       const response = await fetch(`/api/admin/trr-api/shows/${showId}/import-bravo/preview`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({
           show_url: targetUrl,
+          cast_only: false,
           include_people: true,
           include_videos: includeFullShowContent,
           include_news: includeFullShowContent,
@@ -3096,6 +4261,18 @@ export default function TrrShowDetailPage() {
         show?: { description?: string | null; airs_text?: string | null };
         image_candidates?: Array<{ url?: string; alt?: string | null }>;
         people?: BravoPreviewPerson[];
+        person_candidate_results?: BravoPersonCandidateResult[];
+        fandom_people?: BravoPreviewPerson[];
+        fandom_domains_used?: string[];
+        fandom_candidate_results?: BravoPersonCandidateResult[];
+        bravo_candidates_tested?: number;
+        bravo_candidates_valid?: number;
+        bravo_candidates_missing?: number;
+        bravo_candidates_errors?: number;
+        fandom_candidates_tested?: number;
+        fandom_candidates_valid?: number;
+        fandom_candidates_missing?: number;
+        fandom_candidates_errors?: number;
         discovered_person_urls?: string[];
         videos?: BravoVideoItem[];
         news?: BravoNewsItem[];
@@ -3140,6 +4317,110 @@ export default function TrrShowDetailPage() {
             return typeof personUrl === "string" && personUrl.trim().length > 0;
           })
         : [];
+      const nextFandomPeople = Array.isArray(data.fandom_people)
+        ? data.fandom_people.filter((person): person is BravoPreviewPerson => {
+            const personUrl = person?.canonical_url;
+            return typeof personUrl === "string" && personUrl.trim().length > 0;
+          })
+        : [];
+      const nextCandidateResults = Array.isArray(data.person_candidate_results)
+        ? data.person_candidate_results
+            .map((row) => {
+              const url = typeof row?.url === "string" ? row.url.trim() : "";
+              if (!url) return null;
+              return {
+                url,
+                source: "bravo",
+                name: typeof row?.name === "string" && row.name.trim() ? row.name.trim() : null,
+                status: typeof row?.status === "string" ? row.status : undefined,
+                error:
+                  typeof row?.error === "string" && row.error.trim().length > 0
+                    ? row.error.trim()
+                    : null,
+                person:
+                  row?.person && typeof row.person === "object" && !Array.isArray(row.person)
+                    ? (row.person as BravoPreviewPerson)
+                    : null,
+              } satisfies BravoPersonCandidateResult;
+            })
+            .filter((value) => Boolean(value)) as BravoPersonCandidateResult[]
+        : [];
+      const nextFandomCandidateResults = Array.isArray(data.fandom_candidate_results)
+        ? data.fandom_candidate_results
+            .map((row) => {
+              const url = typeof row?.url === "string" ? row.url.trim() : "";
+              if (!url) return null;
+              return {
+                url,
+                source: "fandom",
+                name: typeof row?.name === "string" && row.name.trim() ? row.name.trim() : null,
+                status: typeof row?.status === "string" ? row.status : undefined,
+                error:
+                  typeof row?.error === "string" && row.error.trim().length > 0
+                    ? row.error.trim()
+                    : null,
+                person:
+                  row?.person && typeof row.person === "object" && !Array.isArray(row.person)
+                    ? (row.person as BravoPreviewPerson)
+                    : null,
+              } satisfies BravoPersonCandidateResult;
+            })
+            .filter((value) => Boolean(value)) as BravoPersonCandidateResult[]
+        : [];
+      const nextCandidateSummary: BravoCandidateSummary = {
+        tested:
+          typeof data.bravo_candidates_tested === "number"
+            ? data.bravo_candidates_tested
+            : nextCandidateResults.filter((row) => {
+                const status = String(row.status || "").trim().toLowerCase();
+                return status === "ok" || status === "missing" || status === "error";
+              }).length,
+        valid:
+          typeof data.bravo_candidates_valid === "number"
+            ? data.bravo_candidates_valid
+            : nextCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "ok")
+                .length,
+        missing:
+          typeof data.bravo_candidates_missing === "number"
+            ? data.bravo_candidates_missing
+            : nextCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "missing")
+                .length,
+        errors:
+          typeof data.bravo_candidates_errors === "number"
+            ? data.bravo_candidates_errors
+            : nextCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "error")
+                .length,
+      };
+      const nextFandomCandidateSummary: BravoCandidateSummary = {
+        tested:
+          typeof data.fandom_candidates_tested === "number"
+            ? data.fandom_candidates_tested
+            : nextFandomCandidateResults.filter((row) => {
+                const status = String(row.status || "").trim().toLowerCase();
+                return status === "ok" || status === "missing" || status === "error";
+              }).length,
+        valid:
+          typeof data.fandom_candidates_valid === "number"
+            ? data.fandom_candidates_valid
+            : nextFandomCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "ok")
+                .length,
+        missing:
+          typeof data.fandom_candidates_missing === "number"
+            ? data.fandom_candidates_missing
+            : nextFandomCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "missing")
+                .length,
+        errors:
+          typeof data.fandom_candidates_errors === "number"
+            ? data.fandom_candidates_errors
+            : nextFandomCandidateResults.filter((row) => String(row.status || "").trim().toLowerCase() === "error")
+                .length,
+      };
+      const nextFandomDomains = Array.isArray(data.fandom_domains_used)
+        ? data.fandom_domains_used
+            .filter((value): value is string => typeof value === "string")
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0)
+        : [];
       const nextDiscoveredUrls = Array.isArray(data.discovered_person_urls)
         ? data.discovered_person_urls
             .filter((url): url is string => typeof url === "string")
@@ -3182,38 +4463,51 @@ export default function TrrShowDetailPage() {
 
       setSyncBravoDescription(nextDescription);
       setSyncBravoAirs(nextAirs);
-      setSyncBravoImages(selectedMode === "cast-only" ? [] : filteredShowImages);
-      setSyncBravoImageKinds(selectedMode === "cast-only" ? {} : nextImageKinds);
+      setSyncBravoImages(filteredShowImages);
+      setSyncBravoImageKinds(nextImageKinds);
       setSyncBravoPreviewPeople(nextPeople);
+      setSyncFandomPreviewPeople(nextFandomPeople);
+      setSyncBravoPersonCandidateResults(nextCandidateResults);
+      setSyncFandomPersonCandidateResults(nextFandomCandidateResults);
+      setSyncBravoPreviewResult(data as Record<string, unknown>);
+      setSyncBravoCandidateSummary(nextCandidateSummary);
+      setSyncFandomCandidateSummary(nextFandomCandidateSummary);
+      setSyncFandomDomainsUsed(nextFandomDomains);
+      setSyncBravoProbeTotal(nextCandidateSummary.tested + nextFandomCandidateSummary.tested);
+      setSyncBravoProbeStatusMessage(null);
+      setSyncBravoProbeActive(false);
       setSyncBravoDiscoveredPersonUrls(nextDiscoveredUrls);
       setSyncBravoPreviewVideos(nextVideos);
       setSyncBravoPreviewNews(nextNews);
       setSyncBravoPreviewSeasonFilter(defaultPreviewSeason);
-      setSyncBravoSelectedImages(
-        selectedMode === "cast-only" ? new Set() : new Set(filteredShowImages.map((image) => image.url))
-      );
-      setSyncBravoNotice(
-        selectedMode === "cast-only"
-          ? "Cast-only preview loaded from Bravo."
-          : "Preview loaded from persisted Bravo parse output."
-      );
+      setSyncBravoSelectedImages(new Set(filteredShowImages.map((image) => image.url)));
+      setSyncBravoNotice("Preview loaded from persisted Bravo parse output.");
       appendRefreshLog({
         category: "BravoTV",
-        message:
-          selectedMode === "cast-only"
-            ? `Cast-only preview ready: ${nextPeople.length} cast URLs.`
-            : `Preview ready: ${nextPeople.length} cast URLs, ${nextVideos.length} videos, ${nextNews.length} news, ${filteredShowImages.length} show images.`,
+        message: `Preview ready: Bravo cast ${nextPeople.length}, Fandom cast ${nextFandomPeople.length}, ${nextVideos.length} videos, ${nextNews.length} news, ${filteredShowImages.length} show images.`,
       });
     } catch (err) {
+      if (
+        selectedMode === "cast-only" &&
+        (runId !== syncBravoPreviewRunRef.current || isAbortError(err))
+      ) {
+        return;
+      }
       appendRefreshLog({
         category: "BravoTV",
         message: `Preview failed: ${err instanceof Error ? err.message : "Unknown error"}`,
       });
       setSyncBravoError(err instanceof Error ? err.message : "Bravo preview failed");
     } finally {
-      setSyncBravoPreviewLoading(false);
+      if (selectedMode === "cast-only" && syncBravoPreviewAbortControllerRef.current === castOnlyController) {
+        syncBravoPreviewAbortControllerRef.current = null;
+      }
+      if (runId === syncBravoPreviewRunRef.current) {
+        setSyncBravoPreviewLoading(false);
+      }
     }
   }, [
+    abortSyncBravoPreviewStream,
     appendRefreshLog,
     cast.length,
     defaultSyncBravoSeasonNumber,
@@ -3224,6 +4518,7 @@ export default function TrrShowDetailPage() {
     show?.show_total_episodes,
     syncBravoSeasonEligibilityError,
     syncBravoSeasonOptions.length,
+    syncBravoCastCandidateNameByUrl,
     syncBravoCastUrlCandidates,
     syncBravoTargetSeasonNumber,
     syncBravoRunMode,
@@ -3271,27 +4566,66 @@ export default function TrrShowDetailPage() {
           person_url_candidates: syncBravoCastUrlCandidates,
           season_number:
             syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? undefined,
+          preview_result:
+            syncBravoRunMode === "cast-only" && syncBravoPreviewResult
+              ? syncBravoPreviewResult
+              : undefined,
         }),
       });
 
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
         detail?: string;
-        counts?: { imported_show_images?: number; people_updated?: number };
+        counts?: {
+          imported_show_images?: number;
+          people_updated?: number;
+          fandom_candidates_tested?: number;
+          fandom_candidates_valid?: number;
+          fandom_candidates_missing?: number;
+          fandom_candidates_errors?: number;
+          fandom_profiles_upserted?: number;
+          fandom_links_upserted?: number;
+          fandom_na_marked?: number;
+          fandom_fallback_images_imported?: number;
+        };
       };
       if (!response.ok) {
-        throw new Error(data.error || data.detail || "Bravo sync failed");
+        const failureMessage = data.error || data.detail || "Bravo sync failed";
+        if (response.status === 409 && failureMessage.toLowerCase().includes("preview stale")) {
+          throw new Error("Preview stale. Re-run preview before committing cast-only sync.");
+        }
+        throw new Error(failureMessage);
       }
 
+      const noticeParts: string[] = [];
+      if (typeof data.counts?.people_updated === "number") {
+        noticeParts.push(`people updated: ${data.counts.people_updated}`);
+      }
+      if (typeof data.counts?.imported_show_images === "number") {
+        noticeParts.push(`images imported: ${data.counts.imported_show_images}`);
+      }
+      if (typeof data.counts?.fandom_candidates_tested === "number") {
+        noticeParts.push(`fandom tested: ${data.counts.fandom_candidates_tested}`);
+      }
+      if (typeof data.counts?.fandom_profiles_upserted === "number") {
+        noticeParts.push(`fandom profiles: ${data.counts.fandom_profiles_upserted}`);
+      }
+      if (typeof data.counts?.fandom_fallback_images_imported === "number") {
+        noticeParts.push(`fandom image fallback: ${data.counts.fandom_fallback_images_imported}`);
+      }
       setSyncBravoNotice(
-        `${syncBravoRunMode === "cast-only" ? "Synced Bravo cast members" : "Synced Bravo data"}${typeof data.counts?.people_updated === "number" ? `; people updated: ${data.counts.people_updated}` : ""}${typeof data.counts?.imported_show_images === "number" ? `; images imported: ${data.counts.imported_show_images}` : ""}.`
+        `${syncBravoRunMode === "cast-only" ? "Synced Bravo + Fandom cast members" : "Synced Bravo + Fandom data"}${noticeParts.length > 0 ? `; ${noticeParts.join("; ")}` : ""}.`
       );
       appendRefreshLog({
         category: "BravoTV",
-        message: `${syncBravoRunMode === "cast-only" ? "Bravo cast-only sync complete" : "Bravo sync complete"}: ${data.counts?.people_updated ?? 0} people updated, ${data.counts?.imported_show_images ?? 0} show images imported.`,
+        message: `${syncBravoRunMode === "cast-only" ? "Bravo/Fandom cast-only sync complete" : "Bravo/Fandom sync complete"}: ${data.counts?.people_updated ?? 0} people updated, ${data.counts?.imported_show_images ?? 0} show images imported, ${data.counts?.fandom_profiles_upserted ?? 0} fandom profiles upserted, ${data.counts?.fandom_fallback_images_imported ?? 0} fandom fallback images imported.`,
       });
 
-      await Promise.all([fetchShow(), fetchCast()]);
+      await Promise.all([
+        fetchShow(),
+        fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 }),
+        fetchCastRoleMembers({ force: true }),
+      ]);
       setBravoLoaded(false);
       setNewsLoaded(false);
       void loadBravoData({ force: true });
@@ -3308,6 +4642,7 @@ export default function TrrShowDetailPage() {
   }, [
     appendRefreshLog,
     fetchCast,
+    fetchCastRoleMembers,
     fetchShow,
     getAuthHeaders,
     loadBravoData,
@@ -3320,6 +4655,7 @@ export default function TrrShowDetailPage() {
     syncBravoSeasonOptions.length,
     syncBravoSelectedImages,
     syncBravoCastUrlCandidates,
+    syncBravoPreviewResult,
     syncBravoAirs,
     syncBravoRunMode,
     syncBravoTargetSeasonNumber,
@@ -3335,7 +4671,11 @@ export default function TrrShowDetailPage() {
     if (!requestShowId) return;
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/covered-shows/${requestShowId}`, { headers });
+      const response = await fetchWithTimeout(
+        `/api/admin/covered-shows/${requestShowId}`,
+        { headers },
+        SHOW_CORE_LOAD_TIMEOUT_MS,
+      );
       if (!isCurrentShowId(requestShowId)) return;
       setIsCovered(response.ok);
     } catch {
@@ -3397,7 +4737,7 @@ export default function TrrShowDetailPage() {
       try {
         await fetchShow();
         // Keep initial render fast: load core show data first.
-        await Promise.all([fetchSeasons(), checkCoverage()]);
+        await Promise.allSettled([fetchSeasons(), checkCoverage()]);
       } finally {
         if (!isCurrentShowId(requestShowId)) return;
         setLoading(false);
@@ -3460,6 +4800,8 @@ export default function TrrShowDetailPage() {
   }, [activeTab, fetchCastRoleMembers, hasAccess, showId]);
 
   useEffect(() => {
+    abortSyncBravoPreviewStream();
+    syncBravoPreviewRunRef.current += 1;
     setSyncBravoModePickerOpen(false);
     setSyncBravoOpen(false);
     setSyncBravoRunMode("full");
@@ -3467,6 +4809,16 @@ export default function TrrShowDetailPage() {
     setSyncBravoError(null);
     setSyncBravoNotice(null);
     setSyncBravoPreviewPeople([]);
+    setSyncFandomPreviewPeople([]);
+    setSyncBravoPersonCandidateResults([]);
+    setSyncFandomPersonCandidateResults([]);
+    setSyncBravoPreviewResult(null);
+    setSyncBravoCandidateSummary(null);
+    setSyncFandomCandidateSummary(null);
+    setSyncFandomDomainsUsed([]);
+    setSyncBravoProbeTotal(0);
+    setSyncBravoProbeStatusMessage(null);
+    setSyncBravoProbeActive(false);
     setSyncBravoDiscoveredPersonUrls([]);
     setSyncBravoPreviewVideos([]);
     setSyncBravoPreviewNews([]);
@@ -3508,8 +4860,11 @@ export default function TrrShowDetailPage() {
     castRoleMembersLoadInFlightRef.current = null;
     castRoleMembersLoadKeyRef.current = null;
     setCastRoleMembersError(null);
+    setCastRoleMembersWarning(null);
     setCastMatrixSyncError(null);
     setCastMatrixSyncResult(null);
+    setCastRefreshPipelineRunning(false);
+    setCastRefreshPhaseStates([]);
     setLinksError(null);
     setLinksNotice(null);
     setGoogleNewsLinkId(null);
@@ -3517,7 +4872,7 @@ export default function TrrShowDetailPage() {
     setGoogleNewsNotice(null);
     setGoogleNewsError(null);
     setDetailsEditing(false);
-  }, [showId]);
+  }, [abortSyncBravoPreviewStream, showId]);
 
   useEffect(() => {
     if (!hasAccess || !showId) return;
@@ -3534,10 +4889,11 @@ export default function TrrShowDetailPage() {
   }, [activeTab, hasAccess, loadUnifiedNews, refreshLogOpen, showId]);
 
   useEffect(() => {
+    if (activeTab === "social") return;
     if (seasons.length > 0) {
-      fetchSeasonEpisodeSummaries(seasons);
+      void fetchSeasonEpisodeSummaries(seasons);
     }
-  }, [seasons, fetchSeasonEpisodeSummaries]);
+  }, [activeTab, seasons, fetchSeasonEpisodeSummaries]);
 
   const formatDate = (value: string | null) =>
     value ? new Date(value).toLocaleDateString() : "TBD";
@@ -4185,6 +5541,191 @@ export default function TrrShowDetailPage() {
     });
   }, [syncBravoDiscoveredPersonUrls, syncBravoPreviewPeople]);
 
+  const syncBravoValidProfileCards = useMemo(() => {
+    const byUrl = new Map<
+      string,
+      {
+        url: string;
+        name: string | null;
+        bio: string | null;
+        heroImageUrl: string | null;
+        socialLinks: Array<{ key: string; label: string; url: string; handle: string | null }>;
+      }
+    >();
+    for (const person of syncBravoPreviewPeople) {
+      const url =
+        typeof person.canonical_url === "string" ? person.canonical_url.trim() : "";
+      if (!url) continue;
+      const name = typeof person.name === "string" && person.name.trim() ? person.name.trim() : null;
+      const bio = typeof person.bio === "string" && person.bio.trim() ? person.bio.trim() : null;
+      const heroImageUrl =
+        typeof person.hero_image_url === "string" && person.hero_image_url.trim()
+          ? person.hero_image_url.trim()
+          : null;
+      const socialMap =
+        person.social_links && typeof person.social_links === "object" ? person.social_links : null;
+      const socialLinks = socialMap
+        ? Object.entries(socialMap)
+            .map(([rawKey, rawUrl]) => {
+              const linkUrl = typeof rawUrl === "string" ? rawUrl.trim() : "";
+              if (!linkUrl) return null;
+              const key = normalizeBravoSocialKey(rawKey);
+              return {
+                key,
+                label: formatBravoSocialLabel(key),
+                url: linkUrl,
+                handle: extractBravoSocialHandle(linkUrl),
+              };
+            })
+            .filter(
+              (
+                value
+              ): value is { key: string; label: string; url: string; handle: string | null } =>
+                Boolean(value)
+            )
+            .sort((a, b) => a.label.localeCompare(b.label))
+        : [];
+      byUrl.set(url, { url, name, bio, heroImageUrl, socialLinks });
+    }
+
+    return Array.from(byUrl.values()).sort((a, b) => {
+      const aKey = (a.name || a.url).toLowerCase();
+      const bKey = (b.name || b.url).toLowerCase();
+      return aKey.localeCompare(bKey);
+    });
+  }, [syncBravoPreviewPeople]);
+
+  const syncFandomValidProfileCards = useMemo(() => {
+    const byUrl = new Map<
+      string,
+      {
+        url: string;
+        name: string | null;
+        bio: string | null;
+        heroImageUrl: string | null;
+        socialLinks: Array<{ key: string; label: string; url: string; handle: string | null }>;
+      }
+    >();
+    for (const person of syncFandomPreviewPeople) {
+      const url =
+        typeof person.canonical_url === "string" ? person.canonical_url.trim() : "";
+      if (!url) continue;
+      const name = typeof person.name === "string" && person.name.trim() ? person.name.trim() : null;
+      const bio = typeof person.bio === "string" && person.bio.trim() ? person.bio.trim() : null;
+      const heroImageUrl =
+        typeof person.hero_image_url === "string" && person.hero_image_url.trim()
+          ? person.hero_image_url.trim()
+          : null;
+      const socialMap =
+        person.social_links && typeof person.social_links === "object" ? person.social_links : null;
+      const socialLinks = socialMap
+        ? Object.entries(socialMap)
+            .map(([rawKey, rawUrl]) => {
+              const linkUrl = typeof rawUrl === "string" ? rawUrl.trim() : "";
+              if (!linkUrl) return null;
+              const key = normalizeBravoSocialKey(rawKey);
+              return {
+                key,
+                label: formatBravoSocialLabel(key),
+                url: linkUrl,
+                handle: extractBravoSocialHandle(linkUrl),
+              };
+            })
+            .filter(
+              (
+                value
+              ): value is { key: string; label: string; url: string; handle: string | null } =>
+                Boolean(value)
+            )
+            .sort((a, b) => a.label.localeCompare(b.label))
+        : [];
+      byUrl.set(url, { url, name, bio, heroImageUrl, socialLinks });
+    }
+
+    return Array.from(byUrl.values()).sort((a, b) => {
+      const aKey = (a.name || a.url).toLowerCase();
+      const bKey = (b.name || b.url).toLowerCase();
+      return aKey.localeCompare(bKey);
+    });
+  }, [syncFandomPreviewPeople]);
+
+  const syncBravoCandidateIssues = useMemo(() => {
+    return syncBravoPersonCandidateResults
+      .map((result) => {
+        const url = typeof result.url === "string" ? result.url.trim() : "";
+        if (!url) return null;
+        const status = String(result.status || "").trim().toLowerCase();
+        if (status !== "missing" && status !== "error") return null;
+        const reason =
+          typeof result.error === "string" && result.error.trim() ? result.error.trim() : null;
+        return { url, status: status as "missing" | "error", reason };
+      })
+      .filter((value): value is { url: string; status: "missing" | "error"; reason: string | null } =>
+        Boolean(value)
+      )
+      .sort((a, b) => a.url.localeCompare(b.url));
+  }, [syncBravoPersonCandidateResults]);
+
+  const syncFandomCandidateIssues = useMemo(() => {
+    return syncFandomPersonCandidateResults
+      .map((result) => {
+        const url = typeof result.url === "string" ? result.url.trim() : "";
+        if (!url) return null;
+        const status = String(result.status || "").trim().toLowerCase();
+        if (status !== "missing" && status !== "error") return null;
+        const reason =
+          typeof result.error === "string" && result.error.trim() ? result.error.trim() : null;
+        return { url, status: status as "missing" | "error", reason };
+      })
+      .filter((value): value is { url: string; status: "missing" | "error"; reason: string | null } =>
+        Boolean(value)
+      )
+      .sort((a, b) => a.url.localeCompare(b.url));
+  }, [syncFandomPersonCandidateResults]);
+
+  const derivedSyncBravoCandidateSummary = useMemo<BravoCandidateSummary>(() => {
+    let valid = 0;
+    let missing = 0;
+    let errors = 0;
+    for (const result of syncBravoPersonCandidateResults) {
+      const status = String(result.status || "").trim().toLowerCase();
+      if (status === "ok") valid += 1;
+      else if (status === "missing") missing += 1;
+      else if (status === "error") errors += 1;
+    }
+    return {
+      tested: valid + missing + errors,
+      valid,
+      missing,
+      errors,
+    };
+  }, [syncBravoPersonCandidateResults]);
+
+  const derivedSyncFandomCandidateSummary = useMemo<BravoCandidateSummary>(() => {
+    let valid = 0;
+    let missing = 0;
+    let errors = 0;
+    for (const result of syncFandomPersonCandidateResults) {
+      const status = String(result.status || "").trim().toLowerCase();
+      if (status === "ok") valid += 1;
+      else if (status === "missing") missing += 1;
+      else if (status === "error") errors += 1;
+    }
+    return {
+      tested: valid + missing + errors,
+      valid,
+      missing,
+      errors,
+    };
+  }, [syncFandomPersonCandidateResults]);
+
+  const syncBravoProbeSummary = syncBravoCandidateSummary ?? derivedSyncBravoCandidateSummary;
+  const syncFandomProbeSummary = syncFandomCandidateSummary ?? derivedSyncFandomCandidateSummary;
+  const syncBravoCastSyncCount =
+    syncBravoRunMode === "cast-only"
+      ? Math.max(syncBravoProbeSummary.valid, syncFandomProbeSummary.valid)
+      : syncBravoPreviewCastLinks.length;
+
   const syncBravoSelectedImageSummaries = useMemo(() => {
     const byUrl = new Map(syncBravoImages.map((image) => [image.url, image]));
     return Array.from(syncBravoSelectedImages)
@@ -4237,6 +5778,8 @@ export default function TrrShowDetailPage() {
     const hasPreviewData =
       syncBravoImages.length > 0 ||
       syncBravoPreviewCastLinks.length > 0 ||
+      syncBravoPersonCandidateResults.length > 0 ||
+      syncFandomPersonCandidateResults.length > 0 ||
       syncBravoPreviewNews.length > 0 ||
       syncBravoPreviewVideos.length > 0 ||
       Boolean(syncBravoDescription.trim()) ||
@@ -4251,8 +5794,10 @@ export default function TrrShowDetailPage() {
   }, [
     syncBravoAirs,
     syncBravoDescription,
+    syncFandomPersonCandidateResults.length,
     syncBravoImages.length,
     syncBravoPreviewCastLinks.length,
+    syncBravoPersonCandidateResults.length,
     syncBravoPreviewNews.length,
     syncBravoPreviewVideos.length,
     cast.length,
@@ -4276,6 +5821,18 @@ export default function TrrShowDetailPage() {
       setSyncBravoStep("preview");
       setSyncBravoError(null);
       setSyncBravoNotice(null);
+      setSyncBravoPreviewPeople([]);
+      setSyncFandomPreviewPeople([]);
+      setSyncBravoDiscoveredPersonUrls([]);
+      setSyncBravoPersonCandidateResults([]);
+      setSyncFandomPersonCandidateResults([]);
+      setSyncBravoPreviewResult(null);
+      setSyncBravoCandidateSummary(null);
+      setSyncFandomCandidateSummary(null);
+      setSyncFandomDomainsUsed([]);
+      setSyncBravoProbeTotal(0);
+      setSyncBravoProbeStatusMessage(null);
+      setSyncBravoProbeActive(false);
       if (mode === "cast-only") {
         setSyncBravoImages([]);
         setSyncBravoSelectedImages(new Set());
@@ -4294,6 +5851,21 @@ export default function TrrShowDetailPage() {
       syncBravoUrl,
     ]
   );
+
+  useEffect(() => {
+    if (syncBravoOpen) return;
+    abortSyncBravoPreviewStream();
+    syncBravoPreviewRunRef.current += 1;
+    setSyncBravoProbeStatusMessage(null);
+    setSyncBravoProbeActive(false);
+  }, [abortSyncBravoPreviewStream, syncBravoOpen]);
+
+  useEffect(() => {
+    return () => {
+      abortSyncBravoPreviewStream();
+      syncBravoPreviewRunRef.current += 1;
+    };
+  }, [abortSyncBravoPreviewStream]);
 
   useEffect(() => {
     if (visibleSeasons.length === 0) return;
@@ -4585,6 +6157,7 @@ export default function TrrShowDetailPage() {
       const label = getShowRefreshTargetLabel(target);
       const includeCastProfiles = options?.includeCastProfiles ?? true;
       const fastPhotoMode = options?.photoMode === "fast";
+      const suppressSuccessNotice = options?.suppressSuccessNotice === true;
 
       let success = false;
       let castProfilesSummary: { attempted: number; succeeded: number; failed: number } | null =
@@ -4850,19 +6423,21 @@ export default function TrrShowDetailPage() {
                       : null,
                   ].filter((part): part is string => Boolean(part));
 
-                    setRefreshTargetNotice((prev) => ({
-                      ...prev,
-                      photos: [
-                        successParts.length > 0
-                          ? `SUCCESS: ${successParts.join(", ")}`
-                          : "SUCCESS: photos refresh complete",
-                        failParts.length > 0 ? `FAILS: ${failParts.join(", ")}` : null,
-                        liveCountSuffix ? liveCountSuffix : null,
-                        durationMs !== null ? `duration: ${durationMs}ms` : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" | "),
-                    }));
+                    if (!suppressSuccessNotice) {
+                      setRefreshTargetNotice((prev) => ({
+                        ...prev,
+                        photos: [
+                          successParts.length > 0
+                            ? `SUCCESS: ${successParts.join(", ")}`
+                            : "SUCCESS: photos refresh complete",
+                          failParts.length > 0 ? `FAILS: ${failParts.join(", ")}` : null,
+                          liveCountSuffix ? liveCountSuffix : null,
+                          durationMs !== null ? `duration: ${durationMs}ms` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" | "),
+                      }));
+                    }
                     appendRefreshLog({
                       category: label,
                       message:
@@ -4920,12 +6495,14 @@ export default function TrrShowDetailPage() {
                               : ""
                           }`
                         : "";
-                    setRefreshTargetNotice((prev) => ({
-                      ...prev,
-                      [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}${
-                        liveCountSuffix ? `. ${liveCountSuffix}` : "."
-                      }`,
-                    }));
+                    if (!suppressSuccessNotice) {
+                      setRefreshTargetNotice((prev) => ({
+                        ...prev,
+                        [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}${
+                          liveCountSuffix ? `. ${liveCountSuffix}` : "."
+                        }`,
+                      }));
+                    }
                     appendRefreshLog({
                       category: label,
                       message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
@@ -5059,10 +6636,12 @@ export default function TrrShowDetailPage() {
                   castProfilesSummary.failed > 0 ? ` (${castProfilesSummary.failed} failed)` : ""
                 }`
               : "";
-          setRefreshTargetNotice((prev) => ({
-            ...prev,
-            [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
-          }));
+          if (!suppressSuccessNotice) {
+            setRefreshTargetNotice((prev) => ({
+              ...prev,
+              [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
+            }));
+          }
           appendRefreshLog({
             category: label,
             message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
@@ -5070,7 +6649,9 @@ export default function TrrShowDetailPage() {
             total: null,
           });
         } else if (!sawComplete) {
-          setRefreshTargetNotice((prev) => ({ ...prev, [target]: `Refreshed ${label}.` }));
+          if (!suppressSuccessNotice) {
+            setRefreshTargetNotice((prev) => ({ ...prev, [target]: `Refreshed ${label}.` }));
+          }
           appendRefreshLog({
             category: label,
             message: `Completed ${label}.`,
@@ -5211,13 +6792,313 @@ export default function TrrShowDetailPage() {
   }, [appendRefreshLog, refreshShow, refreshingShowAll, showId]);
 
   const refreshShowCast = useCallback(async () => {
-    if (refreshingShowAll || Object.values(refreshingTargets).some(Boolean) || castMatrixSyncLoading) {
+    if (
+      refreshingShowAll ||
+      Object.values(refreshingTargets).some(Boolean) ||
+      castMatrixSyncLoading ||
+      castMediaEnriching ||
+      castRefreshPipelineRunning
+    ) {
       return;
     }
-    const refreshed = await refreshShow("cast_credits", { includeCastProfiles: true });
-    if (!refreshed) return;
-    await syncCastMatrixRoles();
-  }, [castMatrixSyncLoading, refreshShow, refreshingShowAll, refreshingTargets, syncCastMatrixRoles]);
+    setCastMediaEnrichNotice(null);
+    setCastMediaEnrichError(null);
+    setCastRefreshPipelineRunning(true);
+    setCastRefreshPhaseStates([]);
+    setRefreshTargetNotice((prev) => {
+      const next = { ...prev };
+      delete next.cast_credits;
+      return next;
+    });
+    setRefreshTargetError((prev) => {
+      const next = { ...prev };
+      delete next.cast_credits;
+      return next;
+    });
+    setRefreshTargetProgress((prev) => {
+      const next = { ...prev };
+      delete next.cast_credits;
+      return next;
+    });
+
+    const isBravoShow = (show?.networks ?? []).some(
+      (network) => String(network ?? "").trim().toLowerCase() === "bravo"
+    );
+    let rosterMembers: TrrCastMember[] = [];
+    let latestPhaseStates: CastRefreshPhaseState[] = [];
+
+    try {
+      const phases: CastRefreshPhaseDefinition[] = [
+        {
+          id: "credits_sync",
+          label: "Credits Sync",
+          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.credits_sync,
+          run: async ({ updateProgress }) => {
+            updateProgress({
+              current: 0,
+              total: 1,
+              message: "Syncing cast credits from IMDb...",
+            });
+            const refreshed = await refreshShow("cast_credits", {
+              includeCastProfiles: false,
+              suppressSuccessNotice: true,
+            });
+            if (!refreshed) {
+              throw new Error("Cast credits sync failed.");
+            }
+            updateProgress({
+              current: 1,
+              total: 1,
+              message: "Cast credits synced.",
+            });
+          },
+        },
+        {
+          id: "profile_links_sync",
+          label: "Profile Links Sync",
+          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.profile_links_sync,
+          run: async ({ signal, updateProgress }) => {
+            updateProgress({
+              current: 0,
+              total: 1,
+              message: "Syncing relationship roles and profile links...",
+            });
+            await syncCastMatrixRoles({
+              includeRelationshipRoles: true,
+              includeBravoLinks: false,
+              includeBravoImages: false,
+              throwOnError: true,
+              signal,
+            });
+            updateProgress({
+              current: 1,
+              total: 1,
+              message: "Profile link sync complete.",
+            });
+          },
+        },
+        {
+          id: "bio_sync",
+          label: "Bio Sync",
+          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.bio_sync,
+          run: async ({ signal, updateProgress }) => {
+            updateProgress({
+              current: 0,
+              total: null,
+              message: "Loading IMDb cast roster for bio sync...",
+            });
+            rosterMembers = await fetchCast({
+              rosterMode: "imdb_show_membership",
+              minEpisodes: 0,
+              throwOnError: true,
+              signal,
+            });
+            await refreshCastProfilesAndMedia(rosterMembers, {
+              mode: "profile_only",
+              stageLabel: "Cast Bios",
+              category: "Cast Bios",
+              signal,
+            });
+            updateProgress({
+              current: rosterMembers.length,
+              total: rosterMembers.length,
+              message: `Bio sync complete for ${rosterMembers.length.toLocaleString()} members.`,
+            });
+          },
+        },
+        {
+          id: "network_augmentation",
+          label: "Network Augmentation",
+          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.network_augmentation,
+          run: async ({ signal, updateProgress }) => {
+            if (!isBravoShow) {
+              return { skipped: true, message: "Skipped: no Bravo network augmentation required." };
+            }
+            updateProgress({
+              current: 0,
+              total: 1,
+              message: "Running Bravo-specific cast augmentation...",
+            });
+            await syncCastMatrixRoles({
+              includeRelationshipRoles: false,
+              includeBravoLinks: true,
+              includeBravoImages: true,
+              throwOnError: true,
+              signal,
+            });
+            updateProgress({
+              current: 1,
+              total: 1,
+              message: "Network augmentation complete.",
+            });
+          },
+        },
+        {
+          id: "media_ingest",
+          label: "Media Ingest",
+          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.media_ingest,
+          run: async ({ signal, updateProgress }) => {
+            if (rosterMembers.length === 0) {
+              rosterMembers = await fetchCast({
+                rosterMode: "imdb_show_membership",
+                minEpisodes: 0,
+                throwOnError: true,
+                signal,
+              });
+            }
+            const longHint =
+              rosterMembers.length > 30 ? " This may take several minutes." : "";
+            updateProgress({
+              current: 0,
+              total: rosterMembers.length,
+              message: `Ingesting cast media from IMDb/TMDb...${longHint}`,
+            });
+            await refreshCastProfilesAndMedia(rosterMembers, {
+              mode: "ingest_only",
+              stageLabel: "Cast Media Ingest",
+              category: "Cast Media Ingest",
+              signal,
+            });
+            updateProgress({
+              current: rosterMembers.length,
+              total: rosterMembers.length,
+              message: "Cast media ingest complete.",
+            });
+          },
+        },
+      ];
+
+      await runPhasedCastRefresh({
+        phases,
+        onPhaseStatesChange: (states) => {
+          latestPhaseStates = states;
+          setCastRefreshPhaseStates(states);
+          const activePhase =
+            states.find((phase) => phase.status === "running") ??
+            states.find((phase) => phase.status === "failed" || phase.status === "timed_out") ??
+            [...states].reverse().find((phase) => phase.status === "completed") ??
+            null;
+          if (!activePhase) return;
+
+          const phaseIndex = states.findIndex((phase) => phase.id === activePhase.id);
+          const phaseStage = CAST_REFRESH_PHASE_STAGES[activePhase.id] ?? activePhase.label;
+          setRefreshTargetProgress((prev) => ({
+            ...prev,
+            cast_credits: {
+              stage: `Phase ${phaseIndex + 1}/${states.length}: ${phaseStage}`,
+              message:
+                activePhase.progress.message ||
+                `${phaseStage} ${
+                  activePhase.status === "running" ? "in progress" : activePhase.status
+                }.`,
+              current: activePhase.progress.current,
+              total: activePhase.progress.total,
+            },
+          }));
+        },
+      });
+      await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 });
+      await fetchCastRoleMembers({ force: true });
+      setCastRoleMembersWarning(null);
+      setRefreshTargetNotice((prev) => ({
+        ...prev,
+        cast_credits:
+          "Cast refresh complete: credits synced, profile links synced, bios refreshed, network augmentation applied, media ingest complete.",
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Cast refresh failed";
+      const failedPhase =
+        latestPhaseStates.find((phase) => phase.status === "failed" || phase.status === "timed_out")
+        ?? null;
+      const phasePrefix = failedPhase
+        ? `${CAST_REFRESH_PHASE_STAGES[failedPhase.id] ?? failedPhase.label} failed`
+        : "Cast refresh failed";
+      setRefreshTargetNotice((prev) => {
+        const next = { ...prev };
+        delete next.cast_credits;
+        return next;
+      });
+      setRefreshTargetError((prev) => ({ ...prev, cast_credits: `${phasePrefix}: ${message}` }));
+      appendRefreshLog({
+        category: "Cast & Credits",
+        message: `${phasePrefix}: ${message}`,
+        current: null,
+        total: null,
+      });
+    } finally {
+      setCastRefreshPipelineRunning(false);
+    }
+  }, [
+    appendRefreshLog,
+    castMatrixSyncLoading,
+    castMediaEnriching,
+    castRefreshPipelineRunning,
+    fetchCast,
+    fetchCastRoleMembers,
+    refreshCastProfilesAndMedia,
+    refreshShow,
+    refreshingShowAll,
+    refreshingTargets,
+    show?.networks,
+    syncCastMatrixRoles,
+  ]);
+
+  const enrichCastMedia = useCallback(async () => {
+    if (
+      refreshingShowAll ||
+      Object.values(refreshingTargets).some(Boolean) ||
+      castMatrixSyncLoading ||
+      castMediaEnriching ||
+      castRefreshPipelineRunning
+    ) {
+      return;
+    }
+    setCastMediaEnriching(true);
+    setCastMediaEnrichNotice(null);
+    setCastMediaEnrichError(null);
+    try {
+      await runCastEnrichMediaWorkflow({
+        fetchCastMembers: async () => {
+          setRefreshTargetProgress((prev) => ({
+            ...prev,
+            cast_credits: {
+              stage: "Cast Roster",
+              message: "Loading cast roster for media enrich...",
+              current: null,
+              total: null,
+            },
+          }));
+          return await fetchCast({
+            rosterMode: "imdb_show_membership",
+            minEpisodes: 0,
+            throwOnError: true,
+          });
+        },
+        reprocessCastMemberMedia: async (members) => {
+          await reprocessCastMedia(members);
+        },
+      });
+      await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 0 });
+      setCastMediaEnrichNotice("Cast media enrich complete (count, word detection, crop, resize).");
+    } catch (err) {
+      setCastMediaEnrichError(err instanceof Error ? err.message : "Failed to enrich cast media");
+    } finally {
+      setCastMediaEnriching(false);
+      setRefreshTargetProgress((prev) => {
+        const next = { ...prev };
+        delete next.cast_credits;
+        return next;
+      });
+    }
+  }, [
+    castMatrixSyncLoading,
+    castMediaEnriching,
+    castRefreshPipelineRunning,
+    fetchCast,
+    refreshingShowAll,
+    refreshingTargets,
+    reprocessCastMedia,
+  ]);
 
   const missingCastPhotoCount = useMemo(() => {
     const countMissing = (members: TrrCastMember[]) =>
@@ -5511,23 +7392,10 @@ export default function TrrShowDetailPage() {
             : typeof textPayload.hasTextOverlay === "boolean"
               ? textPayload.hasTextOverlay
               : null;
-
-        const hasManualCrop =
-          asset.thumbnail_crop_mode === "manual" &&
-          typeof asset.thumbnail_focus_x === "number" &&
-          typeof asset.thumbnail_focus_y === "number" &&
-          typeof asset.thumbnail_zoom === "number";
-        if (hasManualCrop) {
-          await callStep("Variants (Manual Crop)", `${prefix}/variants`, {
-            force: true,
-            crop: {
-              x: asset.thumbnail_focus_x,
-              y: asset.thumbnail_focus_y,
-              zoom: asset.thumbnail_zoom,
-              mode: "manual",
-            },
-          });
-        }
+        await callStep("Variants (Auto-Crop)", `${prefix}/variants`, {
+          force: true,
+          crop: buildAssetAutoCropPayloadWithFallback(asset),
+        });
 
         applyGalleryAssetPatch(asset, {
           people_count:
@@ -5617,6 +7485,50 @@ export default function TrrShowDetailPage() {
     [getAuthHeaders]
   );
 
+  const triggerGalleryAssetAutoCrop = useCallback(
+    async (asset: SeasonAsset) => {
+      const base =
+        asset.origin_table === "media_assets"
+          ? { id: asset.media_asset_id ?? asset.id, prefix: "media-assets" }
+          : asset.origin_table === "cast_photos"
+            ? { id: asset.id, prefix: "cast-photos" }
+            : null;
+      if (!base?.id) return;
+      try {
+        const headers = await getAuthHeaders();
+        const endpoint = `/api/admin/trr-api/${base.prefix}/${base.id}/variants`;
+        await fetchWithTimeout(
+          endpoint,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ force: true }),
+          },
+          ASSET_PIPELINE_STEP_TIMEOUT_MS
+        );
+        await fetchWithTimeout(
+          endpoint,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              force: true,
+              crop: buildAssetAutoCropPayloadWithFallback(asset),
+            }),
+          },
+          ASSET_PIPELINE_STEP_TIMEOUT_MS
+        );
+      } catch (error) {
+        console.warn("[show-gallery] auto-crop rebuild after star toggle failed", {
+          assetId: asset.id,
+          origin: asset.origin_table,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [getAuthHeaders]
+  );
+
   const toggleStarGalleryAsset = useCallback(
     async (asset: SeasonAsset, starred: boolean) => {
       const origin = asset.origin_table ?? null;
@@ -5644,8 +7556,11 @@ export default function TrrShowDetailPage() {
           return { ...a, metadata: meta };
         })
       );
+      if (starred) {
+        void triggerGalleryAssetAutoCrop(asset);
+      }
     },
-    [getAuthHeaders]
+    [getAuthHeaders, triggerGalleryAssetAutoCrop]
   );
 
   const updateGalleryAssetContentType = useCallback(
@@ -5733,6 +7648,43 @@ export default function TrrShowDetailPage() {
   const lightboxAssetCapabilities = assetLightbox
     ? resolveGalleryAssetCapabilities(assetLightbox.asset)
     : null;
+  const lightboxFeaturedKind = assetLightbox
+    ? getFeaturedShowImageKind(assetLightbox.asset)
+    : null;
+  const canSetFeaturedPoster =
+    Boolean(assetLightbox) &&
+    assetLightbox?.asset.origin_table === "show_images" &&
+    lightboxFeaturedKind === "poster";
+  const canSetFeaturedBackdrop =
+    Boolean(assetLightbox) &&
+    assetLightbox?.asset.origin_table === "show_images" &&
+    lightboxFeaturedKind === "backdrop";
+  const featuredPosterDisabledReason = !assetLightbox
+    ? "No image selected."
+    : assetLightbox.asset.origin_table !== "show_images"
+      ? "Featured images can only be selected from show_images assets."
+      : lightboxFeaturedKind !== "poster"
+        ? "Only show-image poster assets can be set as featured poster."
+        : undefined;
+  const featuredBackdropDisabledReason = !assetLightbox
+    ? "No image selected."
+    : assetLightbox.asset.origin_table !== "show_images"
+      ? "Featured images can only be selected from show_images assets."
+      : lightboxFeaturedKind !== "backdrop"
+        ? "Only show-image backdrop assets can be set as featured backdrop."
+        : undefined;
+  const isFeaturedPoster = Boolean(
+    assetLightbox &&
+      canSetFeaturedPoster &&
+      show?.primary_poster_image_id &&
+      show.primary_poster_image_id === assetLightbox.asset.id
+  );
+  const isFeaturedBackdrop = Boolean(
+    assetLightbox &&
+      canSetFeaturedBackdrop &&
+      show?.primary_backdrop_image_id &&
+      show.primary_backdrop_image_id === assetLightbox.asset.id
+  );
 
   if (checking) {
     return (
@@ -5811,7 +7763,8 @@ export default function TrrShowDetailPage() {
   const networkLabel = show.networks?.slice(0, 2).join(" · ") || "TRR Core";
   const isShowRefreshBusy =
     refreshingShowAll || Object.values(refreshingTargets).some((value) => value);
-  const isCastRefreshBusy = isShowRefreshBusy || castMatrixSyncLoading;
+  const isCastRefreshBusy =
+    isShowRefreshBusy || castMatrixSyncLoading || castRefreshPipelineRunning || castMediaEnriching;
   const activeRefreshTarget =
     (Object.entries(refreshingTargets).find(([, isRefreshing]) => isRefreshing)?.[0] as
       | ShowRefreshTarget
@@ -5830,15 +7783,51 @@ export default function TrrShowDetailPage() {
     activeTargetProgress?.current ?? refreshAllProgress?.current ?? null;
   const globalRefreshTotal = activeTargetProgress?.total ?? refreshAllProgress?.total ?? null;
   const castTabProgress =
-    refreshingTargets.cast_credits && refreshTargetProgress.cast_credits
+    (refreshingTargets.cast_credits || castRefreshPipelineRunning || castMediaEnriching) &&
+    refreshTargetProgress.cast_credits
       ? refreshTargetProgress.cast_credits
       : globalRefreshProgress;
   const showCastTabProgress =
-    isShowRefreshBusy &&
+    (isShowRefreshBusy || castRefreshPipelineRunning || castMediaEnriching) &&
     Boolean(castTabProgress?.message || castTabProgress?.stage || castTabProgress?.total !== null);
+  const castRefreshActivePhase =
+    castRefreshPhaseStates.find((phase) => phase.status === "running") ?? null;
+  const castRefreshPhasePanelStates =
+    castRefreshPhaseStates.length > 0
+      ? castRefreshPhaseStates
+      : CAST_REFRESH_PHASE_ORDER.map((phaseId) => ({
+          id: phaseId,
+          label: CAST_REFRESH_PHASE_STAGES[phaseId],
+          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS[phaseId],
+          status: "pending" as const,
+          progress: { current: null, total: null, message: null, liveCounts: null },
+          startedAt: null,
+          finishedAt: null,
+          error: null,
+        }));
+  const castRefreshButtonLabel = castRefreshPipelineRunning
+    ? castRefreshActivePhase
+      ? CAST_REFRESH_PHASE_BUTTON_LABELS[castRefreshActivePhase.id]
+      : "Refreshing..."
+    : "Refresh";
   const autoGeneratedBravoUrl = inferBravoShowUrl(show?.name) || syncBravoUrl.trim() || "";
 
   const pipelineSteps = buildPipelineRows(REFRESH_LOG_TOPIC_DEFINITIONS, refreshLogTopicGroups);
+  const castRefreshPhaseStatusChipClassName = (status: CastRefreshPhaseState["status"]): string => {
+    if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    if (status === "running") return "border-sky-200 bg-sky-50 text-sky-700";
+    if (status === "skipped") return "border-zinc-200 bg-zinc-100 text-zinc-600";
+    if (status === "failed" || status === "timed_out") return "border-rose-200 bg-rose-50 text-rose-700";
+    return "border-zinc-200 bg-white text-zinc-500";
+  };
+  const castRefreshPhaseStatusLabel = (status: CastRefreshPhaseState["status"]): string => {
+    if (status === "timed_out") return "Timed Out";
+    if (status === "running") return "Running";
+    if (status === "completed") return "Completed";
+    if (status === "failed") return "Failed";
+    if (status === "skipped") return "Skipped";
+    return "Pending";
+  };
 
   const healthBadgeClassName = (status: HealthStatus): string => {
     if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700";
@@ -5861,7 +7850,8 @@ export default function TrrShowDetailPage() {
     : syncedEpisodeCount > 0
       ? "ready"
       : "missing";
-  const castHealthStatus: HealthStatus = refreshingTargets.cast_credits
+  const castHealthStatus: HealthStatus =
+    refreshingTargets.cast_credits || castRefreshPipelineRunning || castMediaEnriching
     ? "stale"
     : cast.length > 0
       ? "ready"
@@ -6016,6 +8006,7 @@ export default function TrrShowDetailPage() {
         {/* Header */}
         <header className="border-b border-zinc-200 bg-white px-6 py-5">
           <div className="mx-auto max-w-6xl">
+            <AdminBreadcrumbs items={buildShowBreadcrumb(show.name)} className="mb-4" />
             <div className="mb-4">
               <Link
                 href="/admin/trr-shows"
@@ -6074,9 +8065,6 @@ export default function TrrShowDetailPage() {
                     }
                     void refreshAllShowData();
                   }}
-                  onMouseEnter={() => {
-                    if (isShowRefreshBusy) setRefreshLogOpen(true);
-                  }}
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                 >
                   {isShowRefreshBusy
@@ -6093,15 +8081,11 @@ export default function TrrShowDetailPage() {
                       );
                       return;
                     }
-                    if (hasExistingBravoSnapshot) {
-                      setSyncBravoModePickerOpen(true);
-                      setSyncBravoOpen(false);
-                      setSyncBravoStep("preview");
-                      setSyncBravoError(null);
-                      setSyncBravoNotice(null);
-                      return;
-                    }
-                    startSyncBravoFlow("full");
+                    setSyncBravoModePickerOpen(true);
+                    setSyncBravoOpen(false);
+                    setSyncBravoStep("preview");
+                    setSyncBravoError(null);
+                    setSyncBravoNotice(null);
                   }}
                   disabled={!canSyncByBravo || syncBravoLoading}
                   title={syncBravoReadinessMessage || undefined}
@@ -6418,7 +8402,7 @@ export default function TrrShowDetailPage() {
                                 href={buildSeasonAdminUrl({
                                   showSlug: showSlugForRouting,
                                   seasonNumber: season.season_number,
-                                  tab: "episodes",
+                                  tab: "overview",
                                 }) as "/admin/trr-shows"}
                                 onClick={(e) => e.stopPropagation()}
                                 className="text-lg font-semibold text-zinc-900 hover:underline"
@@ -6709,6 +8693,12 @@ export default function TrrShowDetailPage() {
                                     sizes="300px"
                                     className="object-cover"
                                   />
+                                  {asset.origin_table === "show_images" &&
+                                    show.primary_backdrop_image_id === asset.id && (
+                                      <span className="absolute left-2 top-2 rounded-full bg-zinc-900/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white">
+                                        Featured
+                                      </span>
+                                    )}
                                 </button>
                               ))}
                           </div>
@@ -6737,6 +8727,12 @@ export default function TrrShowDetailPage() {
                                     alt={asset.caption || "Poster"}
                                     sizes="200px"
                                   />
+                                  {asset.origin_table === "show_images" &&
+                                    show.primary_poster_image_id === asset.id && (
+                                      <span className="absolute left-2 top-2 rounded-full bg-zinc-900/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white">
+                                        Featured
+                                      </span>
+                                    )}
                                 </button>
                               ))}
                           </div>
@@ -7273,6 +9269,14 @@ export default function TrrShowDetailPage() {
                   </span>
                   <button
                     type="button"
+                    onClick={() => void enrichCastMedia()}
+                    disabled={isCastRefreshBusy}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {castMediaEnriching ? "Enriching..." : "Enrich Media"}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => void enrichMissingCastPhotos()}
                     disabled={castPhotoEnriching || castLoading || missingCastPhotoCount <= 0}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
@@ -7287,7 +9291,7 @@ export default function TrrShowDetailPage() {
                     disabled={isCastRefreshBusy}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {isCastRefreshBusy ? "Refreshing..." : "Refresh"}
+                    {castRefreshButtonLabel}
                   </button>
                 </div>
               </div>
@@ -7301,6 +9305,45 @@ export default function TrrShowDetailPage() {
                   {refreshTargetError.cast_credits ||
                     refreshTargetNotice.cast_credits}
                 </p>
+              )}
+              {(castRefreshPipelineRunning || castRefreshPhaseStates.length > 0) && (
+                <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Cast Refresh Pipeline
+                    </p>
+                    {castRefreshPipelineRunning && (
+                      <p className="text-[11px] text-zinc-500">Fail-fast timeout policy enabled</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {castRefreshPhasePanelStates.map((phase, index) => (
+                      <div
+                        key={`cast-refresh-phase-${phase.id}`}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-zinc-800">
+                            {index + 1}. {CAST_REFRESH_PHASE_STAGES[phase.id] ?? phase.label}
+                          </p>
+                          {(phase.status === "running" ||
+                            phase.status === "failed" ||
+                            phase.status === "timed_out") &&
+                            phase.progress.message && (
+                              <p className="truncate text-xs text-zinc-500">{phase.progress.message}</p>
+                            )}
+                        </div>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${castRefreshPhaseStatusChipClassName(
+                            phase.status
+                          )}`}
+                        >
+                          {castRefreshPhaseStatusLabel(phase.status)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
               <RefreshProgressBar
                 show={showCastTabProgress}
@@ -7319,12 +9362,41 @@ export default function TrrShowDetailPage() {
                   {castPhotoEnrichError || castPhotoEnrichNotice}
                 </p>
               )}
+              {(castMediaEnrichNotice || castMediaEnrichError) && (
+                <p className={`mb-4 text-sm ${castMediaEnrichError ? "text-red-600" : "text-zinc-500"}`}>
+                  {castMediaEnrichError || castMediaEnrichNotice}
+                </p>
+              )}
               {castLoadError && (
                 <p className="mb-4 text-sm text-red-600">{castLoadError}</p>
               )}
-              {(castRoleMembersError || rolesError) && (
+              {castRoleMembersWarning && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <span>{castRoleMembersWarning}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchCastRoleMembers({ force: true })}
+                    className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {castRoleMembersError && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <span>{castRoleMembersError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchCastRoleMembers({ force: true })}
+                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {rolesError && (
                 <p className="mb-4 text-sm text-red-600">
-                  {castRoleMembersError || rolesError}
+                  {rolesError}
                 </p>
               )}
               {castSource === "show_fallback" && castEligibilityWarning && (
@@ -7770,6 +9842,11 @@ export default function TrrShowDetailPage() {
           {/* Social Media Tab */}
           {activeTab === "social" && (
             <div className="space-y-4">
+              {socialDependencyError && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                  Social dependency warning: {socialDependencyError}. Showing available social data.
+                </div>
+              )}
               <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                 {selectedSocialSeason ? (
                   <nav className="mb-4 flex flex-wrap gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
@@ -8609,10 +10686,24 @@ export default function TrrShowDetailPage() {
                 assetLightbox.asset.origin_table === "media_assets"
                   ? undefined
                   : "Delete is only available for imported media assets.",
+              featuredPoster: canSetFeaturedPoster ? undefined : featuredPosterDisabledReason,
+              featuredBackdrop: canSetFeaturedBackdrop ? undefined : featuredBackdropDisabledReason,
             }}
             onRefresh={() => refreshGalleryAssetPipeline(assetLightbox.asset)}
             onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
             onArchive={() => archiveGalleryAsset(assetLightbox.asset)}
+            onSetFeaturedPoster={
+              canSetFeaturedPoster
+                ? () => setFeaturedShowImage("poster", assetLightbox.asset.id)
+                : undefined
+            }
+            onSetFeaturedBackdrop={
+              canSetFeaturedBackdrop
+                ? () => setFeaturedShowImage("backdrop", assetLightbox.asset.id)
+                : undefined
+            }
+            isFeaturedPoster={isFeaturedPoster}
+            isFeaturedBackdrop={isFeaturedBackdrop}
             onUpdateContentType={(contentType) =>
               updateGalleryAssetContentType(assetLightbox.asset, contentType)
             }
@@ -8648,8 +10739,14 @@ export default function TrrShowDetailPage() {
         )}
 
         {refreshLogOpen && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-            <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl">
+          <div
+            className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setRefreshLogOpen(false)}
+          >
+            <div
+              className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl"
+              onClick={(event) => event.stopPropagation()}
+            >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
                   <h3 className="text-lg font-bold text-zinc-900">Health Center</h3>
@@ -8899,22 +10996,22 @@ export default function TrrShowDetailPage() {
             <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl">
               <h3 className="text-lg font-bold text-zinc-900">Sync by Bravo</h3>
               <p className="mt-1 text-sm text-zinc-600">
-                This show already has Bravo sync data. Choose how you want to run this sync.
+                Choose what to sync from Bravo for this run.
               </p>
               <div className="mt-4 space-y-3">
-                <button
-                  type="button"
-                  onClick={() => startSyncBravoFlow("cast-only")}
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
-                >
-                  Cast Only
-                </button>
                 <button
                   type="button"
                   onClick={() => startSyncBravoFlow("full")}
                   className="w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
                 >
-                  Re-Run Show URL
+                  Sync All Info
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startSyncBravoFlow("cast-only")}
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                >
+                  Cast Info only
                 </button>
               </div>
               <button
@@ -8934,7 +11031,7 @@ export default function TrrShowDetailPage() {
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
                   <h3 className="text-lg font-bold text-zinc-900">
-                    Import by Bravo {syncBravoRunMode === "cast-only" ? "(Cast Only)" : ""}
+                    Import by Bravo {syncBravoRunMode === "cast-only" ? "(Cast Info only)" : ""}
                   </h3>
                   <p className="text-sm text-zinc-500">Preview and commit persisted Bravo snapshots for this show.</p>
                   <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
@@ -9031,7 +11128,8 @@ export default function TrrShowDetailPage() {
 
               {syncBravoRunMode === "cast-only" && (
                 <p className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
-                  Cast-only mode probes canonical Bravo cast profile URLs and keeps only valid person pages.
+                  Cast-only mode probes canonical Bravo (`/people/*`) and Fandom (`/wiki/*`) cast profile URLs and reports
+                  valid, missing, and error candidates for each source.
                 </p>
               )}
 
@@ -9126,10 +11224,346 @@ export default function TrrShowDetailPage() {
               )}
 
               <div className="mb-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Cast Member URLs
-                </p>
-                {syncBravoPreviewCastLinks.length === 0 ? (
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Cast Member URLs
+                  </p>
+                  {syncBravoRunMode === "cast-only" && (
+                    <div className="text-right text-[11px] font-semibold text-zinc-500">
+                      <p>
+                        Bravo tested {syncBravoProbeSummary.tested} / valid {syncBravoProbeSummary.valid} /
+                        missing {syncBravoProbeSummary.missing} / error {syncBravoProbeSummary.errors}
+                      </p>
+                      <p>
+                        Fandom tested {syncFandomProbeSummary.tested} / valid {syncFandomProbeSummary.valid} /
+                        missing {syncFandomProbeSummary.missing} / error {syncFandomProbeSummary.errors}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                {syncBravoRunMode === "cast-only" && syncBravoProbeStatusMessage && (
+                  <p className="mb-2 text-xs text-zinc-500">
+                    {syncBravoProbeStatusMessage}
+                    {syncBravoProbeActive && syncBravoProbeTotal > 30 ? " This may take several minutes." : ""}
+                  </p>
+                )}
+
+                {syncBravoRunMode === "cast-only" ? (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Probe Queue
+                      </p>
+                      {syncBravoPersonCandidateResults.length === 0 ? (
+                        <p className="mt-2 text-sm text-zinc-500">
+                          Preparing canonical `/people/*` candidate probes...
+                        </p>
+                      ) : (
+                        <div className="mt-2 space-y-2">
+                          {syncBravoPersonCandidateResults.map((result) => {
+                            const status = String(result.status || "pending").trim().toLowerCase();
+                            const badgeClass =
+                              status === "ok"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : status === "missing"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : status === "error"
+                                    ? "bg-red-100 text-red-700"
+                                    : status === "in_progress"
+                                      ? "bg-blue-100 text-blue-700"
+                                      : "bg-zinc-200 text-zinc-700";
+                            return (
+                              <article
+                                key={`candidate-${result.url}`}
+                                className="rounded-md border border-zinc-200 bg-zinc-50 p-2"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${badgeClass}`}
+                                  >
+                                    {status}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-xs font-semibold text-zinc-800">
+                                      {result.name || "Unresolved cast member"}
+                                    </p>
+                                    <a
+                                      href={result.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="min-w-0 break-all text-xs text-blue-700 hover:underline"
+                                    >
+                                      {result.url}
+                                    </a>
+                                  </div>
+                                </div>
+                                {result.error && (
+                                  <p className="mt-1 text-xs text-zinc-600">{result.error}</p>
+                                )}
+                              </article>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {syncBravoValidProfileCards.length === 0 ? (
+                      <p className="text-sm text-zinc-500">
+                        No valid Bravo profile pages resolved from canonical `/people/*` probes.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {syncBravoValidProfileCards.map((person) => (
+                          <article
+                            key={person.url}
+                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                          >
+                            <div className="flex gap-3">
+                              <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded bg-zinc-100">
+                                {person.heroImageUrl ? (
+                                  <GalleryImage
+                                    src={person.heroImageUrl}
+                                    alt={person.name || "Bravo profile"}
+                                    sizes="96px"
+                                  />
+                                ) : (
+                                  <div className="flex h-full items-center justify-center text-[11px] text-zinc-400">
+                                    No image
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-zinc-900">
+                                  {person.name || "Unresolved cast member"}
+                                </p>
+                                <a
+                                  href={person.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-1 block break-all text-xs text-blue-700 hover:underline"
+                                >
+                                  {person.url}
+                                </a>
+                                {person.bio && (
+                                  <p className="mt-2 line-clamp-3 text-xs text-zinc-600">{person.bio}</p>
+                                )}
+                                {person.socialLinks.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    {person.socialLinks.map((social) => (
+                                      <a
+                                        key={`${person.url}-${social.key}-${social.url}`}
+                                        href={social.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100"
+                                      >
+                                        {social.label}
+                                        {social.handle ? ` ${social.handle}` : ""}
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+
+                    {syncBravoCandidateIssues.length > 0 && (
+                      <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Missing / Error Profiles
+                        </p>
+                        <div className="mt-2 space-y-2">
+                          {syncBravoCandidateIssues.map((result) => (
+                            <article
+                              key={`${result.status}-${result.url}`}
+                              className="rounded-md border border-zinc-200 bg-zinc-50 p-2"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                                    result.status === "missing"
+                                      ? "bg-amber-100 text-amber-700"
+                                      : "bg-red-100 text-red-700"
+                                  }`}
+                                >
+                                  {result.status}
+                                </span>
+                                <a
+                                  href={result.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="min-w-0 break-all text-xs text-blue-700 hover:underline"
+                                >
+                                  {result.url}
+                                </a>
+                              </div>
+                              {result.reason && (
+                                <p className="mt-1 text-xs text-zinc-600">{result.reason}</p>
+                              )}
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Fandom Probe Queue
+                        </p>
+                        <p className="text-[11px] font-semibold text-zinc-500">
+                          tested {syncFandomProbeSummary.tested} / valid {syncFandomProbeSummary.valid} /
+                          missing {syncFandomProbeSummary.missing} / error {syncFandomProbeSummary.errors}
+                        </p>
+                      </div>
+                      {syncFandomDomainsUsed.length > 0 && (
+                        <p className="mt-1 text-[11px] text-zinc-500">
+                          Domains: {syncFandomDomainsUsed.join(", ")}
+                        </p>
+                      )}
+                      {syncFandomPersonCandidateResults.length === 0 ? (
+                        <p className="mt-2 text-sm text-zinc-500">
+                          Preparing canonical `/wiki/*` candidate probes...
+                        </p>
+                      ) : (
+                        <div className="mt-2 space-y-2">
+                          {syncFandomPersonCandidateResults.map((result) => {
+                            const status = String(result.status || "pending").trim().toLowerCase();
+                            const badgeClass =
+                              status === "ok"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : status === "missing"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : status === "error"
+                                    ? "bg-red-100 text-red-700"
+                                    : status === "in_progress"
+                                      ? "bg-blue-100 text-blue-700"
+                                      : "bg-zinc-200 text-zinc-700";
+                            return (
+                              <article
+                                key={`fandom-candidate-${result.url}`}
+                                className="rounded-md border border-zinc-200 bg-zinc-50 p-2"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${badgeClass}`}
+                                  >
+                                    {status}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-xs font-semibold text-zinc-800">
+                                      {result.name || "Unresolved cast member"}
+                                    </p>
+                                    <a
+                                      href={result.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="min-w-0 break-all text-xs text-blue-700 hover:underline"
+                                    >
+                                      {result.url}
+                                    </a>
+                                  </div>
+                                </div>
+                                {result.error && (
+                                  <p className="mt-1 text-xs text-zinc-600">{result.error}</p>
+                                )}
+                              </article>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {syncFandomValidProfileCards.length === 0 ? (
+                      <p className="text-sm text-zinc-500">
+                        No valid Fandom profile pages resolved from canonical `/wiki/*` probes.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {syncFandomValidProfileCards.map((person) => (
+                          <article
+                            key={`fandom-profile-${person.url}`}
+                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                          >
+                            <div className="flex gap-3">
+                              <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded bg-zinc-100">
+                                {person.heroImageUrl ? (
+                                  <GalleryImage
+                                    src={person.heroImageUrl}
+                                    alt={person.name || "Fandom profile"}
+                                    sizes="96px"
+                                  />
+                                ) : (
+                                  <div className="flex h-full items-center justify-center text-[11px] text-zinc-400">
+                                    No image
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-zinc-900">
+                                  {person.name || "Unresolved cast member"}
+                                </p>
+                                <a
+                                  href={person.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-1 block break-all text-xs text-blue-700 hover:underline"
+                                >
+                                  {person.url}
+                                </a>
+                                {person.bio && (
+                                  <p className="mt-2 line-clamp-3 text-xs text-zinc-600">{person.bio}</p>
+                                )}
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+
+                    {syncFandomCandidateIssues.length > 0 && (
+                      <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Fandom Missing / Error Profiles
+                        </p>
+                        <div className="mt-2 space-y-2">
+                          {syncFandomCandidateIssues.map((result) => (
+                            <article
+                              key={`fandom-${result.status}-${result.url}`}
+                              className="rounded-md border border-zinc-200 bg-zinc-50 p-2"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                                    result.status === "missing"
+                                      ? "bg-amber-100 text-amber-700"
+                                      : "bg-red-100 text-red-700"
+                                  }`}
+                                >
+                                  {result.status}
+                                </span>
+                                <a
+                                  href={result.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="min-w-0 break-all text-xs text-blue-700 hover:underline"
+                                >
+                                  {result.url}
+                                </a>
+                              </div>
+                              {result.reason && (
+                                <p className="mt-1 text-xs text-zinc-600">{result.reason}</p>
+                              )}
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : syncBravoPreviewCastLinks.length === 0 ? (
                   <p className="text-sm text-zinc-500">No cast member URLs found in this preview.</p>
                 ) : (
                   <div className="space-y-2">
@@ -9154,6 +11588,67 @@ export default function TrrShowDetailPage() {
                   </div>
                 )}
               </div>
+
+              {syncBravoRunMode !== "cast-only" && (
+                <div className="mb-4">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Fandom Cast Coverage
+                    </p>
+                    <p className="text-[11px] font-semibold text-zinc-500">
+                      tested {syncFandomProbeSummary.tested} / valid {syncFandomProbeSummary.valid} /
+                      missing {syncFandomProbeSummary.missing} / error {syncFandomProbeSummary.errors}
+                    </p>
+                  </div>
+                  {syncFandomDomainsUsed.length > 0 && (
+                    <p className="mb-2 text-xs text-zinc-500">
+                      Domains used: {syncFandomDomainsUsed.join(", ")}
+                    </p>
+                  )}
+                  {syncFandomValidProfileCards.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No valid Fandom cast profiles found in this preview.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {syncFandomValidProfileCards.map((person) => (
+                        <article
+                          key={`full-fandom-${person.url}`}
+                          className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                        >
+                          <p className="text-sm font-semibold text-zinc-900">
+                            {person.name || "Unresolved cast member"}
+                          </p>
+                          <a
+                            href={person.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1 block break-all text-xs text-blue-700 hover:underline"
+                          >
+                            {person.url}
+                          </a>
+                          {person.bio && (
+                            <p className="mt-2 line-clamp-2 text-xs text-zinc-600">{person.bio}</p>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                  {syncFandomCandidateIssues.length > 0 && (
+                    <div className="mt-2 rounded-lg border border-zinc-200 bg-white p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Fandom Missing / Error Profiles
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        {syncFandomCandidateIssues.map((result) => (
+                          <p key={`full-fandom-issue-${result.url}`} className="text-xs text-zinc-600">
+                            {result.status.toUpperCase()}: {result.url}
+                            {result.reason ? ` (${result.reason})` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {syncBravoRunMode !== "cast-only" && (
                 <>
@@ -9327,9 +11822,79 @@ export default function TrrShowDetailPage() {
 
                   <div>
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Cast Members Being Synced ({syncBravoPreviewCastLinks.length})
+                      Cast Members Being Synced ({syncBravoCastSyncCount})
                     </p>
-                    {syncBravoPreviewCastLinks.length === 0 ? (
+                    {syncBravoRunMode === "cast-only" && (
+                      <>
+                        <p className="mb-1 text-xs text-zinc-500">
+                          Bravo summary: tested {syncBravoProbeSummary.tested}, valid{" "}
+                          {syncBravoProbeSummary.valid}, missing {syncBravoProbeSummary.missing},
+                          errors {syncBravoProbeSummary.errors}.
+                        </p>
+                        <p className="mb-2 text-xs text-zinc-500">
+                          Fandom summary: tested {syncFandomProbeSummary.tested}, valid{" "}
+                          {syncFandomProbeSummary.valid}, missing {syncFandomProbeSummary.missing},
+                          errors {syncFandomProbeSummary.errors}.
+                        </p>
+                        {syncFandomDomainsUsed.length > 0 && (
+                          <p className="mb-2 text-xs text-zinc-500">
+                            Fandom domains used: {syncFandomDomainsUsed.join(", ")}
+                          </p>
+                        )}
+                      </>
+                    )}
+                    {syncBravoRunMode === "cast-only" ? (
+                      <div className="space-y-3">
+                        <div>
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                            Bravo Profiles ({syncBravoValidProfileCards.length})
+                          </p>
+                          {syncBravoValidProfileCards.length === 0 ? (
+                            <p className="text-sm text-zinc-500">
+                              No valid Bravo cast profile URLs were detected in this preview.
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              {syncBravoValidProfileCards.map((person) => (
+                                <article
+                                  key={person.url}
+                                  className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                                >
+                                  <p className="text-sm font-semibold text-zinc-900">
+                                    {person.name || "Unresolved cast member"}
+                                  </p>
+                                  <p className="mt-1 break-all text-xs text-zinc-600">{person.url}</p>
+                                </article>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                            Fandom Profiles ({syncFandomValidProfileCards.length})
+                          </p>
+                          {syncFandomValidProfileCards.length === 0 ? (
+                            <p className="text-sm text-zinc-500">
+                              No valid Fandom cast profile URLs were detected in this preview.
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              {syncFandomValidProfileCards.map((person) => (
+                                <article
+                                  key={`confirm-fandom-${person.url}`}
+                                  className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                                >
+                                  <p className="text-sm font-semibold text-zinc-900">
+                                    {person.name || "Unresolved cast member"}
+                                  </p>
+                                  <p className="mt-1 break-all text-xs text-zinc-600">{person.url}</p>
+                                </article>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : syncBravoPreviewCastLinks.length === 0 ? (
                       <p className="text-sm text-zinc-500">No cast member URLs found in this preview.</p>
                     ) : (
                       <div className="space-y-2">
@@ -9415,8 +11980,8 @@ export default function TrrShowDetailPage() {
                     ? syncBravoCommitLoading
                       ? "Syncing..."
                       : syncBravoRunMode === "cast-only"
-                        ? "Sync Cast URLs"
-                        : "Sync by Bravo"
+                        ? "Sync Cast Info only"
+                        : "Sync All Info"
                     : "Next"}
                 </button>
               </div>

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 export default function AdminGroupsPage() {
@@ -28,7 +30,7 @@ export default function AdminGroupsPage() {
         <header className="border-b border-zinc-200 bg-white px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Admin / Groups</p>
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Groups")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Groups</h1>
               <p className="text-sm text-zinc-500">Group management and segmentation tools.</p>
             </div>
@@ -54,4 +56,3 @@ export default function AdminGroupsPage() {
     </ClientOnly>
   );
 }
-

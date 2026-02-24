@@ -3,8 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import {
+  buildSeasonWeekBreadcrumb,
+  humanizeSlug,
+} from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { buildSeasonAdminUrl } from "@/lib/admin/show-admin-routes";
+import { buildSeasonAdminUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 
 /* ------------------------------------------------------------------ */
@@ -238,10 +243,45 @@ const UUID_RE =
 const looksLikeUuid = (value: string): boolean => UUID_RE.test(value);
 const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running"]);
 const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
+const SOCIAL_TIME_ZONE = "America/New_York";
+const REQUEST_TIMEOUT_MS = {
+  weekDetail: 20_000,
+  syncRuns: 15_000,
+  syncJobs: 15_000,
+} as const;
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
+
+const isAbortError = (error: unknown): boolean => {
+  if (error instanceof DOMException) return error.name === "AbortError";
+  if (!error || typeof error !== "object") return false;
+  return (error as { name?: string }).name === "AbortError";
+};
+
+const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
 
 const fmtNum = (n: number | null | undefined): string => {
   if (n == null) return "0";
@@ -253,7 +293,12 @@ const fmtNum = (n: number | null | undefined): string => {
 const fmtDate = (iso: string | null | undefined): string => {
   if (!iso) return "-";
   const d = new Date(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: SOCIAL_TIME_ZONE,
+  });
 };
 
 const fmtDateTime = (iso: string | null | undefined): string => {
@@ -264,6 +309,7 @@ const fmtDateTime = (iso: string | null | undefined): string => {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: SOCIAL_TIME_ZONE,
   });
 };
 
@@ -465,7 +511,7 @@ function PostStatsDrawer({
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
-    const headers = await getClientAuthHeaders();
+    const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
     const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
     const res = await fetch(url, {
       headers,
@@ -510,7 +556,7 @@ function PostStatsDrawer({
     try {
       setRefreshing(true);
       setRefreshError(null);
-      const headers = await getClientAuthHeaders();
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
       const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
       const res = await fetch(url, {
         method: "POST",
@@ -991,6 +1037,13 @@ export default function WeekDetailPage() {
     if (raw === "creator" || raw === "community") return raw;
     return "bravo";
   })();
+  const seasonIdHint = (() => {
+    const raw = searchParams.get("season_id");
+    if (!raw || !looksLikeUuid(raw)) return null;
+    return raw;
+  })();
+  const socialPlatform = searchParams.get("social_platform");
+  const socialView = searchParams.get("social_view");
 
   const [data, setData] = useState<WeekDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1008,6 +1061,12 @@ export default function WeekDetailPage() {
   const [syncPollError, setSyncPollError] = useState<string | null>(null);
   const [syncStartedAt, setSyncStartedAt] = useState<Date | null>(null);
   const syncPollGenerationRef = useRef(0);
+  const resolvedSeasonId = useMemo(() => {
+    if (data?.season?.season_id && looksLikeUuid(data.season.season_id)) {
+      return data.season.season_id;
+    }
+    return seasonIdHint;
+  }, [data, seasonIdHint]);
 
   useEffect(() => {
     if (authLoading || !isAdmin) return;
@@ -1030,7 +1089,7 @@ export default function WeekDetailPage() {
       setSlugResolutionLoading(true);
       setSlugResolutionError(null);
       try {
-        const headers = await getClientAuthHeaders();
+        const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
         const response = await fetch(
           `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
           { headers, cache: "no-store" }
@@ -1066,11 +1125,24 @@ export default function WeekDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const headers = await getClientAuthHeaders();
-      const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}?source_scope=${sourceScope}`;
-      const res = await fetch(url, {
-        headers,
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const weekParams = new URLSearchParams({
+        source_scope: sourceScope,
+        timezone: SOCIAL_TIME_ZONE,
       });
+      if (resolvedSeasonId) {
+        weekParams.set("season_id", resolvedSeasonId);
+      }
+      const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}?${weekParams.toString()}`;
+      const res = await fetchWithTimeout(
+        url,
+        {
+          headers,
+          cache: "no-store",
+        },
+        REQUEST_TIMEOUT_MS.weekDetail,
+        "Week detail request timed out",
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(
@@ -1083,7 +1155,7 @@ export default function WeekDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [hasValidNumericPathParams, showIdForApi, seasonNumber, sourceScope, weekIndex]);
+  }, [hasValidNumericPathParams, resolvedSeasonId, showIdForApi, seasonNumber, sourceScope, weekIndex]);
 
   useEffect(() => {
     if (!hasValidNumericPathParams) {
@@ -1099,15 +1171,33 @@ export default function WeekDetailPage() {
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
       }
-      const headers = await getClientAuthHeaders();
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const runParams = new URLSearchParams({
+        source_scope: sourceScope,
+        limit: "100",
+      });
+      if (resolvedSeasonId) {
+        runParams.set("season_id", resolvedSeasonId);
+      }
+      const jobsParams = new URLSearchParams({
+        run_id: runId,
+        limit: "250",
+      });
+      if (resolvedSeasonId) {
+        jobsParams.set("season_id", resolvedSeasonId);
+      }
       const [runsResponse, jobsResponse] = await Promise.all([
-        fetch(
-          `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?source_scope=${sourceScope}&limit=100`,
+        fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runParams.toString()}`,
           { headers, cache: "no-store" },
+          REQUEST_TIMEOUT_MS.syncRuns,
+          "Sync runs request timed out",
         ),
-        fetch(
-          `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/jobs?run_id=${runId}&limit=250`,
+        fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/jobs?${jobsParams.toString()}`,
           { headers, cache: "no-store" },
+          REQUEST_TIMEOUT_MS.syncJobs,
+          "Sync jobs request timed out",
         ),
       ]);
 
@@ -1133,7 +1223,7 @@ export default function WeekDetailPage() {
       });
       return { run: nextRun, jobs: nextJobs };
     },
-    [hasValidNumericPathParams, invalidPathParamsError, seasonNumber, showIdForApi, sourceScope],
+    [hasValidNumericPathParams, invalidPathParamsError, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
   );
 
   const syncAllCommentsForWeek = useCallback(async () => {
@@ -1146,7 +1236,7 @@ export default function WeekDetailPage() {
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
       }
-      const headers = await getClientAuthHeaders();
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
 
       const selectedPlatformEntries =
         platformFilter === "all"
@@ -1210,8 +1300,12 @@ export default function WeekDetailPage() {
         }
       }
 
+      const ingestParams = new URLSearchParams();
+      if (resolvedSeasonId) {
+        ingestParams.set("season_id", resolvedSeasonId);
+      }
       const response = await fetch(
-        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest`,
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest${ingestParams.toString() ? `?${ingestParams.toString()}` : ""}`,
         {
           method: "POST",
           headers: {
@@ -1260,6 +1354,7 @@ export default function WeekDetailPage() {
     hasValidNumericPathParams,
     invalidPathParamsError,
     platformFilter,
+    resolvedSeasonId,
     seasonNumber,
     showIdForApi,
     sourceScope,
@@ -1521,7 +1616,14 @@ export default function WeekDetailPage() {
         const account =
           typeof job.config?.account === "string" && job.config.account ? ` @${job.config.account}` : "";
         const timestampRaw = job.completed_at ?? job.started_at ?? job.created_at ?? null;
-        const timestamp = timestampRaw ? new Date(timestampRaw).toLocaleTimeString() : "--:--:--";
+        const timestamp = timestampRaw
+          ? new Date(timestampRaw).toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+              timeZone: SOCIAL_TIME_ZONE,
+            })
+          : "--:--";
         const counters = getJobStageCounters(job);
         const persistCounters = getJobPersistCounters(job);
         const activitySummary = getJobActivitySummary(job);
@@ -1570,16 +1672,32 @@ export default function WeekDetailPage() {
     );
   }
 
+  const breadcrumbShowName = data?.season.show_name?.trim() || humanizeSlug(showSlugForRouting);
+  const breadcrumbWeekLabel = data?.week.label?.trim() || `Week ${weekIndexInt}`;
+  const breadcrumbShowHref = buildShowAdminUrl({ showSlug: showSlugForRouting });
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
       {/* Back link + header */}
       <div className="mb-6">
+        <AdminBreadcrumbs
+          items={buildSeasonWeekBreadcrumb(breadcrumbShowName, seasonNumber, breadcrumbWeekLabel, {
+            showHref: breadcrumbShowHref,
+          })}
+          className="mb-2"
+        />
         <Link
           href={buildSeasonAdminUrl({
             showSlug: showSlugForRouting,
             seasonNumber,
             tab: "social",
-            query: new URLSearchParams({ source_scope: sourceScope }),
+            query: (() => {
+              const query = new URLSearchParams({ source_scope: sourceScope });
+              if (socialPlatform) query.set("social_platform", socialPlatform);
+              if (socialView) query.set("social_view", socialView);
+              if (resolvedSeasonId) query.set("season_id", resolvedSeasonId);
+              return query;
+            })(),
           }) as "/admin/trr-shows"}
           className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
         >
