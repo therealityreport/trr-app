@@ -46,8 +46,11 @@ ADMIN_STRICT_HOST_ROUTING=false
 
 Behavior:
 
-- Requests to `/admin/*` on `localhost:3000` redirect to `admin.localhost:3000`.
-- Requests to `/api/admin/*` on non-admin hosts are denied (`403`).
+- Requests to `/admin/*` are canonicalized to `ADMIN_APP_ORIGIN` host.
+- Requests to `/api/admin/*` use `ADMIN_APP_HOSTS` allowlist (plus `ADMIN_APP_ORIGIN` host).
+- `ADMIN_ENFORCE_HOST` defaults to enabled when unset.
+- In development, if `ADMIN_APP_HOSTS` is unset, localhost-family hosts are allowed by default (`admin.localhost,localhost,127.0.0.1,[::1],::1`).
+- With `ADMIN_STRICT_HOST_ROUTING=true`, only non-admin page routes redirect to `/admin`; `/api/*` always passes through.
 - This is the same code path used later for `https://admin.<domain>` in production.
 
 ## TRR Backend Facebank Seed Proxy

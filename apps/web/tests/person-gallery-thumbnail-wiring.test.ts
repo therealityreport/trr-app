@@ -21,7 +21,7 @@ describe("person gallery thumbnail wiring", () => {
     expect(contents).not.toMatch(/exactViewportStyle/);
   });
 
-  it("prefers original/source before hosted fallback", () => {
+  it("uses candidate-based URL resolution for detail views", () => {
     const filePath = path.resolve(
       __dirname,
       "../src/app/admin/trr-shows/people/[personId]/page.tsx",
@@ -29,7 +29,8 @@ describe("person gallery thumbnail wiring", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(
-      /getPersonPhotoOriginalUrl[\s\S]*firstImageUrlCandidate\(getPersonPhotoOriginalUrlCandidates\(photo\)\)/,
+      /getPersonPhotoDetailUrl[\s\S]*firstImageUrlCandidate\(getPersonPhotoDetailUrlCandidates\(photo\)\)/,
     );
+    expect(contents).toMatch(/const cardCandidates = useMemo\(\(\) => getPersonPhotoCardUrlCandidates\(photo\), \[photo\]\)/);
   });
 });

@@ -53,7 +53,6 @@ import {
   firstImageUrlCandidate,
   getPersonPhotoCardUrlCandidates,
   getPersonPhotoDetailUrlCandidates,
-  getPersonPhotoOriginalUrlCandidates,
 } from "@/lib/admin/image-url-candidates";
 import {
   appendLiveCountsToMessage,
@@ -365,6 +364,11 @@ interface BravoVideoItem {
   runtime?: string | null;
   kicker?: string | null;
   image_url?: string | null;
+  hosted_image_url?: string | null;
+  original_image_url?: string | null;
+  media_asset_id?: string | null;
+  thumbnail_sync_status?: string | null;
+  thumbnail_sync_error?: string | null;
   clip_url: string;
   season_number?: number | null;
   published_at?: string | null;
@@ -395,6 +399,16 @@ const parsePeopleCount = (value: unknown): number | null => {
 
 const formatEpisodeCountLabel = (count: number): string =>
   `${count} episode${count === 1 ? "" : "s"}`;
+
+const formatEpisodeAndNonEpisodicLabel = (
+  episodeCount: number,
+  nonEpisodicCount: number
+): string =>
+  nonEpisodicCount > 0
+    ? `${formatEpisodeCountLabel(episodeCount)} • ${nonEpisodicCount} non-episodic credit${
+        nonEpisodicCount === 1 ? "" : "s"
+      }`
+    : formatEpisodeCountLabel(episodeCount);
 
 const formatEpisodeCode = (
   seasonNumber: number | null,
@@ -552,6 +566,9 @@ const PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_PAGE_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
 const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
 const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
+const BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
+const MAX_PHOTO_FETCH_PAGES = 30;
+const TEXT_OVERLAY_DETECT_CONCURRENCY = 4;
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";
@@ -570,14 +587,51 @@ const createNamedError = (name: string, message: string): Error => {
 const fetchWithTimeout = async (
   input: RequestInfo | URL,
   init: RequestInit,
-  timeoutMs: number
+  timeoutMs: number,
+  externalSignal?: AbortSignal
 ): Promise<Response> => {
   const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeoutId);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
+  }
+};
+
+const parseStreamErrorResponse = async (response: Response): Promise<string> => {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      detail?: string;
+    };
+    if (payload.error && payload.detail) return `${payload.error}: ${payload.detail}`;
+    return payload.error || payload.detail || "Request failed";
+  }
+
+  const bodyText = await response.text().catch(() => "");
+  if (!bodyText.trim()) return "Request failed";
+  const dataMatch = bodyText.match(/data:\s*(\{[\s\S]*\})/);
+  if (!dataMatch) return bodyText.trim();
+
+  try {
+    const payload = JSON.parse(dataMatch[1]) as { error?: string; detail?: string };
+    if (payload.error && payload.detail) return `${payload.error}: ${payload.detail}`;
+    return payload.error || payload.detail || bodyText.trim();
+  } catch {
+    return bodyText.trim();
   }
 };
 
@@ -619,14 +673,34 @@ const resolvePhotoDimensions = (
   };
 };
 
+const readGalleryStatusFromMetadata = (
+  photo: TrrPersonPhoto
+): {
+  status: string | null;
+  reason: string | null;
+  checkedAt: string | null;
+} => {
+  const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+  const statusRaw = metadata.gallery_status;
+  const reasonRaw = metadata.gallery_status_reason;
+  const checkedAtRaw = metadata.gallery_status_checked_at;
+  const status =
+    typeof statusRaw === "string" && statusRaw.trim().length > 0 ? statusRaw.trim() : null;
+  const reason =
+    typeof reasonRaw === "string" && reasonRaw.trim().length > 0 ? reasonRaw.trim() : null;
+  const checkedAt =
+    typeof checkedAtRaw === "string" && checkedAtRaw.trim().length > 0 ? checkedAtRaw.trim() : null;
+  return { status, reason, checkedAt };
+};
+
+const isBrokenUnreachableGalleryStatus = (status: string | null | undefined): boolean =>
+  typeof status === "string" && status.trim().toLowerCase() === "broken_unreachable";
+
 const getPersonPhotoCardUrl = (photo: TrrPersonPhoto): string | null =>
   firstImageUrlCandidate(getPersonPhotoCardUrlCandidates(photo));
 
 const getPersonPhotoDetailUrl = (photo: TrrPersonPhoto): string | null =>
   firstImageUrlCandidate(getPersonPhotoDetailUrlCandidates(photo));
-
-const getPersonPhotoOriginalUrl = (photo: TrrPersonPhoto): string | null =>
-  firstImageUrlCandidate(getPersonPhotoOriginalUrlCandidates(photo));
 
 const buildThumbnailCropPreview = (
   photo: TrrPersonPhoto | null | undefined
@@ -815,12 +889,14 @@ function GalleryPhoto({
   isCover,
   onSetCover,
   settingCover,
+  onFallbackEvent,
 }: {
   photo: TrrPersonPhoto;
   onClick: () => void;
   isCover?: boolean;
   onSetCover?: () => void;
   settingCover?: boolean;
+  onFallbackEvent?: (event: "attempt" | "recovered" | "failed") => void;
 }) {
   const [hasError, setHasError] = useState(false);
   const cardCandidates = useMemo(() => getPersonPhotoCardUrlCandidates(photo), [photo]);
@@ -832,6 +908,17 @@ function GalleryPhoto({
     width: number;
     height: number;
   } | null>(null);
+  const telemetryStateRef = useRef({ attempted: false, recovered: false, failed: false });
+  const galleryStatus = useMemo(() => readGalleryStatusFromMetadata(photo), [photo]);
+  const isMarkedBroken = isBrokenUnreachableGalleryStatus(galleryStatus.status);
+  const brokenBadgeTitle = useMemo(() => {
+    if (!isMarkedBroken) return undefined;
+    const checkedAtLabel = galleryStatus.checkedAt
+      ? new Date(galleryStatus.checkedAt).toLocaleString()
+      : "Unknown check time";
+    const reasonLabel = galleryStatus.reason ?? "Source unreachable";
+    return `Broken (unreachable) • ${reasonLabel} • ${checkedAtLabel}`;
+  }, [galleryStatus.checkedAt, galleryStatus.reason, isMarkedBroken]);
   const presentation = useMemo(() => {
     const persistedCrop: ThumbnailCrop | null =
       isThumbnailCropMode(photo.thumbnail_crop_mode) &&
@@ -861,7 +948,12 @@ function GalleryPhoto({
     setCurrentSrc(primarySrc);
     setFallbackIndex(0);
     setNaturalDimensions(null);
-  }, [fallbackCandidates, primarySrc]);
+    telemetryStateRef.current = { attempted: false, recovered: false, failed: false };
+    if (onFallbackEvent && primarySrc && !telemetryStateRef.current.attempted) {
+      onFallbackEvent("attempt");
+      telemetryStateRef.current.attempted = true;
+    }
+  }, [fallbackCandidates, onFallbackEvent, primarySrc]);
 
   const imageDimensions = useMemo(() => {
     const resolvedWidth = naturalDimensions?.width ?? parseDimensionValue(photo.width) ?? null;
@@ -881,6 +973,10 @@ function GalleryPhoto({
       origin: photo.origin,
       attempted: cardCandidates.length,
     });
+    if (onFallbackEvent && !telemetryStateRef.current.failed) {
+      onFallbackEvent("failed");
+      telemetryStateRef.current.failed = true;
+    }
     setHasError(true);
   };
 
@@ -915,6 +1011,10 @@ function GalleryPhoto({
         onError={handleError}
         onLoad={(event) => {
           const element = event.currentTarget as HTMLImageElement;
+          if (onFallbackEvent && currentSrc !== primarySrc && !telemetryStateRef.current.recovered) {
+            onFallbackEvent("recovered");
+            telemetryStateRef.current.recovered = true;
+          }
           if (element.naturalWidth > 0 && element.naturalHeight > 0) {
             setNaturalDimensions({
               width: element.naturalWidth,
@@ -932,6 +1032,16 @@ function GalleryPhoto({
       {photo.facebank_seed && (
         <div className="absolute top-2 right-2 z-10 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white shadow">
           Seed
+        </div>
+      )}
+      {isMarkedBroken && (
+        <div
+          title={brokenBadgeTitle}
+          className={`absolute left-2 z-10 rounded-full bg-red-600 px-2 py-0.5 text-xs font-semibold text-white shadow ${
+            isCover ? "top-9" : "top-2"
+          }`}
+        >
+          Broken
         </div>
       )}
       {/* Set as Cover button */}
@@ -2139,18 +2249,37 @@ export default function PersonProfilePage() {
   const [canonicalSourceOrderNotice, setCanonicalSourceOrderNotice] = useState<string | null>(null);
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
   const [photosVisibleCount, setPhotosVisibleCount] = useState(120);
+  const [showBrokenRows, setShowBrokenRows] = useState(false);
+  const [galleryFallbackTelemetry, setGalleryFallbackTelemetry] = useState({
+    fallbackRecoveredCount: 0,
+    allCandidatesFailedCount: 0,
+    totalImageAttempts: 0,
+  });
   const [credits, setCredits] = useState<TrrPersonCredit[]>([]);
+  const [creditsError, setCreditsError] = useState<string | null>(null);
+  const [creditsLoading, setCreditsLoading] = useState(false);
   const [showScopedCredits, setShowScopedCredits] = useState<PersonCreditShowScope | null>(null);
   const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
+  const [fandomError, setFandomError] = useState<string | null>(null);
+  const [fandomLoaded, setFandomLoaded] = useState(false);
+  const [fandomLoading, setFandomLoading] = useState(false);
   const [fandomSyncOpen, setFandomSyncOpen] = useState(false);
   const [fandomSyncPreview, setFandomSyncPreview] = useState<FandomSyncPreviewResponse | null>(null);
   const [fandomSyncPreviewLoading, setFandomSyncPreviewLoading] = useState(false);
   const [fandomSyncCommitLoading, setFandomSyncCommitLoading] = useState(false);
   const [fandomSyncError, setFandomSyncError] = useState<string | null>(null);
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
+  const [bravoVideosLoaded, setBravoVideosLoaded] = useState(false);
+  const [bravoVideosLoading, setBravoVideosLoading] = useState(false);
+  const [bravoVideosError, setBravoVideosError] = useState<string | null>(null);
+  const [bravoVideoSyncing, setBravoVideoSyncing] = useState(false);
+  const [bravoVideoSyncWarning, setBravoVideoSyncWarning] = useState<string | null>(null);
+  const bravoVideoSyncAttemptedRef = useRef(false);
+  const bravoVideoSyncInFlightRef = useRef<Promise<boolean> | null>(null);
   const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
-  const [bravoContentLoading, setBravoContentLoading] = useState(false);
-  const [bravoContentError, setBravoContentError] = useState<string | null>(null);
+  const [bravoNewsLoaded, setBravoNewsLoaded] = useState(false);
+  const [bravoNewsLoading, setBravoNewsLoading] = useState(false);
+  const [bravoNewsError, setBravoNewsError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>(personRouteState.tab);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2200,6 +2329,8 @@ export default function PersonProfilePage() {
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
   const refreshLogCounterRef = useRef(0);
+  const textOverlayDetectControllerRef = useRef<AbortController | null>(null);
+  const showBrokenRowsRef = useRef(showBrokenRows);
 
   const appendRefreshLog = useCallback(
     (entry: Omit<RefreshLogEntry, "id" | "ts"> & { ts?: number }) => {
@@ -2210,6 +2341,27 @@ export default function PersonProfilePage() {
     },
     []
   );
+
+  const trackGalleryFallbackEvent = useCallback((event: "attempt" | "recovered" | "failed") => {
+    setGalleryFallbackTelemetry((prev) => {
+      if (event === "attempt") {
+        return {
+          ...prev,
+          totalImageAttempts: prev.totalImageAttempts + 1,
+        };
+      }
+      if (event === "recovered") {
+        return {
+          ...prev,
+          fallbackRecoveredCount: prev.fallbackRecoveredCount + 1,
+        };
+      }
+      return {
+        ...prev,
+        allCandidatesFailedCount: prev.allCandidatesFailedCount + 1,
+      };
+    });
+  }, []);
 
   const personSlugForRouting = useMemo(() => {
     if (resolvedPersonSlugParam && resolvedPersonSlugParam.trim().length > 0) {
@@ -2230,6 +2382,38 @@ export default function PersonProfilePage() {
   useEffect(() => {
     setActiveTab(personRouteState.tab);
   }, [personRouteState.tab]);
+
+  useEffect(() => {
+    setBravoVideos([]);
+    setBravoNews([]);
+    setBravoVideosLoaded(false);
+    setBravoNewsLoaded(false);
+    setBravoVideosError(null);
+    setBravoVideoSyncWarning(null);
+    setBravoVideoSyncing(false);
+    bravoVideoSyncAttemptedRef.current = false;
+    bravoVideoSyncInFlightRef.current = null;
+    setBravoNewsError(null);
+    setFandomData([]);
+    setFandomError(null);
+    setFandomLoaded(false);
+    setFandomLoading(false);
+    setCredits([]);
+    setShowScopedCredits(null);
+    setCreditsError(null);
+    setCreditsLoading(false);
+  }, [personId, showIdForApi]);
+
+  useEffect(
+    () => () => {
+      textOverlayDetectControllerRef.current?.abort();
+    },
+    []
+  );
+
+  useEffect(() => {
+    showBrokenRowsRef.current = showBrokenRows;
+  }, [showBrokenRows]);
 
   const setTab = useCallback(
     (tab: TabId) => {
@@ -2290,22 +2474,33 @@ export default function PersonProfilePage() {
     setGalleryShowFilter((prev) => (prev === "all" ? "this-show" : prev));
   }, [showIdParam]);
 
+  const galleryFilterCreditsSource = useMemo(() => {
+    if (!showScopedCredits) return credits;
+    const byId = new Map<string, TrrPersonCredit>();
+    for (const credit of [...credits, ...(showScopedCredits.other_show_credits ?? [])]) {
+      byId.set(credit.id, credit);
+    }
+    return Array.from(byId.values());
+  }, [credits, showScopedCredits]);
+
   const activeShow = useMemo(
-    () => (showIdForApi ? credits.find((credit) => credit.show_id === showIdForApi) ?? null : null),
-    [credits, showIdForApi]
+    () =>
+      showIdForApi ? galleryFilterCreditsSource.find((credit) => credit.show_id === showIdForApi) ?? null : null,
+    [galleryFilterCreditsSource, showIdForApi]
   );
-  const activeShowName = activeShow?.show_name ?? null;
+  const activeShowName =
+    showScopedCredits?.show_name?.trim() || activeShow?.show_name?.trim() || null;
   const activeShowAcronym = useMemo(
     () => buildShowAcronym(activeShowName),
     [activeShowName]
   );
-  const activeShowFilterLabel = activeShowAcronym ?? activeShowName ?? "Current Show";
+  const activeShowFilterLabel = activeShowAcronym ?? activeShowName ?? "This Show";
   const otherShowOptions = useMemo(() => {
     const byKey = new Map<
       string,
       { key: string; showId: string | null; showName: string; acronym: string | null }
     >();
-    for (const credit of credits) {
+    for (const credit of galleryFilterCreditsSource) {
       if (showIdForApi && credit.show_id === showIdForApi) continue;
       const showName = credit.show_name?.trim() ?? "";
       if (!showName || isWwhlShowName(showName)) continue;
@@ -2319,7 +2514,7 @@ export default function PersonProfilePage() {
       });
     }
     return Array.from(byKey.values()).sort((a, b) => a.showName.localeCompare(b.showName));
-  }, [credits, showIdForApi]);
+  }, [galleryFilterCreditsSource, showIdForApi]);
   const otherShowNameMatches = useMemo(
     () => otherShowOptions.map((option) => option.showName.toLowerCase()),
     [otherShowOptions]
@@ -2796,13 +2991,17 @@ export default function PersonProfilePage() {
   }, [fetchWithAuth, showIdForApi, hasAccess]);
 
   // Fetch person details
-  const fetchPerson = useCallback(async () => {
+  const fetchPerson = useCallback(async (options?: { signal?: AbortSignal }) => {
     if (!personId) return;
+    const signal = options?.signal;
+    if (signal?.aborted) return;
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/people/${personId}`, { headers });
+      if (signal?.aborted) return;
+      const response = await fetch(`/api/admin/trr-api/people/${personId}`, { headers, signal });
       if (!response.ok) throw new Error("Failed to fetch person");
       const data = await response.json();
+      if (signal?.aborted) return;
       setPerson(data.person);
       const nextSourceOrder = readCanonicalSourceOrderFromExternalIds(
         data.person?.external_ids as Record<string, unknown> | null | undefined
@@ -2812,6 +3011,7 @@ export default function PersonProfilePage() {
       setCanonicalSourceOrderError(null);
       setCanonicalSourceOrderNotice(null);
     } catch (err) {
+      if (signal?.aborted || isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Failed to load person");
     }
   }, [personId, getAuthHeaders]);
@@ -2894,22 +3094,42 @@ export default function PersonProfilePage() {
   ]);
 
   // Fetch photos
-  const fetchPhotos = useCallback(async (): Promise<TrrPersonPhoto[]> => {
+  const fetchPhotos = useCallback(async (options?: { signal?: AbortSignal; includeBroken?: boolean }): Promise<TrrPersonPhoto[]> => {
     if (!personId) return [];
+    const signal = options?.signal;
+    const includeBroken = options?.includeBroken ?? showBrokenRowsRef.current;
+    if (signal?.aborted) return [];
     try {
       const headers = await getAuthHeaders();
       const pageSize = 500;
       const fetchedPhotos: TrrPersonPhoto[] = [];
       let offset = 0;
+      let pageCount = 0;
       while (true) {
+        if (signal?.aborted) return [];
+        pageCount += 1;
+        if (pageCount > MAX_PHOTO_FETCH_PAGES) {
+          throw new Error("Photo pagination exceeded safety limit.");
+        }
         let response: Response;
         try {
+          const params = new URLSearchParams({
+            limit: String(pageSize),
+            offset: String(offset),
+          });
+          if (includeBroken) {
+            params.set("include_broken", "true");
+          }
           response = await fetchWithTimeout(
-            `/api/admin/trr-api/people/${personId}/photos?limit=${pageSize}&offset=${offset}`,
+            `/api/admin/trr-api/people/${personId}/photos?${params.toString()}`,
             { headers },
-            PHOTO_LIST_LOAD_TIMEOUT_MS
+            PHOTO_LIST_LOAD_TIMEOUT_MS,
+            signal
           );
         } catch (error) {
+          if (signal?.aborted || isSignalAbortedWithoutReasonError(error)) {
+            return [];
+          }
           if (isAbortError(error)) {
             throw new Error(
               `Timed out loading person photos after ${Math.round(PHOTO_LIST_LOAD_TIMEOUT_MS / 1000)}s.`
@@ -2917,6 +3137,7 @@ export default function PersonProfilePage() {
           }
           throw error;
         }
+        if (signal?.aborted) return [];
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const message =
@@ -2930,10 +3151,19 @@ export default function PersonProfilePage() {
         if (pagePhotos.length < pageSize) break;
         offset += pageSize;
       }
+      if (signal?.aborted) return [];
+      setGalleryFallbackTelemetry({
+        fallbackRecoveredCount: 0,
+        allCandidatesFailedCount: 0,
+        totalImageAttempts: 0,
+      });
       setPhotos(fetchedPhotos);
       setPhotosError(null);
       return fetchedPhotos;
     } catch (err) {
+      if (signal?.aborted || isAbortError(err) || isSignalAbortedWithoutReasonError(err)) {
+        return [];
+      }
       console.error("Failed to fetch photos:", err);
       setPhotosError(err instanceof Error ? err.message : "Failed to fetch photos");
       return [];
@@ -2941,6 +3171,11 @@ export default function PersonProfilePage() {
   }, [personId, getAuthHeaders]);
 
   const detectTextOverlayForUnknown = useCallback(async () => {
+    textOverlayDetectControllerRef.current?.abort();
+    const controller = new AbortController();
+    textOverlayDetectControllerRef.current = controller;
+    const signal = controller.signal;
+
     // Best-effort batch for the current gallery set (capped to reduce cost).
     const targets = photos
       .filter(
@@ -2952,103 +3187,133 @@ export default function PersonProfilePage() {
 
     setTextOverlayDetectError(null);
     const headers = await getAuthHeaders();
-    for (const photo of targets) {
+    if (signal.aborted) return;
+    let shouldStop = false;
+    const runDetection = async (
+      photo: TrrPersonPhoto
+    ): Promise<{ error: string | null; shouldStop: boolean }> => {
       try {
-        if (photo.origin === "media_links") {
-          const assetId = photo.media_asset_id;
-          if (!assetId) continue;
-          const response = await fetch(`/api/admin/trr-api/media-assets/${assetId}/detect-text-overlay`, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ force: false }),
-          });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            const errorText =
-              typeof data.error === "string" ? data.error : "Detect text overlay failed";
-            const detailText = typeof data.detail === "string" ? data.detail : null;
-            setTextOverlayDetectError(detailText ? `${errorText}: ${detailText}` : errorText);
-            if (response.status === 401 || response.status === 403 || response.status === 503) {
-              break;
-            }
-          }
-        } else {
-          const response = await fetch(`/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ force: false }),
-          });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            const errorText =
-              typeof data.error === "string" ? data.error : "Detect text overlay failed";
-            const detailText = typeof data.detail === "string" ? data.detail : null;
-            setTextOverlayDetectError(detailText ? `${errorText}: ${detailText}` : errorText);
-            if (response.status === 401 || response.status === 403 || response.status === 503) {
-              break;
-            }
-          }
+        const endpoint =
+          photo.origin === "media_links" && photo.media_asset_id
+            ? `/api/admin/trr-api/media-assets/${photo.media_asset_id}/detect-text-overlay`
+            : `/api/admin/trr-api/cast-photos/${photo.id}/detect-text-overlay`;
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ force: false }),
+          signal,
+        });
+        if (response.ok) {
+          return { error: null, shouldStop: false };
         }
+        const data = await response.json().catch(() => ({}));
+        const errorText =
+          typeof data.error === "string" ? data.error : "Detect text overlay failed";
+        const detailText = typeof data.detail === "string" ? data.detail : null;
+        return {
+          error: detailText ? `${errorText}: ${detailText}` : errorText,
+          shouldStop: response.status === 401 || response.status === 403 || response.status === 503,
+        };
       } catch (err) {
-        setTextOverlayDetectError(
-          err instanceof Error ? err.message : "Detect text overlay failed"
-        );
-        break;
+        if (signal.aborted || isAbortError(err)) {
+          return { error: null, shouldStop: true };
+        }
+        return {
+          error: err instanceof Error ? err.message : "Detect text overlay failed",
+          shouldStop: true,
+        };
+      }
+    };
+
+    for (let index = 0; index < targets.length && !shouldStop; index += TEXT_OVERLAY_DETECT_CONCURRENCY) {
+      if (signal.aborted) break;
+      const batch = targets.slice(index, index + TEXT_OVERLAY_DETECT_CONCURRENCY);
+      const results = await Promise.all(batch.map((photo) => runDetection(photo)));
+      for (const result of results) {
+        if (result.error) setTextOverlayDetectError(result.error);
+        if (result.shouldStop) {
+          shouldStop = true;
+          break;
+        }
       }
     }
 
-    await fetchPhotos();
+    if (signal.aborted) return;
+    await fetchPhotos({ signal });
   }, [photos, getAuthHeaders, fetchPhotos]);
 
   // Fetch credits
-  const fetchCredits = useCallback(async () => {
+  const fetchCredits = useCallback(async (options?: { signal?: AbortSignal }) => {
     if (!personId) return;
+    const signal = options?.signal;
+    if (signal?.aborted) return;
     try {
+      setCreditsLoading(true);
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
-      params.set("limit", "50");
+      params.set("limit", showIdForApi ? "500" : "50");
       if (showIdForApi) {
         params.set("showId", showIdForApi);
       }
       const response = await fetch(
         `/api/admin/trr-api/people/${personId}/credits?${params.toString()}`,
-        { headers }
+        { headers, signal }
       );
-      if (!response.ok) throw new Error("Failed to fetch credits");
-      const data = await response.json();
+      const data = (await response.json().catch(() => ({}))) as {
+        credits?: TrrPersonCredit[];
+        show_scope?: PersonCreditShowScope;
+        error?: string;
+      };
+      if (signal?.aborted) return;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch credits");
+      }
       setCredits(Array.isArray(data.credits) ? data.credits : []);
       setShowScopedCredits(
         data.show_scope && typeof data.show_scope === "object"
           ? (data.show_scope as PersonCreditShowScope)
           : null
       );
+      setCreditsError(null);
     } catch (err) {
+      if (signal?.aborted || isAbortError(err)) return;
+      setCredits([]);
       setShowScopedCredits(null);
+      setCreditsError(err instanceof Error ? err.message : "Failed to fetch credits");
       console.error("Failed to fetch credits:", err);
+    } finally {
+      setCreditsLoading(false);
     }
   }, [personId, getAuthHeaders, showIdForApi]);
 
   // Fetch cover photo
-  const fetchCoverPhoto = useCallback(async () => {
+  const fetchCoverPhoto = useCallback(async (options?: { signal?: AbortSignal }) => {
     if (!personId) return;
+    const signal = options?.signal;
+    if (signal?.aborted) return;
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
         `/api/admin/trr-api/people/${personId}/cover-photo`,
-        { headers }
+        { headers, signal }
       );
       if (!response.ok) return;
       const data = await response.json();
+      if (signal?.aborted) return;
       setCoverPhoto(data.coverPhoto);
     } catch (err) {
+      if (signal?.aborted || isAbortError(err)) return;
       console.error("Failed to fetch cover photo:", err);
     }
   }, [personId, getAuthHeaders]);
 
   // Fetch fandom data
-  const fetchFandomData = useCallback(async () => {
+  const fetchFandomData = useCallback(async (options?: { signal?: AbortSignal }) => {
     if (!personId) return;
+    const signal = options?.signal;
+    if (signal?.aborted) return;
     try {
+      setFandomLoading(true);
       const headers = await getAuthHeaders();
       const showIdQuery =
         typeof showIdForApi === "string" && showIdForApi.trim().length > 0
@@ -3056,13 +3321,27 @@ export default function PersonProfilePage() {
           : "";
       const response = await fetch(
         `/api/admin/trr-api/people/${personId}/fandom${showIdQuery}`,
-        { headers }
+        { headers, signal }
       );
-      if (!response.ok) return;
-      const data = await response.json();
+      const data = (await response.json().catch(() => ({}))) as {
+        fandomData?: TrrCastFandom[];
+        error?: string;
+      };
+      if (signal?.aborted) return;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch fandom data");
+      }
       setFandomData(data.fandomData ?? []);
+      setFandomError(null);
     } catch (err) {
+      if (signal?.aborted || isAbortError(err)) return;
+      setFandomError(err instanceof Error ? err.message : "Failed to fetch fandom data");
       console.error("Failed to fetch fandom data:", err);
+    } finally {
+      setFandomLoading(false);
+      if (!signal?.aborted) {
+        setFandomLoaded(true);
+      }
     }
   }, [personId, getAuthHeaders, showIdForApi]);
 
@@ -3133,53 +3412,159 @@ export default function PersonProfilePage() {
     [personId, getAuthHeaders, fetchFandomData]
   );
 
-  const fetchBravoContent = useCallback(async () => {
+  const syncBravoVideoThumbnails = useCallback(
+    async (options?: { force?: boolean; signal?: AbortSignal }): Promise<boolean> => {
+      if (!showIdForApi) return false;
+      const force = options?.force ?? false;
+      const signal = options?.signal;
+      if (signal?.aborted) return false;
+      if (bravoVideoSyncInFlightRef.current) {
+        return await bravoVideoSyncInFlightRef.current;
+      }
+
+      const request = (async (): Promise<boolean> => {
+        try {
+          setBravoVideoSyncing(true);
+          setBravoVideoSyncWarning(null);
+          const headers = await getAuthHeaders();
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showIdForApi}/bravo/videos/sync-thumbnails`,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({ force }),
+              cache: "no-store",
+            },
+            BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS,
+            signal
+          );
+          const data = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            video_thumbnail_sync?: { attempted?: number; synced?: number; failed?: number };
+          };
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to sync Bravo video thumbnails");
+          }
+          const attempted = Number(data.video_thumbnail_sync?.attempted ?? 0);
+          const synced = Number(data.video_thumbnail_sync?.synced ?? 0);
+          const failed = Number(data.video_thumbnail_sync?.failed ?? 0);
+          if (attempted > 0 || synced > 0 || failed > 0) {
+            setBravoVideoSyncWarning(
+              `Video thumbnail sync: ${synced} synced, ${failed} failed${attempted > 0 ? ` (${attempted} attempted)` : ""}.`
+            );
+          }
+          return true;
+        } catch (error) {
+          if (signal?.aborted || isAbortError(error)) return false;
+          setBravoVideoSyncWarning(
+            error instanceof Error ? error.message : "Failed to sync Bravo video thumbnails"
+          );
+          return false;
+        } finally {
+          setBravoVideoSyncing(false);
+        }
+      })();
+
+      bravoVideoSyncInFlightRef.current = request;
+      try {
+        return await request;
+      } finally {
+        if (bravoVideoSyncInFlightRef.current === request) {
+          bravoVideoSyncInFlightRef.current = null;
+        }
+      }
+    },
+    [getAuthHeaders, showIdForApi]
+  );
+
+  const fetchBravoVideos = useCallback(async (options?: { signal?: AbortSignal; forceSync?: boolean }) => {
     if (!personId || !showIdForApi) {
       setBravoVideos([]);
-      setBravoNews([]);
-      setBravoContentError(null);
+      setBravoVideosLoaded(false);
+      setBravoVideosError(null);
       return;
     }
+    const signal = options?.signal;
+    const forceSync = options?.forceSync ?? false;
+    if (signal?.aborted) return;
 
     try {
-      setBravoContentLoading(true);
-      setBravoContentError(null);
+      setBravoVideosLoading(true);
+      setBravoVideosError(null);
       const headers = await getAuthHeaders();
-      const [videosResponse, newsResponse] = await Promise.all([
-        fetch(
-          `/api/admin/trr-api/shows/${showIdForApi}/bravo/videos?person_id=${personId}&merge_person_sources=true`,
-          {
-            headers,
-            cache: "no-store",
-          }
-        ),
-        fetch(`/api/admin/trr-api/shows/${showIdForApi}/bravo/news?person_id=${personId}`, {
+      if (forceSync || !bravoVideoSyncAttemptedRef.current) {
+        bravoVideoSyncAttemptedRef.current = true;
+        await syncBravoVideoThumbnails({ force: forceSync, signal });
+      }
+      const videosResponse = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/bravo/videos?person_id=${personId}&merge_person_sources=true`,
+        {
           headers,
           cache: "no-store",
-        }),
-      ]);
-
+        },
+        PHOTO_LIST_LOAD_TIMEOUT_MS,
+        signal
+      );
       const videosData = (await videosResponse.json().catch(() => ({}))) as {
         videos?: BravoVideoItem[];
         error?: string;
       };
+      if (signal?.aborted) return;
+      if (!videosResponse.ok) {
+        throw new Error(videosData.error || "Failed to fetch person videos");
+      }
+
+      setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
+    } catch (err) {
+      if (signal?.aborted || isAbortError(err)) return;
+      setBravoVideosError(err instanceof Error ? err.message : "Failed to fetch person videos");
+    } finally {
+      setBravoVideosLoading(false);
+      if (!signal?.aborted) {
+        setBravoVideosLoaded(true);
+      }
+    }
+  }, [getAuthHeaders, personId, showIdForApi, syncBravoVideoThumbnails]);
+
+  const fetchBravoNews = useCallback(async (options?: { signal?: AbortSignal }) => {
+    if (!personId || !showIdForApi) {
+      setBravoNews([]);
+      setBravoNewsLoaded(false);
+      setBravoNewsError(null);
+      return;
+    }
+    const signal = options?.signal;
+    if (signal?.aborted) return;
+
+    try {
+      setBravoNewsLoading(true);
+      setBravoNewsError(null);
+      const headers = await getAuthHeaders();
+      const newsResponse = await fetch(
+        `/api/admin/trr-api/shows/${showIdForApi}/bravo/news?person_id=${personId}`,
+        {
+          headers,
+          cache: "no-store",
+          signal,
+        }
+      );
       const newsData = (await newsResponse.json().catch(() => ({}))) as {
         news?: BravoNewsItem[];
         error?: string;
       };
-      if (!videosResponse.ok) {
-        throw new Error(videosData.error || "Failed to fetch person videos");
-      }
+      if (signal?.aborted) return;
       if (!newsResponse.ok) {
         throw new Error(newsData.error || "Failed to fetch person news");
       }
-
-      setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
       setBravoNews(Array.isArray(newsData.news) ? newsData.news : []);
     } catch (err) {
-      setBravoContentError(err instanceof Error ? err.message : "Failed to fetch Bravo content");
+      if (signal?.aborted || isAbortError(err)) return;
+      setBravoNewsError(err instanceof Error ? err.message : "Failed to fetch person news");
     } finally {
-      setBravoContentLoading(false);
+      setBravoNewsLoading(false);
+      if (!signal?.aborted) {
+        setBravoNewsLoaded(true);
+      }
     }
   }, [getAuthHeaders, personId, showIdForApi]);
 
@@ -3938,12 +4323,7 @@ export default function PersonProfilePage() {
         if (!response.ok || !response.body) {
           clearStreamIdleTimeout();
           clearTimeout(streamTimeout);
-          const data = await response.json().catch(() => ({}));
-          const message =
-            data.error && data.detail
-              ? `${data.error}: ${data.detail}`
-              : data.error || "Failed to refresh images";
-          throw new Error(message);
+          throw new Error(await parseStreamErrorResponse(response));
         }
 
         const reader = response.body.getReader();
@@ -4226,7 +4606,8 @@ export default function PersonProfilePage() {
         fetchPerson(),
         fetchCredits(),
         fetchFandomData(),
-        fetchBravoContent(),
+        fetchBravoVideos(),
+        fetchBravoNews(),
         fetchPhotos(),
         fetchCoverPhoto(),
       ]);
@@ -4254,7 +4635,8 @@ export default function PersonProfilePage() {
     fetchPerson,
     fetchCredits,
     fetchFandomData,
-    fetchBravoContent,
+    fetchBravoVideos,
+    fetchBravoNews,
     fetchPhotos,
     fetchCoverPhoto,
     getAuthHeaders,
@@ -4349,12 +4731,7 @@ export default function PersonProfilePage() {
       );
 
       if (!response.ok || !response.body) {
-        const data = await response.json().catch(() => ({}));
-        const message =
-          data.error && data.detail
-            ? `${data.error}: ${data.detail}`
-            : data.error || "Failed to reprocess images";
-        throw new Error(message);
+        throw new Error(await parseStreamErrorResponse(response));
       }
 
       const reader = response.body.getReader();
@@ -4526,16 +4903,76 @@ export default function PersonProfilePage() {
   useEffect(() => {
     if (!hasAccess) return;
     if (!personId) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
 
     const loadData = async () => {
       setLoading(true);
-      await fetchPerson();
-      await Promise.all([fetchPhotos(), fetchCredits(), fetchCoverPhoto(), fetchFandomData(), fetchBravoContent()]);
-      setLoading(false);
+      try {
+        await fetchPerson({ signal });
+        if (signal.aborted) return;
+        await Promise.all([
+          fetchPhotos({ signal }),
+          fetchCredits({ signal }),
+          fetchCoverPhoto({ signal }),
+        ]);
+      } catch (err) {
+        if (signal.aborted) return;
+        console.error("Failed to load person page data:", err);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
     };
 
-    loadData();
-  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, fetchFandomData, fetchBravoContent, personId]);
+    void loadData();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, personId]);
+
+  useEffect(() => {
+    if (activeTab !== "videos") return;
+    if (!showIdForApi || bravoVideosLoaded) return;
+    const controller = new AbortController();
+    void fetchBravoVideos({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
+  }, [activeTab, bravoVideosLoaded, fetchBravoVideos, showIdForApi]);
+
+  useEffect(() => {
+    if (!hasAccess || !personId) return;
+    if (loading) return;
+    const controller = new AbortController();
+    void fetchPhotos({ signal: controller.signal, includeBroken: showBrokenRows });
+    return () => {
+      controller.abort();
+    };
+  }, [fetchPhotos, hasAccess, loading, personId, showBrokenRows]);
+
+  useEffect(() => {
+    if (activeTab !== "news") return;
+    if (!showIdForApi || bravoNewsLoaded) return;
+    const controller = new AbortController();
+    void fetchBravoNews({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
+  }, [activeTab, bravoNewsLoaded, fetchBravoNews, showIdForApi]);
+
+  useEffect(() => {
+    if (activeTab !== "fandom") return;
+    if (!hasAccess || fandomLoaded) return;
+    const controller = new AbortController();
+    void fetchFandomData({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
+  }, [activeTab, fandomLoaded, fetchFandomData, hasAccess]);
 
   // Open lightbox with photo, index, and trigger element for focus restoration
   const openLightbox = (
@@ -4783,6 +5220,19 @@ export default function PersonProfilePage() {
     return parsed.toLocaleDateString();
   };
 
+  const resolveBravoVideoThumbnailUrl = (video: BravoVideoItem): string | null => {
+    if (typeof video.hosted_image_url === "string" && video.hosted_image_url.trim()) {
+      return video.hosted_image_url.trim();
+    }
+    if (typeof video.image_url === "string" && video.image_url.trim()) {
+      return video.image_url.trim();
+    }
+    if (typeof video.original_image_url === "string" && video.original_image_url.trim()) {
+      return video.original_image_url.trim();
+    }
+    return null;
+  };
+
   // Extract external IDs - database uses 'imdb'/'tmdb' keys, not 'imdb_id'/'tmdb_id'
   const rawExternalIds = person?.external_ids as {
     imdb?: string;
@@ -4847,6 +5297,10 @@ export default function PersonProfilePage() {
       ),
     [showScopedCredits]
   );
+  const currentShowCastNonEpisodicTotal =
+    showScopedCredits?.cast_non_episodic.length ?? 0;
+  const currentShowCrewNonEpisodicTotal =
+    showScopedCredits?.crew_non_episodic.length ?? 0;
 
   const renderOtherShowCreditSummaryRow = (
     credit: TrrPersonCredit,
@@ -5136,6 +5590,7 @@ export default function PersonProfilePage() {
                       <GalleryPhoto
                         photo={photo}
                         onClick={() => {}}
+                        onFallbackEvent={trackGalleryFallbackEvent}
                       />
                     </button>
                   ))}
@@ -5328,6 +5783,7 @@ export default function PersonProfilePage() {
                     </button>
                   )}
                 </div>
+                {creditsError && <p className="mb-3 text-sm text-red-600">{creditsError}</p>}
                 <div className="space-y-2">
                   {credits.slice(0, 5).map((credit) => {
                     const rowClassName =
@@ -5427,6 +5883,11 @@ export default function PersonProfilePage() {
                   </div>
                 </div>
               )}
+              {fandomError && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-6 shadow-sm lg:col-span-2">
+                  <p className="text-sm text-red-700">{fandomError}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -5517,6 +5978,17 @@ export default function PersonProfilePage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
                     </svg>
                     Filters
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowBrokenRows((prev) => !prev)}
+                    className={`rounded-lg border px-4 py-2 text-sm font-semibold transition ${
+                      showBrokenRows
+                        ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                        : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                    }`}
+                  >
+                    {showBrokenRows ? "Hide Broken" : "Show Broken"}
                   </button>
                   <button
                     onClick={() => setScrapeDrawerOpen(true)}
@@ -5626,6 +6098,11 @@ export default function PersonProfilePage() {
                 <p className="text-sm text-zinc-500">
                   Showing {filteredPhotos.length} of {photos.length} photos
                 </p>
+                <p className="text-xs text-zinc-500">
+                  Fallback diagnostics: {galleryFallbackTelemetry.fallbackRecoveredCount} recovered,{" "}
+                  {galleryFallbackTelemetry.allCandidatesFailedCount} failed,{" "}
+                  {galleryFallbackTelemetry.totalImageAttempts} attempted.
+                </p>
               </div>
 
               <div className="space-y-6">
@@ -5636,17 +6113,10 @@ export default function PersonProfilePage() {
                       {gallerySections.profilePictures.map((photo) => {
                         const index = filteredPhotoIndexById.get(photo.id) ?? 0;
                         return (
-                          <div
+                          <button
+                            type="button"
                             key={photo.id}
-                            role="button"
-                            tabIndex={0}
                             onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                openLightbox(photo, index, e.currentTarget as HTMLElement);
-                              }
-                            }}
                             className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                           >
                             <GalleryPhoto
@@ -5655,6 +6125,7 @@ export default function PersonProfilePage() {
                               isCover={coverPhoto?.photo_id === photo.id}
                               onSetCover={photo.hosted_url ? () => handleSetCover(photo) : undefined}
                               settingCover={settingCover}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                             />
                             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
                               <p className="text-xs text-white truncate">
@@ -5662,7 +6133,7 @@ export default function PersonProfilePage() {
                                 {photo.season && ` • S${photo.season}`}
                               </p>
                             </div>
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
@@ -5676,17 +6147,10 @@ export default function PersonProfilePage() {
                       {gallerySections.otherPhotos.map((photo) => {
                         const index = filteredPhotoIndexById.get(photo.id) ?? 0;
                         return (
-                          <div
+                          <button
+                            type="button"
                             key={photo.id}
-                            role="button"
-                            tabIndex={0}
                             onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                openLightbox(photo, index, e.currentTarget as HTMLElement);
-                              }
-                            }}
                             className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                           >
                             <GalleryPhoto
@@ -5695,6 +6159,7 @@ export default function PersonProfilePage() {
                               isCover={coverPhoto?.photo_id === photo.id}
                               onSetCover={photo.hosted_url ? () => handleSetCover(photo) : undefined}
                               settingCover={settingCover}
+                              onFallbackEvent={trackGalleryFallbackEvent}
                             />
                             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
                               <p className="text-xs text-white truncate">
@@ -5702,7 +6167,7 @@ export default function PersonProfilePage() {
                                 {photo.season && ` • S${photo.season}`}
                               </p>
                             </div>
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
@@ -5745,31 +6210,39 @@ export default function PersonProfilePage() {
                 </div>
                 <button
                   type="button"
-                  onClick={fetchBravoContent}
-                  disabled={bravoContentLoading}
+                  onClick={() => void fetchBravoVideos({ forceSync: true })}
+                  disabled={bravoVideosLoading}
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                 >
-                  {bravoContentLoading ? "Refreshing..." : "Refresh"}
+                  {bravoVideosLoading ? "Refreshing..." : "Refresh"}
                 </button>
               </div>
 
-              {bravoContentError && <p className="mb-4 text-sm text-red-600">{bravoContentError}</p>}
-              {!bravoContentLoading && bravoVideos.length === 0 && !bravoContentError && (
+              {bravoVideosError && <p className="mb-4 text-sm text-red-600">{bravoVideosError}</p>}
+              {bravoVideoSyncing && (
+                <p className="mb-4 text-sm text-zinc-500">Syncing high-quality video thumbnails...</p>
+              )}
+              {bravoVideoSyncWarning && !bravoVideosError && (
+                <p className="mb-4 text-sm text-amber-700">{bravoVideoSyncWarning}</p>
+              )}
+              {!bravoVideosLoading && bravoVideos.length === 0 && !bravoVideosError && (
                 <p className="text-sm text-zinc-500">No persisted Bravo videos found for this person.</p>
               )}
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {bravoVideos.map((video, index) => (
+                {bravoVideos.map((video, index) => {
+                  const thumbnailUrl = resolveBravoVideoThumbnailUrl(video);
+                  return (
                   <article key={`${video.clip_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
                     <a href={video.clip_url} target="_blank" rel="noopener noreferrer" className="group block">
                       <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
-                        {video.image_url ? (
+                        {thumbnailUrl ? (
                           <Image
-                            src={video.image_url}
+                            src={thumbnailUrl}
                             alt={video.title || "Bravo video"}
                             fill
                             className="object-cover transition group-hover:scale-105"
-                            unoptimized
+                            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                           />
                         ) : (
                           <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
@@ -5787,7 +6260,8 @@ export default function PersonProfilePage() {
                       )}
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -5804,15 +6278,15 @@ export default function PersonProfilePage() {
                 </div>
                 <button
                   type="button"
-                  onClick={fetchBravoContent}
-                  disabled={bravoContentLoading}
+                  onClick={() => void fetchBravoNews()}
+                  disabled={bravoNewsLoading}
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                 >
-                  {bravoContentLoading ? "Refreshing..." : "Refresh"}
+                  {bravoNewsLoading ? "Refreshing..." : "Refresh"}
                 </button>
               </div>
-              {bravoContentError && <p className="mb-4 text-sm text-red-600">{bravoContentError}</p>}
-              {!bravoContentLoading && bravoNews.length === 0 && !bravoContentError && (
+              {bravoNewsError && <p className="mb-4 text-sm text-red-600">{bravoNewsError}</p>}
+              {!bravoNewsLoading && bravoNews.length === 0 && !bravoNewsError && (
                 <p className="text-sm text-zinc-500">No persisted Bravo news found for this person.</p>
               )}
               <div className="grid gap-4 sm:grid-cols-2">
@@ -5821,7 +6295,13 @@ export default function PersonProfilePage() {
                     <a href={item.article_url} target="_blank" rel="noopener noreferrer" className="group block">
                       <div className="relative mb-3 aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200">
                         {item.image_url ? (
-                          <Image src={item.image_url} alt={item.headline || "Bravo news"} fill className="object-cover transition group-hover:scale-105" unoptimized />
+                          <Image
+                            src={item.image_url}
+                            alt={item.headline || "Bravo news"}
+                            fill
+                            className="object-cover transition group-hover:scale-105"
+                            sizes="(max-width: 640px) 100vw, 50vw"
+                          />
                         ) : (
                           <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
                         )}
@@ -5852,11 +6332,15 @@ export default function PersonProfilePage() {
                   {person.full_name}
                 </h3>
               </div>
+              {creditsLoading && (
+                <p className="mb-4 text-sm text-zinc-500">Loading credits...</p>
+              )}
+              {creditsError && <p className="mb-4 text-sm text-red-600">{creditsError}</p>}
               {showScopedCredits ? (
                 <div className="space-y-8">
                   <section className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-base font-semibold text-zinc-900">Cast Credits</h4>
+                      <h4 className="text-base font-semibold text-zinc-900">Cast</h4>
                       <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
                         {showScopedCredits.cast_groups.length} grouped
                       </span>
@@ -5867,7 +6351,10 @@ export default function PersonProfilePage() {
                           <div className="flex items-center justify-between gap-4">
                             <h5 className="text-sm font-semibold text-zinc-700">{currentScopedShowName}</h5>
                             <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
-                              {formatEpisodeCountLabel(currentShowCastEpisodeTotal)}
+                              {formatEpisodeAndNonEpisodicLabel(
+                                currentShowCastEpisodeTotal,
+                                currentShowCastNonEpisodicTotal
+                              )}
                             </span>
                           </div>
                         </summary>
@@ -5975,7 +6462,7 @@ export default function PersonProfilePage() {
 
                   <section className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-base font-semibold text-zinc-900">Crew Credits</h4>
+                      <h4 className="text-base font-semibold text-zinc-900">Crew</h4>
                       <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
                         {showScopedCredits.crew_groups.length} grouped
                       </span>
@@ -5986,7 +6473,10 @@ export default function PersonProfilePage() {
                           <div className="flex items-center justify-between gap-4">
                             <h5 className="text-sm font-semibold text-zinc-700">{currentScopedShowName}</h5>
                             <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
-                              {formatEpisodeCountLabel(currentShowCrewEpisodeTotal)}
+                              {formatEpisodeAndNonEpisodicLabel(
+                                currentShowCrewEpisodeTotal,
+                                currentShowCrewNonEpisodicTotal
+                              )}
                             </span>
                           </div>
                         </summary>
@@ -6181,15 +6671,27 @@ export default function PersonProfilePage() {
                       Preview and save structured Fandom data from allowlisted communities.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setFandomSyncOpen(true)}
-                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
-                  >
-                    Sync by Fandom
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void fetchFandomData()}
+                      disabled={fandomLoading}
+                      className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                    >
+                      {fandomLoading ? "Refreshing..." : "Refresh"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFandomSyncOpen(true)}
+                      className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Sync by Fandom
+                    </button>
+                  </div>
                 </div>
+                {fandomLoading && <p className="mt-3 text-sm text-zinc-500">Loading Fandom data...</p>}
                 {fandomSyncError && <p className="mt-3 text-sm text-red-600">{fandomSyncError}</p>}
+                {fandomError && <p className="mt-3 text-sm text-red-600">{fandomError}</p>}
               </div>
 
               {fandomData.length === 0 ? (

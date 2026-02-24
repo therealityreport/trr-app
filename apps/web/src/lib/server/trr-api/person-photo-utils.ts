@@ -10,6 +10,13 @@ export interface PersonPhotoCanonicalLike extends PersonPhotoLike {
   source_asset_id?: string | null;
   hosted_sha256?: string | null;
   media_asset_id?: string | null;
+  original_url?: string | null;
+  url?: string | null;
+  thumb_url?: string | null;
+  display_url?: string | null;
+  detail_url?: string | null;
+  crop_display_url?: string | null;
+  crop_detail_url?: string | null;
 }
 
 /**
@@ -64,6 +71,39 @@ function buildCanonicalKeys(photo: PersonPhotoCanonicalLike): string[] {
   return Array.from(new Set(keys));
 }
 
+function hasNonEmptyUrl(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function computeRenderableScore(photo: PersonPhotoCanonicalLike): number {
+  let score = 0;
+  if (hasNonEmptyUrl(photo.hosted_url)) score += 1;
+  if (hasNonEmptyUrl(photo.original_url) || hasNonEmptyUrl(photo.url)) score += 2;
+  if (
+    hasNonEmptyUrl(photo.thumb_url) ||
+    hasNonEmptyUrl(photo.display_url) ||
+    hasNonEmptyUrl(photo.detail_url)
+  ) {
+    score += 3;
+  }
+  if (hasNonEmptyUrl(photo.crop_display_url) || hasNonEmptyUrl(photo.crop_detail_url)) {
+    score += 3;
+  }
+  return score;
+}
+
+function shouldReplaceCanonicalPhoto<T extends PersonPhotoCanonicalLike>(existing: T, candidate: T): boolean {
+  const existingScore = computeRenderableScore(existing);
+  const candidateScore = computeRenderableScore(candidate);
+  if (candidateScore > existingScore) return true;
+  if (candidateScore < existingScore) return false;
+
+  if (existing.origin === "cast_photos" && candidate.origin === "media_links") {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Dedupe on canonical identity (source IDs / sha / hosted_url), preferring media_links rows on collisions.
  *
@@ -95,7 +135,7 @@ export function dedupePhotosByCanonicalKeysPreferMediaLinks<T extends PersonPhot
     }
 
     const existing = deduped[existingIndex];
-    if (existing.origin === "cast_photos" && photo.origin === "media_links") {
+    if (shouldReplaceCanonicalPhoto(existing, photo)) {
       deduped[existingIndex] = photo;
     }
 

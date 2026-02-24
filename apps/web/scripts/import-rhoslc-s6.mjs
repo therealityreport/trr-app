@@ -153,7 +153,7 @@ const QUESTIONS = [
   },
 
   // Cast Sliders (one per cast member)
-  ...CAST.map((member, idx) => ({
+  ...CAST.map((member) => ({
     key: `slider_${member.id}`,
     text: `Rate ${member.name} on the following scale`,
     type: "numeric",

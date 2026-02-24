@@ -41,6 +41,9 @@ describe("networks-streaming sync proxy route", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
+          run_id: "network-streaming-20260224T210000Z",
+          status: "stopped",
+          resume_cursor: { entity_type: "network", entity_key: "bravo" },
           entities_synced: 14,
           providers_synced: 22,
           links_enriched: 11,
@@ -68,10 +71,23 @@ describe("networks-streaming sync proxy route", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await POST(makeRequest({ force: true, skip_s3: false, dry_run: true, limit: 100 }));
+    const response = await POST(
+      makeRequest({
+        force: true,
+        skip_s3: false,
+        dry_run: true,
+        limit: 100,
+        refresh_external_sources: true,
+        batch_size: 50,
+        max_runtime_sec: 1200,
+        resume_run_id: "network-streaming-20260224T200000Z",
+      }),
+    );
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(payload.run_id).toBe("network-streaming-20260224T210000Z");
+    expect(payload.status).toBe("stopped");
     expect(payload.entities_synced).toBe(14);
     expect(payload.variants_black_mirrored).toBe(6);
     expect(payload.unresolved_logos_count).toBe(1);
@@ -84,7 +100,16 @@ describe("networks-streaming sync proxy route", () => {
         Authorization: "Bearer service-role-secret",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ force: true, skip_s3: false, dry_run: true, limit: 100 }),
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      force: true,
+      skip_s3: false,
+      dry_run: true,
+      refresh_external_sources: true,
+      batch_size: 50,
+      max_runtime_sec: 1200,
+      resume_run_id: "network-streaming-20260224T200000Z",
+      limit: 100,
     });
   });
 

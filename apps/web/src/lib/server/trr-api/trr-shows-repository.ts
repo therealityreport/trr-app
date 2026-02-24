@@ -60,6 +60,8 @@ export interface UpdateTrrShowInput {
   primaryLogoImageId?: string | null;
 }
 
+export type ShowFeaturedImageKind = "poster" | "backdrop";
+
 export interface TrrSeason {
   id: string;
   show_id: string;
@@ -216,6 +218,7 @@ export interface PaginationOptions {
 
 export interface SourcePaginationOptions extends PaginationOptions {
   sources?: string[];
+  includeBroken?: boolean;
 }
 
 const DEFAULT_LIMIT = 20;
@@ -240,41 +243,6 @@ function normalizePagination(options?: PaginationOptions): {
   const limit = Math.min(Math.max(options?.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
   const offset = Math.max(options?.offset ?? 0, 0);
   return { limit, offset };
-}
-
-/**
- * Helper: Fetch image URLs for shows from show_images table.
- * Mutates the shows array in place to add poster_url, backdrop_url, logo_url.
- */
-async function enrichShowsWithImageUrls(shows: TrrShow[]): Promise<void> {
-  if (shows.length === 0) return;
-
-  // Collect all image IDs
-  const imageIds = shows.flatMap((show) =>
-    [show.primary_poster_image_id, show.primary_backdrop_image_id, show.primary_logo_image_id]
-      .filter((id): id is string => id !== null)
-  );
-
-  if (imageIds.length === 0) return;
-
-  try {
-    const result = await pgQuery<{ id: string; hosted_url: string | null }>(
-      `SELECT id, hosted_url
-       FROM core.show_images
-       WHERE id = ANY($1::uuid[])`,
-      [imageIds]
-    );
-    const imageMap = new Map(result.rows.map((img) => [img.id, img.hosted_url]));
-
-    // Enrich each show
-    for (const show of shows) {
-      show.poster_url = show.primary_poster_image_id ? imageMap.get(show.primary_poster_image_id) ?? null : null;
-      show.backdrop_url = show.primary_backdrop_image_id ? imageMap.get(show.primary_backdrop_image_id) ?? null : null;
-      show.logo_url = show.primary_logo_image_id ? imageMap.get(show.primary_logo_image_id) ?? null : null;
-    }
-  } catch (error) {
-    console.warn("[trr-shows-repository] Failed to enrich shows with image URLs", error);
-  }
 }
 
 // ============================================================================
@@ -602,6 +570,39 @@ export async function getShowByImdbId(imdbId: string): Promise<TrrShow | null> {
     [imdbId]
   );
   return result.rows[0] ?? null;
+}
+
+const normalizeFeaturedShowImageKind = (
+  imageType: string | null | undefined,
+  kind: string | null | undefined
+): ShowFeaturedImageKind | "other" => {
+  const token = String(imageType ?? kind ?? "")
+    .trim()
+    .toLowerCase();
+  if (token === "poster") return "poster";
+  if (token === "backdrop" || token === "background") return "backdrop";
+  return "other";
+};
+
+/**
+ * Validate that a show image belongs to the given show and matches expected featured kind.
+ */
+export async function validateShowImageForField(
+  showId: string,
+  imageId: string,
+  expectedKind: ShowFeaturedImageKind
+): Promise<boolean> {
+  const result = await pgQuery<{ kind: string | null; image_type: string | null }>(
+    `SELECT kind, image_type
+     FROM core.show_images
+     WHERE id = $1::uuid
+       AND show_id = $2::uuid
+     LIMIT 1`,
+    [imageId, showId]
+  );
+  const row = result.rows[0];
+  if (!row) return false;
+  return normalizeFeaturedShowImageKind(row.image_type, row.kind) === expectedKind;
 }
 
 /**
@@ -2276,6 +2277,12 @@ export async function getPhotosByPersonId(
   options?: SourcePaginationOptions
 ): Promise<TrrPersonPhoto[]> {
   const { limit, offset } = normalizePagination(options);
+  const includeBroken = options?.includeBroken === true;
+  const isMarkedBroken = (metadataValue: unknown): boolean => {
+    if (!metadataValue || typeof metadataValue !== "object") return false;
+    const status = (metadataValue as Record<string, unknown>).gallery_status;
+    return typeof status === "string" && status.trim().toLowerCase() === "broken_unreachable";
+  };
 
   const person = await getPersonById(personId);
   const fullName = person?.full_name?.trim() ?? null;
@@ -2515,6 +2522,7 @@ export async function getPhotosByPersonId(
   });
 
   const castPhotosFiltered = castPhotos.filter((photo) =>
+    (includeBroken || !isMarkedBroken(photo.metadata)) &&
     isLikelyImage(photo.hosted_content_type, photo.hosted_url) &&
     isFandomPhotoOwnedByExpectedPerson({
       source: photo.source,
@@ -2599,6 +2607,7 @@ export async function getPhotosByPersonId(
       .map((row) => {
         if (!row.hosted_url) return null;
         const context = row.context;
+        if (!includeBroken && isMarkedBroken(context)) return null;
         const contextPeopleNames = Array.isArray((context as { people_names?: unknown })?.people_names)
           ? ((context as { people_names: unknown }).people_names as string[])
           : null;
@@ -2654,7 +2663,7 @@ export async function getPhotosByPersonId(
           {
             hostedUrl: row.hosted_url,
             originalUrl: readMetadataOriginalUrl(normalizedFandom.metadata),
-            sourceUrl: row.source_url,
+            sourceUrl: sourceUrlForNormalization,
           }
         );
         const sourcePageUrl =
@@ -2670,7 +2679,7 @@ export async function getPhotosByPersonId(
           person_id: personId,
           source: normalizedFandom.source,
           source_asset_id: row.source_asset_id ?? null,
-          url: row.source_url,
+          url: sourceUrlForNormalization,
           hosted_url: row.hosted_url,
           hosted_sha256: row.hosted_sha256 ?? null,
           hosted_content_type: row.hosted_content_type ?? null,
@@ -2706,6 +2715,7 @@ export async function getPhotosByPersonId(
 
   if (mediaPhotos.length > 0) {
     mediaPhotos = mediaPhotos.filter((photo) =>
+      (includeBroken || !isMarkedBroken(photo.metadata)) &&
       isLikelyImage(photo.hosted_content_type, photo.hosted_url) &&
       isFandomPhotoOwnedByExpectedPerson({
         source: photo.source,
@@ -2722,7 +2732,7 @@ export async function getPhotosByPersonId(
   const allPhotos = [...(castPhotosWithTags ?? []) as TrrPersonPhoto[], ...mediaPhotos];
 
   // Deduplicate by canonical identity (source IDs / sha / hosted_url),
-  // preferring media_links rows when collisions occur.
+  // preferring the row with the best renderable URL set on collisions.
   const dedupedPhotos = dedupePhotosByCanonicalKeysPreferMediaLinks(allPhotos);
 
   const normalizedSources = new Set(
@@ -2883,6 +2893,46 @@ export async function getCreditsByPersonId(
   imdbOnlyCredits.sort((a, b) => (a.show_name ?? "").localeCompare(b.show_name ?? ""));
   const combined = [...localCredits, ...imdbOnlyCredits];
   return combined.slice(offset, offset + limit);
+}
+
+/**
+ * Get the full credits dataset used for show-scoped person credit assembly.
+ * Fetches all paginated credits in bounded pages and deduplicates by credit id.
+ */
+export async function getCreditsForPersonShowScope(
+  personId: string,
+  showId: string,
+  options?: { pageSize?: number; maxPages?: number }
+): Promise<TrrPersonCredit[]> {
+  const pageSize = Math.min(Math.max(options?.pageSize ?? MAX_LIMIT, 1), MAX_LIMIT);
+  const maxPages = Math.max(options?.maxPages ?? 40, 1);
+
+  const allCredits: TrrPersonCredit[] = [];
+  let offset = 0;
+  for (let page = 0; page < maxPages; page += 1) {
+    const pageCredits = await getCreditsByPersonId(personId, {
+      limit: pageSize,
+      offset,
+    });
+    if (pageCredits.length === 0) break;
+    allCredits.push(...pageCredits);
+    if (pageCredits.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  const deduped: TrrPersonCredit[] = [];
+  const seen = new Set<string>();
+  for (const credit of allCredits) {
+    if (seen.has(credit.id)) continue;
+    seen.add(credit.id);
+    deduped.push(credit);
+  }
+
+  // Keep parameter meaningful for this scope helper and aid diagnostics.
+  if (!deduped.some((credit) => credit.show_id === showId)) {
+    return deduped;
+  }
+  return deduped;
 }
 
 /**

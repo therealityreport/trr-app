@@ -32,8 +32,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
-    if (!serviceRoleKey) {
+    const dedicatedToken = process.env.TRR_BACKEND_SERVICE_TOKEN?.trim() || null;
+    const serviceRoleToken =
+      process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY?.trim() || null;
+    const backendToken =
+      dedicatedToken ??
+      (process.env.NODE_ENV === "production" ? null : serviceRoleToken);
+    if (!backendToken) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }
 
@@ -45,7 +50,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const response = await fetch(backendRequestUrl.toString(), {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
+        Authorization: `Bearer ${backendToken}`,
       },
       cache: "no-store",
     });

@@ -12,6 +12,15 @@ interface RouteParams {
   params: Promise<{ personId: string }>;
 }
 
+const isValidHttpUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 /**
  * GET /api/admin/trr-api/people/[personId]/cover-photo
  *
@@ -62,11 +71,23 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const body = await request.json();
-    const { photo_id, photo_url } = body;
+    const isObjectBody = body && typeof body === "object";
+    const photo_id = isObjectBody ? (body as { photo_id?: unknown }).photo_id : null;
+    const photo_url = isObjectBody ? (body as { photo_url?: unknown }).photo_url : null;
+    const normalizedPhotoId =
+      typeof photo_id === "string" && photo_id.trim().length > 0 ? photo_id.trim() : null;
+    const normalizedPhotoUrl =
+      typeof photo_url === "string" && photo_url.trim().length > 0 ? photo_url.trim() : null;
 
-    if (!photo_id || !photo_url) {
+    if (!normalizedPhotoId || !normalizedPhotoUrl) {
       return NextResponse.json(
         { error: "photo_id and photo_url are required" },
+        { status: 400 }
+      );
+    }
+    if (!isValidHttpUrl(normalizedPhotoUrl)) {
+      return NextResponse.json(
+        { error: "photo_url must be a valid http(s) URL" },
         { status: 400 }
       );
     }
@@ -74,8 +95,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const authContext = { firebaseUid: user.uid, isAdmin: true };
     const coverPhoto = await setCoverPhoto(authContext, {
       person_id: personId,
-      photo_id,
-      photo_url,
+      photo_id: normalizedPhotoId,
+      photo_url: normalizedPhotoUrl,
     });
 
     return NextResponse.json({ coverPhoto });

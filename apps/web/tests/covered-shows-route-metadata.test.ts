@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
+
 const { requireAdminMock, getCoveredShowsMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getCoveredShowsMock: vi.fn(),
@@ -21,7 +23,7 @@ describe("covered shows route metadata fields", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getCoveredShowsMock.mockReset();
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
   });
 
   it("returns optional show metadata fields in GET payload", async () => {

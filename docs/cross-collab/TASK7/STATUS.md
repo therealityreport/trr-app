@@ -96,3 +96,18 @@ None.
     - `pnpm -C apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-communities-route.test.ts tests/reddit-community-flares-refresh-route.test.ts tests/reddit-flairs-service.test.ts tests/reddit-threads-route.test.ts` (5 files passed, 18 tests passed)
     - `pnpm -C apps/web run db:migrate` (pass; applied `024_add_post_flares_to_admin_reddit_communities.sql`)
     - `pnpm -C apps/web exec tsc -p tsconfig.json --noEmit --pretty false` (pass)
+
+- February 24, 2026: Closed follow-up gaps for week day drilldown, failure readability, and section loading states.
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+    - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `apps/web/tests/week-social-thumbnails.test.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+    - `apps/web/tests/social-week-detail-wiring.test.ts`
+  - Changes:
+    - Week detail now consumes `day` query and `social_platform` query to prefilter the page; includes clear-day action and day-scoped empty state copy.
+    - Advanced Run Health now shows grouped failure clusters and latest 5 failure events for faster triage.
+    - Added explicit skeleton-based section loading states for analytics progressive reveal.
+  - Validation:
+    - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'tests/season-social-analytics-section.test.tsx' 'tests/week-social-thumbnails.test.tsx'` (pass)
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/week-social-thumbnails.test.tsx tests/social-week-detail-wiring.test.ts` (`3 files passed`, `53 tests passed`; existing act warnings in one polling test remain)

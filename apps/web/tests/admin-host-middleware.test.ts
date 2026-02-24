@@ -3,16 +3,28 @@ import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
 
 const originalEnv = {
+  NODE_ENV: process.env.NODE_ENV,
   ADMIN_APP_ORIGIN: process.env.ADMIN_APP_ORIGIN,
+  ADMIN_APP_HOSTS: process.env.ADMIN_APP_HOSTS,
   ADMIN_ENFORCE_HOST: process.env.ADMIN_ENFORCE_HOST,
   ADMIN_STRICT_HOST_ROUTING: process.env.ADMIN_STRICT_HOST_ROUTING,
 };
 
 afterEach(() => {
+  if (typeof originalEnv.NODE_ENV === "undefined") {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = originalEnv.NODE_ENV;
+  }
   if (typeof originalEnv.ADMIN_APP_ORIGIN === "undefined") {
     delete process.env.ADMIN_APP_ORIGIN;
   } else {
     process.env.ADMIN_APP_ORIGIN = originalEnv.ADMIN_APP_ORIGIN;
+  }
+  if (typeof originalEnv.ADMIN_APP_HOSTS === "undefined") {
+    delete process.env.ADMIN_APP_HOSTS;
+  } else {
+    process.env.ADMIN_APP_HOSTS = originalEnv.ADMIN_APP_HOSTS;
   }
   if (typeof originalEnv.ADMIN_ENFORCE_HOST === "undefined") {
     delete process.env.ADMIN_ENFORCE_HOST;
@@ -27,6 +39,34 @@ afterEach(() => {
 });
 
 describe("admin host proxy", () => {
+  it("defaults to enforcing host routing in development when ADMIN_ENFORCE_HOST is unset", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/admin/fonts");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin/fonts");
+  });
+
+  it("allows /api/admin requests on localhost in development by default allowlist", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/api/admin/auth/status");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("redirects /admin requests on public host to admin origin", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -55,6 +95,7 @@ describe("admin host proxy", () => {
 
   it("blocks /api/admin requests on non-admin host", async () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 
@@ -67,8 +108,22 @@ describe("admin host proxy", () => {
     });
   });
 
+  it("allows /api/admin requests on ADMIN_APP_HOSTS hosts even when non-canonical", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_APP_HOSTS = "localhost";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/api/admin/auth/status");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("allows admin routes on admin host", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 
@@ -109,6 +164,7 @@ describe("admin host proxy", () => {
 
   it("redirects non-admin paths to /admin on admin host when strict routing is enabled", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_APP_HOSTS = "localhost";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "true";
 
@@ -117,5 +173,42 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin");
+  });
+
+  it("still redirects /admin UI paths to canonical origin even when host is allowlisted for admin API", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_APP_HOSTS = "localhost";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/admin/fonts");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin/fonts");
+  });
+
+  it("does not redirect /api/session/login on admin host when strict routing is enabled", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "true";
+
+    const request = new NextRequest("http://admin.localhost:3000/api/session/login");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("does not redirect /api/session/logout on admin host when strict routing is enabled", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "true";
+
+    const request = new NextRequest("http://admin.localhost:3000/api/session/logout");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 });

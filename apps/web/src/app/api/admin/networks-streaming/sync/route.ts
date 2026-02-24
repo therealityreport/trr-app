@@ -11,6 +11,10 @@ interface SyncRequestBody {
   skip_s3?: boolean;
   dry_run?: boolean;
   unresolved_only?: boolean;
+  refresh_external_sources?: boolean;
+  batch_size?: number;
+  max_runtime_sec?: number;
+  resume_run_id?: string;
   limit?: number;
 }
 
@@ -39,12 +43,32 @@ const sanitizeBody = (body: unknown): SyncRequestBody => {
     typeof limitRaw === "number" && Number.isFinite(limitRaw)
       ? Math.max(1, Math.min(5000, Math.floor(limitRaw)))
       : undefined;
+  const batchSizeRaw = source.batch_size;
+  const batchSize =
+    typeof batchSizeRaw === "number" && Number.isFinite(batchSizeRaw)
+      ? Math.max(1, Math.min(500, Math.floor(batchSizeRaw)))
+      : undefined;
+  const maxRuntimeRaw = source.max_runtime_sec;
+  const maxRuntimeSec =
+    typeof maxRuntimeRaw === "number" && Number.isFinite(maxRuntimeRaw)
+      ? Math.max(60, Math.min(3600, Math.floor(maxRuntimeRaw)))
+      : undefined;
+  const resumeRunId =
+    typeof source.resume_run_id === "string" && source.resume_run_id.trim().length > 0
+      ? source.resume_run_id.trim()
+      : undefined;
 
   return {
     ...(typeof source.force === "boolean" ? { force: source.force } : {}),
     ...(typeof source.skip_s3 === "boolean" ? { skip_s3: source.skip_s3 } : {}),
     ...(typeof source.dry_run === "boolean" ? { dry_run: source.dry_run } : {}),
     ...(typeof source.unresolved_only === "boolean" ? { unresolved_only: source.unresolved_only } : {}),
+    ...(typeof source.refresh_external_sources === "boolean"
+      ? { refresh_external_sources: source.refresh_external_sources }
+      : {}),
+    ...(batchSize !== undefined ? { batch_size: batchSize } : {}),
+    ...(maxRuntimeSec !== undefined ? { max_runtime_sec: maxRuntimeSec } : {}),
+    ...(resumeRunId !== undefined ? { resume_run_id: resumeRunId } : {}),
     ...(limit !== undefined ? { limit } : {}),
   };
 };

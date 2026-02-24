@@ -6,13 +6,13 @@ import {
   type RedditListingSort,
 } from "@/lib/server/admin/reddit-discovery-service";
 import { getRedditCommunityById } from "@/lib/server/admin/reddit-sources-repository";
+import { resolveEpisodeDiscussionRules } from "@/lib/server/admin/reddit-episode-rules";
 import {
   getSeasonById,
-  getSeasonByShowAndNumber,
   getSeasonsByShowId,
   getShowById,
 } from "@/lib/server/trr-api/trr-shows-repository";
-import { isValidPositiveIntegerString, isValidUuid } from "@/lib/server/validation/identifiers";
+import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +21,8 @@ interface RouteParams {
 }
 
 const SORTS: RedditListingSort[] = ["new", "hot", "top"];
+const MAX_PERIOD_LABELS = 5;
+const MAX_PERIOD_LABEL_LENGTH = 120;
 
 const parseSortModes = (input: string | null): RedditListingSort[] => {
   if (!input) return SORTS;
@@ -50,8 +52,27 @@ const parseIsoDateParam = (
   return { value: parsed.toISOString() };
 };
 
+const sanitizePeriodLabels = (values: string[]): string[] => {
+  const deduped = new Set<string>();
+  const output: string[] = [];
+  for (const raw of values) {
+    if (typeof raw !== "string") continue;
+    const normalized = raw.replace(/\s+/g, " ").trim().slice(0, MAX_PERIOD_LABEL_LENGTH);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (deduped.has(key)) continue;
+    deduped.add(key);
+    output.push(normalized);
+    if (output.length >= MAX_PERIOD_LABELS) {
+      break;
+    }
+  }
+  return output;
+};
+
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
+    const requestStartedAt = Date.now();
     await requireAdmin(request);
 
     const { communityId } = await params;
@@ -63,22 +84,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const rawSeasonNumber = request.nextUrl.searchParams.get("season_number");
-    if (rawSeasonNumber && !isValidPositiveIntegerString(rawSeasonNumber)) {
+    const legacyShowId = request.nextUrl.searchParams.get("show_id");
+    if (legacyShowId || rawSeasonNumber) {
       return NextResponse.json(
-        { error: "season_number must be a positive integer" },
+        {
+          error:
+            "Legacy params show_id/season_number are no longer supported. Use communityId with optional season_id.",
+        },
         { status: 400 },
       );
     }
-    const seasonNumber = rawSeasonNumber ? Number.parseInt(rawSeasonNumber, 10) : null;
 
     const seasonId = request.nextUrl.searchParams.get("season_id");
     if (seasonId && !isValidUuid(seasonId)) {
       return NextResponse.json({ error: "season_id must be a valid UUID" }, { status: 400 });
-    }
-
-    const legacyShowId = request.nextUrl.searchParams.get("show_id");
-    if (legacyShowId && !isValidUuid(legacyShowId)) {
-      return NextResponse.json({ error: "show_id must be a valid UUID" }, { status: 400 });
     }
 
     const parsedPeriodStart = parseIsoDateParam(
@@ -110,18 +129,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!community) {
       return NextResponse.json({ error: "Community not found" }, { status: 404 });
     }
-    if (legacyShowId && community.trr_show_id !== legacyShowId) {
-      return NextResponse.json(
-        { error: "show_id does not match selected community" },
-        { status: 400 },
-      );
-    }
-    if (legacyShowId) {
-      console.warn("[api] Legacy show_id query param used for episode discussion refresh");
-    }
-    if (rawSeasonNumber) {
-      console.warn("[api] Legacy season_number query param used for episode discussion refresh");
-    }
 
     const showId = community.trr_show_id;
     const show = await getShowById(showId);
@@ -138,14 +145,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           { status: 400 },
         );
       }
-    } else if (seasonNumber) {
-      resolvedSeason = await getSeasonByShowAndNumber(showId, seasonNumber);
-      if (!resolvedSeason) {
-        return NextResponse.json(
-          { error: "No season found for season_number on the selected show" },
-          { status: 404 },
-        );
-      }
     } else {
       const latest = await getSeasonsByShowId(showId, { limit: 1, offset: 0 });
       resolvedSeason = latest[0] ?? null;
@@ -160,13 +159,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "No season resolved" }, { status: 404 });
     }
 
+    const resolvedRules = resolveEpisodeDiscussionRules({
+      subreddit: community.subreddit,
+      showName: show.name,
+      showAliases: show.alternative_names,
+      isShowFocused: community.is_show_focused,
+      episodeTitlePatterns: community.episode_title_patterns,
+      analysisAllFlares: community.analysis_all_flares,
+    });
+
     const discovery = await discoverEpisodeDiscussionThreads({
       subreddit: community.subreddit,
       showName: show.name,
       showAliases: show.alternative_names,
       seasonNumber: resolvedSeason.season_number,
-      episodeTitlePatterns: community.episode_title_patterns,
-      episodeRequiredFlares: community.analysis_all_flares,
+      episodeTitlePatterns: resolvedRules.effectiveEpisodeTitlePatterns,
+      episodeRequiredFlares: resolvedRules.effectiveRequiredFlares,
       isShowFocused: community.is_show_focused,
       periodStart: parsedPeriodStart.value,
       periodEnd: parsedPeriodEnd.value,
@@ -174,13 +182,37 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       limitPerMode: parseLimit(request.nextUrl.searchParams.get("limit")),
     });
 
+    const selectedPeriodLabels = sanitizePeriodLabels(
+      request.nextUrl.searchParams.getAll("period_label"),
+    );
+
+    console.info("[reddit_episode_refresh_complete]", {
+      community_id: communityId,
+      show_id: showId,
+      season_id: resolvedSeason.id,
+      season_number: resolvedSeason.season_number,
+      subreddit: community.subreddit,
+      successful_sorts: discovery.successful_sorts,
+      failed_sorts: discovery.failed_sorts,
+      rate_limited_sorts: discovery.rate_limited_sorts,
+      candidates_found: discovery.candidates.length,
+      duration_ms: Date.now() - requestStartedAt,
+    });
+
     return NextResponse.json({
       community,
       candidates: discovery.candidates,
+      episode_matrix: discovery.episode_matrix,
       meta: {
         fetched_at: discovery.fetched_at,
         total_found: discovery.candidates.length,
         filters_applied: discovery.filters_applied,
+        effective_episode_title_patterns: resolvedRules.effectiveEpisodeTitlePatterns,
+        effective_required_flares: resolvedRules.effectiveRequiredFlares,
+        auto_seeded_required_flares: resolvedRules.autoSeededRequiredFlares,
+        successful_sorts: discovery.successful_sorts,
+        failed_sorts: discovery.failed_sorts,
+        rate_limited_sorts: discovery.rate_limited_sorts,
         season_context: {
           season_id: resolvedSeason.id,
           season_number: resolvedSeason.season_number,
@@ -190,8 +222,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             parsedPeriodStart.value ?? discovery.filters_applied.period_start ?? null,
           selected_window_end:
             parsedPeriodEnd.value ?? discovery.filters_applied.period_end ?? null,
-          selected_period_labels:
-            request.nextUrl.searchParams.getAll("period_label").filter(Boolean) ?? [],
+          selected_period_labels: selectedPeriodLabels,
         },
       },
     });

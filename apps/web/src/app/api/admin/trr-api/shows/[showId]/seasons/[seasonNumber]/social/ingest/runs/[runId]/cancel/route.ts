@@ -40,9 +40,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         { status: 400 },
       );
     }
+    const seasonIdHintRaw = request.nextUrl.searchParams.get("season_id");
+    if (seasonIdHintRaw && !isValidUuid(seasonIdHintRaw)) {
+      return NextResponse.json(
+        { error: "season_id must be a valid UUID", code: "BAD_REQUEST", retryable: false },
+        { status: 400 },
+      );
+    }
+    const seasonIdHint = seasonIdHintRaw ?? undefined;
 
     const data = await fetchSeasonBackendJson(showId, seasonNumber, `/ingest/runs/${runId}/cancel`, {
       method: "POST",
+      seasonIdHint,
       fallbackError: "Failed to cancel ingest run",
       retries: 1,
       timeoutMs: 30_000,

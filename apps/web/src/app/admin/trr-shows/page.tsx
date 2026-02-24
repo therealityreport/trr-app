@@ -154,6 +154,7 @@ export default function TrrShowsPage() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const latestSearchRequestRef = useRef(0);
+  const searchAbortControllerRef = useRef<AbortController | null>(null);
 
   // Sync-from-lists state
   const [syncingLists, setSyncingLists] = useState(false);
@@ -261,11 +262,17 @@ export default function TrrShowsPage() {
 
   const searchShows = useCallback(async (searchQuery: string) => {
     if (!searchQuery.trim()) {
+      searchAbortControllerRef.current?.abort();
+      searchAbortControllerRef.current = null;
       setResults(null);
       setSearchError(null);
       setLoading(false);
       return;
     }
+
+    searchAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortControllerRef.current = controller;
 
     const requestId = latestSearchRequestRef.current + 1;
     latestSearchRequestRef.current = requestId;
@@ -275,6 +282,7 @@ export default function TrrShowsPage() {
     try {
       const response = await fetchWithAuth(
         `/api/admin/trr-api/shows?q=${encodeURIComponent(searchQuery)}&limit=20`,
+        { signal: controller.signal },
       );
 
       if (!response.ok) {
@@ -286,10 +294,14 @@ export default function TrrShowsPage() {
       if (requestId !== latestSearchRequestRef.current) return;
       setResults(data);
     } catch (err) {
+      if (controller.signal.aborted) return;
       if (requestId !== latestSearchRequestRef.current) return;
       setSearchError(err instanceof Error ? err.message : "Search failed");
       setResults(null);
     } finally {
+      if (searchAbortControllerRef.current === controller) {
+        searchAbortControllerRef.current = null;
+      }
       if (requestId !== latestSearchRequestRef.current) return;
       setLoading(false);
     }
@@ -310,8 +322,17 @@ export default function TrrShowsPage() {
       void searchShows(q);
     }, 250);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [hasAccess, userKey, query, searchShows]);
+
+  useEffect(() => {
+    return () => {
+      searchAbortControllerRef.current?.abort();
+      searchAbortControllerRef.current = null;
+    };
+  }, []);
 
   const syncFromLists = useCallback(async () => {
     if (syncingLists) return;

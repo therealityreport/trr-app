@@ -91,11 +91,12 @@ describe("applyAdvancedFiltersToSeasonAssets", () => {
     expect(result.map((a) => a.id).sort()).toEqual(["imdb_no_text", "tmdb_no_text"]);
   });
 
-  it("filters by content type using fandom_section_tag normalization (PROMO)", () => {
+  it("filters by content type using fandom_section_tag normalization (PROMO, OSA-only)", () => {
     const assets: SeasonAsset[] = [
       mkAsset({
         id: "promo",
         source: "fandom",
+        context_section: "official season announcement",
         metadata: { fandom_section_tag: "Promo Portraits" },
       }),
       mkAsset({
@@ -112,6 +113,31 @@ describe("applyAdvancedFiltersToSeasonAssets", () => {
 
     const result = applyAdvancedFiltersToSeasonAssets(assets, filters);
     expect(result.map((a) => a.id)).toEqual(["promo"]);
+  });
+
+  it("applies promo filter using section classification (OSA cast promos only)", () => {
+    const assets: SeasonAsset[] = [
+      mkAsset({
+        id: "osa-cast",
+        kind: "profile",
+        context_section: "official season announcement",
+        metadata: { fandom_section_tag: "official season announcement" },
+      }),
+      mkAsset({
+        id: "non-osa-cast",
+        kind: "cast",
+        context_section: "promo",
+        metadata: { fandom_section_tag: "promo" },
+      }),
+    ];
+
+    const filters = {
+      ...DEFAULT_ADVANCED_FILTERS,
+      contentTypes: ["promo"],
+    };
+
+    const result = applyAdvancedFiltersToSeasonAssets(assets, filters);
+    expect(result.map((a) => a.id)).toEqual(["osa-cast"]);
   });
 
   it("filters by content type using fandom_section_label even when stored fandom_section_tag is OTHER (INTRO)", () => {

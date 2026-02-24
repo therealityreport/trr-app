@@ -1,10 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import {
+  buildUserScopedRouteCacheKey,
+  getRouteResponseCache,
+  parseCacheTtlMs,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
-const BACKEND_TIMEOUT_MS = 120_000;
+const BACKEND_TIMEOUT_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_CAST_ROLE_MEMBERS_TIMEOUT_MS,
+  20_000,
+);
 const MAX_ATTEMPTS = 2;
+const CAST_ROLE_MEMBERS_CACHE_NAMESPACE = "admin-show-cast-role-members";
+const CAST_ROLE_MEMBERS_CACHE_TTL_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_CAST_ROLE_MEMBERS_CACHE_TTL_MS,
+);
 
 type ProxyErrorCode =
   | "UPSTREAM_TIMEOUT"
@@ -50,12 +63,24 @@ const parseErrorMessage = (data: unknown, fallback: string): string => {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { showId } = await params;
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/cast-role-members`);
     if (!backendUrl) return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
 
     const { searchParams } = new URL(request.url);
+    const cacheKey = buildUserScopedRouteCacheKey(
+      user.uid,
+      `${showId}:list`,
+      request.nextUrl.searchParams,
+    );
+    const cachedData = getRouteResponseCache<unknown>(
+      CAST_ROLE_MEMBERS_CACHE_NAMESPACE,
+      cacheKey,
+    );
+    if (cachedData) {
+      return NextResponse.json(cachedData, { headers: { "x-trr-cache": "hit" } });
+    }
     const url = new URL(backendUrl);
     searchParams.forEach((value, key) => url.searchParams.set(key, value));
 
@@ -77,6 +102,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
         const data = await response.json().catch(() => ({}));
         if (response.ok) {
+          setRouteResponseCache(
+            CAST_ROLE_MEMBERS_CACHE_NAMESPACE,
+            cacheKey,
+            data,
+            CAST_ROLE_MEMBERS_CACHE_TTL_MS,
+          );
           return NextResponse.json(data);
         }
 

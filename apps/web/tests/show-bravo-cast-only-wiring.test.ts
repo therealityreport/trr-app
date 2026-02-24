@@ -21,7 +21,10 @@ describe("show bravo cast-only wiring", () => {
     expect(contents).toMatch(/cast_only:\s*true/);
     expect(contents).toMatch(/cast_only:\s*syncBravoRunMode === "cast-only"/);
     expect(contents).toMatch(/preview_result:/);
+    expect(contents).toMatch(/preview_signature:/);
     expect(contents).toMatch(/syncBravoPreviewResult/);
+    expect(contents).toMatch(/syncBravoPreviewSignature/);
+    expect(contents).toMatch(/syncBravoRunMode === "cast-only" && !syncBravoPreviewSignature/);
     expect(contents).toMatch(/Preview stale\. Re-run preview before committing cast-only sync\./);
     expect(contents).toMatch(/fetchCastRoleMembers\(\{\s*force:\s*true\s*\}\)/);
     expect(contents).toMatch(/status:\s*"pending"/);
@@ -30,5 +33,6 @@ describe("show bravo cast-only wiring", () => {
     expect(contents).toMatch(/setSyncFandomPersonCandidateResults/);
     expect(contents).toMatch(/fandom_candidate_results/);
     expect(contents).toMatch(/fandom_domains_used/);
+    expect(contents).toMatch(/Selected Mode:/);
   });
 });

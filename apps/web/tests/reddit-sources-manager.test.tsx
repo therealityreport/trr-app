@@ -29,7 +29,6 @@ const baseCommunity = {
   network_focus_targets: ["Bravo"],
   franchise_focus_targets: ["Real Housewives"],
   episode_title_patterns: ["Live Episode Discussion", "Post Episode Discussion"],
-  episode_required_flares: ["Salt Lake City"],
   post_flares_updated_at: "2026-01-01T00:00:00.000Z",
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -71,7 +70,6 @@ const secondaryCommunity = {
   network_focus_targets: [],
   franchise_focus_targets: [],
   episode_title_patterns: [],
-  episode_required_flares: [],
   post_flares_updated_at: null,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -341,8 +339,14 @@ describe("RedditSourcesManager", () => {
       expect(screen.getAllByText("Bravo RH").length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
-    expect(screen.getByRole("checkbox", { name: /Show matched only/i })).toBeChecked();
+    await waitFor(() => {
+      expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Bravo RH/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: /Show matched only/i })).toBeChecked();
+    });
     fireEvent.click(screen.getByRole("button", { name: "Discover Threads" }));
 
     expect(await screen.findByText("WWHL open thread")).toBeInTheDocument();
@@ -597,12 +601,15 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Bravo RH").length).toBeGreaterThan(0);
     });
+    await waitFor(() => {
+      expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
 
     expect(screen.queryByText("All Posts With Flair")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Show-focused mode enabled. All discovered posts are eligible (including no-flair posts)."),
+      await screen.findByText("Show-focused mode enabled. All discovered posts are eligible (including no-flair posts)."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: /Show matched only/i })).not.toBeInTheDocument();
   });
@@ -622,14 +629,43 @@ describe("RedditSourcesManager", () => {
           num_comments: 88,
           posted_at: "2026-02-24T12:00:00.000Z",
           link_flair_text: "Salt Lake City",
+          episode_number: 4,
+          discussion_type: "live",
           source_sorts: ["new"],
           match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [
+        {
+          episode_number: 4,
+          live: {
+            post_count: 1,
+            total_comments: 88,
+            total_upvotes: 321,
+            top_post_id: "episode-1",
+            top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-1/test/",
+          },
+          post: { post_count: 0, total_comments: 0, total_upvotes: 0, top_post_id: null, top_post_url: null },
+          weekly: { post_count: 0, total_comments: 0, total_upvotes: 0, top_post_id: null, top_post_url: null },
+          total_posts: 1,
+          total_comments: 88,
+          total_upvotes: 321,
         },
       ],
       meta: {
         fetched_at: "2026-02-24T12:00:00.000Z",
         total_found: 1,
         filters_applied: {},
+        effective_episode_title_patterns: [
+          "Live Episode Discussion",
+          "Post Episode Discussion",
+          "Weekly Episode Discussion",
+        ],
+        effective_required_flares: ["Salt Lake City"],
+        auto_seeded_required_flares: true,
+        successful_sorts: ["new", "top"],
+        failed_sorts: ["hot"],
+        rate_limited_sorts: ["hot"],
         season_context: { season_id: "season-1", season_number: 6 },
         period_context: {
           selected_window_start: "2026-01-01T00:00:00.000Z",
@@ -684,10 +720,6 @@ describe("RedditSourcesManager", () => {
         expect.anything(),
       );
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("season_number=6"),
-        expect.anything(),
-      );
-      expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("period_start=2026-01-01T00%3A00%3A00.000Z"),
         expect.anything(),
       );
@@ -698,8 +730,29 @@ describe("RedditSourcesManager", () => {
     });
 
     expect(await screen.findByText("RHOSLC - Season 6 - Episode 4 - Live Episode Discussion")).toBeInTheDocument();
+    expect(screen.getByText("Episode 4")).toBeInTheDocument();
+    expect(screen.getByText("1 posts")).toBeInTheDocument();
+    expect(screen.getAllByText("88 comments").length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Top post" })).toHaveAttribute(
+        "href",
+        "https://www.reddit.com/r/BravoRealHousewives/comments/episode-1/test/",
+      );
+    });
+    expect(
+      screen.getByText(
+        "Using temporary required flair: Salt Lake City (set in All Posts With Flair to persist).",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Failed sorts: hot/i)).toBeInTheDocument();
+    expect(screen.getByText(/Rate-limited: hot/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "No all-post flares selected. Episode refresh may be less strict for this multi-show community.",
+      ),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("321 upvotes")).toBeInTheDocument();
-    expect(screen.getByText("88 comments")).toBeInTheDocument();
+    expect(screen.getAllByText("88 comments").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Save Selected" }));
 

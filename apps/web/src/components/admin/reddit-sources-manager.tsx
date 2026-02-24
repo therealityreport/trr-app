@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 
 type ManagerMode = "season" | "global";
@@ -39,7 +39,6 @@ interface RedditCommunity {
   network_focus_targets: string[];
   franchise_focus_targets: string[];
   episode_title_patterns: string[];
-  episode_required_flares: string[];
   post_flares_updated_at: string | null;
   is_active: boolean;
   created_at: string;
@@ -98,17 +97,44 @@ interface EpisodeDiscussionCandidate {
   num_comments: number;
   posted_at: string | null;
   link_flair_text: string | null;
+  episode_number: number;
+  discussion_type: "live" | "post" | "weekly";
   source_sorts: Array<"new" | "hot" | "top">;
   match_reasons: string[];
+}
+
+interface EpisodeDiscussionMatrixCell {
+  post_count: number;
+  total_comments: number;
+  total_upvotes: number;
+  top_post_id: string | null;
+  top_post_url: string | null;
+}
+
+interface EpisodeDiscussionMatrixRow {
+  episode_number: number;
+  live: EpisodeDiscussionMatrixCell;
+  post: EpisodeDiscussionMatrixCell;
+  weekly: EpisodeDiscussionMatrixCell;
+  total_posts: number;
+  total_comments: number;
+  total_upvotes: number;
 }
 
 interface EpisodeDiscussionRefreshPayload {
   community?: RedditCommunityResponse;
   candidates?: EpisodeDiscussionCandidate[];
+  episode_matrix?: EpisodeDiscussionMatrixRow[];
   meta?: {
     fetched_at?: string;
     total_found?: number;
     filters_applied?: Record<string, unknown>;
+    effective_episode_title_patterns?: string[];
+    effective_required_flares?: string[];
+    auto_seeded_required_flares?: boolean;
+    successful_sorts?: Array<"new" | "hot" | "top">;
+    failed_sorts?: Array<"new" | "hot" | "top">;
+    rate_limited_sorts?: Array<"new" | "hot" | "top">;
     season_context?: {
       season_id?: string;
       season_number?: number;
@@ -188,7 +214,15 @@ const fmtNum = (value: number): string => {
   return value.toLocaleString();
 };
 
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_DEFAULT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = {
+  default: REQUEST_TIMEOUT_DEFAULT_MS,
+  communities: 45_000,
+  discover: 45_000,
+  seasonContext: 75_000,
+  episodeRefresh: 90_000,
+  episodeSave: 90_000,
+} as const;
 
 const toErrorMessage = (err: unknown, fallback: string): string =>
   err instanceof Error && err.message.trim().length > 0 ? err.message : fallback;
@@ -226,6 +260,12 @@ const toIsoDate = (value: string | null | undefined): string | null => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString();
+};
+
+const formatDiscussionTypeLabel = (type: "live" | "post" | "weekly"): string => {
+  if (type === "live") return "Live";
+  if (type === "post") return "Post";
+  return "Weekly";
 };
 
 const buildPeriodOptions = (weeklyRows: SocialAnalyticsPeriodRow[]): EpisodePeriodOption[] => {
@@ -275,7 +315,6 @@ const toCommunityModel = (community: RedditCommunityResponse): RedditCommunity =
   network_focus_targets: normalizeFlairList(community.network_focus_targets),
   franchise_focus_targets: normalizeFlairList(community.franchise_focus_targets),
   episode_title_patterns: normalizeFlairList(community.episode_title_patterns),
-  episode_required_flares: normalizeFlairList(community.episode_required_flares),
   post_flares_updated_at: community.post_flares_updated_at ?? null,
 });
 
@@ -367,15 +406,11 @@ export default function RedditSourcesManager({
   const [episodePatternInput, setEpisodePatternInput] = useState("");
   const [seasonOptions, setSeasonOptions] = useState<ShowSeasonOption[]>([]);
   const [episodeSeasonId, setEpisodeSeasonId] = useState<string | null>(seasonId ?? null);
-  const [episodeSeasonNumber, setEpisodeSeasonNumber] = useState<number | null>(
-    typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0
-      ? seasonNumber
-      : null,
-  );
   const [periodOptions, setPeriodOptions] = useState<EpisodePeriodOption[]>([]);
   const [selectedPeriodKey, setSelectedPeriodKey] = useState<string>("all-periods");
   const [periodsLoading, setPeriodsLoading] = useState(false);
   const [episodeContextWarning, setEpisodeContextWarning] = useState<string | null>(null);
+  const [episodeMatrix, setEpisodeMatrix] = useState<EpisodeDiscussionMatrixRow[]>([]);
   const [episodeCandidates, setEpisodeCandidates] = useState<EpisodeDiscussionCandidate[]>([]);
   const [episodeSelectedPostIds, setEpisodeSelectedPostIds] = useState<string[]>([]);
   const [episodeRefreshing, setEpisodeRefreshing] = useState(false);
@@ -384,21 +419,44 @@ export default function RedditSourcesManager({
     null,
   );
   const isBusy = busyAction !== null;
+  const seasonOptionsCacheRef = useRef<Map<string, ShowSeasonOption[]>>(new Map());
+  const periodOptionsCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
+  const episodeContextRequestTokenRef = useRef(0);
+  const episodeContextAbortRef = useRef<AbortController | null>(null);
 
   const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
 
   const fetchWithTimeout = useCallback(
-    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    async (
+      input: RequestInfo | URL,
+      init?: RequestInit & { timeoutMs?: number },
+    ): Promise<Response> => {
+      const { timeoutMs, ...requestInit } = init ?? {};
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const timeout = setTimeout(
+        () => controller.abort(),
+        timeoutMs ?? REQUEST_TIMEOUT_MS.default,
+      );
+      const upstreamSignal = requestInit.signal;
+      const abortFromUpstream = () => controller.abort();
+      if (upstreamSignal) {
+        if (upstreamSignal.aborted) {
+          controller.abort();
+        } else {
+          upstreamSignal.addEventListener("abort", abortFromUpstream, { once: true });
+        }
+      }
       try {
-        return await fetchAdminWithAuth(input, { ...init, signal: controller.signal });
+        return await fetchAdminWithAuth(input, { ...requestInit, signal: controller.signal });
       } catch (err) {
         if ((err as { name?: string } | null)?.name === "AbortError") {
           throw new Error("Request timed out. Please try again.");
         }
         throw err;
       } finally {
+        if (upstreamSignal) {
+          upstreamSignal.removeEventListener("abort", abortFromUpstream);
+        }
         clearTimeout(timeout);
       }
     },
@@ -426,8 +484,6 @@ export default function RedditSourcesManager({
                     patch.franchise_focus_targets ?? community.franchise_focus_targets,
                   episode_title_patterns:
                     patch.episode_title_patterns ?? community.episode_title_patterns,
-                  episode_required_flares:
-                    patch.episode_required_flares ?? community.episode_required_flares,
                   post_flares_updated_at: patch.post_flares_updated_at ?? community.post_flares_updated_at,
                 }
               : community,
@@ -483,6 +539,7 @@ export default function RedditSourcesManager({
     const response = await fetchWithTimeout("/api/admin/covered-shows", {
       headers,
       cache: "no-store",
+      timeoutMs: REQUEST_TIMEOUT_MS.communities,
     });
     if (!response.ok) {
       throw new Error("Failed to fetch covered shows");
@@ -508,6 +565,7 @@ export default function RedditSourcesManager({
     const response = await fetchWithTimeout(`/api/admin/reddit/communities${qs ? `?${qs}` : ""}`, {
       headers,
       cache: "no-store",
+      timeoutMs: REQUEST_TIMEOUT_MS.communities,
     });
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
@@ -552,8 +610,8 @@ export default function RedditSourcesManager({
     setPeriodOptions([]);
     setSelectedPeriodKey("all-periods");
     setEpisodeSeasonId(null);
-    setEpisodeSeasonNumber(null);
     setEpisodeContextWarning(null);
+    setEpisodeMatrix([]);
   }, [selectedCommunityId]);
 
   const selectedCommunity = useMemo(
@@ -566,8 +624,29 @@ export default function RedditSourcesManager({
     [periodOptions, selectedPeriodKey],
   );
 
+  const isEpisodeContextRequestActive = useCallback(
+    (requestToken: number, signal?: AbortSignal) =>
+      episodeContextRequestTokenRef.current === requestToken && !signal?.aborted,
+    [],
+  );
+
   const loadPeriodOptionsForSeason = useCallback(
-    async (community: RedditCommunity, season: ShowSeasonOption) => {
+    async (
+      community: RedditCommunity,
+      season: ShowSeasonOption,
+      options?: { signal?: AbortSignal; requestToken?: number },
+    ) => {
+      const requestToken = options?.requestToken ?? episodeContextRequestTokenRef.current;
+      const periodCacheKey = `${community.trr_show_id}:${season.id}`;
+      const cachedPeriods = periodOptionsCacheRef.current.get(periodCacheKey);
+      if (cachedPeriods) {
+        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+          setPeriodOptions(cachedPeriods);
+          setSelectedPeriodKey("all-periods");
+        }
+        return;
+      }
+
       const headers = await getAuthHeaders();
       const analyticsParams = new URLSearchParams();
       analyticsParams.set("season_id", season.id);
@@ -576,6 +655,8 @@ export default function RedditSourcesManager({
         {
           headers,
           cache: "no-store",
+          signal: options?.signal,
+          timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
         },
       );
       if (!analyticsResponse.ok) {
@@ -597,8 +678,11 @@ export default function RedditSourcesManager({
 
       const periods = buildPeriodOptions(Array.isArray(analyticsPayload.weekly) ? analyticsPayload.weekly : []);
       if (periods.length > 0) {
-        setPeriodOptions(periods);
-        setSelectedPeriodKey("all-periods");
+        periodOptionsCacheRef.current.set(periodCacheKey, periods);
+        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+          setPeriodOptions(periods);
+          setSelectedPeriodKey("all-periods");
+        }
         return;
       }
 
@@ -609,52 +693,70 @@ export default function RedditSourcesManager({
       const fallbackStartIso = toIsoDate(fallbackStart);
       const fallbackEndIso = toIsoDate(fallbackEnd);
       if (fallbackStartIso && fallbackEndIso) {
-        setPeriodOptions([
+        const fallbackPeriods: EpisodePeriodOption[] = [
           {
             key: "all-periods",
             label: "All Periods",
             start: fallbackStartIso,
             end: fallbackEndIso,
           },
-        ]);
-        setSelectedPeriodKey("all-periods");
+        ];
+        periodOptionsCacheRef.current.set(periodCacheKey, fallbackPeriods);
+        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+          setPeriodOptions(fallbackPeriods);
+          setSelectedPeriodKey("all-periods");
+        }
       } else {
-        setPeriodOptions([]);
+        periodOptionsCacheRef.current.set(periodCacheKey, []);
+        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+          setPeriodOptions([]);
+        }
       }
     },
-    [fetchWithTimeout, getAuthHeaders],
+    [fetchWithTimeout, getAuthHeaders, isEpisodeContextRequestActive],
   );
 
   const loadSeasonAndPeriodContext = useCallback(
-    async (community: RedditCommunity) => {
+    async (community: RedditCommunity, options?: { signal?: AbortSignal; requestToken?: number }) => {
+      const requestToken = options?.requestToken ?? episodeContextRequestTokenRef.current;
       setPeriodsLoading(true);
       setEpisodeContextWarning(null);
       try {
-        const headers = await getAuthHeaders();
-        const seasonsResponse = await fetchWithTimeout(
-          `/api/admin/trr-api/shows/${community.trr_show_id}/seasons?limit=100`,
-          {
-            headers,
-            cache: "no-store",
-          },
-        );
-        if (!seasonsResponse.ok) {
-          throw new Error("Failed to load seasons for episode discussions");
+        const seasonCacheKey = community.trr_show_id;
+        let seasons = seasonOptionsCacheRef.current.get(seasonCacheKey) ?? null;
+        if (!seasons) {
+          const headers = await getAuthHeaders();
+          const seasonsResponse = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${community.trr_show_id}/seasons?limit=100`,
+            {
+              headers,
+              cache: "no-store",
+              signal: options?.signal,
+              timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+            },
+          );
+          if (!seasonsResponse.ok) {
+            throw new Error("Failed to load seasons for episode discussions");
+          }
+          const seasonsPayload = (await seasonsResponse.json().catch(() => ({}))) as {
+            seasons?: ShowSeasonOption[];
+          };
+          seasons = Array.isArray(seasonsPayload.seasons)
+            ? [...seasonsPayload.seasons]
+                .filter(
+                  (season): season is ShowSeasonOption =>
+                    Boolean(season?.id) &&
+                    typeof season.season_number === "number" &&
+                    Number.isFinite(season.season_number),
+                )
+                .sort((a, b) => b.season_number - a.season_number)
+            : [];
+          seasonOptionsCacheRef.current.set(seasonCacheKey, seasons);
         }
-        const seasonsPayload = (await seasonsResponse.json().catch(() => ({}))) as {
-          seasons?: ShowSeasonOption[];
-        };
-        const seasons = Array.isArray(seasonsPayload.seasons)
-          ? [...seasonsPayload.seasons]
-              .filter(
-                (season): season is ShowSeasonOption =>
-                  Boolean(season?.id) &&
-                  typeof season.season_number === "number" &&
-                  Number.isFinite(season.season_number),
-              )
-              .sort((a, b) => b.season_number - a.season_number)
-          : [];
-        setSeasonOptions(seasons);
+        if (!isEpisodeContextRequestActive(requestToken, options?.signal)) {
+          return;
+        }
+        setSeasonOptions(seasons ?? []);
         if (seasons.length === 0) {
           throw new Error("No seasons found for this show");
         }
@@ -669,24 +771,44 @@ export default function RedditSourcesManager({
           throw new Error("No season could be resolved for this community");
         }
 
-        setEpisodeSeasonId(resolvedSeason.id);
-        setEpisodeSeasonNumber(resolvedSeason.season_number);
-        await loadPeriodOptionsForSeason(community, resolvedSeason);
+        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+          setEpisodeSeasonId(resolvedSeason.id);
+        }
+        await loadPeriodOptionsForSeason(community, resolvedSeason, options);
       } finally {
-        setPeriodsLoading(false);
+        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+          setPeriodsLoading(false);
+        }
       }
     },
-    [fetchWithTimeout, getAuthHeaders, loadPeriodOptionsForSeason, seasonId, seasonNumber],
+    [
+      fetchWithTimeout,
+      getAuthHeaders,
+      isEpisodeContextRequestActive,
+      loadPeriodOptionsForSeason,
+      seasonId,
+      seasonNumber,
+    ],
   );
 
   useEffect(() => {
     if (!selectedCommunity) return;
-    let cancelled = false;
+    const requestToken = episodeContextRequestTokenRef.current + 1;
+    episodeContextRequestTokenRef.current = requestToken;
+    episodeContextAbortRef.current?.abort();
+    const controller = new AbortController();
+    episodeContextAbortRef.current = controller;
     void (async () => {
       try {
-        await loadSeasonAndPeriodContext(selectedCommunity);
+        await loadSeasonAndPeriodContext(selectedCommunity, {
+          signal: controller.signal,
+          requestToken,
+        });
       } catch (err) {
-        if (!cancelled) {
+        if (
+          !controller.signal.aborted &&
+          episodeContextRequestTokenRef.current === requestToken
+        ) {
           setEpisodeContextWarning(
             toErrorMessage(
               err,
@@ -697,7 +819,10 @@ export default function RedditSourcesManager({
       }
     })();
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (episodeContextAbortRef.current === controller) {
+        episodeContextAbortRef.current = null;
+      }
     };
   }, [loadSeasonAndPeriodContext, selectedCommunity]);
 
@@ -1127,6 +1252,7 @@ export default function RedditSourcesManager({
         {
           headers,
           cache: "no-store",
+          timeoutMs: REQUEST_TIMEOUT_MS.discover,
         },
       );
       if (!response.ok) {
@@ -1194,9 +1320,6 @@ export default function RedditSourcesManager({
       if (episodeSeasonId) {
         params.set("season_id", episodeSeasonId);
       }
-      if (episodeSeasonNumber) {
-        params.set("season_number", String(episodeSeasonNumber));
-      }
       if (selectedPeriod) {
         params.set("period_start", selectedPeriod.start);
         params.set("period_end", selectedPeriod.end);
@@ -1208,6 +1331,7 @@ export default function RedditSourcesManager({
           method: "GET",
           headers,
           cache: "no-store",
+          timeoutMs: REQUEST_TIMEOUT_MS.episodeRefresh,
         },
       );
       const payload = (await response.json().catch(() => ({}))) as EpisodeDiscussionRefreshPayload;
@@ -1223,20 +1347,14 @@ export default function RedditSourcesManager({
       }
 
       const nextCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+      const nextMatrix = Array.isArray(payload.episode_matrix) ? payload.episode_matrix : [];
+      setEpisodeMatrix(nextMatrix);
       setEpisodeCandidates(nextCandidates);
       setEpisodeSelectedPostIds(nextCandidates.map((candidate) => candidate.reddit_post_id));
       setEpisodeMeta(payload.meta ?? null);
       const resolvedSeasonId = payload.meta?.season_context?.season_id;
-      const resolvedSeasonNumber = payload.meta?.season_context?.season_number;
       if (typeof resolvedSeasonId === "string" && resolvedSeasonId.trim().length > 0) {
         setEpisodeSeasonId(resolvedSeasonId);
-      }
-      if (
-        typeof resolvedSeasonNumber === "number" &&
-        Number.isFinite(resolvedSeasonNumber) &&
-        resolvedSeasonNumber > 0
-      ) {
-        setEpisodeSeasonNumber(resolvedSeasonNumber);
       }
     } catch (err) {
       setError(toErrorMessage(err, "Failed to refresh episode discussions"));
@@ -1245,7 +1363,6 @@ export default function RedditSourcesManager({
     }
   }, [
     episodeSeasonId,
-    episodeSeasonNumber,
     fetchWithTimeout,
     getAuthHeaders,
     mergeCommunityPatch,
@@ -1272,6 +1389,7 @@ export default function RedditSourcesManager({
         {
           method: "POST",
           headers: { ...headers, "Content-Type": "application/json" },
+          timeoutMs: REQUEST_TIMEOUT_MS.episodeSave,
           body: JSON.stringify({
             season_id: episodeSeasonId ?? null,
             threads: selectedThreads.map((thread) => ({
@@ -2212,10 +2330,17 @@ export default function RedditSourcesManager({
                               const nextSeasonId = event.target.value || null;
                               setEpisodeSeasonId(nextSeasonId);
                               const season = seasonOptions.find((item) => item.id === nextSeasonId);
-                              setEpisodeSeasonNumber(season?.season_number ?? null);
                               if (season) {
+                                const requestToken = episodeContextRequestTokenRef.current + 1;
+                                episodeContextRequestTokenRef.current = requestToken;
+                                episodeContextAbortRef.current?.abort();
+                                const controller = new AbortController();
+                                episodeContextAbortRef.current = controller;
                                 setPeriodsLoading(true);
-                                void loadPeriodOptionsForSeason(selectedCommunity, season)
+                                void loadPeriodOptionsForSeason(selectedCommunity, season, {
+                                  signal: controller.signal,
+                                  requestToken,
+                                })
                                   .catch((err) => {
                                     setEpisodeContextWarning(
                                       toErrorMessage(
@@ -2225,7 +2350,12 @@ export default function RedditSourcesManager({
                                     );
                                   })
                                   .finally(() => {
-                                    setPeriodsLoading(false);
+                                    if (
+                                      !controller.signal.aborted &&
+                                      episodeContextRequestTokenRef.current === requestToken
+                                    ) {
+                                      setPeriodsLoading(false);
+                                    }
                                   });
                               } else {
                                 setPeriodOptions([]);
@@ -2271,7 +2401,7 @@ export default function RedditSourcesManager({
                           onClick={() => void handleRefreshEpisodeDiscussions()}
                           className="self-end rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
                         >
-                          Refresh Candidates
+                          Refresh Episode Discussions
                         </button>
                       </div>
 
@@ -2361,11 +2491,18 @@ export default function RedditSourcesManager({
                           Required flares for episode refresh are sourced from
                           {" "}
                           <span className="font-semibold">All Posts With Flair</span>.
-                          {selectedCommunity.analysis_all_flares.length === 0 && (
+                          {selectedCommunity.analysis_all_flares.length === 0 &&
+                            !episodeMeta?.auto_seeded_required_flares && (
                             <span className="block pt-1 text-amber-700">
-                              No all-post flares selected. Episode refresh will be less strict for this multi-show community.
+                              No all-post flares selected. Episode refresh may be less strict for this multi-show community.
                             </span>
                           )}
+                        </div>
+                      )}
+
+                      {episodeMeta?.auto_seeded_required_flares && (
+                        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+                          Using temporary required flair: Salt Lake City (set in All Posts With Flair to persist).
                         </div>
                       )}
 
@@ -2381,7 +2518,67 @@ export default function RedditSourcesManager({
                           {episodeMeta.period_context?.selected_period_labels?.[0]
                             ? ` · ${episodeMeta.period_context.selected_period_labels[0]}`
                             : ""}
+                          {episodeMeta.failed_sorts && episodeMeta.failed_sorts.length > 0
+                            ? ` · Failed sorts: ${episodeMeta.failed_sorts.join(", ")}`
+                            : ""}
+                          {episodeMeta.rate_limited_sorts &&
+                          episodeMeta.rate_limited_sorts.length > 0
+                            ? ` · Rate-limited: ${episodeMeta.rate_limited_sorts.join(", ")}`
+                            : ""}
                         </p>
+                      )}
+
+                      {episodeMatrix.length > 0 && (
+                        <div className="mb-3 overflow-x-auto rounded-lg border border-zinc-200">
+                          <table className="min-w-full text-left text-xs">
+                            <thead className="bg-zinc-50 text-zinc-600">
+                              <tr>
+                                <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Episode</th>
+                                <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Live</th>
+                                <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Post</th>
+                                <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Weekly</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-100">
+                              {episodeMatrix.map((row) => {
+                                const cells: Array<["live" | "post" | "weekly", EpisodeDiscussionMatrixCell]> = [
+                                  ["live", row.live],
+                                  ["post", row.post],
+                                  ["weekly", row.weekly],
+                                ];
+                                return (
+                                  <tr key={`episode-matrix-${row.episode_number}`}>
+                                    <td className="whitespace-nowrap px-2 py-2 font-semibold text-zinc-800">
+                                      Episode {row.episode_number}
+                                    </td>
+                                    {cells.map(([cellKey, cell]) => (
+                                      <td
+                                        key={`episode-matrix-cell-${row.episode_number}-${cellKey}`}
+                                        className="px-2 py-2 text-zinc-600"
+                                      >
+                                        <div>{fmtNum(cell.post_count)} posts</div>
+                                        <div>{fmtNum(cell.total_comments)} comments</div>
+                                        {(() => {
+                                          if (!cell.top_post_url) return null;
+                                          return (
+                                            <a
+                                              href={cell.top_post_url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-[11px] font-semibold text-blue-700 hover:underline"
+                                            >
+                                              Top post
+                                            </a>
+                                          );
+                                        })()}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
 
                       {episodeCandidates.length === 0 ? (
@@ -2419,6 +2616,10 @@ export default function RedditSourcesManager({
                                       {candidate.title}
                                     </a>
                                     <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                                      <span>
+                                        Episode {candidate.episode_number} ·{" "}
+                                        {formatDiscussionTypeLabel(candidate.discussion_type)}
+                                      </span>
                                       <span>{fmtNum(candidate.score)} upvotes</span>
                                       <span>{fmtNum(candidate.num_comments)} comments</span>
                                       <span>{fmtDateTime(candidate.posted_at)}</span>

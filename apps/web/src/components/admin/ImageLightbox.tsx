@@ -19,6 +19,10 @@ import {
   THUMBNAIL_CROP_LIMITS,
   resolveThumbnailViewportRect,
 } from "@/lib/thumbnail-crop";
+import { LightboxShell } from "@/components/admin/image-lightbox/LightboxShell";
+import { LightboxImageStage } from "@/components/admin/image-lightbox/LightboxImageStage";
+import { LightboxMetadataPanel } from "@/components/admin/image-lightbox/LightboxMetadataPanel";
+import { LightboxManagementActions } from "@/components/admin/image-lightbox/LightboxManagementActions";
 
 // Inline SVG icons to avoid external dependencies
 const XIcon = ({ className }: { className?: string }) => (
@@ -329,6 +333,9 @@ function MetadataPanel({
   const sourceBadgeLabel = formatSourceBadgeLabel(metadata.source, metadata.sourceUrl);
   const foundOnSourceLabel = formatFoundOnSourceLabel(metadata.source, metadata.sourceUrl);
   const foundOnPageTitle = metadata.sourcePageTitle || "Unknown";
+  const galleryStatusNormalized = (metadata.galleryStatus ?? "").trim().toLowerCase();
+  const isBrokenUnreachable = galleryStatusNormalized === "broken_unreachable";
+  const galleryStatusLabel = metadata.galleryStatus ? metadata.galleryStatus.replace(/_/g, " ") : null;
   const mirrorFileName =
     typeof metadata.s3MirrorFileName === "string" && metadata.s3MirrorFileName.trim().length > 0
       ? metadata.s3MirrorFileName.trim()
@@ -395,6 +402,17 @@ function MetadataPanel({
     { label: "Caption", value: metadata.caption ?? "—" },
     { label: "Fetched", value: formatDateLabel(metadata.fetchedAt) },
   ];
+  if (galleryStatusLabel) {
+    metadataCoverageRows.push({ label: "Gallery Status", value: galleryStatusLabel });
+    metadataCoverageRows.push({
+      label: "Gallery Status Reason",
+      value: metadata.galleryStatusReason ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Gallery Status Checked",
+      value: metadata.galleryStatusCheckedAt ? metadata.galleryStatusCheckedAt.toLocaleString() : "—",
+    });
+  }
 
   const handleAction = async (action: string, handler?: () => Promise<void>) => {
     if (!handler || actionLoading) return;
@@ -601,6 +619,14 @@ function MetadataPanel({
               style={{ backgroundColor: metadata.sourceBadgeColor }}
             >
               {sourceBadgeLabel.toUpperCase()}
+            </span>
+          )}
+          {isBrokenUnreachable && (
+            <span
+              className="inline-block rounded px-2 py-0.5 text-xs font-semibold text-white bg-red-500/90"
+              title={metadata.galleryStatusReason ?? undefined}
+            >
+              BROKEN (UNREACHABLE)
             </span>
           )}
         </div>
@@ -924,7 +950,7 @@ function MetadataPanel({
 
       {/* Management Actions */}
       {management?.canManage && hasAnyActions && (
-        <div className="mt-6 pt-4 border-t border-white/10">
+        <LightboxManagementActions>
           <span className="tracking-widest text-[10px] uppercase text-white/50">
             Actions
           </span>
@@ -1076,11 +1102,11 @@ function MetadataPanel({
               disabled={actionLoading !== null || Boolean(deleteDisabledReason)}
               title={deleteDisabledReason ?? undefined}
               className="w-full rounded bg-red-500/20 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/30 disabled:opacity-50"
-            >
-              {actionLoading === "delete" ? "Deleting..." : "Delete"}
-            </button>
+              >
+                {actionLoading === "delete" ? "Deleting..." : "Delete"}
+              </button>
           </div>
-        </div>
+        </LightboxManagementActions>
       )}
     </div>
   );
@@ -1499,14 +1525,7 @@ export function ImageLightbox({
       : null;
 
   return (
-    <div
-      ref={modalRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={alt}
-    >
+    <LightboxShell modalRef={modalRef} alt={alt} onBackdropClick={onClose}>
       {/* Close button */}
       <button
         ref={closeButtonRef}
@@ -1567,7 +1586,7 @@ export function ImageLightbox({
         className="relative flex max-h-[90vh] max-w-[90vw] flex-col overflow-hidden rounded-lg md:flex-row"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="relative flex flex-1 items-center justify-center bg-black/20">
+        <LightboxImageStage>
           {imageFailed ? (
             <div className="flex h-[60vh] w-[60vw] max-w-[90vw] items-center justify-center rounded-lg bg-black/40 text-sm text-white/70">
               Image failed to load
@@ -1747,53 +1766,45 @@ export function ImageLightbox({
               )}
             </div>
           )}
-        </div>
+        </LightboxImageStage>
 
         {metadata && (
-          <div
-            className={`relative shrink-0 overflow-hidden border-t border-white/10 transition-all duration-300 ease-out md:border-t-0 md:border-l ${
-              showMetadata
-                ? "h-64 w-full md:h-auto md:w-80"
-                : "h-0 w-full md:h-auto md:w-0"
-            }`}
-          >
-            <div className={showMetadata ? "h-full w-full" : "pointer-events-none h-full w-full"}>
-              <MetadataPanel
-                metadata={metadata}
-                isExpanded={showMetadata}
-                runtimeDimensions={previewImageSize}
-                management={
-                  canManage
-                    ? {
-                        isArchived,
-                        isStarred,
-                        canManage,
-                        onRefresh,
-                        onSync,
-                        onCount,
-                        onCrop,
-                        onIdText,
-                        onResize,
-                        onArchive,
-                        onUnarchive,
-                        onToggleStar,
-                        onSetFeaturedPoster,
-                        onSetFeaturedBackdrop,
-                        isFeaturedPoster,
-                        isFeaturedBackdrop,
-                        onUpdateContentType,
-                        onDelete,
-                        onReassign,
-                        actionDisabledReasons,
-                      }
-                    : undefined
-                }
-                extras={metadataExtras}
-                showExtras={showEditTools}
-                onToggleExtras={() => setShowEditTools((prev) => !prev)}
-              />
-            </div>
-          </div>
+          <LightboxMetadataPanel showMetadata={showMetadata}>
+            <MetadataPanel
+              metadata={metadata}
+              isExpanded={showMetadata}
+              runtimeDimensions={previewImageSize}
+              management={
+                canManage
+                  ? {
+                      isArchived,
+                      isStarred,
+                      canManage,
+                      onRefresh,
+                      onSync,
+                      onCount,
+                      onCrop,
+                      onIdText,
+                      onResize,
+                      onArchive,
+                      onUnarchive,
+                      onToggleStar,
+                      onSetFeaturedPoster,
+                      onSetFeaturedBackdrop,
+                      isFeaturedPoster,
+                      isFeaturedBackdrop,
+                      onUpdateContentType,
+                      onDelete,
+                      onReassign,
+                      actionDisabledReasons,
+                    }
+                  : undefined
+              }
+              extras={metadataExtras}
+              showExtras={showEditTools}
+              onToggleExtras={() => setShowEditTools((prev) => !prev)}
+            />
+          </LightboxMetadataPanel>
         )}
       </div>
 
@@ -1810,7 +1821,7 @@ export function ImageLightbox({
           </p>
         )}
       </div>
-    </div>
+    </LightboxShell>
   );
 }
 

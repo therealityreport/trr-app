@@ -8,18 +8,25 @@ vi.mock("@/lib/admin/useAdminGuard", () => ({
   useAdminGuard: () => ({ hasAccess: true, checking: false }),
 }));
 
-const { mockParams, mockSearch } = vi.hoisted(() => ({
+const { mockParams, mockSearch, mockRouter } = vi.hoisted(() => ({
   mockParams: {
     showId: "7782652f-783a-488b-8860-41b97de32e75",
     seasonNumber: "6",
     weekIndex: "1",
   },
   mockSearch: { value: "source_scope=bravo" },
+  mockRouter: {
+    push: vi.fn(),
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+    back: vi.fn(),
+  },
 }));
 
 vi.mock("next/navigation", () => ({
   useParams: () => mockParams,
   useSearchParams: () => new URLSearchParams(mockSearch.value),
+  useRouter: () => mockRouter,
 }));
 
 const weekPayload = {
@@ -124,6 +131,7 @@ describe("WeekDetailPage thumbnails", () => {
     mockParams.seasonNumber = "6";
     mockParams.weekIndex = "1";
     mockSearch.value = "source_scope=bravo";
+    mockRouter.replace.mockReset();
     (auth as unknown as { currentUser?: { getIdToken: () => Promise<string> } }).currentUser = {
       getIdToken: vi.fn().mockResolvedValue("test-token"),
     };
@@ -179,6 +187,39 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("14s")).toBeInTheDocument();
     expect(screen.getByText("@tagged_user")).toBeInTheDocument();
     expect(screen.getByText("@collab_user")).toBeInTheDocument();
+  });
+
+  it("applies day and social platform query prefilters and can clear day filter", async () => {
+    mockSearch.value = "source_scope=bravo&social_platform=youtube&day=2025-12-31";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => weekPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Day filter: Dec 31")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Episode Clip")).toBeInTheDocument();
+    expect(screen.queryByText("IG post")).not.toBeInTheDocument();
+    expect(screen.queryByText("No posts found for this day.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear day filter" }));
+    expect(mockRouter.replace).toHaveBeenCalled();
+    const nextHref = String(mockRouter.replace.mock.calls.at(-1)?.[0] ?? "");
+    expect(nextHref).toContain("/social/week/1");
+    expect(nextHref).toContain("source_scope=bravo");
+    expect(nextHref).toContain("social_platform=youtube");
+    expect(nextHref).not.toContain("day=");
   });
 
   it("renders enriched instagram metadata inside the Post Stats drawer", async () => {
@@ -319,6 +360,47 @@ describe("WeekDetailPage thumbnails", () => {
           }),
         } as Response;
       }
+      if (url.includes("/social/analytics/comments-coverage?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_saved_comments: 36,
+            total_reported_comments: 36,
+            coverage_pct: 100,
+            up_to_date: true,
+            stale_posts_count: 0,
+            posts_scanned: 3,
+            by_platform: {
+              instagram: {
+                total_saved_comments: 10,
+                total_reported_comments: 10,
+                coverage_pct: 100,
+                up_to_date: true,
+                stale_posts_count: 0,
+                posts_scanned: 1,
+              },
+              tiktok: {
+                total_saved_comments: 12,
+                total_reported_comments: 12,
+                coverage_pct: 100,
+                up_to_date: true,
+                stale_posts_count: 0,
+                posts_scanned: 1,
+              },
+              youtube: {
+                total_saved_comments: 14,
+                total_reported_comments: 14,
+                coverage_pct: 100,
+                up_to_date: true,
+                stale_posts_count: 0,
+                posts_scanned: 1,
+              },
+            },
+            evaluated_at: "2026-01-01T00:02:00.000Z",
+          }),
+        } as Response;
+      }
       throw new Error(`Unexpected URL: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
@@ -333,12 +415,16 @@ describe("WeekDetailPage thumbnails", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Sync queued for Week 1 \(all platforms\) · run 80423aa2 · 8 job\(s\)/),
+        screen.getByText(
+          /Pass 1\/8 queued for Week 1 \(all platforms\) · run 80423aa2 · 8 job\(s\)/,
+        ),
       ).toBeInTheDocument();
     });
     await waitFor(() => {
       expect(screen.getByText("Sync Progress")).toBeInTheDocument();
-      expect(screen.getByText(/Ingest complete/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Pass 1\/8 ingest complete.*Coverage 36\/36 \(100\.0%\) · Up-to-Date\./),
+      ).toBeInTheDocument();
     });
     expect(screen.getByText(/10 scraped/i)).toBeInTheDocument();
     expect(screen.getByText(/saved 8/i)).toBeInTheDocument();

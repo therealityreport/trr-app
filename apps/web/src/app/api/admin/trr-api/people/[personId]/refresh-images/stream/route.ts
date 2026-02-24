@@ -20,14 +20,14 @@ interface RouteParams {
   params: Promise<{ personId: string }>;
 }
 
-const buildSseErrorResponse = (payload: Record<string, unknown>): Response =>
-  new Response(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, {
-    status: 200,
+const buildErrorResponse = (
+  payload: Record<string, unknown>,
+  status: number
+): Response =>
+  Response.json(payload, {
+    status,
     headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-store, must-revalidate",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
+      "Cache-Control": "no-store, max-age=0",
     },
   });
 
@@ -69,11 +69,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { personId } = await params;
     if (!personId) {
-      return buildSseErrorResponse({
+      return buildErrorResponse(
+        {
           stage: "proxy",
           error: "personId is required",
-        status: 400,
-      });
+        },
+        400
+      );
     }
 
     let body: Record<string, unknown> | undefined;
@@ -87,20 +89,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const backendUrl = getBackendApiUrl(`/admin/person/${personId}/refresh-images/stream`);
     if (!backendUrl) {
-      return buildSseErrorResponse({
+      return buildErrorResponse(
+        {
           stage: "proxy",
           error: "Backend API not configured",
-          status: 500,
-      });
+        },
+        500
+      );
     }
 
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      return buildSseErrorResponse({
+      return buildErrorResponse(
+        {
           stage: "proxy",
           error: "Backend auth not configured",
-          status: 500,
-      });
+        },
+        500
+      );
     }
 
     let backendResponse: Response | null = null;
@@ -134,47 +140,54 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     if (!backendResponse) {
-      const detail = `${getErrorDetail(lastError)} (TRR_API_URL=${process.env.TRR_API_URL ?? "unset"})`;
-      return buildSseErrorResponse({
-        stage: "proxy",
-        error: "Backend fetch failed",
-        detail,
-        status: 502,
-      });
+      return buildErrorResponse(
+        {
+          stage: "proxy",
+          error: "Backend fetch failed",
+          detail: getErrorDetail(lastError),
+        },
+        502
+      );
     }
 
     if (!backendResponse.ok) {
       const errorText = await backendResponse.text();
-      return buildSseErrorResponse({
+      return buildErrorResponse(
+        {
           stage: "backend",
           error: "Backend refresh failed",
           detail: errorText || `HTTP ${backendResponse.status}`,
-          status: backendResponse.status,
-      });
+        },
+        backendResponse.status
+      );
     }
 
     if (!backendResponse.body) {
-      return buildSseErrorResponse({
+      return buildErrorResponse(
+        {
           stage: "backend",
           error: "No response body from backend",
-          status: 502,
-      });
+        },
+        502
+      );
     }
 
     return new Response(backendResponse.body, {
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Cache-Control": "no-store, max-age=0",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       },
     });
   } catch (error) {
-    return buildSseErrorResponse({
+    return buildErrorResponse(
+      {
         stage: "proxy",
         error: "Refresh stream request failed",
         detail: getErrorDetail(error),
-        status: 500,
-    });
+      },
+      500
+    );
   }
 }

@@ -87,7 +87,6 @@ export async function POST(
 
 export async function PUT(
   request: NextRequest,
-  _context: { params: Promise<{ surveySlug: string; questionId: string }> },
 ) {
   try {
     const user = await requireAdmin(request);
@@ -125,7 +124,6 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  _context: { params: Promise<{ surveySlug: string; questionId: string }> },
 ) {
   try {
     const user = await requireAdmin(request);

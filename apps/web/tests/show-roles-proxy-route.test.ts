@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+
+process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
 const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -21,8 +24,9 @@ describe("show roles proxy route", () => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
     vi.restoreAllMocks();
+    invalidateRouteResponseCache("admin-show-roles");
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/shows/show-1/roles"
     );
@@ -92,7 +96,7 @@ describe("show roles proxy route", () => {
 
     expect(response.status).toBe(504);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(payload.error).toContain("timed out after 120s");
+    expect(payload.error).toContain("timed out after 20s");
     expect(payload.code).toBe("UPSTREAM_TIMEOUT");
     expect(payload.retryable).toBe(true);
     expect(payload.upstream_status).toBe(504);

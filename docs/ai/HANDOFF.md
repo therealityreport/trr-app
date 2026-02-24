@@ -2,6 +2,295 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-24) — PR #52 CI unblock (timeout assertion drift)
+
+- February 24, 2026: Fixed the remaining Node 20 CI failure on `codex/2026-02-24-trr-app-sync` by removing a stale hardcoded timeout expectation in one route test.
+  - Files:
+    - `apps/web/tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts`
+    - `apps/web/tests/reddit-sources-manager.test.tsx`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+  - Changes:
+    - Updated abort-timeout assertion from exact `90s` text to a format assertion (`timed out after <N>s`) so the test stays aligned with the route timeout constant.
+    - Stabilized the show-focused community test by waiting for communities to finish loading before selection and using an async text assertion for the post-load helper copy.
+    - Stabilized run-scoped jobs loading test by using the `Select Latest Run` action and waiting for combobox value state before asserting downstream `run_id` job fetch calls.
+    - Stabilized run-health grouped-failure assertion by waiting asynchronously for the `RATE_LIMIT · comments · 2` grouped row to render before asserting.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx` (pass)
+    - `pnpm -C apps/web run test:ci` (pass; `186 files, 745 tests`)
+    - `for i in $(seq 1 15); do pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx -t "loads jobs for the selected run id"; done` (all 15 passes)
+    - `for i in $(seq 1 20); do pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx -t "groups failures and renders latest five failure events in run health"; done` (all 20 passes)
+
+## Latest Update (2026-02-24) — Admin host defaults + browser sync hardening + season social test act cleanup
+
+- February 24, 2026: Implemented outstanding follow-ups to stabilize admin host isolation defaults, local workspace tab behavior, and social analytics test noise.
+  - Files:
+    - `apps/web/src/proxy.ts`
+    - `apps/web/src/lib/server/auth.ts`
+    - `apps/web/tests/admin-host-middleware.test.ts`
+    - `apps/web/tests/server-auth-adapter.test.ts`
+    - `apps/web/tests/season-social-analytics-section.test.tsx`
+    - `apps/web/.env.example`
+    - `apps/web/README.md`
+    - `../scripts/dev-workspace.sh`
+    - `../scripts/open-or-refresh-browser-tab.sh`
+  - Changes:
+    - Host enforcement now defaults to enabled when `ADMIN_ENFORCE_HOST` is unset.
+    - Development fallback host allowlist added for admin API checks when `ADMIN_APP_HOSTS` is unset:
+      - `admin.localhost,localhost,127.0.0.1,[::1],::1`
+      - canonical `ADMIN_APP_ORIGIN` host still included.
+    - Proxy and server host-gate behavior kept in parity (same default-on + dev fallback semantics).
+    - Workspace launcher now injects explicit admin host env defaults into `next dev` and prints `TRR-APP Admin` URL.
+    - Browser tab refresh script no longer treats all localhost-family `:3000` tabs as equivalent; refresh matching is exact target URL + explicit localhost/127 alias only.
+    - Season social analytics test cleanup:
+      - standardized fake timer lifecycle in `afterEach` with `act(...)`
+      - wrapped polling timer advances in `act(...)`
+      - removed per-test `useRealTimers` cleanup duplication.
+  - Validation:
+    - Pending in current session; run:
+      - `pnpm -C apps/web exec vitest run tests/admin-host-middleware.test.ts tests/server-auth-adapter.test.ts tests/season-social-analytics-section.test.tsx`
+      - `pnpm -C apps/web exec tsc --noEmit`
+      - `pnpm -C apps/web run test:ci`
+      - `pnpm -C apps/web exec next build --webpack`
+      - `pnpm -C apps/web run lint`
+
+## Latest Update (2026-02-24) — SHOW pages comprehensive hardening pass (shared tabs + gallery chunking + runtime coverage)
+
+- February 24, 2026 (final outstanding-fixes closeout): Cleared remaining wiring drift and completed full validation for the speed/efficiency + hardening pass.
+  - Files:
+    - `apps/web/tests/show-page-modularization-wiring.test.ts`
+    - `apps/web/tests/show-cast-lazy-loading-wiring.test.ts`
+  - Changes:
+    - Updated show-page modularization wiring expectations to shared component imports under `@/components/admin/show-tabs/*`.
+    - Updated cast cancel-button wiring assertion to include the current `hasPersonRefreshInFlight` condition.
+  - Validation:
+    - `pnpm -C apps/web run test:ci` (`181 files, 734 tests passed`)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass, after `.next/types` regeneration by build)
+
+- February 24, 2026: Implemented the SHOW/SEASON admin hardening and maintainability pass in `apps/web` with app-only scope (no backend schema/contract changes).
+  - Files:
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/src/lib/admin/admin-fetch.ts`
+    - `apps/web/src/components/admin/ImageLightbox.tsx`
+    - `apps/web/src/components/admin/show-tabs/ShowTabsNav.tsx` (new shared)
+    - `apps/web/src/components/admin/show-tabs/ShowSeasonCards.tsx` (new shared)
+    - `apps/web/src/components/admin/show-tabs/ShowAssetsImageSections.tsx` (new shared)
+    - `apps/web/src/components/admin/show-tabs/ShowOverviewTab.tsx` (new)
+    - `apps/web/src/components/admin/show-tabs/ShowSeasonsTab.tsx` (new)
+    - `apps/web/src/components/admin/show-tabs/ShowAssetsTab.tsx` (new)
+    - `apps/web/src/components/admin/show-tabs/ShowNewsTab.tsx` (new)
+    - `apps/web/src/components/admin/show-tabs/ShowCastTab.tsx` (new)
+    - `apps/web/src/components/admin/show-tabs/ShowSocialTab.tsx` (new)
+    - `apps/web/src/components/admin/show-tabs/ShowSettingsTab.tsx` (new)
+    - `apps/web/src/components/admin/season-tabs/SeasonEpisodesTab.tsx` (new)
+    - `apps/web/src/components/admin/season-tabs/SeasonAssetsTab.tsx` (new)
+    - `apps/web/src/components/admin/season-tabs/SeasonVideosTab.tsx` (new)
+    - `apps/web/src/components/admin/season-tabs/SeasonFandomTab.tsx` (new)
+    - `apps/web/src/components/admin/season-tabs/SeasonCastTab.tsx` (new)
+    - `apps/web/src/components/admin/season-tabs/SeasonSocialTab.tsx` (new)
+    - `apps/web/src/components/admin/image-lightbox/LightboxShell.tsx` (new)
+    - `apps/web/src/components/admin/image-lightbox/LightboxImageStage.tsx` (new)
+    - `apps/web/src/components/admin/image-lightbox/LightboxMetadataPanel.tsx` (new)
+    - `apps/web/src/components/admin/image-lightbox/LightboxManagementActions.tsx` (new)
+    - Tests:
+      - `apps/web/tests/show-tabs-nav.runtime.test.tsx` (new)
+      - `apps/web/tests/show-season-cards.runtime.test.tsx` (new)
+      - `apps/web/tests/show-assets-image-sections.runtime.test.tsx` (new)
+      - `apps/web/tests/image-lightbox-metadata.test.tsx` (extended featured actions)
+  - Migration map:
+    - `apps/web/src/app/admin/trr-shows/[showId]/_components/ShowTabsNav.tsx` -> `apps/web/src/components/admin/show-tabs/ShowTabsNav.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/_components/ShowSeasonCards.tsx` -> `apps/web/src/components/admin/show-tabs/ShowSeasonCards.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/_components/ShowAssetsImageSections.tsx` -> `apps/web/src/components/admin/show-tabs/ShowAssetsImageSections.tsx`
+  - Key changes:
+    - Switched show page imports to shared tab components under `src/components/admin/show-tabs`.
+    - Added season tab wrappers under `src/components/admin/season-tabs` and wired season page tab blocks through these shared components.
+    - Added/normalized admin fetch wrapper usage (`adminGetJson` / `adminMutation`) in show + season paths (continuation of prior in-flight work).
+    - Show gallery render hardening:
+      - replaced single global `galleryVisibleCount` with per-section visibility map (`ShowGalleryVisibleBySection`),
+      - per-section chunk defaults = 60 and increment = 60,
+      - per-section load-more controls now appear for each populated section.
+    - `ImageLightbox` internal maintainability split:
+      - wired outer shell/image stage/metadata panel container and management-action container through subcomponents in `src/components/admin/image-lightbox`.
+      - public `ImageLightbox` API unchanged.
+    - Runtime test coverage added for:
+      - show tabs nav behavior,
+      - season cards + deep-link chip order,
+      - assets section featured badges/lightbox wiring/load-more controls,
+      - featured poster/backdrop actions in lightbox metadata panel.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts tests/season-tab-alias-redirect.test.ts tests/show-tabs-nav.runtime.test.tsx tests/show-season-cards.runtime.test.tsx tests/show-assets-image-sections.runtime.test.tsx tests/image-lightbox-metadata.test.tsx tests/show-featured-image-validation-route.test.ts tests/trr-shows-repository-featured-image-validation.test.ts tests/show-page-tab-order-wiring.test.ts tests/season-page-tab-order-wiring.test.ts tests/show-featured-image-lightbox-wiring.test.ts` (`11 files, 46 tests passed`)
+    - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' src/components/admin/ImageLightbox.tsx src/components/admin/show-tabs src/components/admin/season-tabs src/components/admin/image-lightbox src/lib/admin/show-admin-routes.ts src/lib/admin/admin-fetch.ts` (pass)
+    - `pnpm -C apps/web exec next typegen` (pass; regenerated `.next/types` after transient lock/type artifact drift)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+  - Residual risks / follow-up:
+    - Heavy show-tab bodies (`assets/news/cast/settings/social`) are still largely inline in `[showId]/page.tsx`; full module extraction and `next/dynamic` chunk-splitting is only partially completed.
+
+## Latest Update (2026-02-24) — Networks sync controls (credit-safe default + resume support)
+
+- February 24, 2026: Implemented app-side controls for the backend resumable/credit-safe networks sync contract.
+  - Files:
+    - `apps/web/src/app/api/admin/networks-streaming/sync/route.ts`
+    - `apps/web/src/app/admin/networks/page.tsx`
+    - `apps/web/tests/networks-streaming-sync-proxy-route.test.ts`
+    - `apps/web/tests/admin-networks-page-auth.test.tsx`
+  - Changes:
+    - Sync proxy now accepts/forwards:
+      - `refresh_external_sources`
+      - `batch_size`
+      - `max_runtime_sec`
+      - `resume_run_id`
+    - Networks admin page sync behavior defaults to credit-safe mode:
+      - always sends `refresh_external_sources=false` unless operator enables toggle.
+    - Added advanced operator toggle:
+      - “Refresh external catalogs (uses credits)”.
+    - Added run metadata rendering in sync result panel:
+      - run id, status, resume cursor.
+    - Added `Resume Sync` action when backend reports `status='stopped'`.
+    - Kept existing auth flow and unresolved handling intact.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/networks-streaming-sync-proxy-route.test.ts tests/admin-networks-page-auth.test.tsx` (`7 passed`)
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+
+## Latest Update (2026-02-24) — Red build/test cleanup pass (show role timeout + proxy/wiring stability)
+
+- February 24, 2026: Completed the targeted cleanup pass for current build/test regressions in `apps/web` (no backend contract changes).
+  - Files:
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/roles/route.ts`
+    - `apps/web/tests/show-role-mutation-proxy-route.test.ts`
+    - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - `apps/web/tests/reddit-discovery-service.test.ts`
+  - Changes:
+    - Standardized show-role mutation timeout default:
+      - `MUTATION_BACKEND_TIMEOUT_MS` fallback changed from `25_000` to `60_000` in show roles proxy route.
+    - Updated role mutation timeout test to assert `timed out after 60s`.
+    - Fixed People admin page TypeScript handler mismatch by wrapping async tab refresh handlers:
+      - `onClick={() => void fetchBravoVideos()}`
+      - `onClick={() => void fetchBravoNews()}`
+    - Updated reddit discovery matrix expectation to include `top_post_url` in episode matrix cell assertions.
+  - Validation:
+    - `pnpm -C apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C apps/web exec vitest run tests/show-cast-lazy-loading-wiring.test.ts tests/show-role-mutation-proxy-route.test.ts tests/show-cast-role-members-proxy-route.test.ts tests/show-roles-proxy-route.test.ts tests/show-cast-matrix-sync-proxy-route.test.ts tests/show-social-load-resilience-wiring.test.ts` (`6 files, 30 tests passed`)
+    - `pnpm -C apps/web run test:ci` (`174 files, 695 tests passed`)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+    - `pnpm -C apps/web run lint` (pass with warnings only; no errors)
+
+## Latest Update (2026-02-24) — Gallery reliability sweep (dedupe quality, broken filtering, pagination, section/filter alignment)
+
+- February 24, 2026: Implemented the app-side gallery reliability pass for person/show/season admin media surfaces.
+  - Files:
+    - `apps/web/src/lib/server/trr-api/person-photo-utils.ts`
+    - `apps/web/src/app/api/admin/trr-api/people/[personId]/photos/route.ts`
+    - `apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+    - `apps/web/src/lib/admin/asset-sectioning.ts`
+    - `apps/web/src/lib/gallery-filter-utils.ts`
+    - `apps/web/src/lib/admin/paginated-gallery-fetch.ts` (new)
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - Tests:
+      - `apps/web/tests/person-photo-dedupe-quality.test.ts` (new)
+      - `apps/web/tests/person-gallery-broken-filter.test.ts` (new)
+      - `apps/web/tests/show-gallery-pagination.test.ts` (new)
+      - `apps/web/tests/season-gallery-pagination.test.ts` (new)
+      - `apps/web/tests/asset-sectioning.test.ts`
+      - `apps/web/tests/gallery-advanced-filtering.test.ts`
+      - `apps/web/tests/person-gallery-thumbnail-wiring.test.ts`
+  - Changes:
+    - Person-photo dedupe now prioritizes renderability quality rather than hardcoding `media_links` precedence:
+      - scores variant presence, fallback URL availability, hosted URL presence
+      - retains stable tie-breaker (`media_links` then deterministic order).
+    - Person photos API adds additive query support:
+      - `include_broken=true|false` (default `false`) in `/api/admin/trr-api/people/[personId]/photos`.
+    - Repository person-gallery shaping:
+      - defaults to excluding `gallery_status=broken_unreachable`
+      - supports `includeBroken` opt-in
+      - normalizes media-link `url`/fallback from resolved source candidates (not raw nullable `source_url`).
+    - Sectioning/filter alignment:
+      - stricter profile picture classification (explicit profile signals only)
+      - season promo content-type filtering enforced as OSA-only cast promos via section-classification gate.
+    - Hidden truncation removal:
+      - added paginated fetch helper (`limit=500` loops)
+      - show and season gallery loads now page until exhausted (bounded by max-pages safeguard).
+    - Season batch jobs now build targets from currently displayed filtered gallery buckets, with existing “no content types selected” guard preserved.
+  - Validation:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-photo-dedupe-quality.test.ts tests/person-gallery-broken-filter.test.ts tests/show-gallery-pagination.test.ts tests/season-gallery-pagination.test.ts tests/asset-sectioning.test.ts tests/gallery-advanced-filtering.test.ts tests/person-gallery-thumbnail-wiring.test.ts` (`7 files, 21 tests passed`)
+  - Notes:
+    - Workspace has many unrelated in-flight changes; this update is scoped to gallery reliability files listed above.
+
+## Latest Update (2026-02-24) — 10 additional admin speed/efficiency fixes (post-hardening)
+
+- February 24, 2026: Implemented the next 10 runtime improvements focused on admin responsiveness, reduced request fan-out, faster failure behavior, and short-TTL dedupe caching.
+  - Files:
+    - `apps/web/src/lib/server/auth.ts`
+    - `apps/web/src/app/admin/trr-shows/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/roles/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/roles/[roleId]/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast-role-members/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast/[personId]/roles/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/cast-matrix/sync/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/summary/route.ts`
+    - `apps/web/src/app/api/admin/covered-shows/route.ts`
+    - `apps/web/src/app/api/admin/covered-shows/[showId]/route.ts`
+    - `apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/route.ts`
+    - `apps/web/src/lib/server/admin/route-response-cache.ts` (new shared short-TTL route cache)
+    - Updated tests:
+      - `apps/web/tests/covered-shows-route-metadata.test.ts`
+      - `apps/web/tests/show-roles-proxy-route.test.ts`
+      - `apps/web/tests/show-role-mutation-proxy-route.test.ts`
+      - `apps/web/tests/show-cast-role-members-proxy-route.test.ts`
+      - `apps/web/tests/show-cast-matrix-sync-proxy-route.test.ts`
+      - `apps/web/tests/show-social-load-resilience-wiring.test.ts`
+      - `apps/web/tests/social-season-hint-routes.test.ts`
+  - Key changes by fix:
+    - Dev bypass auth now short-circuits immediately for `dev-admin-bypass` in `requireAdmin(...)` without expensive verification fallback.
+    - Show search now aborts stale in-flight requests via `AbortController`.
+    - Show cast fetch now uses timeout + abort-safe behavior and cancels stale fetches when tab/show changes.
+    - Show season-episode summary fan-out now uses bounded concurrency (`SEASON_EPISODE_SUMMARY_CONCURRENCY = 4`).
+    - Summary fan-out now only runs on relevant tab state (`seasons`) instead of broad non-social behavior.
+    - Season page no longer eagerly prefetches Bravo/Fandom supplemental data on initial load; Bravo video load is tab-lazy.
+    - Season page collapses duplicate cast calls by using single `include_archive_only=true` fetch and deriving cast/archive subsets client-side.
+    - Roles and cast-role-members proxy routes now use shorter default timeouts and retry-once envelopes.
+    - Social `runs`/`runs/summary`/`analytics` routes support interactive-vs-background timeout profiles (interactive default = fast-fail).
+    - Added tiny per-user short-TTL cache for read-heavy admin routes (`covered-shows`, `show seasons`, `show roles`, `cast-role-members`, social runs + summary), with cache invalidation on relevant mutations.
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/covered-shows-route-metadata.test.ts tests/show-roles-proxy-route.test.ts tests/show-role-mutation-proxy-route.test.ts tests/show-cast-role-members-proxy-route.test.ts tests/show-cast-matrix-sync-proxy-route.test.ts tests/show-social-load-resilience-wiring.test.ts tests/social-season-hint-routes.test.ts tests/show-cast-lazy-loading-wiring.test.ts tests/season-cast-tab-quality-wiring.test.ts tests/covered-shows-page-no-fanout-wiring.test.ts` (`10 files, 51 tests passed`)
+    - `pnpm -C apps/web exec tsc --noEmit --pretty false` currently fails on pre-existing unrelated typing drift in `apps/web/src/lib/server/admin/reddit-discovery-service.ts` (missing `successful_sorts/failed_sorts/rate_limited_sorts` and `top_post_url` fields).
+  - Notes:
+    - `show-cast-matrix-sync-proxy-route` intentionally logs an error in the fetch-failure test path; assertions still pass.
+
+## Latest Update (2026-02-24) — Admin proxy host-routing hardening (API allowlist + strict API passthrough)
+
+- February 24, 2026: Implemented the remaining admin host routing edge-case fixes in `apps/web` so API host allowlists and strict host mode behave as designed.
+  - Files:
+    - `apps/web/src/proxy.ts`
+    - `apps/web/tests/admin-host-middleware.test.ts`
+    - `apps/web/.env.example`
+    - `apps/web/README.md`
+  - Changes:
+    - `proxy.ts` now separates host checks:
+      - canonical admin UI host (`ADMIN_APP_ORIGIN`) for `/admin/*` redirects,
+      - admin API allowlist (`ADMIN_APP_HOSTS` + origin host) for `/api/admin/*` gating.
+    - Added allowlist parsing + resolution helpers in `proxy.ts` and retained loopback-equivalence matching.
+    - Strict host mode (`ADMIN_STRICT_HOST_ROUTING=true`) now redirects only non-admin page routes on canonical admin host and explicitly passes through all `/api/*` routes (including `/api/session/*`).
+    - Updated proxy tests to cover:
+      - API allowlist pass on non-canonical host,
+      - `/admin/*` canonical redirect even when host is API-allowlisted,
+      - strict mode passthrough for `/api/session/login` and `/api/session/logout`,
+      - strict mode redirect for non-admin pages still enforced.
+    - Updated docs/env semantics:
+      - `ADMIN_APP_HOSTS` documented as `/api/admin/*` allowlist.
+      - strict mode documented as page-only redirect behavior (never `/api/*`).
+  - Validation:
+    - `pnpm -C apps/web exec vitest run tests/admin-host-middleware.test.ts tests/server-auth-adapter.test.ts` (`2 files, 22 tests passed`)
+    - `pnpm -C apps/web run lint` (pass with pre-existing warnings only)
+    - `pnpm -C apps/web exec next build --webpack` fails on pre-existing unrelated type error in `apps/web/src/app/admin/trr-shows/[showId]/page.tsx:7915` (`failedMembers` on `never`).
+    - `pnpm -C apps/web run test:ci` fails with pre-existing unrelated failures outside proxy scope (including `show-cast-lazy-loading-wiring`, `show-role-mutation-proxy-route`, `show-cast-role-members-proxy-route`, `show-roles-proxy-route`, `show-cast-matrix-sync-proxy-route`, `show-social-load-resilience-wiring`).
+
 ## Latest Update (2026-02-24) — Lightbox uncropped guarantee via hosted/original-first detail candidates
 
 - February 24, 2026: Updated lightbox detail URL precedence to avoid stale crop-framed renders when uncropped hosted/original URLs are available.
@@ -5121,6 +5410,7 @@ Continuation (same session, 2026-02-24) — Bravo/Social analytics hardening pas
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]/route.ts`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-season-hint-routes.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-social-load-resilience-wiring.test.ts`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-load-resilience-wiring.test.ts`
@@ -5395,3 +5685,655 @@ Continuation (same session, 2026-02-24) — News tab hardening for async Google 
 - Updated tests:
   - `tests/tags-people-count-source-route.test.ts`
   - `tests/show-refresh-stream-route.test.ts`
+
+Continuation (same session, 2026-02-24) — Shows/Seasons admin a11y + reliability fixes from audit backlog.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/AdminBreadcrumbs.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+- Changes:
+  - `AdminBreadcrumbs` now uses Next.js client navigation (`next/link`) for ancestor crumbs and no longer uses index-based keys.
+  - Show page:
+    - Replaced network/show header raw `<img>` usages with `next/image`.
+    - Replaced remaining index-based/URL+index list keys in targeted admin sections with stable keys.
+    - Replaced prompt-based edit flows for links/roles/cast-role assignment with controlled modal editors.
+    - Added user-visible coverage mutation errors (instead of console-only failures).
+    - Added request timeout guards for Google News link mutations, cast-matrix sync, and covered-shows mutations.
+    - Upgraded refresh-log/sync-by-bravo/batch-jobs modal structures with dialog semantics (`role="dialog"`, `aria-modal`, focus target, Escape close, keyboard-accessible backdrop).
+  - Season page:
+    - Replaced blocking media delete `alert(...)` path with inline admin error channel (`assetsRefreshError`).
+    - Converted batch-jobs and add-backdrops overlays to keyboard-accessible backdrop buttons.
+    - Added dialog semantics + focus/Escape handling to season batch-jobs and add-backdrops panels.
+    - Replaced remaining targeted unstable list keys with stable keys.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/components/admin/AdminBreadcrumbs.tsx' 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx'` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/admin-breadcrumbs.test.ts tests/admin-breadcrumbs-component.test.tsx tests/admin-networks-page-auth.test.tsx tests/admin-network-detail-page-auth.test.tsx tests/person-credits-show-scope-wiring.test.ts` (`14 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with pre-existing workspace warnings unrelated to these files)
+
+Continuation (same session, 2026-02-24) — News hardening phase 2 UI/proxy updates.
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/google-news/sync/[jobId]/route.ts`
+  - `apps/web/tests/show-news-tab-google-wiring.test.ts`
+  - `apps/web/tests/show-google-news-sync-status-proxy-route.test.ts`
+- Changes:
+  - News request race protection:
+    - Added in-flight query-key guard + request sequence ref so stale in-flight reads do not clobber newer filter/sort requests.
+    - Added follow-up rerun behavior when query intent changes while a request is in flight.
+  - Backend-facet-driven filter UI:
+    - Added additive news facet types/state (`sources`, `people`, `topics`, `seasons`).
+    - Filter dropdown options now come from backend facets instead of client-side page-local derivation.
+    - Removed redundant client-side filtering (`filteredUnifiedNews`) for server-backed filters.
+  - Count display and pagination semantics:
+    - Added page count state and updated UI copy to `Showing X of Y` using backend count/total.
+  - Proxy timeout alignment:
+    - Increased Google sync-status proxy timeout to 60s to match polling envelope.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/show-news-proxy-route.test.ts tests/show-google-news-sync-status-proxy-route.test.ts tests/show-news-tab-google-wiring.test.ts` (`6 passed`)
+  - `pnpm -C apps/web exec vitest run tests/show-google-news-sync-proxy-route.test.ts` (`1 passed`)
+  - `pnpm -C apps/web exec tsc --noEmit` (fails due pre-existing unrelated type issue in `src/components/admin/AdminBreadcrumbs.tsx` from workspace-local changes)
+- Follow-up validation (same continuation):
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+  - Re-ran breadcrumb/admin targeted vitest set after typed-route `Link` update (`14 passed`).
+
+Continuation (same session, 2026-02-24) — Social analytics timeout/reliability fixes (targeted bug pass).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/summary/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-season-hint-routes.test.ts`
+- Changes:
+  - Enforced strict `season_id` UUID validation on runs summary route (returns `400` on malformed value).
+  - Raised targets timeout budget (`12s` -> `15s`) on both client and proxy route to reduce false timeout churn.
+  - Tuned jobs/week-analytics proxy routes to poll-friendly settings (`retries: 0`, lower timeout) to avoid retry amplification.
+  - Added week-view post drawer propagation of `season_id` for both post detail GET and refresh POST.
+  - Added timeout-bound post drawer network calls (GET/POST) to prevent indefinite waits.
+  - Hardened week-view sync progress fetch to tolerate partial endpoint failure (`runs` or `jobs`) instead of fail-closed behavior when one side succeeds.
+  - Added route regression for runs summary invalid `season_id`.
+  - Updated analytics-timeout test timer envelope to cover current timeout budget and avoid false negatives in fake-timer mode.
+  - Added explicit poll error surfacing in season social polling catch path (no silent swallow).
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/social-season-hint-routes.test.ts tests/social-week-detail-wiring.test.ts` (`14 passed`).
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/summary/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts' 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'tests/social-season-hint-routes.test.ts'` (pass with one pre-existing hook-deps warning in week detail page).
+  - Note: `tests/season-social-analytics-section.test.tsx` contains an existing timer-sensitive timeout assertion that remained flaky in this workspace after broader social header/polling changes.
+
+Continuation (same session, 2026-02-24) — Sync-by-Bravo mode confirmation + preview-signature commit guard wiring.
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/tests/show-bravo-cast-only-wiring.test.ts`
+- Changes:
+  - Added sticky selected-mode summary in Sync-by-Bravo modal (`Sync All Info` vs `Cast Info only`) through preview/commit flow.
+  - Stored preview `preview_signature` from both preview JSON and preview stream complete payload.
+  - Required cast-only preview signature before commit and sent additive `preview_signature` in commit payload.
+  - Cleared preview-signature state on flow reset/cancel to prevent stale commit payload reuse.
+  - Updated wiring tests to assert `preview_signature` propagation and mode-summary UI text.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-bravo-cast-only-wiring.test.ts` (`2 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'tests/show-bravo-cast-only-wiring.test.ts'` (pass)
+
+Continuation (same session, 2026-02-24) — Reliable comment sync auto-pass loop + coverage-aware completion.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/comments-coverage/route.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+- Changes:
+  - Added reusable comments-coverage proxy route and wired frontend orchestrators to evaluate strict up-to-date (`saved >= reported`) after each terminal run.
+  - Implemented pass-based auto-continuation for week and season run flows with guardrail stop (`8 passes` or `90 minutes`), including explicit `Stalled` state.
+  - Ensured orchestrated follow-up passes use:
+    - `ingest_mode: "comments_only"`
+    - `sync_strategy: "incremental"`
+    - `allow_inline_dev_fallback: true`
+  - Hardened proxy route budgets:
+    - week detail `45s` / `1 retry`
+    - runs/jobs `30s` / `2 retries`
+    - analytics `35s` / `1 retry`
+  - Updated week sync test expectations to the pass-based UX copy and coverage endpoint flow.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/week-social-thumbnails.test.tsx tests/season-social-analytics-section.test.tsx` (`44 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass; warnings only, no errors)
+  - Note: full-suite `vitest` in this workspace currently has unrelated pre-existing failures outside social sync scope (person gallery thumbnail wiring and person refresh stream route contract assertion).
+
+Continuation (same session, 2026-02-24) — final alignment updates for reliable multi-pass comment sync.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-season-hint-routes.test.ts`
+- Changes:
+  - Updated proxy budgets to match plan:
+    - week analytics route => `retries: 1`, `timeoutMs: 45_000`
+    - jobs route => `retries: 2`, `timeoutMs: 30_000`
+  - Week page now uses scoped `/analytics/comments-coverage` snapshot as live coverage preview during active multi-pass sync sessions, preventing stale in-memory `Saved/Actual` display while auto-continuing.
+  - Updated week sync test and season-id hint route tests to new pass-based UX and timeout/retry expectations.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/week-social-thumbnails.test.tsx tests/social-season-hint-routes.test.ts tests/social-week-detail-wiring.test.ts tests/season-social-analytics-section.test.tsx` (`58 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts' 'tests/week-social-thumbnails.test.tsx' 'tests/social-season-hint-routes.test.ts'` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` currently fails from unrelated pre-existing show page issue (`SurveysSection` undefined in `src/app/admin/trr-shows/[showId]/page.tsx`).
+
+Continuation (same session, 2026-02-24) — BravoRealHousewives RHOSLC episode discussion matrix + effective flair rules:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-episode-rules.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-discovery-service.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-refresh-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+- Changes:
+  - Added episode rule resolver for `r/BravoRealHousewives` to enforce unioned default title patterns (`Live/Post/Weekly Episode Discussion`) and RHOSLC temporary flair auto-seed (`Salt Lake City`) when non-show-focused and `analysis_all_flares` is empty.
+  - Expanded episode discovery candidates with deterministic `episode_number` + `discussion_type` parsing from title.
+  - Added episode matrix aggregation (`Episode x Type`) with per-cell `post_count`, `total_comments`, `total_upvotes`, and `top_post_id`.
+  - Updated episode refresh route payload to return:
+    - `episode_matrix`
+    - `meta.effective_episode_title_patterns`
+    - `meta.effective_required_flares`
+    - `meta.auto_seeded_required_flares`
+  - Updated Reddit Sources manager episode section to render grouped matrix and top-post links, show auto-seed banner, and rename secondary refresh CTA to `Refresh Episode Discussions`.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with existing warnings only)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-community-episode-refresh-route.test.ts tests/reddit-sources-manager.test.tsx` (`25 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (fails due unrelated existing TS error in `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx:5424` — `Cannot find name 'addBackdropsDialogRef'`)
+
+Continuation (same session, 2026-02-24) — SHOW pages hardening + incremental modularization.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/_components/ShowTabsNav.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/_components/ShowSeasonCards.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/_components/ShowAssetsImageSections.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-featured-image-validation-route.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/trr-shows-repository-featured-image-validation.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-page-modularization-wiring.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/trr-shows-slug-route.test.ts`
+- Changes:
+  - Added server-side featured-image validation for show PUT updates:
+    - `validateShowImageForField(showId, imageId, expectedKind)` checks `core.show_images` ownership (`show_id`) and normalized kind (`poster`/`backdrop`, including `background` alias).
+    - `PUT /api/admin/trr-api/shows/[showId]` now validates non-null `primary_poster_image_id` and `primary_backdrop_image_id` before update.
+    - Invalid assignments now return `400` with explicit field-level errors and emit warning logs with `showId`, field, and rejected image ID.
+    - `null` clear semantics and existing response shape (`{ show }` / `{ error }`) remain unchanged.
+  - Incremental show-page modularization (behavior-preserving):
+    - Extracted show tab nav to `ShowTabsNav`.
+    - Extracted season cards + deep-link chips to `ShowSeasonCards`.
+    - Extracted featured-aware backdrops/posters gallery sections to `ShowAssetsImageSections`.
+    - Kept state/fetch orchestration and lightbox featured-action wiring in `[showId]/page.tsx`.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-admin-routes.test.ts tests/season-tab-alias-redirect.test.ts tests/show-page-tab-order-wiring.test.ts tests/season-page-tab-order-wiring.test.ts tests/show-featured-image-lightbox-wiring.test.ts tests/show-featured-image-validation-route.test.ts tests/trr-shows-repository-featured-image-validation.test.ts tests/show-page-modularization-wiring.test.ts tests/trr-shows-slug-route.test.ts` (`34 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/trr-api/shows/[showId]/route.ts' src/lib/server/trr-api/trr-shows-repository.ts 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/_components/ShowTabsNav.tsx' 'src/app/admin/trr-shows/[showId]/_components/ShowSeasonCards.tsx' 'src/app/admin/trr-shows/[showId]/_components/ShowAssetsImageSections.tsx' tests/show-featured-image-validation-route.test.ts tests/trr-shows-repository-featured-image-validation.test.ts tests/show-page-modularization-wiring.test.ts tests/trr-shows-slug-route.test.ts` (no errors; existing warnings remain in large show page and one pre-existing repository helper warning)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (fails on pre-existing unrelated show-page type narrowing at `src/app/admin/trr-shows/[showId]/page.tsx:7915-7916`, `failedMembers` on `never`)
+- One-time audit query (dev/staging) for invalid featured references:
+  - `SELECT s.id AS show_id, s.name, s.primary_poster_image_id, p.show_id AS poster_show_id, p.image_type AS poster_image_type, s.primary_backdrop_image_id, b.show_id AS backdrop_show_id, b.image_type AS backdrop_image_type FROM core.shows s LEFT JOIN core.show_images p ON p.id = s.primary_poster_image_id LEFT JOIN core.show_images b ON b.id = s.primary_backdrop_image_id WHERE (s.primary_poster_image_id IS NOT NULL AND (p.id IS NULL OR p.show_id <> s.id OR lower(coalesce(p.image_type, p.kind, '')) NOT IN ('poster'))) OR (s.primary_backdrop_image_id IS NOT NULL AND (b.id IS NULL OR b.show_id <> s.id OR lower(coalesce(b.image_type, b.kind, '')) NOT IN ('backdrop','background')));`
+
+Continuation (same session, 2026-02-24) — Phase 2 admin hardening: shared modal, shared fetch helper, and tab extraction pass.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/AdminModal.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-fetch.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/show-tabs/ShowSurveysTab.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-tabs/SeasonSurveysTab.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-tabs/SeasonOverviewTab.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-modal.test.tsx` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-fetch.test.ts` (new)
+- Changes:
+  - Added shared `AdminModal` primitive with:
+    - `role="dialog"` + `aria-modal`,
+    - keyboard escape handling,
+    - backdrop close behavior,
+    - focus trap (Tab / Shift+Tab loop),
+    - focus restore to the previously-focused element on close,
+    - disable-close mode for in-flight operations.
+  - Added shared admin fetch utility in `lib/admin/admin-fetch.ts` and moved show/season pages to import `fetchWithTimeout` from this shared helper (removed duplicated local implementations).
+  - Migrated concrete modals to `AdminModal`:
+    - show page: batch jobs, link edit, role rename, cast-role edit,
+    - season page: batch jobs modal and add-backdrops drawer.
+  - Started tab modularization pass by extracting:
+    - show surveys tab -> `ShowSurveysTab`,
+    - season surveys tab -> `SeasonSurveysTab`,
+    - season overview tab -> `SeasonOverviewTab`.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/components/admin/AdminModal.tsx' 'src/lib/admin/admin-fetch.ts' 'src/components/admin/show-tabs/ShowSurveysTab.tsx' 'src/components/admin/season-tabs/SeasonSurveysTab.tsx' 'src/components/admin/season-tabs/SeasonOverviewTab.tsx' 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx'` (pass; warnings only)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/admin-modal.test.tsx tests/admin-fetch.test.ts tests/show-social-subnav-wiring.test.ts tests/season-social-subnav-wiring.test.ts tests/show-page-tab-order-wiring.test.ts tests/season-page-tab-order-wiring.test.ts tests/show-settings-links-fandom-visibility.test.ts tests/admin-breadcrumbs.test.ts tests/admin-breadcrumbs-component.test.tsx` (`21 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with pre-existing repo warnings)
+
+Continuation (same session, 2026-02-24) — News Stability Patch Set (remaining app-side fixes + typed Link blocker).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/AdminBreadcrumbs.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-news-tab-google-wiring.test.ts`
+- Changes:
+  - Reworked show-page News loading flow to deterministic latest-request-wins:
+    - removed waiter-chaining behavior,
+    - added single pending follow-up queue refs:
+      - `pendingNewsReloadRef`
+      - `pendingNewsReloadArgsRef`,
+    - retained `newsRequestSeqRef` stale-response guard.
+  - Added cursor/query-key safety for pagination:
+    - new `newsCursorQueryKeyRef`,
+    - append now requires both `newsNextCursor` and cursor-query-key match,
+    - stale/mismatched append intents auto-fallback to non-append forced reload.
+  - Added append-failure cleanup:
+    - clears `newsNextCursor` + `newsCursorQueryKeyRef`,
+    - preserves already-rendered items,
+    - surfaces actionable cursor-reset error message.
+  - Cleared pending/cursor refs on show reset to avoid cross-show state bleed.
+  - Fixed breadcrumb typed-route blocker:
+    - internal paths continue using `next/link` with `Route` cast,
+    - non-internal hrefs render as plain anchors.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-news-tab-google-wiring.test.ts tests/show-google-news-sync-status-proxy-route.test.ts tests/admin-breadcrumbs-component.test.tsx` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/components/admin/AdminBreadcrumbs.tsx'` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+
+Continuation (same session, 2026-02-24) — Social analytics 22-item hardening pass (app segment).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/comments-coverage/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/export/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/runs/[runId]/cancel/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/summary/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-load-resilience-wiring.test.ts`
+- Changes:
+  - Removed retry amplification on core social polling endpoints and standardized bounded timeouts (`runs/jobs 15s`, `analytics 22s`, `week/comments-coverage 20s`, retries `0`).
+  - Standardized `season_id` UUID validation + `seasonIdHint` forwarding in social proxy routes touched this pass.
+  - Landing poll loop now runs `runs` + `jobs` in parallel with `Promise.allSettled`, keeps independent section errors, and applies adaptive backoff (`3s -> 6s -> 10s -> 15s`) while preserving stale data.
+  - Reduced jobs poll payload for active runs (`limit=100`) and aligned client timeout constants with proxy settings.
+  - Week sync panel now tracks and renders `Last successful progress refresh` timestamp; sync poll timeouts aligned to `15s`.
+  - Show/season social tabs are fail-open against optional/supplemental fetch issues (`if (!show)` / `if (!show || !season)` gating only).
+  - Updated resilience wiring test to assert current non-blocking supplemental-load pattern instead of brittle old source-string for `Promise.allSettled`.
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run tests/season-social-analytics-section.test.tsx tests/social-week-detail-wiring.test.ts tests/social-season-hint-routes.test.ts tests/show-social-load-resilience-wiring.test.ts tests/season-social-load-resilience-wiring.test.ts` (`62 passed`)
+- `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint src/components/admin/season-social-analytics-section.tsx src/app/admin/trr-shows/[showId]/page.tsx src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/comments-coverage/route.ts` (pass)
+
+Continuation (same session, 2026-02-24) — Phase 2 modal migration completion (show page remaining dialogs).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- Changes:
+  - Finished migrating remaining show-page dialogs to shared `AdminModal`:
+    - Health Center (`refreshLogOpen`)
+    - Sync by Bravo mode picker (`syncBravoModePickerOpen`)
+    - Import by Bravo main dialog (`syncBravoOpen`)
+  - Removed now-obsolete manual dialog refs:
+    - `refreshLogDialogRef`
+    - `syncBravoModeDialogRef`
+    - `syncBravoDialogRef`
+  - Removed leftover manual Escape key listener for sync mode picker (behavior now owned by `AdminModal`).
+  - Preserved existing close semantics for in-flight Bravo sync by wiring `disableClose={syncBravoLoading}` and guarded close handler.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/admin-modal.test.tsx tests/admin-fetch.test.ts tests/show-social-subnav-wiring.test.ts tests/season-social-subnav-wiring.test.ts tests/show-page-tab-order-wiring.test.ts tests/season-page-tab-order-wiring.test.ts tests/admin-breadcrumbs.test.ts tests/admin-breadcrumbs-component.test.tsx tests/person-credits-show-scope-wiring.test.ts` (`21 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with existing repo warnings)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` currently fails on unrelated in-progress files outside this slice:
+    - `src/app/admin/trr-shows/people/[personId]/page.tsx` (button handler typing)
+    - `src/lib/server/admin/reddit-discovery-service.ts` (shape/type updates)
+
+Continuation (same session, 2026-02-24) — show admin TS contract stabilization for Sync-by-Bravo wiring.
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/_components/ShowSeasonCards.tsx`
+  - `apps/web/tests/show-bravo-cast-only-wiring.test.ts`
+- Changes:
+  - Tightened local date-range formatter type contract to accept `string | null | undefined` and normalized inputs internally.
+  - Removed tab-selection cast at show tabs callsite by passing typed callback directly.
+  - Simplified season-card formatter wiring to pass the typed formatter directly.
+  - Added cast-only commit-guard wiring assertion in Sync-by-Bravo test (`cast-only` requires `syncBravoPreviewSignature`).
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-bravo-cast-only-wiring.test.ts` (`2 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/_components/ShowTabsNav.tsx' 'src/app/admin/trr-shows/[showId]/_components/ShowSeasonCards.tsx' 'tests/show-bravo-cast-only-wiring.test.ts'` (pass)
+
+Continuation (same session, 2026-02-24) — Cast Tab additional quality pass (show + season, single frontend patch).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/cast-route-state.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-cast-lazy-loading-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-cast-tab-quality-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/cast-route-state.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/cast-incremental-render.test.tsx` (new)
+- Changes:
+  - Added cast URL-state helper (`cast_q`, `cast_sort`, `cast_order`, `cast_img`, plus show/season-specific filter keys) with parse/write round-trip support.
+  - Added search + debounced URL persistence on show and season cast tabs; preserves non-cast query params and avoids replace loops.
+  - Added show-page overlap guard `castAnyJobRunning` and disabled per-card `Refresh Person`/`Edit Roles` while top-level cast jobs are active.
+  - Added deep-link role-edit wiring (`cast_person`, `cast_open_role_editor`) and season per-card parity actions (`Refresh Person`, `Edit Roles` deep-link to show cast editor).
+  - Split season top-level cast actions into `Sync Cast` and `Enrich Media` (post-processing only), including cancel and phase-specific notices.
+  - Added cast failed-member tracking + collapsible panel + `Retry failed only` action on show and season enrich flows.
+  - Added stale snapshot recency metadata to warning surfaces (`Showing last successful snapshot from Xm ago`).
+  - Added incremental render for large cast lists (initial 48 + batch 48 via `requestIdleCallback` fallback) and `Rendering X/Y` progress text.
+  - Standardized filter-aware cast header counts on both pages: filtered/total cast, crew, and visible totals.
+  - Split season loading labels into cast-intelligence vs supplemental-show-cast states.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/show-cast-lazy-loading-wiring.test.ts tests/season-cast-tab-quality-wiring.test.ts tests/cast-route-state.test.ts tests/cast-incremental-render.test.tsx` (`4 files passed`, `26 tests passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/cast-route-state.ts' 'tests/show-cast-lazy-loading-wiring.test.ts' 'tests/season-cast-tab-quality-wiring.test.ts' 'tests/cast-route-state.test.ts' 'tests/cast-incremental-render.test.tsx'` (pass)
+
+Continuation (same session, 2026-02-24) — key-stability follow-up on cast failed-member lists.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+- Changes:
+  - Replaced index-based React keys in failed-member list rendering with stable composite keys:
+    - from `${member.personId}-${index}`
+    - to `${member.personId}-${member.name}-${member.reason}`
+  - This prevents reconciliation drift when the list order changes or rows are retried/removed.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx'` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/show-page-tab-order-wiring.test.ts tests/season-page-tab-order-wiring.test.ts tests/show-social-subnav-wiring.test.ts tests/season-social-subnav-wiring.test.ts` (`8 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+
+Continuation (same session, 2026-02-24) — season breadcrumb clickable show segment.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-page-tab-order-wiring.test.ts`
+- Changes:
+  - Updated season page breadcrumb wiring to pass `showHref` into `buildSeasonBreadcrumb(...)` using `buildShowAdminUrl({ showSlug: showSlugForRouting })`.
+  - This makes the show-name breadcrumb segment clickable on season pages (consistent with week/person pages).
+  - Added a wiring test assertion to prevent regressions of clickable show crumbs in season breadcrumbs.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' tests/season-page-tab-order-wiring.test.ts` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-page-tab-order-wiring.test.ts tests/social-week-detail-wiring.test.ts tests/admin-breadcrumbs.test.ts` (`13 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+
+Continuation (same session, 2026-02-24) — Reddit consolidation pass (20-item reliability/contract hardening).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-episode-rules.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/save/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-discovery-service.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-refresh-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-save-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-communities-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+- Changes:
+  - Discovery service now uses resilient sort fetching via `Promise.allSettled` + retry/backoff (429/502/503/504), with partial-success behavior instead of full refresh failure.
+  - Added discovery diagnostics across episode/general discovery outputs: `successful_sorts`, `failed_sorts`, `rate_limited_sorts`.
+  - Added structured observability logging for discovery/refresh/save flows with community/show/season/sort/duration fields.
+  - Hardened episode parsing:
+    - safer episode extraction with ambiguity rejection (`Episode N`, `SxEy`, constrained `E<N>` context),
+    - expanded deterministic discussion-type aliases (`live thread`, `post-episode discussion`, `weekly thread`).
+  - Episode matrix cells now include `top_post_url` server-side (no client-side lookup requirement).
+  - Refresh route now sanitizes/caps echoed `period_label` values (dedupe, trim, max labels/length).
+  - Episode bulk-save route hardened:
+    - strict ISO `posted_at` normalization,
+    - max payload cap (`250`),
+    - case-insensitive dedupe by `reddit_post_id` with `skipped_duplicates`,
+    - controlled save concurrency pool (`5`),
+    - non-negative integer normalization for score/comment inputs.
+  - Community POST/PATCH deprecates `episode_required_flares` writes (ignored with warnings); behavior remains driven by `analysis_all_flares`.
+  - Manager UX/perf hardening:
+    - endpoint-specific timeout policy,
+    - season/period context caching by show+season,
+    - abort/race-safe context loading,
+    - strictness copy fix when RHOSLC auto-seed is active,
+    - surfaced sort diagnostics in Episode Discussions meta line,
+    - matrix top-link uses direct `top_post_url`.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts tests/reddit-community-route.test.ts tests/reddit-communities-route.test.ts tests/reddit-sources-manager.test.tsx` (`54 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass; existing unrelated warnings only)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+
+Continuation (same session, 2026-02-24) — Bravo video thumbnail quality + auto-backfill wiring.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/bravo/videos/sync-thumbnails/route.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-bravo-video-thumbnail-wiring.test.ts` (new)
+- Changes:
+  - Added show-level proxy route for backend thumbnail sync endpoint:
+    - `POST /api/admin/trr-api/shows/[showId]/bravo/videos/sync-thumbnails`
+    - 90s timeout + backend reachability error mapping.
+  - Show/season/person video tabs now auto-trigger one thumbnail sync attempt when opening Videos view (in-flight dedupe + attempted ref).
+  - Season/person refresh buttons now trigger forced thumbnail resync (`forceSync: true`) before reloading videos.
+  - Video thumbnail rendering precedence updated on show/season/person pages:
+    - `hosted_image_url` -> `image_url` -> `original_image_url`.
+  - Added non-blocking sync status/warning messaging in video tab UIs.
+  - Extended `BravoVideoItem` typing with additive thumbnail sync fields.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/bravo/videos/sync-thumbnails/route.ts' 'tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts' 'tests/show-bravo-video-thumbnail-wiring.test.ts'` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts tests/show-bravo-video-thumbnail-wiring.test.ts tests/show-bravo-videos-proxy-route.test.ts tests/people-page-tabs-runtime.test.tsx` (`10 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+- Cross-repo contract check:
+  - `screenalytics` has no direct consumer references to these Bravo video admin routes/fields (no code changes required).
+- Continuation (same session): completed legacy deprecation gate path.
+  - Added request-time strict gate (`REDDIT_DISCOVERY_LEGACY_PARAMS_STRICT=1`) in:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/save/route.ts`
+  - Added strict-mode tests:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-refresh-route.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-save-route.test.ts`
+  - Validation:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts` (pass)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-threads-route.test.ts tests/reddit-sources-manager.test.tsx tests/reddit-community-flares-refresh-route.test.ts tests/reddit-flairs-service.test.ts tests/reddit-discovery-service.test.ts tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts tests/reddit-community-route.test.ts tests/reddit-communities-route.test.ts tests/reddit-community-view-page.test.tsx` (pass)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+
+Continuation (same session, 2026-02-24) — Cast + Season tabs comprehensive quality pass (12-item follow-up).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/cast-route-state.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/cast-route-state.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-cast-lazy-loading-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-cast-tab-quality-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/cast-incremental-render.test.tsx`
+- Changes:
+  - Migrated cast query contract to canonical keys with legacy read support:
+    - show: writes `cast_filters` (reads legacy `cast_roles` fallback)
+    - season: writes `cast_role_filters` + `cast_credit_filters` (reads legacy `cast_roles`/`cast_credits` fallback)
+    - writers clear legacy keys to prevent drift.
+  - Show cast tab:
+    - deep-link role editor now waits for role data readiness before consuming `cast_open_role_editor`.
+    - top-level busy state now includes in-flight per-person refreshes.
+    - top-level cast counters now show `rendered/matched/total`.
+    - added deferred search compute path (`useDeferredValue`) for cast filter/sort pipeline.
+    - added per-person refresh AbortController map, with abort on reset/unmount/cancel.
+    - added `aria-pressed` for cast filter chips and `aria-live` status semantics for cast loading/render messages.
+  - Season cast tab:
+    - per-person refresh now triggers post-success reload of cast-role-members + supplemental show cast.
+    - retry-failed enrich now also refreshes cast-role-members + supplemental show cast.
+    - deduped season cast by `person_id` before merge/filter/sort.
+    - top-level `Sync Cast` / `Enrich Cast & Crew Media` buttons block during per-person refresh in-flight.
+    - added per-person refresh AbortController map with abort on reset/unmount/cancel.
+    - deep-link `Edit Roles` now builds whitelisted show-cast query via `writeShowCastRouteState` instead of forwarding full season search params.
+    - relabeled season enrich action/notice copy to `Cast & crew media` semantics.
+    - added `aria-pressed` chips and `aria-live` status semantics for loading/render labels.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/cast-route-state.test.ts tests/show-cast-lazy-loading-wiring.test.ts tests/season-cast-tab-quality-wiring.test.ts tests/cast-incremental-render.test.tsx` (`4 files passed`, `31 tests passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/lib/admin/cast-route-state.ts' 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'tests/cast-route-state.test.ts' 'tests/show-cast-lazy-loading-wiring.test.ts' 'tests/season-cast-tab-quality-wiring.test.ts' 'tests/cast-incremental-render.test.tsx'` (no errors; pre-existing warnings in show page remain)
+
+Continuation (same session, 2026-02-24) — Week-detail day prefilter wiring + run-failure readability + section skeletons.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- Changes:
+  - Week detail now consumes `day=YYYY-MM-DD` and `social_platform` query params:
+    - preselects platform filter from `social_platform`
+    - applies day-level local-time filtering to post list, summary totals, and comments coverage
+    - renders active day-filter banner with clear action
+    - empty-state copy differentiates week vs day scope.
+  - Advanced Run Health panel now includes:
+    - grouped failure clusters (code + stage + platforms + count + sample)
+    - latest 5 failure events list for triage.
+  - Added explicit section-level loading skeletons for progressive reveal while analytics load.
+  - Added run-summary loading state to avoid blank advanced panel while summary fetch is in-flight.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'tests/season-social-analytics-section.test.tsx' 'tests/week-social-thumbnails.test.tsx'` (pass)
+  - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/week-social-thumbnails.test.tsx tests/social-week-detail-wiring.test.ts` (`53 passed`; existing React act warnings in one long-running polling test remain pre-existing)
+
+Continuation (same session, 2026-02-24) — Social timeout triage follow-up (comments coverage + jobs polling).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+- Changes:
+  - Reduced social jobs fetch default page size from `250` to `100` in season social landing fetch path.
+  - Reduced week-detail sync polling jobs request `limit` from `250` to `100`.
+  - This aligns with the hardening target to keep progress polling payloads bounded and reduce `UPSTREAM_TIMEOUT` risk under load.
+- Findings validated during triage:
+  - `comments-coverage` now returns `200` consistently after backend SQL alias fix (no more `missing FROM-clause entry for table "t"`).
+  - Historical `galleryVisibleCount is not defined` no longer reproduces in current source/runtime after restart.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/social-week-detail-wiring.test.ts` (`47 passed`; existing React `act(...)` warnings remain in polling-heavy test path).
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx'` (pass).
+  - Manual proxy checks after restart:
+    - `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/seasons/6/social/analytics/comments-coverage?...` -> `200`
+    - `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/seasons/6/social/runs?...` -> `200`
+    - `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/seasons/6/social/jobs?...run_id=933687e3-5345-4124-bfe0-75806793c6c6` -> `200`.
+
+Continuation (same session, 2026-02-24) — requested revision pass: timeout standardization + key stability + lint follow-up.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
+- Changes:
+  - Standardized remaining non-stream show-page calls to timeout-bounded fetches via `fetchWithTimeout`.
+    - Covered slug resolution, show settings mutations, show-links CRUD/discovery, role mutations/assignment, Bravo preview+commit mutations, and media asset detection/archive/star/content-type/delete mutations.
+    - Left stream endpoints and manual external-signal fallback fetches unchanged by design.
+  - Added `BRAVO_IMPORT_MUTATION_TIMEOUT_MS = 120_000` for non-stream Bravo preview/commit mutations.
+  - Week social page:
+    - Replaced index-based sync log keying with stable job-id keying (`key={entry.id}`).
+    - Refactored `syncLogs` memo to return `{ id, line }` entries.
+    - Kept typed `router.replace` route-cast compatibility (`as Route`) for day-filter URL updates.
+  - Added regression coverage in `social-week-detail-wiring.test.ts` to assert stable sync-log key wiring.
+  - Verified people-page hook-dependency warning concern is no longer present on current file state.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/social-week-detail-wiring.test.ts tests/show-news-tab-google-wiring.test.ts tests/show-social-subnav-wiring.test.ts tests/season-social-subnav-wiring.test.ts tests/show-page-tab-order-wiring.test.ts tests/season-page-tab-order-wiring.test.ts tests/admin-fetch.test.ts` (`20 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx' tests/social-week-detail-wiring.test.ts` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with existing repo warnings only; no errors)
+
+Continuation (same session, 2026-02-24) — Reddit contract hardening follow-through (strict legacy rejection + deprecated field removal path).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/save/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-communities-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-refresh-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-save-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+- Changes:
+  - Removed compatibility-gated legacy fallback logic for episode refresh/save params.
+    - `GET /episode-discussions/refresh` now rejects `show_id` and `season_number` unconditionally with `400`.
+    - `POST /episode-discussions/save` now rejects `show_id` and `show_name` unconditionally with `400`.
+  - Community write routes now reject deprecated `episode_required_flares` payloads with `400` and guidance to use `analysis_all_flares`.
+  - Repository/community model cleanup continued:
+    - operational/community row mapping no longer exposes `episode_required_flares` in returned API objects.
+    - community create/update paths no longer write or resolve `episode_required_flares`.
+  - Manager UI/types cleanup:
+    - removed `episode_required_flares` from client community shape/merge normalization.
+    - refresh request no longer sends legacy `season_number`; uses `season_id` + period window.
+  - Test suite updated for strict behavior:
+    - legacy refresh/save params now expected to fail.
+    - deprecated `episode_required_flares` writes now expected to fail.
+    - manager refresh query assertions updated to `season_id`/period-only.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-threads-route.test.ts tests/reddit-sources-manager.test.tsx tests/reddit-community-flares-refresh-route.test.ts tests/reddit-flairs-service.test.ts tests/reddit-discovery-service.test.ts tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts tests/reddit-community-route.test.ts tests/reddit-communities-route.test.ts tests/reddit-community-view-page.test.tsx` (`10 files passed`, `72 tests passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+
+Continuation (same session, 2026-02-24) — MEDIA/GALLERY hardening pass (show/season/person reliability + diagnostics).
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/ImageLightbox.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/photo-metadata.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/paginated-gallery-fetch.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-gallery-pagination.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-gallery-pagination.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-broken-toggle.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-gallery-batch-preflight.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-gallery-batch-preflight.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-gallery-section-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/gallery-fallback-telemetry.test.ts`
+- Changes:
+  - Person gallery audit mode:
+    - Added `Show Broken` toggle in person gallery toolbar (`showBrokenRows`, default off).
+    - Person photo fetch now sends `include_broken=true` only when toggle is enabled.
+    - Added broken card badge (`Broken`) and tooltip context for `broken_unreachable` rows.
+  - Person gallery diagnostics:
+    - Added fallback telemetry counters (`recovered`, `failed`, `attempted`) in gallery UI.
+    - Gallery card loader now emits attempt/recovered/failed events and logs all-candidate failure as before.
+  - Lightbox metadata visibility:
+    - Added additive gallery status fields to `PhotoMetadata` (`galleryStatus`, `galleryStatusReason`, `galleryStatusCheckedAt`).
+    - Mapped status values from metadata for person + season/show assets.
+    - Lightbox now surfaces `BROKEN (UNREACHABLE)` badge and status rows in Metadata Coverage when present.
+  - Show gallery hardening:
+    - Removed dead/disallowed section branches from section-visible defaults and grouping keys, keeping only:
+      - `cast_photos`
+      - `profile_pictures`
+      - `posters`
+      - `backdrops`
+  - Season batch preflight UX:
+    - Added deterministic preflight summary text in season batch modal using the same computed target plan as submit payload.
+  - Pagination metadata helper usage remains additive (`fetchAllPaginatedGalleryRowsWithMeta`) with truncation warnings preserved on show/season pages.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-gallery-broken-toggle.test.ts tests/show-gallery-pagination.test.ts tests/season-gallery-pagination.test.ts tests/show-gallery-batch-preflight.test.ts tests/season-gallery-batch-preflight.test.ts tests/show-gallery-section-visibility.test.ts tests/gallery-fallback-telemetry.test.ts` (`7 files passed`, `7 tests passed`).
+  - Additional regressions:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-gallery-thumbnail-wiring.test.ts tests/image-lightbox-metadata.test.tsx` (`2 files passed`, `13 tests passed`; expected jsdom `scrollTo` warnings only).
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/people-page-tabs-runtime.test.tsx tests/show-assets-image-sections.runtime.test.tsx` (`2 files passed`, `6 tests passed`; existing mocked fandom fetch stderr noise in runtime test path).
+
+Continuation (same session, 2026-02-24) — Networks sync hardening rollout (ops/deploy follow-through).
+- Scope:
+  - Confirmed TRR-APP proxy/UI surfaces new sync controls (`refresh_external_sources`, `resume_run_id`, runtime/batch passthrough) and run metadata render path.
+  - Executed production Vercel deploy for `apps/web`.
+- Execution details:
+  - Initial production deploy failed due lockfile mismatch in app-local lock:
+    - `apps/web/package.json` expected `eslint-config-next@16.1.6`
+    - `apps/web/pnpm-lock.yaml` pinned `eslint-config-next@15.5.0`
+  - Lock refresh:
+    - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm install --lockfile-only --ignore-workspace`
+  - Redeploy result:
+    - `vercel deploy --prod` succeeded.
+    - production deployment: `https://web-6s2s56rn1-the-reality-reports-projects.vercel.app`
+    - `vercel inspect` status: `Ready`.
+- Notes:
+  - Backend Cloud Run remains pending (separate auth blocker in backend handoff); app deploy is complete.
+
+Continuation (same session, 2026-02-24) — Bravo video thumbnail sync timeout hardening + RHOSLC videos smoke verification.
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/bravo/videos/sync-thumbnails/route.ts`
+- Changes:
+  - Increased Bravo video thumbnail sync proxy timeout from `90s` to `15 minutes`:
+    - `BACKEND_TIMEOUT_MS = 15 * 60_000`
+  - Rationale: forced one-time thumbnail mirror/backfill can legitimately exceed 90s.
+- Validation:
+  - `pnpm -C apps/web exec eslint 'src/app/api/admin/trr-api/shows/[showId]/bravo/videos/sync-thumbnails/route.ts'` (pass)
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+- RHOSLC data-path smoke checks after forced backfill (UI-serving endpoints):
+  - Show videos: `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/bravo/videos?merge_person_sources=true`
+    - `count=58`, `hosted_count=58`, `non_hosted_count=0`
+  - Season videos: `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/bravo/videos?season_number=6&merge_person_sources=true`
+    - `count=58`, `hosted_count=58`, `non_hosted_count=0`
+  - Person videos (Heather Gay): `/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75/bravo/videos?person_id=a0f6454b-2ceb-4077-9e9a-a3b152e922f0&merge_person_sources=true`
+    - `count=17`, `hosted_count=17`, `non_hosted_count=0`

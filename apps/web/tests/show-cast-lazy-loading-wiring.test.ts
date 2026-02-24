@@ -4,7 +4,9 @@ import path from "node:path";
 
 describe("show detail cast lazy-loading wiring", () => {
   const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+  const castRouteStatePath = path.resolve(__dirname, "../src/lib/admin/cast-route-state.ts");
   const contents = fs.readFileSync(filePath, "utf8");
+  const castRouteStateContents = fs.readFileSync(castRouteStatePath, "utf8");
 
   it("keeps initial page load Promise.all free of fetchCast", () => {
     expect(contents).toMatch(/await Promise\.allSettled\(\[fetchSeasons\(\), checkCoverage\(\)\]\)/);
@@ -45,19 +47,44 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).not.toMatch(/:\s*globalRefreshProgress;/);
   });
 
-  it("shows filtered\\/total cast counters and exposes cancel for running cast jobs", () => {
+  it("adds cast search and URL-persisted cast filter state", () => {
+    expect(contents).toMatch(/parseShowCastRouteState/);
+    expect(contents).toMatch(/writeShowCastRouteState/);
+    expect(contents).toMatch(/castSearchQuery/);
+    expect(contents).toMatch(/castSearchQueryDebounced/);
+    expect(castRouteStateContents).toMatch(/cast_q/);
+    expect(castRouteStateContents).toMatch(/cast_filters/);
+    expect(contents).toMatch(/Search Name/);
+  });
+
+  it("disables per-card cast actions while cast jobs are running", () => {
+    expect(contents).toMatch(/const castAnyJobRunning =/);
+    expect(contents).toMatch(/const hasPersonRefreshInFlight = Object\.keys\(refreshingPersonIds\)\.length > 0/);
+    expect(contents).toMatch(/disabled=\{castAnyJobRunning \|\| Boolean\(refreshingPersonIds\[member\.person_id\]\)\}/);
+    expect(contents).toMatch(/title=\{castAnyJobRunning \? \"Cast sync in progress\" : undefined\}/);
+  });
+
+  it("tracks and renders failed cast members with retry-failed control", () => {
+    expect(contents).toMatch(/const \[castRunFailedMembers, setCastRunFailedMembers\] = useState<CastRunFailedMember\[]>\(\[\]\)/);
+    expect(contents).toMatch(/Retry failed only/);
+    expect(contents).toMatch(/retryFailedCastMediaEnrich/);
+    expect(contents).toMatch(/Failed Members \(\{castRunFailedMembers\.length\}\)/);
+  });
+
+  it("shows rendered\\/matched\\/total cast counters and exposes cancel for running cast jobs", () => {
     expect(contents).toMatch(/const castDisplayTotals = useMemo/);
-    expect(contents).toMatch(/castGalleryMembers\.length}\/\{castDisplayTotals\.cast} cast/);
-    expect(contents).toMatch(/crewGalleryMembers\.length}\/\{castDisplayTotals\.crew} crew/);
-    expect(contents).toMatch(/castDisplayMembers\.length}\/\{castDisplayTotals\.total} visible/);
+    expect(contents).toMatch(/renderedCastCount}\/\{matchedCastCount}\/\{totalCastCount} cast/);
+    expect(contents).toMatch(/renderedCrewCount}\/\{matchedCrewCount}\/\{totalCrewCount} crew/);
+    expect(contents).toMatch(/renderedVisibleCount}\/\{matchedVisibleCount}\/\{totalVisibleCount} visible/);
     expect(contents).toMatch(/const cancelShowCastWorkflow = useCallback/);
     expect(contents).toMatch(/castRefreshAbortControllerRef\.current\?\.abort\(\)/);
     expect(contents).toMatch(/castMediaEnrichAbortControllerRef\.current\?\.abort\(\)/);
-    expect(contents).toMatch(/\(castRefreshPipelineRunning \|\| castMediaEnriching\) &&/);
+    expect(contents).toMatch(/\(castRefreshPipelineRunning \|\| castMediaEnriching \|\| hasPersonRefreshInFlight\) &&/);
     expect(contents).toMatch(/if \(completedSuccessfully\) \{\s*setCastRefreshPhaseStates\(\[\]\);/s);
     expect(contents).toMatch(
       /castRefreshAbortControllerRef\.current\?\.abort\(\);\s*castMediaEnrichAbortControllerRef\.current\?\.abort\(\);/s
     );
+    expect(contents).toMatch(/personRefreshAbortControllersRef/);
   });
 
   it("uses valid interactive structure for cast cards by separating link and action buttons", () => {
@@ -85,11 +112,18 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/castPhaseProgress \?\? refreshTargetProgress\.cast_credits \?\? null/);
   });
 
+  it("defers cast search filtering work and waits for role data before deep-link editor open", () => {
+    expect(contents).toMatch(/useDeferredValue/);
+    expect(contents).toMatch(/const castSearchQueryDeferred = useDeferredValue/);
+    expect(contents).toMatch(/const roleDataReady = castRoleMembersLoadedOnce \|\| Boolean\(roleMember\);/);
+    expect(contents).toMatch(/if \(!roleDataReady\) return;/);
+  });
+
   it("keeps cast tab usable when cast-role-members refresh fails", () => {
     expect(contents).toMatch(/Showing last successful cast intelligence snapshot/);
     expect(contents).toMatch(/setCastRoleMembersWarning/);
     expect(contents).toMatch(/onClick=\{\(\) => void fetchCastRoleMembers\(\{ force: true \}\)\}/);
-    expect(contents).toMatch(/rolesWarning && \(/);
+    expect(contents).toMatch(/rolesWarningWithSnapshotAge && \(/);
     expect(contents).toMatch(/Retry Roles/);
     expect(contents).toMatch(/onClick=\{\(\) => void fetchShowRoles\(\{ force: true \}\)\}/);
   });

@@ -73,7 +73,6 @@ export async function POST(request: NextRequest) {
       network_focus_targets?: unknown;
       franchise_focus_targets?: unknown;
       episode_title_patterns?: unknown;
-      episode_required_flares?: unknown;
     };
 
     if (!body.trr_show_id || typeof body.trr_show_id !== "string") {
@@ -147,19 +146,11 @@ export async function POST(request: NextRequest) {
       }
       episodeTitlePatterns = body.episode_title_patterns as string[];
     }
-
-    let episodeRequiredFlares: string[] | undefined;
-    if (body.episode_required_flares !== undefined) {
-      if (
-        !Array.isArray(body.episode_required_flares) ||
-        body.episode_required_flares.some((value) => typeof value !== "string")
-      ) {
-        return NextResponse.json(
-          { error: "episode_required_flares must be an array of strings" },
-          { status: 400 },
-        );
-      }
-      episodeRequiredFlares = body.episode_required_flares as string[];
+    if ("episode_required_flares" in body) {
+      return NextResponse.json(
+        { error: "episode_required_flares is no longer supported; use analysis_all_flares" },
+        { status: 400 },
+      );
     }
 
     const community = await createRedditCommunity(authContext, {
@@ -174,7 +165,6 @@ export async function POST(request: NextRequest) {
       networkFocusTargets,
       franchiseFocusTargets,
       episodeTitlePatterns,
-      episodeRequiredFlares,
     });
 
     return NextResponse.json({ community }, { status: 201 });

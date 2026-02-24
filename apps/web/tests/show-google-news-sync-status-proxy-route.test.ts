@@ -54,4 +54,20 @@ describe("show google-news sync status proxy route", () => {
       })
     );
   });
+
+  it("maps aborts to a 60s timeout response", async () => {
+    const abortError = new Error("aborted");
+    abortError.name = "AbortError";
+    const fetchMock = vi.fn().mockRejectedValue(abortError);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/google-news/sync/job-1");
+    const response = await GET(request, {
+      params: Promise.resolve({ showId: "show-1", jobId: "job-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(504);
+    expect(String(payload.error || "")).toContain("timed out after 60s");
+  });
 });

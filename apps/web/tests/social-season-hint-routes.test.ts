@@ -18,6 +18,7 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
 
 import { GET as getJobs } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route";
 import { GET as getRuns } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route";
+import { GET as getRunsSummary } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/summary/route";
 import { GET as getTargets } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route";
 import { GET as getAnalytics } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route";
 import { GET as getWeek } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route";
@@ -45,7 +46,7 @@ describe("social routes season_id hint forwarding", () => {
     );
   });
 
-  it("forwards season_id hint on jobs route and uses reduced retries/timeout", async () => {
+  it("forwards season_id hint on jobs route and uses poll-safe retries/timeout", async () => {
     const request = new NextRequest(
       `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/jobs?season_id=${seasonId}&run_id=run-1&limit=250`,
       { method: "GET" },
@@ -60,7 +61,7 @@ describe("social routes season_id hint forwarding", () => {
       expect.objectContaining({
         seasonIdHint: seasonId,
         retries: 0,
-        timeoutMs: 20_000,
+        timeoutMs: 15_000,
       }),
     );
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
@@ -89,6 +90,21 @@ describe("social routes season_id hint forwarding", () => {
     );
 
     const response = await getRuns(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
+    const payload = (await response.json()) as { error?: string; code?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.code).toBe("BAD_REQUEST");
+    expect(payload.error).toContain("season_id");
+    expect(fetchSeasonBackendJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for invalid season_id on runs summary route", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/runs/summary?season_id=bad-id`,
+      { method: "GET" },
+    );
+
+    const response = await getRunsSummary(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
     const payload = (await response.json()) as { error?: string; code?: string };
 
     expect(response.status).toBe(400);
@@ -127,6 +143,29 @@ describe("social routes season_id hint forwarding", () => {
     expect(fetchSeasonBackendJsonMock).not.toHaveBeenCalled();
   });
 
+  it("supports background timeout profile on analytics route", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/analytics?season_id=${seasonId}&timeout_profile=background&source_scope=bravo`,
+      { method: "GET" },
+    );
+
+    const response = await getAnalytics(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
+    expect(response.status).toBe(200);
+    expect(fetchSeasonBackendJsonMock).toHaveBeenCalledWith(
+      showId,
+      "6",
+      "/analytics",
+      expect.objectContaining({
+        seasonIdHint: seasonId,
+        retries: 1,
+        timeoutMs: 35_000,
+      }),
+    );
+    const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
+    expect(String(options.queryString ?? "")).not.toContain("season_id=");
+    expect(String(options.queryString ?? "")).not.toContain("timeout_profile=");
+  });
+
   it("forwards season_id hint on week analytics route", async () => {
     const request = new NextRequest(
       `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/analytics/week/3?season_id=${seasonId}&source_scope=bravo`,
@@ -144,6 +183,7 @@ describe("social routes season_id hint forwarding", () => {
       expect.objectContaining({
         seasonIdHint: seasonId,
         retries: 0,
+        timeoutMs: 20_000,
       }),
     );
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };

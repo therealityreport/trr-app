@@ -118,7 +118,6 @@ describe("/api/admin/reddit/communities route", () => {
       network_focus_targets: ["Bravo"],
       franchise_focus_targets: ["Real Housewives"],
       episode_title_patterns: ["Live Episode Discussion"],
-      episode_required_flares: ["Salt Lake City"],
     });
 
     const request = new NextRequest("http://localhost/api/admin/reddit/communities", {
@@ -131,7 +130,6 @@ describe("/api/admin/reddit/communities route", () => {
         network_focus_targets: ["Bravo"],
         franchise_focus_targets: ["Real Housewives"],
         episode_title_patterns: ["Live Episode Discussion"],
-        episode_required_flares: ["Salt Lake City"],
       }),
       headers: { "Content-Type": "application/json" },
     });
@@ -152,7 +150,6 @@ describe("/api/admin/reddit/communities route", () => {
         networkFocusTargets: ["Bravo"],
         franchiseFocusTargets: ["Real Housewives"],
         episodeTitlePatterns: ["Live Episode Discussion"],
-        episodeRequiredFlares: ["Salt Lake City"],
       }),
     );
   });
@@ -194,6 +191,26 @@ describe("/api/admin/reddit/communities route", () => {
 
     expect(response.status).toBe(400);
     expect(payload.error).toContain("episode_title_patterns");
+    expect(createRedditCommunityMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects deprecated episode_required_flares on create payload", async () => {
+    const request = new NextRequest("http://localhost/api/admin/reddit/communities", {
+      method: "POST",
+      body: JSON.stringify({
+        trr_show_id: SHOW_ID,
+        trr_show_name: "The Real Housewives of Salt Lake City",
+        subreddit: "BravoRealHousewives",
+        episode_title_patterns: ["Live Episode Discussion"],
+        episode_required_flares: ["Salt Lake City", 123],
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("episode_required_flares");
     expect(createRedditCommunityMock).not.toHaveBeenCalled();
   });
 });

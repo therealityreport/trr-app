@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getShowById, updateShowById } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  getShowById,
+  updateShowById,
+  validateShowImageForField,
+} from "@/lib/server/trr-api/trr-shows-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -152,6 +156,44 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         deduped.push(candidate);
       }
       alternativeNames = deduped;
+    }
+
+    if (primaryPosterImageId) {
+      const isValidPoster = await validateShowImageForField(
+        showId,
+        primaryPosterImageId,
+        "poster"
+      );
+      if (!isValidPoster) {
+        console.warn("[api] Rejected invalid featured poster image assignment", {
+          showId,
+          field: "primary_poster_image_id",
+          imageId: primaryPosterImageId,
+        });
+        return NextResponse.json(
+          { error: "primary_poster_image_id must reference a poster image for this show" },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (primaryBackdropImageId) {
+      const isValidBackdrop = await validateShowImageForField(
+        showId,
+        primaryBackdropImageId,
+        "backdrop"
+      );
+      if (!isValidBackdrop) {
+        console.warn("[api] Rejected invalid featured backdrop image assignment", {
+          showId,
+          field: "primary_backdrop_image_id",
+          imageId: primaryBackdropImageId,
+        });
+        return NextResponse.json(
+          { error: "primary_backdrop_image_id must reference a backdrop image for this show" },
+          { status: 400 }
+        );
+      }
     }
 
     const show = await updateShowById(showId, {

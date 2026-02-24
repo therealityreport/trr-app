@@ -48,7 +48,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       seasonIdHint,
       fallbackError: "Failed to fetch social jobs",
       retries: 0,
-      timeoutMs: 20_000,
+      timeoutMs: 15_000,
     });
     return NextResponse.json(data);
   } catch (error) {

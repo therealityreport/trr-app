@@ -68,4 +68,16 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/showHref:\s*breadcrumbShowHref/);
     expect(contents).toMatch(/buildSeasonWeekBreadcrumb\(/);
   });
+
+  it("uses stable job ids for sync log row keys", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/syncLogs\.map\(\(entry\) => \(/);
+    expect(contents).toMatch(/key=\{entry\.id\}/);
+    expect(contents).not.toMatch(/key=\{`\$\{line\}-\$\{index\}`\}/);
+  });
 });

@@ -456,7 +456,8 @@ function CastToken({
   });
   // dnd-kit provides an `aria-pressed` attribute, but we want selection state
   // to control that value; omit it to avoid duplicate props in JSX.
-  const { ["aria-pressed"]: _ariaPressed, ...draggableAttributes } = attributes;
+  const { ["aria-pressed"]: ariaPressedFromDnd, ...draggableAttributes } = attributes;
+  void ariaPressedFromDnd;
 
   const dims = size === "bench"
     ? "w-12 h-12 sm:w-14 sm:h-14"

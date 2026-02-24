@@ -1,6 +1,7 @@
 import { mapPhotoToMetadata, mapSeasonAssetToMetadata } from "@/lib/photo-metadata";
 import type { TrrPersonPhoto, SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 import type { ContentTypeFilter } from "@/lib/admin/advanced-filters";
+import { classifySeasonAssetSection, type AssetSectionKey } from "@/lib/admin/asset-sectioning";
 
 export function normalizeBool(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
@@ -47,6 +48,31 @@ export function inferPeopleCountForPersonPhoto(photo: TrrPersonPhoto): number | 
 
 function matchesWwhl(text: string): boolean {
   return text.toLowerCase().includes("wwhl");
+}
+
+function normalizeToken(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function isOfficialSeasonAnnouncementAsset(asset: SeasonAsset): boolean {
+  const metadata = (asset.metadata ?? {}) as Record<string, unknown>;
+  const tokens = [
+    asset.context_section,
+    asset.context_type,
+    metadata.context_section,
+    metadata.context_type,
+    metadata.fandom_section_tag,
+    metadata.fandom_section_label,
+  ]
+    .map(normalizeToken)
+    .filter(Boolean)
+    .join(" ");
+  return tokens.includes("official season announcement");
 }
 
 function isProfilePictureContext(
@@ -102,6 +128,29 @@ export function matchesContentTypesForSeasonAsset(
   showName?: string
 ): boolean {
   if (contentTypes.length === 0) return true;
+  const section = classifySeasonAssetSection(asset, { seasonNumber, showName });
+  const sectionByFilter: Partial<Record<ContentTypeFilter, AssetSectionKey>> = {
+    confessional: "confessionals",
+    reunion: "reunion",
+    profile_picture: "profile_pictures",
+    episode_still: "episode_stills",
+    intro: "intro_card",
+    other: "other",
+  };
+
+  if (contentTypes.includes("promo")) {
+    const isPromoCastPhoto = section === "cast_photos" && isOfficialSeasonAnnouncementAsset(asset);
+    if (isPromoCastPhoto) return true;
+  }
+
+  const hasSectionMatch = contentTypes.some((contentType) => {
+    if (contentType === "wwhl") return false;
+    if (contentType === "promo") return false;
+    const expectedSection = sectionByFilter[contentType];
+    return Boolean(expectedSection && section === expectedSection);
+  });
+  if (hasSectionMatch) return true;
+
   const meta = mapSeasonAssetToMetadata(asset, seasonNumber, showName);
   const sectionTag = (meta.contentType ?? meta.sectionTag ?? "").toLowerCase();
   const label = (meta.sectionLabel ?? "").toLowerCase();
@@ -111,7 +160,6 @@ export function matchesContentTypesForSeasonAsset(
 
   return contentTypes.some((ct) => {
     // Fallback: for assets imported via admin scraping, "kind" is often the most reliable signal.
-    if (ct === "promo" && kind === "promo") return true;
     if (ct === "intro" && kind === "intro") return true;
     if (ct === "reunion" && kind === "reunion") return true;
     if (ct === "episode_still" && (kind === "episode_still" || kind === "episode still")) return true;
@@ -122,7 +170,7 @@ export function matchesContentTypesForSeasonAsset(
       case "reunion":
         return sectionTag.includes("reunion");
       case "promo":
-        return sectionTag.includes("promo");
+        return false;
       case "profile_picture":
         return isProfilePictureContext(asset.context_type, asset.context_section);
       case "episode_still":

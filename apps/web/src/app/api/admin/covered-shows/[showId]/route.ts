@@ -5,8 +5,10 @@ import {
   getCoveredShowByTrrShowId,
   removeCoveredShow,
 } from "@/lib/server/admin/covered-shows-repository";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
+const COVERED_SHOWS_CACHE_NAMESPACE = "admin-covered-shows";
 
 interface RouteParams {
   params: Promise<{ showId: string }>;
@@ -76,6 +78,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         { status: 404 }
       );
     }
+    invalidateRouteResponseCache(COVERED_SHOWS_CACHE_NAMESPACE, `${user.uid}:`);
 
     return NextResponse.json({ success: true });
   } catch (error) {

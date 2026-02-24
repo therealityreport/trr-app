@@ -1,11 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import {
+  buildUserScopedRouteCacheKey,
+  getRouteResponseCache,
+  invalidateRouteResponseCache,
+  parseCacheTtlMs,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
-const LIST_BACKEND_TIMEOUT_MS = 120_000;
-const MUTATION_BACKEND_TIMEOUT_MS = 60_000;
+const LIST_BACKEND_TIMEOUT_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_SHOW_ROLES_TIMEOUT_MS,
+  20_000,
+);
+const MUTATION_BACKEND_TIMEOUT_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_SHOW_ROLES_MUTATION_TIMEOUT_MS,
+  60_000,
+);
 const MAX_ATTEMPTS = 2;
+const SHOW_ROLES_CACHE_NAMESPACE = "admin-show-roles";
+const SHOW_ROLES_CACHE_TTL_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_SHOW_ROLES_CACHE_TTL_MS,
+);
 
 type ProxyErrorCode =
   | "UPSTREAM_TIMEOUT"
@@ -51,12 +68,17 @@ const listTimeoutJson = (): NextResponse<ProxyErrorPayload> =>
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { showId } = await params;
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/roles`);
     if (!backendUrl) return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
 
     const { searchParams } = new URL(request.url);
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `${showId}:list`, request.nextUrl.searchParams);
+    const cachedData = getRouteResponseCache<unknown>(SHOW_ROLES_CACHE_NAMESPACE, cacheKey);
+    if (cachedData) {
+      return NextResponse.json(cachedData, { headers: { "x-trr-cache": "hit" } });
+    }
     const url = new URL(backendUrl);
     searchParams.forEach((value, key) => url.searchParams.set(key, value));
 
@@ -76,6 +98,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         });
         const data = await response.json().catch(() => ({}));
         if (response.ok) {
+          setRouteResponseCache(SHOW_ROLES_CACHE_NAMESPACE, cacheKey, data, SHOW_ROLES_CACHE_TTL_MS);
           return NextResponse.json(data);
         }
 
@@ -141,7 +164,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { showId } = await params;
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/roles`);
     if (!backendUrl) return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
@@ -187,6 +210,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         { status: response.status }
       );
     }
+    invalidateRouteResponseCache(SHOW_ROLES_CACHE_NAMESPACE, `${user.uid}:${showId}:`);
 
     return NextResponse.json(data);
   } catch (error) {

@@ -4,10 +4,12 @@ import { NextRequest } from "next/server";
 const {
   requireAdminMock,
   getCreditsByPersonIdMock,
+  getCreditsForPersonShowScopeMock,
   getEpisodeCreditsByPersonShowIdMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getCreditsByPersonIdMock: vi.fn(),
+  getCreditsForPersonShowScopeMock: vi.fn(),
   getEpisodeCreditsByPersonShowIdMock: vi.fn(),
 }));
 
@@ -17,6 +19,7 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getCreditsByPersonId: getCreditsByPersonIdMock,
+  getCreditsForPersonShowScope: getCreditsForPersonShowScopeMock,
   getEpisodeCreditsByPersonShowId: getEpisodeCreditsByPersonShowIdMock,
 }));
 
@@ -26,6 +29,7 @@ describe("person credits route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getCreditsByPersonIdMock.mockReset();
+    getCreditsForPersonShowScopeMock.mockReset();
     getEpisodeCreditsByPersonShowIdMock.mockReset();
 
     requireAdminMock.mockResolvedValue(undefined);
@@ -57,7 +61,7 @@ describe("person credits route", () => {
 
   it("returns show_scope with cast/crew grouping and role separation", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
-    getCreditsByPersonIdMock.mockResolvedValue([
+    const scopedCredits = [
       {
         id: "credit-host",
         show_id: showId,
@@ -98,7 +102,9 @@ describe("person credits route", () => {
         credit_category: "Self",
         source_type: "imdb",
       },
-    ]);
+    ];
+    getCreditsByPersonIdMock.mockResolvedValue(scopedCredits);
+    getCreditsForPersonShowScopeMock.mockResolvedValue(scopedCredits);
 
     getEpisodeCreditsByPersonShowIdMock.mockResolvedValue([
       {
@@ -159,6 +165,11 @@ describe("person credits route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.credits).toHaveLength(4);
+    expect(getCreditsByPersonIdMock).toHaveBeenCalledWith("person-1", {
+      limit: 50,
+      offset: 0,
+    });
+    expect(getCreditsForPersonShowScopeMock).toHaveBeenCalledWith("person-1", showId);
     expect(getEpisodeCreditsByPersonShowIdMock).toHaveBeenCalledWith(
       "person-1",
       showId,
@@ -186,7 +197,7 @@ describe("person credits route", () => {
 
   it("places credits with Self episode evidence into cast_groups even when base category differs", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
-    getCreditsByPersonIdMock.mockResolvedValue([
+    const scopedCredits = [
       {
         id: "credit-host",
         show_id: showId,
@@ -197,7 +208,9 @@ describe("person credits route", () => {
         credit_category: "Producer",
         source_type: "imdb",
       },
-    ]);
+    ];
+    getCreditsByPersonIdMock.mockResolvedValue(scopedCredits);
+    getCreditsForPersonShowScopeMock.mockResolvedValue(scopedCredits);
 
     getEpisodeCreditsByPersonShowIdMock.mockResolvedValue([
       {
@@ -228,7 +241,7 @@ describe("person credits route", () => {
 
   it("suppresses null-role Self cast groups when explicit cast role exists", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
-    getCreditsByPersonIdMock.mockResolvedValue([
+    const scopedCredits = [
       {
         id: "credit-host",
         show_id: showId,
@@ -259,7 +272,9 @@ describe("person credits route", () => {
         credit_category: "Producer",
         source_type: "imdb",
       },
-    ]);
+    ];
+    getCreditsByPersonIdMock.mockResolvedValue(scopedCredits);
+    getCreditsForPersonShowScopeMock.mockResolvedValue(scopedCredits);
 
     getEpisodeCreditsByPersonShowIdMock.mockResolvedValue([
       {
@@ -304,7 +319,7 @@ describe("person credits route", () => {
 
   it("keeps null-role Self cast groups when no explicit cast role exists", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
-    getCreditsByPersonIdMock.mockResolvedValue([
+    const scopedCredits = [
       {
         id: "credit-self-null-role",
         show_id: showId,
@@ -315,7 +330,9 @@ describe("person credits route", () => {
         credit_category: "Self",
         source_type: "imdb",
       },
-    ]);
+    ];
+    getCreditsByPersonIdMock.mockResolvedValue(scopedCredits);
+    getCreditsForPersonShowScopeMock.mockResolvedValue(scopedCredits);
 
     getEpisodeCreditsByPersonShowIdMock.mockResolvedValue([
       {
@@ -356,5 +373,70 @@ describe("person credits route", () => {
     expect(response.status).toBe(400);
     expect(payload.error).toBe("showId must be a UUID");
     expect(getCreditsByPersonIdMock).not.toHaveBeenCalled();
+  });
+
+  it("builds show_scope from full-scope credits even when paged credits omit scoped rows", async () => {
+    const showId = "11111111-2222-3333-4444-555555555555";
+    getCreditsByPersonIdMock.mockResolvedValue([
+      {
+        id: "credit-other-show",
+        show_id: "99999999-aaaa-bbbb-cccc-dddddddddddd",
+        person_id: "person-1",
+        show_name: "WWHL",
+        role: "Host",
+        billing_order: 1,
+        credit_category: "Self",
+        source_type: "imdb",
+      },
+    ]);
+    getCreditsForPersonShowScopeMock.mockResolvedValue([
+      {
+        id: "credit-host",
+        show_id: showId,
+        person_id: "person-1",
+        show_name: "RHOSLC",
+        role: "Host",
+        billing_order: 1,
+        credit_category: "Self",
+        source_type: "imdb",
+      },
+      {
+        id: "credit-other-show",
+        show_id: "99999999-aaaa-bbbb-cccc-dddddddddddd",
+        person_id: "person-1",
+        show_name: "WWHL",
+        role: "Host",
+        billing_order: 1,
+        credit_category: "Self",
+        source_type: "imdb",
+      },
+    ]);
+
+    getEpisodeCreditsByPersonShowIdMock.mockResolvedValue([
+      {
+        credit_id: "credit-host",
+        credit_category: "Self",
+        role: "Host",
+        billing_order: 1,
+        source_type: "imdb",
+        episode_id: "ep-201",
+        season_number: 2,
+        episode_number: 1,
+        episode_name: "Welcome Back",
+        appearance_type: "appears",
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/people/person-1/credits?limit=1&showId=${showId}`
+    );
+    const response = await GET(request, { params: Promise.resolve({ personId: "person-1" }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.credits).toHaveLength(1);
+    expect(payload.show_scope.cast_groups).toHaveLength(1);
+    expect(payload.show_scope.cast_groups[0].credit_id).toBe("credit-host");
+    expect(payload.show_scope.other_show_credits).toHaveLength(1);
   });
 });

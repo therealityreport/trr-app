@@ -56,7 +56,6 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
       network_focus_targets: ["Bravo"],
       franchise_focus_targets: ["Real Housewives"],
       episode_title_patterns: ["Live Episode Discussion"],
-      episode_required_flares: ["Salt Lake City"],
     });
 
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
@@ -73,7 +72,6 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     expect(payload.community?.network_focus_targets).toEqual(["Bravo"]);
     expect(payload.community?.franchise_focus_targets).toEqual(["Real Housewives"]);
     expect(payload.community?.episode_title_patterns).toEqual(["Live Episode Discussion"]);
-    expect(payload.community?.episode_required_flares).toEqual(["Salt Lake City"]);
   });
 
   it("updates analysis flare modes when PATCH payload is valid", async () => {
@@ -86,7 +84,6 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
       network_focus_targets: [],
       franchise_focus_targets: [],
       episode_title_patterns: ["Live Episode Discussion"],
-      episode_required_flares: [],
     });
 
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
@@ -164,7 +161,6 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
       network_focus_targets: ["Bravo"],
       franchise_focus_targets: ["Real Housewives"],
       episode_title_patterns: ["Live Episode Discussion"],
-      episode_required_flares: ["Salt Lake City"],
     });
 
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
@@ -207,14 +203,12 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
       network_focus_targets: ["Bravo"],
       franchise_focus_targets: ["Real Housewives"],
       episode_title_patterns: ["Live Episode Discussion", "Post Episode Discussion"],
-      episode_required_flares: ["Salt Lake City"],
     });
 
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
       method: "PATCH",
       body: JSON.stringify({
         episode_title_patterns: ["Post Episode Discussion", "Live Episode Discussion"],
-        episode_required_flares: ["Salt Lake City"],
       }),
       headers: { "Content-Type": "application/json" },
     });
@@ -229,13 +223,11 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
       "Live Episode Discussion",
       "Post Episode Discussion",
     ]);
-    expect(payload.community?.episode_required_flares).toEqual(["Salt Lake City"]);
     expect(updateRedditCommunityMock).toHaveBeenCalledWith(
       { firebaseUid: "admin-uid", isAdmin: true },
       COMMUNITY_ID,
       expect.objectContaining({
         episodeTitlePatterns: ["Post Episode Discussion", "Live Episode Discussion"],
-        episodeRequiredFlares: ["Salt Lake City"],
       }),
     );
   });
@@ -274,10 +266,11 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     expect(getRedditCommunityByIdMock).not.toHaveBeenCalled();
   });
 
-  it("rejects invalid episode rule payloads", async () => {
+  it("rejects deprecated episode_required_flares payloads", async () => {
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
       method: "PATCH",
       body: JSON.stringify({
+        episode_title_patterns: ["Live Episode Discussion"],
         episode_required_flares: ["Salt Lake City", 123],
       }),
       headers: { "Content-Type": "application/json" },

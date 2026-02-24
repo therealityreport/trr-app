@@ -54,7 +54,7 @@ describe("server auth adapter", () => {
     process.env.ADMIN_EMAIL_ALLOWLIST = "";
     process.env.TRR_CORE_SUPABASE_URL = "https://example.supabase.co";
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role";
-    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_APP_HOSTS = "localhost,127.0.0.1";
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_ENFORCE_HOST;
 
@@ -234,7 +234,7 @@ describe("server auth adapter", () => {
     expect(resetSnapshot.lastObservedAt).toBeNull();
   });
 
-  it("defaults host enforcement to disabled in development when ADMIN_ENFORCE_HOST is unset", async () => {
+  it("defaults host enforcement to enabled in development with localhost-family allowlist when unset", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "development";
     delete process.env.ADMIN_ENFORCE_HOST;
@@ -256,6 +256,32 @@ describe("server auth adapter", () => {
         email: "admin@example.com",
         provider: "firebase",
       });
+    } finally {
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
+  it("denies requireAdmin on non-allowlisted host in development when ADMIN_ENFORCE_HOST is unset", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin-dev-deny",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      await expect(
+        auth.requireAdmin(requestWithBearerAt("http://example.test/api/test", "token-dev-default-host-deny")),
+      ).rejects.toThrow("forbidden");
     } finally {
       if (typeof previousNodeEnv === "undefined") {
         delete process.env.NODE_ENV;

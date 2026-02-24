@@ -4,6 +4,7 @@ import {
   type PersonShowEpisodeCredit,
   type TrrPersonCredit,
   getCreditsByPersonId,
+  getCreditsForPersonShowScope,
   getEpisodeCreditsByPersonShowId,
 } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -214,8 +215,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get("limit") ?? "50", 10);
-    const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const parsedLimit = Number.parseInt(searchParams.get("limit") ?? "50", 10);
+    const parsedOffset = Number.parseInt(searchParams.get("offset") ?? "0", 10);
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50;
+    const offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
     const showIdRaw = searchParams.get("showId");
     const showId =
       typeof showIdRaw === "string" && showIdRaw.trim().length > 0
@@ -230,16 +233,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const credits = await getCreditsByPersonId(personId, { limit, offset });
-    const showScope =
-      showId
-        ? buildShowScopePayload(
-            showId,
-            credits,
-            await getEpisodeCreditsByPersonShowId(personId, showId, {
-              includeArchiveFootage: false,
-            })
-          )
-        : null;
+    const showScope = showId
+      ? buildShowScopePayload(
+          showId,
+          await getCreditsForPersonShowScope(personId, showId),
+          await getEpisodeCreditsByPersonShowId(personId, showId, {
+            includeArchiveFootage: false,
+          })
+        )
+      : null;
 
     return NextResponse.json({
       credits,

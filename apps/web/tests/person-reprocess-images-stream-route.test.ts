@@ -59,4 +59,19 @@ describe("person reprocess-images stream proxy route", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(payload).toContain("\"auto_count\"");
   });
+
+  it("returns non-200 JSON error payload when backend fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("bad gateway", { status: 502 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest(), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(payload.stage).toBe("backend");
+    expect(payload.error).toBe("Backend reprocess failed");
+    expect(String(payload.detail ?? "")).not.toContain("TRR_API_URL");
+  });
 });

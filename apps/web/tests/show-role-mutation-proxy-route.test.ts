@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
+
 const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
@@ -23,7 +25,7 @@ describe("show role mutation proxy routes", () => {
     getBackendApiUrlMock.mockReset();
     vi.restoreAllMocks();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 

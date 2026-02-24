@@ -26,6 +26,7 @@ export interface AuthenticatedUser {
 
 const DEV_ADMIN_BYPASS_UID = "dev-admin-bypass";
 const DEV_ADMIN_BYPASS_EMAIL = "dev-admin@localhost";
+const DEFAULT_DEV_ADMIN_ALLOWED_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 type TokenKind = "id" | "session";
@@ -445,6 +446,12 @@ function resolveDefaultAdminOrigin(): string | null {
 
 function resolveAdminAllowedHosts(): Set<string> {
   const hosts = parseHostAllowlist(process.env.ADMIN_APP_HOSTS);
+  if (hosts.size === 0 && process.env.NODE_ENV === "development") {
+    for (const host of DEFAULT_DEV_ADMIN_ALLOWED_HOSTS) {
+      const normalizedHost = normalizeHost(host);
+      if (normalizedHost) hosts.add(normalizedHost);
+    }
+  }
   const configuredOrigin = process.env.ADMIN_APP_ORIGIN?.trim() || resolveDefaultAdminOrigin();
   if (configuredOrigin) {
     try {
@@ -460,7 +467,7 @@ function resolveAdminAllowedHosts(): Set<string> {
 function isAdminHostEnforced(): boolean {
   const explicit = parseOptionalBoolean(process.env.ADMIN_ENFORCE_HOST);
   if (explicit !== null) return explicit;
-  return process.env.NODE_ENV === "production";
+  return true;
 }
 
 const adminAllowedHosts = resolveAdminAllowedHosts();
@@ -617,6 +624,10 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
   }
 
   if (isDevAdminBypassEnabled(request)) {
+    const parsed = parseTokenFromRequest(request);
+    if (parsed?.token.trim() === "dev-admin-bypass") {
+      return buildDevBypassUser();
+    }
     const existingUser = await getUserFromRequest(request);
     return existingUser ?? buildDevBypassUser();
   }

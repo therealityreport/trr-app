@@ -7,7 +7,6 @@ import {
   sanitizeFocusTargets,
 } from "@/lib/server/admin/reddit-community-focus";
 import {
-  sanitizeEpisodeRequiredFlares,
   sanitizeEpisodeTitlePatterns,
 } from "@/lib/server/admin/reddit-episode-rules";
 
@@ -25,7 +24,6 @@ export interface RedditCommunityRow {
   network_focus_targets: string[];
   franchise_focus_targets: string[];
   episode_title_patterns: string[];
-  episode_required_flares: string[];
   post_flares_updated_at: string | null;
   is_active: boolean;
   created_by_firebase_uid: string;
@@ -79,7 +77,6 @@ export interface CreateRedditCommunityInput {
   networkFocusTargets?: string[];
   franchiseFocusTargets?: string[];
   episodeTitlePatterns?: string[];
-  episodeRequiredFlares?: string[];
 }
 
 export interface UpdateRedditCommunityInput {
@@ -93,7 +90,6 @@ export interface UpdateRedditCommunityInput {
   networkFocusTargets?: string[];
   franchiseFocusTargets?: string[];
   episodeTitlePatterns?: string[];
-  episodeRequiredFlares?: string[];
 }
 
 export interface ListRedditThreadsOptions {
@@ -148,7 +144,6 @@ interface RedditCommunityRowRaw
     | "network_focus_targets"
     | "franchise_focus_targets"
     | "episode_title_patterns"
-    | "episode_required_flares"
   > {
   post_flares: unknown;
   analysis_flares: unknown;
@@ -156,7 +151,6 @@ interface RedditCommunityRowRaw
   network_focus_targets: unknown;
   franchise_focus_targets: unknown;
   episode_title_patterns: unknown;
-  episode_required_flares: unknown;
 }
 
 const toThreadsArray = (value: unknown): RedditThreadRow[] => {
@@ -182,27 +176,34 @@ const toEpisodeTitlePatterns = (value: unknown): string[] => {
   return sanitizeEpisodeTitlePatterns(raw);
 };
 
-const toEpisodeRequiredFlares = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return [];
-  const raw = value.filter((item): item is string => typeof item === "string");
-  return sanitizeEpisodeRequiredFlares(raw);
-};
-
 const toNumberOrZero = (value: number | null | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-  return value;
+  return Math.max(0, Math.floor(value));
 };
 
-const toCommunityRow = (row: RedditCommunityRowRaw): RedditCommunityRow => ({
-  ...row,
-  post_flares: toFlairArray(row.subreddit, row.post_flares),
-  analysis_flares: toFlairArray(row.subreddit, row.analysis_flares),
-  analysis_all_flares: toFlairArray(row.subreddit, row.analysis_all_flares),
-  network_focus_targets: toFocusTargets(row.network_focus_targets),
-  franchise_focus_targets: toFocusTargets(row.franchise_focus_targets),
-  episode_title_patterns: toEpisodeTitlePatterns(row.episode_title_patterns),
-  episode_required_flares: toEpisodeRequiredFlares(row.episode_required_flares),
-});
+const toCommunityRow = (row: RedditCommunityRowRaw): RedditCommunityRow => {
+  const normalizedSubreddit = row.subreddit;
+  return {
+    id: row.id,
+    trr_show_id: row.trr_show_id,
+    trr_show_name: row.trr_show_name,
+    subreddit: normalizedSubreddit,
+    display_name: row.display_name,
+    notes: row.notes,
+    post_flares: toFlairArray(normalizedSubreddit, row.post_flares),
+    analysis_flares: toFlairArray(normalizedSubreddit, row.analysis_flares),
+    analysis_all_flares: toFlairArray(normalizedSubreddit, row.analysis_all_flares),
+    is_show_focused: row.is_show_focused,
+    network_focus_targets: toFocusTargets(row.network_focus_targets),
+    franchise_focus_targets: toFocusTargets(row.franchise_focus_targets),
+    episode_title_patterns: toEpisodeTitlePatterns(row.episode_title_patterns),
+    post_flares_updated_at: row.post_flares_updated_at,
+    is_active: row.is_active,
+    created_by_firebase_uid: row.created_by_firebase_uid,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+};
 
 interface SanitizedAnalysisModes {
   analysisFlares: string[];
@@ -331,9 +332,8 @@ export async function createRedditCommunity(
         network_focus_targets,
         franchise_focus_targets,
         episode_title_patterns,
-        episode_required_flares,
         created_by_firebase_uid
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)
       RETURNING *`,
       [
         input.trrShowId,
@@ -346,7 +346,6 @@ export async function createRedditCommunity(
         JSON.stringify(focusState.network_focus_targets),
         JSON.stringify(focusState.franchise_focus_targets),
         JSON.stringify(sanitizeEpisodeTitlePatterns(input.episodeTitlePatterns ?? [])),
-        JSON.stringify(sanitizeEpisodeRequiredFlares(input.episodeRequiredFlares ?? [])),
         authContext.firebaseUid,
       ],
     );
@@ -369,8 +368,7 @@ export async function updateRedditCommunity(
       input.franchiseFocusTargets !== undefined;
     const shouldResolveAnalysis =
       input.analysisFlares !== undefined || input.analysisAllFlares !== undefined;
-    const shouldResolveEpisodeRules =
-      input.episodeTitlePatterns !== undefined || input.episodeRequiredFlares !== undefined;
+    const shouldResolveEpisodeRules = input.episodeTitlePatterns !== undefined;
 
     interface CommunityUpdateLookup {
       subreddit: string;
@@ -380,7 +378,6 @@ export async function updateRedditCommunity(
       analysis_flares: unknown;
       analysis_all_flares: unknown;
       episode_title_patterns: unknown;
-      episode_required_flares: unknown;
     }
 
     let lookupRow: CommunityUpdateLookup | null = null;
@@ -393,7 +390,6 @@ export async function updateRedditCommunity(
                , analysis_flares
                , analysis_all_flares
                , episode_title_patterns
-               , episode_required_flares
            FROM ${COMMUNITIES_TABLE}
           WHERE id = $1::uuid
           LIMIT 1`,
@@ -467,14 +463,8 @@ export async function updateRedditCommunity(
         input.episodeTitlePatterns ??
           (lookupRow ? toEpisodeTitlePatterns(lookupRow.episode_title_patterns) : []),
       );
-      const nextEpisodeRequiredFlares = sanitizeEpisodeRequiredFlares(
-        input.episodeRequiredFlares ??
-          (lookupRow ? toEpisodeRequiredFlares(lookupRow.episode_required_flares) : []),
-      );
       sets.push(`episode_title_patterns = $${idx++}::jsonb`);
       values.push(JSON.stringify(nextEpisodeTitlePatterns));
-      sets.push(`episode_required_flares = $${idx++}::jsonb`);
-      values.push(JSON.stringify(nextEpisodeRequiredFlares));
     }
 
     if (sets.length === 0) {

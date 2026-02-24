@@ -38,7 +38,7 @@ describe("person refresh-images stream proxy route", () => {
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 
-  it("returns status 200 SSE error payload when backend responds non-OK", async () => {
+  it("returns non-200 JSON error payload when backend responds non-OK", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("backend unavailable", { status: 502 }),
     );
@@ -47,12 +47,11 @@ describe("person refresh-images stream proxy route", () => {
     const response = await POST(makeRequest(), {
       params: Promise.resolve({ personId: "person-1" }),
     });
-    const payload = await response.text();
+    const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload).toContain("event: error");
-    expect(payload).toContain("\"stage\":\"backend\"");
-    expect(payload).toContain("\"error\":\"Backend refresh failed\"");
+    expect(response.status).toBe(502);
+    expect(payload.stage).toBe("backend");
+    expect(payload.error).toBe("Backend refresh failed");
   });
 
   it("streams successful backend SSE body through unchanged", async () => {
@@ -93,5 +92,20 @@ describe("person refresh-images stream proxy route", () => {
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(payload).toContain("\"sync_tmdb\"");
+  });
+
+  it("does not leak backend URL details in proxy errors", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("fetch failed"));
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.TRR_API_URL = "https://internal.example.local";
+
+    const response = await POST(makeRequest(), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(String(payload.detail ?? "")).not.toContain("TRR_API_URL");
+    expect(String(payload.detail ?? "")).not.toContain("internal.example.local");
   });
 });
