@@ -13,10 +13,12 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
     - Updated abort-timeout assertion from exact `90s` text to a format assertion (`timed out after <N>s`) so the test stays aligned with the route timeout constant.
     - Stabilized the show-focused community test by waiting for communities to finish loading before selection and using an async text assertion for the post-load helper copy.
     - Stabilized run-scoped jobs loading test by using the `Select Latest Run` action and waiting for combobox value state before asserting downstream `run_id` job fetch calls.
+    - Stabilized run-health grouped-failure assertion by waiting asynchronously for the `RATE_LIMIT · comments · 2` grouped row to render before asserting.
   - Validation:
     - `pnpm -C apps/web exec vitest run -c vitest.config.ts tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx` (pass)
     - `pnpm -C apps/web run test:ci` (pass; `186 files, 745 tests`)
     - `for i in $(seq 1 15); do pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx -t "loads jobs for the selected run id"; done` (all 15 passes)
+    - `for i in $(seq 1 20); do pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx -t "groups failures and renders latest five failure events in run health"; done` (all 20 passes)
 
 ## Latest Update (2026-02-24) — Admin host defaults + browser sync hardening + season social test act cleanup
 

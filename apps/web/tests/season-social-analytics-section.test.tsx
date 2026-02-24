@@ -1303,7 +1303,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       expect(screen.getByText("Failure Groups")).toBeInTheDocument();
       expect(screen.getByText("Latest 5 Failure Events")).toBeInTheDocument();
     });
-    expect(screen.getByText("RATE_LIMIT · comments · 2")).toBeInTheDocument();
+    expect(await screen.findByText(/RATE_LIMIT\s*·\s*comments\s*·\s*2/i)).toBeInTheDocument();
     const latestFailures = screen.getByTestId("run-health-latest-failures");
     await waitFor(() => {
       expect(within(latestFailures).getAllByRole("listitem")).toHaveLength(5);
