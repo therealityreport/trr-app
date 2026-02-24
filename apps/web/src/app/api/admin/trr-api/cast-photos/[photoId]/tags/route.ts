@@ -177,7 +177,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (hasExplicitCount) {
       peopleCount =
         typeof peopleCountRaw === "number" && Number.isFinite(peopleCountRaw)
-          ? Math.max(1, Math.floor(peopleCountRaw))
+          ? Math.max(0, Math.floor(peopleCountRaw))
           : null;
       peopleCountSource = peopleCount !== null ? "manual" : null;
     } else if (peopleNames.length > 0 || peopleIds.length > 0) {

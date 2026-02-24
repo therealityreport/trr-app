@@ -52,4 +52,28 @@ describe("show unified news proxy route", () => {
       })
     );
   });
+
+  it("passes pagination and incremental parameters through to backend", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ news: [], next_cursor: "abc", total_count: 10 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/news?limit=50&cursor=abc&since=2026-02-01T00:00:00Z&until=2026-02-20T00:00:00Z&person_id=123"
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://backend.example.com/api/v1/admin/shows/show-1/news?limit=50&cursor=abc&since=2026-02-01T00%3A00%3A00Z&until=2026-02-20T00%3A00%3A00Z&person_id=123",
+      expect.objectContaining({
+        cache: "no-store",
+      })
+    );
+  });
 });

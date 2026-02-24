@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
+const MUTATION_BACKEND_TIMEOUT_MS = 60_000;
 
 interface RouteParams {
   params: Promise<{ showId: string; roleId: string }>;
@@ -19,14 +20,30 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (!serviceRoleKey) return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
 
     const body = await request.json().catch(() => ({}));
-    const response = await fetch(backendUrl, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), MUTATION_BACKEND_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(backendUrl, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return NextResponse.json(
+          { error: `Update role request timed out after ${Math.round(MUTATION_BACKEND_TIMEOUT_MS / 1000)}s` },
+          { status: 504 }
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {

@@ -14,9 +14,9 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
-import { POST } from "@/app/api/admin/trr-api/shows/[showId]/google-news/sync/route";
+import { GET } from "@/app/api/admin/trr-api/shows/[showId]/google-news/sync/[jobId]/route";
 
-describe("show google-news sync proxy route", () => {
+describe("show google-news sync status proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
@@ -24,39 +24,34 @@ describe("show google-news sync proxy route", () => {
 
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(
-      "https://backend.example.com/api/v1/admin/shows/show-1/google-news/sync"
+      "https://backend.example.com/api/v1/admin/shows/show-1/google-news/sync/job-1"
     );
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 
-  it("forwards force + async sync payload to backend", async () => {
+  it("forwards sync job status request to backend", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ synced: true, count: 12 }), {
+      new Response(JSON.stringify({ id: "job-1", status: "completed" }), {
         status: 200,
         headers: { "content-type": "application/json" },
       })
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/google-news/sync", {
-      method: "POST",
-      body: JSON.stringify({ force: true, async: true }),
-      headers: { "content-type": "application/json" },
-    });
+    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/google-news/sync/job-1");
 
-    const response = await POST(request, { params: Promise.resolve({ showId: "show-1" }) });
+    const response = await GET(request, {
+      params: Promise.resolve({ showId: "show-1", jobId: "job-1" }),
+    });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.synced).toBe(true);
+    expect(payload.status).toBe("completed");
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://backend.example.com/api/v1/admin/shows/show-1/google-news/sync",
+      "https://backend.example.com/api/v1/admin/shows/show-1/google-news/sync/job-1",
       expect.objectContaining({
-        method: "POST",
         cache: "no-store",
       })
     );
-    const fetchArgs = fetchMock.mock.calls[0]?.[1] as { body?: string };
-    expect(fetchArgs.body).toBe(JSON.stringify({ force: true, async: true }));
   });
 });

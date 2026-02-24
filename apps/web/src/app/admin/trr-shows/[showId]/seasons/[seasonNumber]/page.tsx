@@ -239,7 +239,7 @@ const SEASON_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
 const SEASON_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 const SEASON_ASSET_LOAD_TIMEOUT_MS = 60_000;
 const SEASON_CAST_LOAD_TIMEOUT_MS = 60_000;
-const SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS = 90_000;
+const SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const SEASON_PERSON_STREAM_MAX_DURATION_MS = 6 * 60 * 1000;
 const SEASON_PERSON_FALLBACK_TIMEOUT_MS = 4 * 60 * 1000;
 const SEASON_ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
@@ -1556,6 +1556,8 @@ export default function SeasonDetailPage() {
   }, [hasAccess, loadSeasonData, showId]);
 
   useEffect(() => {
+    castRefreshAbortControllerRef.current?.abort();
+    castRefreshAbortControllerRef.current = null;
     setAllowPlaceholderMediaOverride(false);
     setGalleryDiagnosticFilter("all");
     setCastSortBy("episodes");
@@ -4798,12 +4800,27 @@ export default function SeasonDetailPage() {
                   </button>
                 </div>
               )}
-              {(castRoleMembersError || trrShowCastError) && (
+              {castRoleMembersError && (
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  <span>{castRoleMembersError || trrShowCastError}</span>
+                  <span>{castRoleMembersError}</span>
                   <button
                     type="button"
                     onClick={() => void fetchCastRoleMembers({ force: true })}
+                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {trrShowCastError && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <span>{trrShowCastError}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      showCastFetchAttemptedRef.current = false;
+                      void fetchShowCastForBrand();
+                    }}
                     className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
                   >
                     Retry

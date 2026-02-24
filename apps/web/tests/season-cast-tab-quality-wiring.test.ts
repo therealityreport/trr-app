@@ -33,6 +33,7 @@ describe("season cast tab quality wiring", () => {
     expect(contents).toMatch(/const castRefreshAbortControllerRef = useRef<AbortController \| null>\(null\)/);
     expect(contents).toMatch(/const cancelSeasonCastRefresh = useCallback/);
     expect(contents).toMatch(/castRefreshAbortControllerRef\.current\?\.abort\(\)/);
+    expect(contents).toMatch(/castRefreshAbortControllerRef\.current = null/);
     expect(contents).toMatch(/Season cast refresh canceled\./);
     expect(contents).toMatch(/onClick=\{cancelSeasonCastRefresh\}/);
   });
@@ -40,10 +41,12 @@ describe("season cast tab quality wiring", () => {
   it("shows retry controls and filtered\\/total cast count chips", () => {
     expect(contents).toMatch(/castRoleMembersWarning && \(/);
     expect(contents).toMatch(/onClick=\{\(\) => void fetchCastRoleMembers\(\{ force: true \}\)\}/);
+    expect(contents).toMatch(/trrShowCastError && \(/);
+    expect(contents).toMatch(/showCastFetchAttemptedRef\.current = false;/);
+    expect(contents).toMatch(/void fetchShowCastForBrand\(\);/);
     expect(contents).toMatch(/const castDisplayTotals = useMemo/);
     expect(contents).toMatch(/castSeasonMembers\.length}\/\{castDisplayTotals\.cast} cast/);
     expect(contents).toMatch(/crewSeasonMembers\.length}\/\{castDisplayTotals\.crew} crew/);
     expect(contents).toMatch(/castDisplayMembers\.length}\/\{castDisplayTotals\.total} visible/);
   });
 });
-

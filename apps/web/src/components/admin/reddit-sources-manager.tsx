@@ -188,7 +188,10 @@ const fmtNum = (value: number): string => {
   return value.toLocaleString();
 };
 
-const REQUEST_TIMEOUT_MS = 20_000;
+const REQUEST_TIMEOUT_MS = 60_000;
+
+const toErrorMessage = (err: unknown, fallback: string): string =>
+  err instanceof Error && err.message.trim().length > 0 ? err.message : fallback;
 
 const isRedditHost = (hostname: string): boolean => {
   const host = hostname.toLowerCase();
@@ -372,6 +375,7 @@ export default function RedditSourcesManager({
   const [periodOptions, setPeriodOptions] = useState<EpisodePeriodOption[]>([]);
   const [selectedPeriodKey, setSelectedPeriodKey] = useState<string>("all-periods");
   const [periodsLoading, setPeriodsLoading] = useState(false);
+  const [episodeContextWarning, setEpisodeContextWarning] = useState<string | null>(null);
   const [episodeCandidates, setEpisodeCandidates] = useState<EpisodeDiscussionCandidate[]>([]);
   const [episodeSelectedPostIds, setEpisodeSelectedPostIds] = useState<string[]>([]);
   const [episodeRefreshing, setEpisodeRefreshing] = useState(false);
@@ -549,6 +553,7 @@ export default function RedditSourcesManager({
     setSelectedPeriodKey("all-periods");
     setEpisodeSeasonId(null);
     setEpisodeSeasonNumber(null);
+    setEpisodeContextWarning(null);
   }, [selectedCommunityId]);
 
   const selectedCommunity = useMemo(
@@ -623,6 +628,7 @@ export default function RedditSourcesManager({
   const loadSeasonAndPeriodContext = useCallback(
     async (community: RedditCommunity) => {
       setPeriodsLoading(true);
+      setEpisodeContextWarning(null);
       try {
         const headers = await getAuthHeaders();
         const seasonsResponse = await fetchWithTimeout(
@@ -681,7 +687,12 @@ export default function RedditSourcesManager({
         await loadSeasonAndPeriodContext(selectedCommunity);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load season context");
+          setEpisodeContextWarning(
+            toErrorMessage(
+              err,
+              "Failed to load season context. Refresh can still run with latest season/all periods.",
+            ),
+          );
         }
       }
     })();
@@ -1173,19 +1184,19 @@ export default function RedditSourcesManager({
 
   const handleRefreshEpisodeDiscussions = useCallback(async () => {
     if (!selectedCommunity) return;
-    if (!episodeSeasonId || !episodeSeasonNumber) {
-      setError("Season context is required for episode discussion refresh");
-      return;
-    }
 
     setEpisodeRefreshing(true);
     setError(null);
+    setEpisodeContextWarning(null);
     try {
       const headers = await getAuthHeaders();
-      const params = new URLSearchParams({
-        season_id: episodeSeasonId,
-        season_number: String(episodeSeasonNumber),
-      });
+      const params = new URLSearchParams();
+      if (episodeSeasonId) {
+        params.set("season_id", episodeSeasonId);
+      }
+      if (episodeSeasonNumber) {
+        params.set("season_number", String(episodeSeasonNumber));
+      }
       if (selectedPeriod) {
         params.set("period_start", selectedPeriod.start);
         params.set("period_end", selectedPeriod.end);
@@ -1215,8 +1226,20 @@ export default function RedditSourcesManager({
       setEpisodeCandidates(nextCandidates);
       setEpisodeSelectedPostIds(nextCandidates.map((candidate) => candidate.reddit_post_id));
       setEpisodeMeta(payload.meta ?? null);
+      const resolvedSeasonId = payload.meta?.season_context?.season_id;
+      const resolvedSeasonNumber = payload.meta?.season_context?.season_number;
+      if (typeof resolvedSeasonId === "string" && resolvedSeasonId.trim().length > 0) {
+        setEpisodeSeasonId(resolvedSeasonId);
+      }
+      if (
+        typeof resolvedSeasonNumber === "number" &&
+        Number.isFinite(resolvedSeasonNumber) &&
+        resolvedSeasonNumber > 0
+      ) {
+        setEpisodeSeasonNumber(resolvedSeasonNumber);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to refresh episode discussions");
+      setError(toErrorMessage(err, "Failed to refresh episode discussions"));
     } finally {
       setEpisodeRefreshing(false);
     }
@@ -2171,6 +2194,11 @@ export default function RedditSourcesManager({
                       <p className="mb-2 text-xs text-zinc-500">
                         Episode Discussions are post types in this subreddit matched by title phrases.
                       </p>
+                      {episodeContextWarning && (
+                        <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+                          {episodeContextWarning}
+                        </div>
+                      )}
 
                       <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                         <label className="flex flex-col gap-1">
@@ -2189,10 +2217,11 @@ export default function RedditSourcesManager({
                                 setPeriodsLoading(true);
                                 void loadPeriodOptionsForSeason(selectedCommunity, season)
                                   .catch((err) => {
-                                    setError(
-                                      err instanceof Error
-                                        ? err.message
-                                        : "Failed to load social periods for selected season",
+                                    setEpisodeContextWarning(
+                                      toErrorMessage(
+                                        err,
+                                        "Failed to load social periods for selected season",
+                                      ),
                                     );
                                   })
                                   .finally(() => {

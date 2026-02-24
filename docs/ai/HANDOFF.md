@@ -5248,3 +5248,150 @@ Continuation (same session, 2026-02-24) — Week-view sync progress refresh stab
 - Validation:
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run tests/social-week-detail-wiring.test.ts tests/season-social-analytics-section.test.tsx` (`41 passed`)
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts' tests/social-week-detail-wiring.test.ts` (pass)
+
+Continuation (same session, 2026-02-24) — Social live-update retry banner stabilization for active ingest runs:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-season-hint-routes.test.ts`
+- Root cause evidence:
+  - `/Users/thomashulihan/Projects/TRR/.logs/workspace/trr-app.log` showed recurring `/social/runs` and `/social/jobs` requests completing near the 15s timeout edge, followed by 504 timeout errors and retry banner flips.
+  - Poll path was querying full runs list (`limit=100`) every cycle and jobs requests could overlap from multiple callers (selected-run fetch + poll fetch), increasing load and timeout risk.
+- Changes:
+  - Increased UI/proxy timeout margins for runs/jobs from `15_000` to `20_000` ms.
+  - Poll runs request now uses run-scoped query (`run_id=<activeRunId>&limit=1`) instead of fetching full run list.
+  - Added jobs single-flight dedupe in `season-social-analytics-section` (`jobsByKey`) to prevent concurrent duplicate `/social/jobs` calls for the same run.
+  - Kept retry banner threshold behavior (2 consecutive failures), but reduced poll-path sensitivity by throttling analytics refresh during poll (`ANALYTICS_POLL_REFRESH_MS=30_000`) and making analytics refresh best-effort (does not fail runs/jobs progress polling).
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run tests/season-social-analytics-section.test.tsx tests/social-season-hint-routes.test.ts` (`44 passed`; existing React `act(...)` warnings remain non-fatal)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint 'src/components/admin/season-social-analytics-section.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route.ts' tests/season-social-analytics-section.test.tsx tests/social-season-hint-routes.test.ts` (pass)
+
+Continuation (same session, 2026-02-24) — Reddit Sources timeout resilience during season-context preload:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+- Root cause evidence:
+  - Manager-wide abort timeout (`20_000ms`) surfaced as global `Request timed out. Please try again.`.
+  - Season/period context preload effect (`loadSeasonAndPeriodContext`) wrote failures into global `error`, so slow season/social analytics requests could look like core community load failure.
+  - Episode refresh previously hard-required local season context (`episodeSeasonId` + `episodeSeasonNumber`) and blocked refresh when context preload failed.
+- Changes:
+  - Increased admin request timeout in manager from `20_000` -> `60_000` ms.
+  - Added local episode-context warning state and stopped routing season-context preload failures to global error banner.
+  - Episode refresh now allows server-default context fallback (omits `season_id`/`season_number` when unavailable).
+  - On refresh response, manager hydrates local season context from `meta.season_context` when provided.
+  - Season selector period-load failures now set local episode warning instead of global manager error.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx` (`10 passed`)
+
+Continuation (same session, 2026-02-24) — Editorial redesign of Season Social Analytics header container (top + immediate controls):
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- Scope:
+  - Reworked only top surface (identity/header + current run + filters + season details + platform tabs + live status banners).
+  - No backend/API contract changes.
+- UI/UX changes:
+  - Introduced clearer editorial hierarchy with differentiated card weights.
+  - Current Run block now has actionable empty state:
+    - `Select Latest Run` (when runs exist)
+    - `Start New Ingest` (scroll/focus into Ingest + Export controls)
+  - Season Details now shows readable/truncated season id with `Copy` action and inline copied/failed feedback.
+  - Platform tabs retained behavior but got stronger active/focus styling.
+  - Live polling/retry banners and section-level warning cards moved into the top controls surface for immediate operator context.
+  - Added helper utilities:
+    - `truncateIdentifier(...)`
+    - `copyTextToClipboard(...)` with clipboard API + fallback.
+- Accessibility/interaction notes:
+  - Added semantic region labels (`aria-label`) on top controls groups.
+  - Added focus target to ingest panel and run-ingest button for empty-state CTA handoff.
+  - Preserved all existing query/state behavior for scope/week/run/platform.
+- Tests:
+  - Added coverage for new header behaviors:
+    - actionable empty state rendering
+    - latest-run selection action
+    - season-id copy action
+  - Existing ordering test (platform tabs above filters) remains green.
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run tests/season-social-analytics-section.test.tsx tests/social-week-detail-wiring.test.ts` (`44 passed`; existing non-fatal React `act(...)` warnings persist on long-polling test path)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+- Intentional deviation from figma-specific workflow:
+  - No Figma file/node URL was provided; implementation followed existing TRR design language and requested editorial direction without design-token contract changes.
+
+Continuation (same session, 2026-02-24) — Cast tab reliability pass + roles timeout hardening:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/roles/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/roles/[roleId]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-roles-proxy-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-role-mutation-proxy-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-cast-lazy-loading-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-cast-tab-quality-wiring.test.ts`
+- Changes:
+  - Hardened show roles proxy GET:
+    - timeout increased to `120_000`,
+    - retry once on retryable upstream/network failures,
+    - additive error envelope fields (`code`, `retryable`, `upstream_status`).
+  - Added timeout guards for roles mutations:
+    - roles `POST` timeout (`60_000`) in show roles route,
+    - roles `PATCH` timeout (`60_000`) in role detail route.
+  - Show cast page reliability:
+    - aborts in-flight cast pipeline/media runs on show switch/reset,
+    - role-catalog loading now retries once and preserves stale snapshot with warning text,
+    - cast tab now shows explicit `Retry Roles` controls for warning/error states,
+    - role assignment flow removed redundant double role reload and batches missing-role creation with bounded concurrency.
+  - Cast progress UX:
+    - cast progress bar now prefers active phase progress (`castRefreshPhaseStates`) before falling back to legacy `cast_credits` progress.
+  - Season cast page reliability:
+    - aborts in-flight season cast refresh on show/season change,
+    - split retry banners so `castRoleMembersError` retries `fetchCastRoleMembers(...)` and `trrShowCastError` retries `fetchShowCastForBrand()`.
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-roles-proxy-route.test.ts tests/show-role-mutation-proxy-route.test.ts tests/show-cast-lazy-loading-wiring.test.ts tests/season-cast-tab-quality-wiring.test.ts` (`21 passed`)
+
+Continuation (same session, 2026-02-24) — Senior frontend QA hardening pass on redesigned social header:
+- Files:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- QA findings addressed:
+  - Prevented potential horizontal overflow in top header grid under long run labels/metadata by adding `min-w-0` to grid columns.
+  - Improved copy feedback accessibility by marking season ID copy feedback as live status (`role="status"`, `aria-live="polite"`, `aria-atomic="true"`).
+  - Replaced timeout-based ingest focus handoff with `requestAnimationFrame` for more deterministic focus transfer after CTA click.
+  - Added regression assertion for live status copy feedback in component tests.
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run tests/season-social-analytics-section.test.tsx` (`39 passed`; existing non-fatal React `act(...)` warnings persist on long-polling scenario)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+
+Continuation (same session, 2026-02-24) — News tab hardening for async Google sync, backend filtering/pagination, and timeout alignment.
+- Files:
+  - `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/news/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/google-news/sync/route.ts`
+  - `apps/web/src/app/api/admin/trr-api/shows/[showId]/google-news/sync/[jobId]/route.ts` (new)
+  - `apps/web/tests/show-news-proxy-route.test.ts`
+  - `apps/web/tests/show-google-news-sync-proxy-route.test.ts`
+  - `apps/web/tests/show-google-news-sync-status-proxy-route.test.ts` (new)
+- Changes:
+  - Increased proxy timeouts for news read/sync to align with backend budgets.
+  - Added proxy route for Google sync job status polling.
+  - Updated News tab sync flow to call Google sync in async mode and poll job status with explicit timeout handling.
+  - Fixed auto-sync bookkeeping so `newsAutoSyncAttempted` is set only after successful sync.
+  - Switched unified news loads to backend-driven filters (`person_id`, `source`, `topic`, `season_number`) and pagination (`limit`, `cursor`) with load-more support.
+  - Added additive UI support for new item fields (`canonical_article_url`, mirror status/attempt metadata, quality score).
+- Validation:
+  - `pnpm -C apps/web exec tsc --noEmit` (pass)
+  - `pnpm -C apps/web exec vitest run tests/show-news-proxy-route.test.ts tests/show-google-news-sync-proxy-route.test.ts tests/show-google-news-sync-status-proxy-route.test.ts tests/show-news-tab-google-wiring.test.ts` (`6 passed`)
+  - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/api/admin/trr-api/shows/[showId]/news/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/google-news/sync/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/google-news/sync/[jobId]/route.ts' 'tests/show-news-proxy-route.test.ts' 'tests/show-google-news-sync-proxy-route.test.ts' 'tests/show-google-news-sync-status-proxy-route.test.ts'` (pass with existing `@next/next/no-img-element` warnings in show page)
+
+## 2026-02-24 Media Pipeline Stabilization (Codex)
+- Fixed person gallery stage button wiring so Sync/Count/Crop/ID Text/Auto-Crop trigger stage-specific refresh/reprocess payloads.
+- Updated image pipeline partial-failure handling to complete with warnings (no fatal throw when `allowPartialFailures=true`).
+- Fixed lightbox auto-crop refresh action to run auto-count + variants pipeline.
+- Increased show/season cast-person stream idle watchdog from 90s to 600s.
+- Hardened `/api/admin/trr-api/shows/[showId]/refresh/stream` proxy with retryable upstream fetch handling and no-store SSE headers.
+- Allowed explicit `people_count=0` in cast-photo and media-link tag routes.
+- Scoped media-link tag context writes to targeted links using per-link context updates.
+- Updated tests:
+  - `tests/tags-people-count-source-route.test.ts`
+  - `tests/show-refresh-stream-route.test.ts`

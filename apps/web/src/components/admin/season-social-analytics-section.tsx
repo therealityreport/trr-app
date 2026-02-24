@@ -637,10 +637,11 @@ const getTotalCoverage = (week: WeeklyPlatformRow): CoverageSummary => {
 
 const REQUEST_TIMEOUT_MS = {
   analytics: 22_000,
-  runs: 15_000,
+  runs: 20_000,
   targets: 12_000,
-  jobs: 15_000,
+  jobs: 20_000,
 } as const;
+const ANALYTICS_POLL_REFRESH_MS = 30_000;
 
 export const POLL_FAILURES_BEFORE_RETRY_BANNER = 2;
 export const shouldSetPollingRetry = (consecutiveFailures: number): boolean =>
@@ -925,6 +926,30 @@ const formatJobActivitySummary = (activity: Record<string, unknown> | null): str
   return segments.join(" · ");
 };
 
+const truncateIdentifier = (value: string, prefix = 8, suffix = 4): string => {
+  if (value.length <= prefix + suffix + 1) return value;
+  return `${value.slice(0, prefix)}…${value.slice(-suffix)}`;
+};
+
+const copyTextToClipboard = async (value: string): Promise<boolean> => {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  if (typeof document === "undefined") return false;
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "absolute";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  textArea.setSelectionRange(0, value.length);
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textArea);
+  return copied;
+};
+
 export default function SeasonSocialAnalyticsSection({
   showId,
   showSlug,
@@ -1000,6 +1025,7 @@ export default function SeasonSocialAnalyticsSection({
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [elapsedTick, setElapsedTick] = useState(0);
+  const [seasonIdCopyNotice, setSeasonIdCopyNotice] = useState<string | null>(null);
   const [pollingStatus, setPollingStatus] = useState<"idle" | "retrying" | "recovered">("idle");
   const [sectionLastSuccessAt, setSectionLastSuccessAt] = useState<{
     analytics: Date | null;
@@ -1012,15 +1038,21 @@ export default function SeasonSocialAnalyticsSection({
   });
   const pollGenerationRef = useRef(0);
   const pollFailureCountRef = useRef(0);
+  const lastAnalyticsPollAtRef = useRef(0);
+  const seasonIdCopyTimerRef = useRef<number | null>(null);
+  const ingestPanelRef = useRef<HTMLElement | null>(null);
+  const runSeasonIngestButtonRef = useRef<HTMLButtonElement | null>(null);
   const inFlightRef = useRef<{
     analyticsByKey: Map<string, Promise<AnalyticsResponse>>;
     runsByKey: Map<string, Promise<SocialRun[]>>;
     targetsByKey: Map<string, Promise<SocialTarget[]>>;
+    jobsByKey: Map<string, Promise<SocialJob[]>>;
     refreshAll: Promise<void> | null;
   }>({
     analyticsByKey: new Map(),
     runsByKey: new Map(),
     targetsByKey: new Map(),
+    jobsByKey: new Map(),
     refreshAll: null,
   });
   const showRouteSlug = (showSlug || showId).trim();
@@ -1267,17 +1299,24 @@ export default function SeasonSocialAnalyticsSection({
     }
   }, [analyticsRequestKey, getAuthHeaders, queryString, readErrorMessage, seasonNumber, showId]);
 
-  const fetchRuns = useCallback(async () => {
-    const existingRequest = inFlightRef.current.runsByKey.get(runsRequestKey);
+  const fetchRuns = useCallback(async (options?: { runId?: string | null; limit?: number }) => {
+    const runId = options?.runId?.trim() || null;
+    const requestedLimit = Number.isFinite(options?.limit) ? Number(options?.limit) : 100;
+    const safeLimit = Math.max(1, Math.min(250, requestedLimit));
+    const scopedRunsKey = `${runsRequestKey}:run=${runId ?? "all"}:limit=${safeLimit}`;
+    const existingRequest = inFlightRef.current.runsByKey.get(scopedRunsKey);
     if (existingRequest) {
       return existingRequest;
     }
 
     const request = (async () => {
       const headers = await getAuthHeaders();
-      const params = new URLSearchParams({ limit: "100" });
+      const params = new URLSearchParams({ limit: String(safeLimit) });
       params.set("source_scope", scope);
       params.set("season_id", seasonId);
+      if (runId) {
+        params.set("run_id", runId);
+      }
       const response = await fetchAdminWithTimeout(
         `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/runs?${params.toString()}`,
         { headers, cache: "no-store" },
@@ -1289,18 +1328,34 @@ export default function SeasonSocialAnalyticsSection({
       }
       const data = (await response.json()) as { runs?: SocialRun[] };
       const nextRuns = data.runs ?? [];
-      setRuns(nextRuns);
+      if (!runId) {
+        setRuns(nextRuns);
+      } else {
+        setRuns((current) => {
+          if (nextRuns.length === 0) return current;
+          const merged = [...current];
+          for (const nextRun of nextRuns) {
+            const existingIndex = merged.findIndex((run) => run.id === nextRun.id);
+            if (existingIndex >= 0) {
+              merged[existingIndex] = nextRun;
+            } else {
+              merged.unshift(nextRun);
+            }
+          }
+          return merged;
+        });
+      }
       setSectionLastSuccessAt((current) => ({ ...current, runs: new Date() }));
       return nextRuns;
     })();
 
-    inFlightRef.current.runsByKey.set(runsRequestKey, request);
+    inFlightRef.current.runsByKey.set(scopedRunsKey, request);
     try {
       return await request;
     } finally {
-      const activeRequest = inFlightRef.current.runsByKey.get(runsRequestKey);
+      const activeRequest = inFlightRef.current.runsByKey.get(scopedRunsKey);
       if (activeRequest === request) {
-        inFlightRef.current.runsByKey.delete(runsRequestKey);
+        inFlightRef.current.runsByKey.delete(scopedRunsKey);
       }
     }
   }, [getAuthHeaders, readErrorMessage, runsRequestKey, scope, seasonId, seasonNumber, showId]);
@@ -1371,6 +1426,12 @@ export default function SeasonSocialAnalyticsSection({
       setJobs([]);
       return [] as SocialJob[];
     }
+    const jobsRequestKey = `${seasonId}:${runId}:250`;
+    const existingRequest = inFlightRef.current.jobsByKey.get(jobsRequestKey);
+    if (existingRequest) {
+      return existingRequest;
+    }
+    const request = (async () => {
     const headers = await getAuthHeaders();
     const params = new URLSearchParams({ limit: "250", run_id: runId });
     params.set("season_id", seasonId);
@@ -1395,6 +1456,16 @@ export default function SeasonSocialAnalyticsSection({
       return nextJobs;
     });
     return nextJobs;
+    })();
+    inFlightRef.current.jobsByKey.set(jobsRequestKey, request);
+    try {
+      return await request;
+    } finally {
+      const activeRequest = inFlightRef.current.jobsByKey.get(jobsRequestKey);
+      if (activeRequest === request) {
+        inFlightRef.current.jobsByKey.delete(jobsRequestKey);
+      }
+    }
   }, [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId]);
 
   const refreshAll = useCallback(async () => {
@@ -1796,7 +1867,7 @@ export default function SeasonSocialAnalyticsSection({
       if (cancelled || inFlight) return;
       inFlight = true;
       try {
-        const nextRuns = await fetchRuns();
+        const nextRuns = await fetchRuns({ runId: activeRunId, limit: 1 });
         if (cancelled || generation !== pollGenerationRef.current) return;
 
         const currentRun = nextRuns.find((run) => run.id === activeRunId);
@@ -1805,7 +1876,21 @@ export default function SeasonSocialAnalyticsSection({
         if (cancelled || generation !== pollGenerationRef.current) return;
 
         if (!runningIngest) {
-          await fetchAnalytics();
+          const now = Date.now();
+          if (now - lastAnalyticsPollAtRef.current >= ANALYTICS_POLL_REFRESH_MS) {
+            lastAnalyticsPollAtRef.current = now;
+            void fetchAnalytics()
+              .then(() => {
+                setSectionErrors((current) => ({ ...current, analytics: null }));
+              })
+              .catch((analyticsError) => {
+                setSectionErrors((current) => ({
+                  ...current,
+                  analytics:
+                    analyticsError instanceof Error ? analyticsError.message : "Failed to load social analytics",
+                }));
+              });
+          }
         }
         pollFailureCountRef.current = 0;
         setPollingStatus((current) => (current === "retrying" ? "recovered" : current));
@@ -2257,8 +2342,51 @@ export default function SeasonSocialAnalyticsSection({
   const isAdvancedView = analyticsView === "advanced";
   const isRedditView = analyticsView === "reddit";
   const selectedRunLabel = selectedRunId ? (runOptionLabelById.get(selectedRunId) ?? null) : null;
+  const truncatedSeasonId = useMemo(() => truncateIdentifier(seasonId), [seasonId]);
+  const selectLatestRun = useCallback(() => {
+    if (!runs.length) return;
+    const preferredRun = runs.find((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? runs[0];
+    setSelectedRunId(preferredRun?.id ?? null);
+    setSectionErrors((current) => ({ ...current, jobs: null }));
+  }, [runs]);
+  const focusIngestControls = useCallback(() => {
+    ingestPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.requestAnimationFrame(() => {
+      runSeasonIngestButtonRef.current?.focus();
+    });
+  }, []);
+  const copySeasonId = useCallback(async () => {
+    try {
+      const copied = await copyTextToClipboard(seasonId);
+      setSeasonIdCopyNotice(copied ? "Copied" : "Copy failed");
+    } catch {
+      setSeasonIdCopyNotice("Copy failed");
+    }
+  }, [seasonId]);
+
+  useEffect(() => {
+    if (!seasonIdCopyNotice) return;
+    if (seasonIdCopyTimerRef.current !== null) {
+      window.clearTimeout(seasonIdCopyTimerRef.current);
+    }
+    seasonIdCopyTimerRef.current = window.setTimeout(() => {
+      setSeasonIdCopyNotice(null);
+      seasonIdCopyTimerRef.current = null;
+    }, 1800);
+    return () => {
+      if (seasonIdCopyTimerRef.current !== null) {
+        window.clearTimeout(seasonIdCopyTimerRef.current);
+      }
+    };
+  }, [seasonIdCopyNotice]);
+
   const ingestExportPanel = (
-    <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+    <article
+      ref={ingestPanelRef}
+      tabIndex={-1}
+      aria-label="Ingest and export controls"
+      className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
+    >
       <h4 className="mb-4 text-lg font-semibold text-zinc-900">Ingest + Export</h4>
       <div className="space-y-2 text-sm text-zinc-600">
         <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
@@ -2302,6 +2430,7 @@ export default function SeasonSocialAnalyticsSection({
           {runningIngest && ingestingDay ? `Running ${formatDayScopeLabel(ingestingDay)}...` : "Run Specific Day (All Platforms)"}
         </button>
         <button
+          ref={runSeasonIngestButtonRef}
           type="button"
           onClick={() => runIngest()}
           disabled={runningIngest}
@@ -2422,185 +2551,227 @@ export default function SeasonSocialAnalyticsSection({
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-50 p-6 shadow-sm">
-        <div className="space-y-4">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div>
+      <section
+        aria-label="Season social analytics controls"
+        className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm sm:p-6"
+      >
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-4">
+            <header className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white">
                   Season Social Analytics
                 </p>
                 <p
                   className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
-                    hasRunningJobs
-                      ? "bg-zinc-300 text-zinc-800"
-                      : "bg-zinc-100 text-zinc-600"
+                    hasRunningJobs ? "bg-zinc-300 text-zinc-800" : "bg-zinc-100 text-zinc-600"
                   }`}
                 >
                   {hasRunningJobs ? "Run Active" : "Idle"}
                 </p>
               </div>
-              <h3 className="mt-3 text-2xl font-bold text-zinc-900">{showName} · Season {seasonNumber}</h3>
-              <p className="mt-1 text-sm text-zinc-500">
+              <h3 className="text-2xl font-bold leading-tight text-zinc-900 sm:text-[28px]">
+                {showName} · Season {seasonNumber}
+              </h3>
+              <p className="max-w-2xl text-sm text-zinc-500">
                 Bravo-owned social analytics with viewer sentiment and weekly rollups.
               </p>
-            </div>
+            </header>
 
-            <div className="w-full rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm xl:max-w-xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Current Run</p>
-              <p className="mt-2 text-sm font-medium leading-relaxed text-zinc-800 break-words">
-                {selectedRunLabel ?? "No run selected"}
-              </p>
-            </div>
+            <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-zinc-100 shadow-sm sm:p-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-300">Current Run</p>
+              {selectedRunLabel ? (
+                <p className="mt-2 break-words text-sm font-medium leading-relaxed text-zinc-100">{selectedRunLabel}</p>
+              ) : (
+                <div className="mt-2 space-y-3">
+                  <p className="text-sm font-medium text-zinc-100">No run selected.</p>
+                  <p className="text-xs text-zinc-300">Pick the latest run or jump to ingest controls to start one.</p>
+                  <div className="flex flex-wrap gap-2">
+                    {runs.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={selectLatestRun}
+                        disabled={runningIngest}
+                        className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Select Latest Run
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={focusIngestControls}
+                      className="rounded-lg border border-zinc-500 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-700"
+                    >
+                      Start New Ingest
+                    </button>
+                  </div>
+                </div>
+              )}
+            </article>
           </div>
 
-          {!hidePlatformTabs && (
-            <nav className="flex gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-1 shadow-sm">
-              {PLATFORM_TABS.map((tab) => {
-                const isActive = platformTab === tab.key;
-                return (
+          <aside className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Season Details</p>
+            <dl className="mt-3 space-y-2">
+              <div className="rounded-lg bg-zinc-50 px-3 py-2">
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Season ID</dt>
+                <dd className="mt-1 flex items-center gap-2">
+                  <span className="font-mono text-sm font-medium text-zinc-800" title={seasonId}>
+                    {truncatedSeasonId}
+                  </span>
                   <button
-                    key={tab.key}
                     type="button"
                     onClick={() => {
-                      setPlatformTabAndUrl(tab.key);
+                      void copySeasonId();
                     }}
-                    className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                      isActive
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:bg-white/50 hover:text-zinc-700"
-                    }`}
+                    className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-700 transition hover:bg-zinc-100"
                   >
-                    {tab.label}
+                    Copy
                   </button>
-                );
-              })}
-            </nav>
-          )}
-
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Filters</p>
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                  Scope
-                  <select
-                    value={scope}
-                    onChange={(event) => setScope(event.target.value as Scope)}
-                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
+                  <span
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500"
                   >
-                    <option value="bravo">Bravo</option>
-                  </select>
-                </label>
-                <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                  Week
-                  <select
-                    value={weekFilter}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      if (nextValue === "all") {
-                        setWeekFilter("all");
-                        return;
-                      }
-                      const parsed = Number.parseInt(nextValue, 10);
-                      setWeekFilter(Number.isFinite(parsed) ? parsed : "all");
-                    }}
-                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
-                  >
-                    <option value="all">All Weeks</option>
-                    {(analytics?.weekly ?? []).map((week) => (
-                      <option key={week.week_index} value={week.week_index}>
-                        {week.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                  Run
-                  <select
-                    value={selectedRunId ?? ""}
-                    onChange={(event) => {
-                      const nextRunId = event.target.value || null;
-                      setSelectedRunId(nextRunId);
-                      setSectionErrors((current) => ({ ...current, jobs: null }));
-                    }}
-                    disabled={runningIngest}
-                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <option value="">No Run Selected</option>
-                    {runs.map((run) => (
-                      <option key={run.id} value={run.id}>
-                        {runOptionLabelById.get(run.id) ??
-                          `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {seasonIdCopyNotice}
+                  </span>
+                </dd>
               </div>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Season Details</p>
-              <dl className="mt-3 space-y-2">
+              <div className="rounded-lg bg-zinc-50 px-3 py-2">
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Last Updated</dt>
+                <dd className="mt-1 text-sm font-medium text-zinc-800">{formatDateTimeFromDate(lastUpdated)}</dd>
+              </div>
+              {analytics?.window?.start && analytics?.window?.end && (
                 <div className="rounded-lg bg-zinc-50 px-3 py-2">
-                  <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Season ID</dt>
-                  <dd className="mt-1 break-all text-sm font-medium text-zinc-800">{seasonId}</dd>
-                </div>
-                <div className="rounded-lg bg-zinc-50 px-3 py-2">
-                  <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Last Updated</dt>
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Window</dt>
                   <dd className="mt-1 text-sm font-medium text-zinc-800">
-                    {formatDateTimeFromDate(lastUpdated)}
+                    {formatDateTime(analytics.window.start)} to {formatDateTime(analytics.window.end)}
                   </dd>
                 </div>
-                {analytics?.window?.start && analytics?.window?.end && (
-                  <div className="rounded-lg bg-zinc-50 px-3 py-2">
-                    <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Window</dt>
-                    <dd className="mt-1 text-sm font-medium text-zinc-800">
-                      {formatDateTime(analytics.window.start)} to {formatDateTime(analytics.window.end)}
-                    </dd>
-                  </div>
-                )}
-              </dl>
-            </div>
+              )}
+            </dl>
+          </aside>
+        </div>
+
+        {!hidePlatformTabs && (
+          <nav className="mt-4 flex gap-1 rounded-xl border border-zinc-200 bg-zinc-100/70 p-1" aria-label="Social platform tabs">
+            {PLATFORM_TABS.map((tab) => {
+              const isActive = platformTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => {
+                    setPlatformTabAndUrl(tab.key);
+                  }}
+                  className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 ${
+                    isActive
+                      ? "bg-white text-zinc-900 shadow-sm"
+                      : "text-zinc-600 hover:bg-white/80 hover:text-zinc-900"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </nav>
+        )}
+
+        <div aria-label="Social analytics filters" className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Filters</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+              Scope
+              <select
+                value={scope}
+                onChange={(event) => setScope(event.target.value as Scope)}
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
+              >
+                <option value="bravo">Bravo</option>
+              </select>
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+              Week
+              <select
+                value={weekFilter}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  if (nextValue === "all") {
+                    setWeekFilter("all");
+                    return;
+                  }
+                  const parsed = Number.parseInt(nextValue, 10);
+                  setWeekFilter(Number.isFinite(parsed) ? parsed : "all");
+                }}
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
+              >
+                <option value="all">All Weeks</option>
+                {(analytics?.weekly ?? []).map((week) => (
+                  <option key={week.week_index} value={week.week_index}>
+                    {week.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+              Run
+              <select
+                value={selectedRunId ?? ""}
+                onChange={(event) => {
+                  const nextRunId = event.target.value || null;
+                  setSelectedRunId(nextRunId);
+                  setSectionErrors((current) => ({ ...current, jobs: null }));
+                }}
+                disabled={runningIngest}
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">No Run Selected</option>
+                {runs.map((run) => (
+                  <option key={run.id} value={run.id}>
+                    {runOptionLabelById.get(run.id) ??
+                      `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
+
+        {(pollingStatus !== "idle" || staleFallbackItems.length > 0 || sectionErrorItems.length > 0) && (
+          <div className="mt-4 space-y-2">
+            {pollingStatus === "retrying" && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                Live updates temporarily unavailable. Retrying...
+              </div>
+            )}
+            {pollingStatus === "recovered" && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                Live updates connection restored.
+              </div>
+            )}
+            {staleFallbackItems.length > 0 && (
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+                Showing last successful social data while live refresh retries.
+              </div>
+            )}
+            {sectionErrorItems.map((item) => (
+              <div key={item.key} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <span className="font-semibold">{item.label}:</span> {item.message}
+                {item.staleAt && (
+                  <p className="mt-1 text-xs font-medium text-amber-800">
+                    Showing last successful data from {formatDateTimeFromDate(item.staleAt)}.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
-        </div>
-      )}
-
-      {pollingStatus === "retrying" && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          Live updates temporarily unavailable. Retrying...
-        </div>
-      )}
-      {pollingStatus === "recovered" && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          Live updates connection restored.
-        </div>
-      )}
-
-      {staleFallbackItems.length > 0 && (
-        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-          Showing last successful social data while live refresh retries.
-        </div>
-      )}
-
-      {sectionErrorItems.length > 0 && (
-        <div className="space-y-2">
-          {sectionErrorItems.map((item) => (
-            <div key={item.key} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-              <span className="font-semibold">{item.label}:</span> {item.message}
-              {item.staleAt && (
-                <p className="mt-1 text-xs font-medium text-amber-800">
-                  Showing last successful data from {formatDateTimeFromDate(item.staleAt)}.
-                </p>
-              )}
-            </div>
-          ))}
         </div>
       )}
 

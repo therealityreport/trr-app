@@ -8,7 +8,8 @@ const {
   setCastPhotoFaceBoxesMock,
   getMediaLinkByIdMock,
   ensureMediaLinksForPeopleMock,
-  updateMediaLinksContextMock,
+  getMediaLinksByAssetIdMock,
+  setMediaLinkContextByIdMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getTagsByPhotoIdsMock: vi.fn(),
@@ -16,7 +17,8 @@ const {
   setCastPhotoFaceBoxesMock: vi.fn(),
   getMediaLinkByIdMock: vi.fn(),
   ensureMediaLinksForPeopleMock: vi.fn(),
-  updateMediaLinksContextMock: vi.fn(),
+  getMediaLinksByAssetIdMock: vi.fn(),
+  setMediaLinkContextByIdMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -32,7 +34,8 @@ vi.mock("@/lib/server/admin/cast-photo-tags-repository", () => ({
 vi.mock("@/lib/server/trr-api/media-links-repository", () => ({
   getMediaLinkById: getMediaLinkByIdMock,
   ensureMediaLinksForPeople: ensureMediaLinksForPeopleMock,
-  updateMediaLinksContext: updateMediaLinksContextMock,
+  getMediaLinksByAssetId: getMediaLinksByAssetIdMock,
+  setMediaLinkContextById: setMediaLinkContextByIdMock,
 }));
 
 import { PUT as putCastPhotoTags } from "@/app/api/admin/trr-api/cast-photos/[photoId]/tags/route";
@@ -46,7 +49,8 @@ describe("tags route people_count_source semantics", () => {
     setCastPhotoFaceBoxesMock.mockReset();
     getMediaLinkByIdMock.mockReset();
     ensureMediaLinksForPeopleMock.mockReset();
-    updateMediaLinksContextMock.mockReset();
+    getMediaLinksByAssetIdMock.mockReset();
+    setMediaLinkContextByIdMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
   });
@@ -104,6 +108,7 @@ describe("tags route people_count_source semantics", () => {
   it("media-link tag-only update preserves manual count source and count", async () => {
     getMediaLinkByIdMock.mockResolvedValue({
       id: "link-1",
+      entity_id: "person-1",
       media_asset_id: "asset-1",
       context: {
         people_count: 4,
@@ -111,7 +116,22 @@ describe("tags route people_count_source semantics", () => {
       },
     });
     ensureMediaLinksForPeopleMock.mockResolvedValue(undefined);
-    updateMediaLinksContextMock.mockResolvedValue(undefined);
+    getMediaLinksByAssetIdMock.mockResolvedValue([
+      {
+        id: "link-1",
+        entity_id: "person-1",
+        media_asset_id: "asset-1",
+        kind: "gallery",
+        entity_type: "person",
+        position: null,
+        context: {
+          people_count: 4,
+          people_count_source: "manual",
+        },
+        created_at: "2024-01-01T00:00:00.000Z",
+      },
+    ]);
+    setMediaLinkContextByIdMock.mockResolvedValue(undefined);
 
     const request = new NextRequest("http://localhost/api/admin/trr-api/media-links/link-1/tags", {
       method: "PUT",
@@ -127,8 +147,8 @@ describe("tags route people_count_source semantics", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(updateMediaLinksContextMock).toHaveBeenCalledWith(
-      "asset-1",
+    expect(setMediaLinkContextByIdMock).toHaveBeenCalledWith(
+      "link-1",
       expect.objectContaining({
         people_count: 4,
         people_count_source: "manual",
@@ -141,6 +161,7 @@ describe("tags route people_count_source semantics", () => {
   it("media-link update persists face_boxes in context payload", async () => {
     getMediaLinkByIdMock.mockResolvedValue({
       id: "link-1",
+      entity_id: "person-1",
       media_asset_id: "asset-1",
       context: {
         people_count: 2,
@@ -148,7 +169,22 @@ describe("tags route people_count_source semantics", () => {
       },
     });
     ensureMediaLinksForPeopleMock.mockResolvedValue(undefined);
-    updateMediaLinksContextMock.mockResolvedValue(undefined);
+    getMediaLinksByAssetIdMock.mockResolvedValue([
+      {
+        id: "link-1",
+        entity_id: "person-1",
+        media_asset_id: "asset-1",
+        kind: "gallery",
+        entity_type: "person",
+        position: null,
+        context: {
+          people_count: 2,
+          people_count_source: "manual",
+        },
+        created_at: "2024-01-01T00:00:00.000Z",
+      },
+    ]);
+    setMediaLinkContextByIdMock.mockResolvedValue(undefined);
 
     const request = new NextRequest("http://localhost/api/admin/trr-api/media-links/link-1/tags", {
       method: "PUT",
@@ -167,8 +203,8 @@ describe("tags route people_count_source semantics", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(updateMediaLinksContextMock).toHaveBeenCalledWith(
-      "asset-1",
+    expect(setMediaLinkContextByIdMock).toHaveBeenCalledWith(
+      "link-1",
       expect.objectContaining({
         face_boxes: expect.arrayContaining([
           expect.objectContaining({
@@ -183,5 +219,85 @@ describe("tags route people_count_source semantics", () => {
       })
     );
     expect(payload.face_boxes).toHaveLength(1);
+  });
+
+  it("cast-photo route accepts explicit people_count=0", async () => {
+    getTagsByPhotoIdsMock.mockResolvedValue(new Map());
+    upsertCastPhotoTagsMock.mockResolvedValue({
+      cast_photo_id: "photo-1",
+      people_names: [],
+      people_ids: [],
+      people_count: 0,
+      people_count_source: "manual",
+      detector: null,
+      created_at: null,
+      updated_at: null,
+      created_by_firebase_uid: "admin-user",
+      updated_by_firebase_uid: "admin-user",
+    });
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/cast-photos/photo-1/tags", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ people_count: 0, people: [] }),
+    });
+
+    const response = await putCastPhotoTags(request, {
+      params: Promise.resolve({ photoId: "photo-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(upsertCastPhotoTagsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        people_count: 0,
+        people_count_source: "manual",
+      })
+    );
+    expect(payload.people_count).toBe(0);
+  });
+
+  it("media-link route accepts explicit people_count=0", async () => {
+    getMediaLinkByIdMock.mockResolvedValue({
+      id: "link-1",
+      entity_id: "person-1",
+      media_asset_id: "asset-1",
+      context: {},
+    });
+    ensureMediaLinksForPeopleMock.mockResolvedValue(undefined);
+    getMediaLinksByAssetIdMock.mockResolvedValue([
+      {
+        id: "link-1",
+        entity_id: "person-1",
+        media_asset_id: "asset-1",
+        kind: "gallery",
+        entity_type: "person",
+        position: null,
+        context: {},
+        created_at: "2024-01-01T00:00:00.000Z",
+      },
+    ]);
+    setMediaLinkContextByIdMock.mockResolvedValue(undefined);
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/media-links/link-1/tags", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ people_count: 0, people: [] }),
+    });
+
+    const response = await putMediaLinkTags(request, {
+      params: Promise.resolve({ linkId: "link-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(setMediaLinkContextByIdMock).toHaveBeenCalledWith(
+      "link-1",
+      expect.objectContaining({
+        people_count: 0,
+        people_count_source: "manual",
+      })
+    );
+    expect(payload.people_count).toBe(0);
   });
 });

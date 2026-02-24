@@ -8,6 +8,7 @@ describe("show news tab google wiring", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{(?:showId|requestShowId)\}\/google-news\/sync/);
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{(?:showId|requestShowId)\}\/google-news\/sync\/\$\{encodeURIComponent\(jobId\)\}/);
     expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{(?:showId|requestShowId)\}\/news\?/);
     expect(contents).toMatch(/setNewsSort\("trending"\)/);
     expect(contents).toMatch(/setNewsSort\("latest"\)/);

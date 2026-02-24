@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   ensureMediaLinksForPeople,
+  getMediaLinksByAssetId,
   getMediaLinkById,
-  updateMediaLinksContext,
+  setMediaLinkContextById,
   type TagPerson,
 } from "@/lib/server/trr-api/media-links-repository";
 
@@ -57,7 +58,7 @@ const uniqueNames = (people: TagPerson[]): string[] => {
 
 const parseCount = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value)
-    ? Math.max(1, Math.floor(value))
+    ? Math.max(0, Math.floor(value))
     : null;
 
 const parseCountSource = (value: unknown): "auto" | "manual" | null =>
@@ -202,7 +203,37 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     };
 
     await ensureMediaLinksForPeople(link.media_asset_id, people, mergedContext);
-    await updateMediaLinksContext(link.media_asset_id, mergedContext);
+    const linksForAsset = await getMediaLinksByAssetId(link.media_asset_id);
+    const targetEntityIds = new Set<string>([
+      ...(typeof link.entity_id === "string" && link.entity_id.trim().length > 0
+        ? [link.entity_id]
+        : []),
+      ...peopleIds,
+    ]);
+    const linkIdsToUpdate = linksForAsset
+      .filter((candidate) => candidate.id === linkId || targetEntityIds.has(candidate.entity_id))
+      .map((candidate) => candidate.id);
+    if (linkIdsToUpdate.length === 0) {
+      linkIdsToUpdate.push(linkId);
+    }
+    await Promise.all(
+      linkIdsToUpdate.map(async (candidateLinkId) => {
+        const existingLink = linksForAsset.find((candidate) => candidate.id === candidateLinkId);
+        const existingContext =
+          existingLink?.context && typeof existingLink.context === "object"
+            ? (existingLink.context as Record<string, unknown>)
+            : {};
+        const nextContext: Record<string, unknown> = {
+          ...existingContext,
+          people_ids: peopleIds,
+          people_names: peopleNames,
+          people_count: peopleCount,
+          people_count_source: peopleCountSource,
+          ...(hasFaceBoxes ? { face_boxes: faceBoxes ?? null } : {}),
+        };
+        await setMediaLinkContextById(candidateLinkId, nextContext);
+      })
+    );
 
     return NextResponse.json({
       people_names: peopleNames,
