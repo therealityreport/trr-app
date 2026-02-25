@@ -1,16 +1,77 @@
 "use client";
 
-import { Route } from "next";
+import { useEffect, useMemo, useState } from "react";
+import type { Route } from "next";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
-import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
+import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+
+interface CoveredShow {
+  id: string;
+  trr_show_id: string;
+  show_name: string;
+  canonical_slug?: string | null;
+  alternative_names?: string[] | null;
+  show_total_episodes?: number | null;
+}
 
 export default function AdminSocialMediaPage() {
   const { user, checking, hasAccess } = useAdminGuard();
+  const [shows, setShows] = useState<CoveredShow[]>([]);
+  const [loadingShows, setLoadingShows] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess) return;
+
+    let cancelled = false;
+    const loadShows = async () => {
+      setLoadingShows(true);
+      setLoadError(null);
+      try {
+        const response = await fetchAdminWithAuth("/api/admin/covered-shows", undefined, {
+          preferredUser: user,
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          shows?: CoveredShow[];
+        };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load covered shows");
+        }
+        if (cancelled) return;
+        setShows(Array.isArray(data.shows) ? data.shows : []);
+      } catch (error) {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : "Failed to load covered shows");
+      } finally {
+        if (!cancelled) {
+          setLoadingShows(false);
+        }
+      }
+    };
+
+    void loadShows();
+    return () => {
+      cancelled = true;
+    };
+  }, [checking, hasAccess, user]);
+
+  const sortedShows = useMemo(
+    () =>
+      [...shows].sort((a, b) => {
+        const aName = (a.show_name ?? "").trim().toLowerCase();
+        const bName = (b.show_name ?? "").trim().toLowerCase();
+        return aName.localeCompare(bName);
+      }),
+    [shows],
+  );
 
   if (checking) {
     return (
@@ -53,7 +114,7 @@ export default function AdminSocialMediaPage() {
             <div>
               <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Social Analytics", "/admin/social-media")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Social Analytics</h1>
-              <p className="text-sm text-zinc-500">Category dashboards for Bravo Content and Creator Content.</p>
+              <p className="text-sm text-zinc-500">Select a covered show to open Bravo social analytics.</p>
             </div>
             <Link
               href="/admin"
@@ -64,62 +125,56 @@ export default function AdminSocialMediaPage() {
           </div>
         </AdminGlobalHeader>
 
-        <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
-          <section className="grid gap-4 md:grid-cols-2">
-            <Link
-              href={"/admin/social-media/bravo-content" as Route}
-              className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md"
-            >
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Category</p>
-              <h2 className="mt-2 text-2xl font-bold text-zinc-900">Bravo Content</h2>
-              <p className="mt-2 text-sm text-zinc-600">
-                Official network channels and accounts (BravoTV, BravoDailyDish, BravoWWHL, WWHL).
-              </p>
-              <p className="mt-4 text-sm font-semibold text-zinc-900">Open Dashboard</p>
-            </Link>
-
-            <Link
-              href={"/admin/social-media/creator-content" as Route}
-              className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md"
-            >
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Category</p>
-              <div className="mt-2 flex items-center gap-2">
-                <h2 className="text-2xl font-bold text-zinc-900">Creator Content</h2>
-                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                  Read-only
-                </span>
-              </div>
-              <p className="mt-2 text-sm text-zinc-600">
-                Per-show creator roster dashboard shell. Actions and ingest controls are intentionally disabled for now.
-              </p>
-              <p className="mt-4 text-sm font-semibold text-zinc-900">Open Dashboard</p>
-            </Link>
-          </section>
-
+        <main className="mx-auto max-w-6xl px-6 py-8">
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Season Ops</p>
-                <h3 className="text-lg font-semibold text-zinc-900">Operational Ingest Surface</h3>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Covered Shows</p>
+                <h2 className="text-lg font-semibold text-zinc-900">Choose a show</h2>
               </div>
-              <Link
-                href="/admin/trr-shows"
-                className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-              >
-                Open Shows
-              </Link>
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                {sortedShows.length} total
+              </span>
             </div>
-            <p className="text-sm text-zinc-600">
-              Season-level ingest, jobs, and exports continue under each show season Social tab.
-            </p>
-          </section>
 
-          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="mb-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Community Sources</p>
-              <h3 className="text-lg font-semibold text-zinc-900">Reddit Source Manager</h3>
-            </div>
-            <RedditSourcesManager mode="global" />
+            {loadingShows ? (
+              <div className="py-10 text-center text-sm text-zinc-500">Loading covered shows…</div>
+            ) : loadError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {loadError}
+              </div>
+            ) : sortedShows.length === 0 ? (
+              <p className="text-sm text-zinc-500">
+                No covered shows found. Add shows in the Shows admin page first.
+              </p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {sortedShows.map((show) => {
+                  const routeSlug = resolvePreferredShowRouteSlug({
+                    alternativeNames: show.alternative_names,
+                    canonicalSlug: show.canonical_slug,
+                    fallback: show.show_name || show.trr_show_id,
+                  });
+                  const socialHref = buildShowAdminUrl({
+                    showSlug: routeSlug,
+                    tab: "social",
+                    socialView: "bravo",
+                  }) as Route;
+                  return (
+                    <Link
+                      key={show.id}
+                      href={socialHref}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:border-zinc-300 hover:bg-zinc-100"
+                    >
+                      <p className="text-sm font-semibold text-zinc-900">{show.show_name}</p>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Open Bravo Analytics
+                      </p>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
           </section>
         </main>
       </div>

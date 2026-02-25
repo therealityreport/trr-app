@@ -11,6 +11,7 @@ export interface CoveredShow {
   trr_show_id: string;
   show_name: string;
   canonical_slug?: string | null;
+  alternative_names?: string[] | null;
   show_total_episodes?: number | null;
   poster_url?: string | null;
   created_at: string;
@@ -63,6 +64,7 @@ export async function getCoveredShows(): Promise<CoveredShow[]> {
            THEN s.slug || '--' || lower(left(s.id::text, 8))
          ELSE s.slug
        END AS canonical_slug,
+       s.alternative_names,
        s.show_total_episodes,
        si.hosted_url AS poster_url
      FROM ${TABLE} cs

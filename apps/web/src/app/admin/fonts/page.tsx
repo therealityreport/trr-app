@@ -35,6 +35,13 @@ const ButtonsTab = dynamic(() => import("./_components/ButtonsTab"), {
     </div>
   ),
 });
+const NYTOccurrencesTab = dynamic(() => import("./_components/NYTOccurrencesTab"), {
+  loading: () => (
+    <div className="py-12 text-center text-sm text-zinc-500">
+      Scanning NYT occurrences...
+    </div>
+  ),
+});
 
 const TINT_SHADE_SWATCHES_PER_SIDE = 3;
 
@@ -1259,6 +1266,9 @@ function AdminFontsPageContent() {
 
         {/* Buttons Tab */}
         {activeTab === "buttons" && <ButtonsTab />}
+
+        {/* NYT Occurrences Tab */}
+        {activeTab === "nyt-occurrences" && <NYTOccurrencesTab preferredUser={user} />}
 
         {/* Colors Tab */}
         {activeTab === "colors" && (

@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { mockAdminApi, SHOW_ID, waitForAdminReady } from "./admin-fixtures";
 
-const ASSETS_ROUTE_PATTERN = /\/(assets|media-gallery)(\?|$)|\?tab=assets/;
+const ASSETS_ROUTE_PATTERN = /\/(assets|media-gallery|media)(\?|$)|\?tab=assets/;
 
 test("show tab deep links preserve tab state across navigation", async ({ page }) => {
   await mockAdminApi(page);
 
-  await page.goto(`/admin/trr-shows/${SHOW_ID}?tab=assets`);
+  await page.goto(`/shows/${SHOW_ID}/media`);
   await waitForAdminReady(page);
 
   const assetsTab = page.getByRole("tab", { name: "Assets" });
@@ -15,7 +15,7 @@ test("show tab deep links preserve tab state across navigation", async ({ page }
   await expect(assetsTab).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveURL(ASSETS_ROUTE_PATTERN);
 
-  await page.goto(`/admin/trr-shows/${SHOW_ID}/cast`);
+  await page.goto(`/shows/${SHOW_ID}/cast`);
   await waitForAdminReady(page);
   await expect(castTab).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveURL(/\/cast(\?|$)/);

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import {
   buildNetworkDetailBreadcrumb,
@@ -188,7 +189,7 @@ export default function AdminNetworkStreamingDetailPage() {
 
         const canonicalSlug = toEntitySlug(payload.entity_slug || payload.display_name);
         if (canonicalSlug && canonicalSlug !== routeEntitySlug) {
-          router.replace(`/admin/networks/${payload.entity_type}/${canonicalSlug}`);
+          router.replace(`/admin/networks-and-streaming/${payload.entity_type}/${canonicalSlug}`);
         }
       } catch (fetchError) {
         if (cancelled) return;
@@ -246,7 +247,7 @@ export default function AdminNetworkStreamingDetailPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto max-w-6xl">
             <AdminBreadcrumbs
-              items={buildNetworkDetailBreadcrumb(pageTitle, `/admin/networks/${routeEntityType}/${routeEntitySlug}`)}
+              items={buildNetworkDetailBreadcrumb(pageTitle, `/admin/networks-and-streaming/${routeEntityType}/${routeEntitySlug}`)}
               className="mb-1"
             />
             <h1 className="mt-2 break-words text-3xl font-bold text-zinc-900">{pageTitle}</h1>
@@ -258,6 +259,10 @@ export default function AdminNetworkStreamingDetailPage() {
                   : "Production company"}{" "}
               profile with saved assets, metadata, and added shows.
             </p>
+            <BrandsTabs
+              activeTab={routeEntityType === "production" ? "production-companies" : "networks-streaming"}
+              className="mt-4"
+            />
           </div>
         </AdminGlobalHeader>
 
@@ -274,10 +279,10 @@ export default function AdminNetworkStreamingDetailPage() {
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Link
-                  href="/admin/networks"
+                  href="/admin/networks-and-streaming"
                   className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
                 >
-                  Back to Networks
+                  Back to Network & Streaming Services
                 </Link>
               </div>
               <div className="mt-4">
@@ -287,7 +292,7 @@ export default function AdminNetworkStreamingDetailPage() {
                     {notFoundSuggestions.map((item) => (
                       <li key={`${item.entity_type}:${item.entity_slug}`}>
                         <Link
-                          href={`/admin/networks/${item.entity_type}/${item.entity_slug}`}
+                          href={`/admin/networks-and-streaming/${item.entity_type}/${item.entity_slug}`}
                           className="text-sm text-amber-900 underline [overflow-wrap:anywhere]"
                         >
                           {item.name}
@@ -504,7 +509,7 @@ export default function AdminNetworkStreamingDetailPage() {
                               <td className="max-w-[320px] px-3 py-2 font-medium text-zinc-900 [overflow-wrap:anywhere]">
                                 <Link
                                   className="text-zinc-900 underline-offset-2 hover:underline"
-                                  href={`/admin/trr-shows/${encodeURIComponent(showSlug)}`}
+                                  href={`/shows/${encodeURIComponent(showSlug)}`}
                                 >
                                   {show.show_name}
                                 </Link>

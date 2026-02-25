@@ -11,6 +11,13 @@ const makeListing = (posts: Array<Record<string, unknown>>) => ({
   },
 });
 
+const makeSearchListing = (posts: Array<Record<string, unknown>>, after: string | null = null) => ({
+  data: {
+    children: posts.map((post) => ({ data: post })),
+    after,
+  },
+});
+
 describe("reddit-discovery-service", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -842,5 +849,149 @@ describe("reddit-discovery-service", () => {
     });
 
     expect(result.candidates).toHaveLength(0);
+  });
+
+  it("uses t=all for top listing fetches", async () => {
+    const topUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/top.json")) {
+        topUrls.push(url);
+      }
+      return new Response(JSON.stringify(makeListing([])), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      episodeTitlePatterns: ["Live Episode Discussion"],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["top"],
+    });
+
+    expect(topUrls.length).toBeGreaterThan(0);
+    expect(topUrls[0]).toContain("t=all");
+  });
+
+  it("recovers historical episode threads via subreddit search when listings miss", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/new.json") || url.includes("/hot.json") || url.includes("/top.json")) {
+        return new Response(JSON.stringify(makeListing([])), { status: 200 });
+      }
+      if (url.includes("/search.json")) {
+        return new Response(
+          JSON.stringify(
+            makeSearchListing([
+              {
+                id: "search-match",
+                title:
+                  "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Live Episode Discussion",
+                selftext: "Historical live thread",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/search-match/test/",
+                permalink: "/r/BravoRealHousewives/comments/search-match/test/",
+                author: "AutoModerator",
+                score: 170,
+                num_comments: 2700,
+                created_utc: 1_758_800_000,
+                link_flair_text: "Salt Lake City",
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      seasonEpisodes: [{ episode_number: 1, air_date: "2025-09-16" }],
+      episodeTitlePatterns: [
+        "Live Episode Discussion",
+        "Post Episode Discussion",
+        "Weekly Episode Discussion",
+      ],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["new", "hot", "top"],
+    });
+
+    expect(result.candidates.map((candidate) => candidate.reddit_post_id)).toEqual(["search-match"]);
+    expect(result.discovery_source_summary.listing_count).toBe(0);
+    expect(result.discovery_source_summary.search_count).toBeGreaterThan(0);
+    expect(result.discovery_source_summary.search_pages_fetched).toBeGreaterThan(0);
+    expect(result.coverage_expected_slots).toBe(3);
+    expect(result.coverage_found_slots).toBe(1);
+    expect(result.coverage_found_episode_count).toBe(1);
+    expect(result.coverage_missing_slots).toEqual([
+      { episode_number: 1, discussion_type: "post" },
+      { episode_number: 1, discussion_type: "weekly" },
+    ]);
+  });
+
+  it("restricts candidates to expected season episode numbers when season episodes are provided", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/search.json")) {
+        return new Response(JSON.stringify(makeSearchListing([])), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify(
+          makeListing([
+            {
+              id: "episode-1",
+              title: "RHOSLC Season 6 Episode 1 Live Episode Discussion",
+              selftext: "Valid episode",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-1/test/",
+              permalink: "/r/BravoRealHousewives/comments/episode-1/test/",
+              author: "user1",
+              score: 100,
+              num_comments: 50,
+              created_utc: 1_758_800_100,
+              link_flair_text: "Salt Lake City",
+            },
+            {
+              id: "episode-99",
+              title: "RHOSLC Season 6 Episode 99 Live Episode Discussion",
+              selftext: "Should be excluded because not in season episodes list",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-99/test/",
+              permalink: "/r/BravoRealHousewives/comments/episode-99/test/",
+              author: "user2",
+              score: 120,
+              num_comments: 60,
+              created_utc: 1_758_800_101,
+              link_flair_text: "Salt Lake City",
+            },
+          ]),
+        ),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      seasonEpisodes: [{ episode_number: 1, air_date: "2025-09-16" }],
+      episodeTitlePatterns: ["Live Episode Discussion"],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["new"],
+    });
+
+    expect(result.expected_episode_numbers).toEqual([1]);
+    expect(result.candidates.map((candidate) => candidate.reddit_post_id)).toEqual(["episode-1"]);
+    expect(result.episode_matrix.map((row) => row.episode_number)).toEqual([1]);
   });
 });

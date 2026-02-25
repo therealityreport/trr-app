@@ -1,4 +1,4 @@
-# TRR-APP — Claude/Codex Playbook
+# TRR-APP — Codex/Claude Playbook
 
 Canonical repo rules: `/Users/thomashulihan/Projects/TRR/TRR-APP/AGENTS.md`.
 Workspace coordination rules: `/Users/thomashulihan/Projects/TRR/AGENTS.md`.
@@ -37,6 +37,7 @@ pnpm -C apps/web run test:ci
 5. Update `docs/ai/HANDOFF.md` before ending session.
 
 ## Skill Activation (Repo)
+- `orchestrate-plan-execution`: Codex-primary default entrypoint for non-trivial plan + execute tasks; routes checkpoint, parallel, or strict review-loop execution (Claude secondary).
 - `figma-frontend-design-engineer`: default for Figma URL/node-based design implementation and parity fixes.
 - `senior-frontend`: default for UI/admin/App Router tasks.
 - `senior-fullstack`: cross-repo UI + API integration tasks.

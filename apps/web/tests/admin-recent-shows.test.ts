@@ -36,7 +36,7 @@ describe("admin recent shows storage", () => {
     expect(entries[0]).toMatchObject({
       slug: "show-4",
       label: "Show 4 updated",
-      href: "/admin/trr-shows/show-4",
+      href: "/shows/show-4",
     });
     expect(entries.map((entry) => entry.slug)).toEqual(["show-4", "show-6", "show-5", "show-3", "show-2"]);
   });
@@ -55,13 +55,13 @@ describe("admin recent shows storage", () => {
       {
         slug: "slc",
         label: "RHOSLC",
-        href: "/admin/trr-shows/slc",
+        href: "/shows/slc",
         touchedAt: 123,
       },
     ]);
 
     expect(buildAdminShowHref("real-housewives/beverly-hills")).toBe(
-      "/admin/trr-shows/real-housewives%2Fbeverly-hills",
+      "/shows/real-housewives%2Fbeverly-hills",
     );
   });
 });

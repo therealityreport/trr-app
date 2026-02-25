@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import AdminNetworkStreamingDetailPage from "@/app/admin/networks/[entityType]/[entitySlug]/page";
 
 const mocks = vi.hoisted(() => {
@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/admin/networks/network/bravo",
+  usePathname: () => "/admin/networks-and-streaming/network/bravo",
   useParams: () => mocks.params,
   useRouter: () => mocks.router,
 }));
@@ -126,14 +126,15 @@ describe("admin network detail page", () => {
     expect(String(detailCall[0])).toContain("entity_type=network");
     expect(String(detailCall[0])).toContain("entity_slug=bravo");
 
-    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
-    expect(screen.getByRole("link", { name: "Networks & Streaming" })).toHaveAttribute("href", "/admin/networks");
+    const breadcrumbNav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(breadcrumbNav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    expect(within(breadcrumbNav).getByRole("link", { name: "Brands" })).toHaveAttribute("href", "/admin/brands");
     expect(screen.getByText("Saved Logos")).toBeInTheDocument();
     expect(screen.getByText("Saved Info / URLs")).toBeInTheDocument();
     expect(screen.getByText("Added Shows")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "The Real Housewives of Salt Lake City" })).toHaveAttribute(
       "href",
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city",
+      "/shows/the-real-housewives-of-salt-lake-city",
     );
     expect(screen.getByRole("link", { name: "https://logo.example.com/bravo.svg" })).toBeInTheDocument();
     expect(mocks.replace).not.toHaveBeenCalled();
@@ -255,7 +256,7 @@ describe("admin network detail page", () => {
     render(<AdminNetworkStreamingDetailPage />);
 
     await waitFor(() => {
-      expect(mocks.replace).toHaveBeenCalledWith("/admin/networks/network/bravo-tv");
+      expect(mocks.replace).toHaveBeenCalledWith("/admin/networks-and-streaming/network/bravo-tv");
     });
   });
 

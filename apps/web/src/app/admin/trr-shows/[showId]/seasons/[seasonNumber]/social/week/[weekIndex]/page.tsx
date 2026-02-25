@@ -208,6 +208,35 @@ interface CommentsCoverageResponse {
   >;
 }
 
+interface MirrorCoverageResponse {
+  up_to_date: boolean;
+  needs_mirror_count: number;
+  mirrored_count: number;
+  failed_count: number;
+  partial_count: number;
+  pending_count: number;
+  posts_scanned: number;
+  by_platform?: Record<
+    string,
+    {
+      up_to_date: boolean;
+      needs_mirror_count: number;
+      mirrored_count: number;
+      failed_count: number;
+      partial_count: number;
+      pending_count: number;
+      posts_scanned: number;
+    }
+  >;
+}
+
+interface WorkerHealthPayload {
+  queue_enabled?: boolean;
+  healthy?: boolean;
+  healthy_workers?: number;
+  reason?: string | null;
+}
+
 type PlatformFilter = "all" | "instagram" | "tiktok" | "twitter" | "youtube";
 type SortField = "engagement" | "likes" | "views" | "comments_count" | "shares" | "retweets" | "posted_at";
 type SortDir = "desc" | "asc";
@@ -270,11 +299,16 @@ const SOCIAL_TIME_ZONE = "America/New_York";
 const DATE_TOKEN_RE = /^\d{4}-\d{2}-\d{2}$/;
 const COMMENT_SYNC_MAX_PASSES = 8;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
+const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
+  process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
+  process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
 const REQUEST_TIMEOUT_MS = {
   weekDetail: 45_000,
   syncRuns: 15_000,
   syncJobs: 15_000,
   commentsCoverage: 35_000,
+  mirrorCoverage: 35_000,
+  workerHealth: 12_000,
 } as const;
 const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 const TRANSIENT_DEV_RESTART_PATTERNS = [
@@ -439,6 +473,11 @@ function isCommentsCoverageIncomplete(saved: number, actual: number): boolean {
 function formatCoverageLabel(saved: number, actual: number): string {
   const pct = actual > 0 ? Math.max(0, Math.min(100, (saved / actual) * 100)) : 100;
   return `${fmtNum(saved)}/${fmtNum(actual)} (${pct.toFixed(1)}%)`;
+}
+
+function formatMirrorCoverageLabel(readyCount: number, total: number): string {
+  const pct = total > 0 ? Math.max(0, Math.min(100, (readyCount / total) * 100)) : 100;
+  return `${fmtNum(readyCount)}/${fmtNum(total)} (${pct.toFixed(1)}%)`;
 }
 
 function getReportedCommentCountFromStats(platform: string, stats: Record<string, number>): number {
@@ -868,7 +907,7 @@ function PostStatsDrawer({
                 </h3>
                 <p className="text-xs text-gray-500 mb-3">
                   {commentsIncomplete
-                    ? `Saved in Supabase: ${fmtNum(savedCommentsCount)} of ${fmtNum(reportedCommentsCount)} platform-reported comments. Use Sync All Comments in Week view (or REFRESH here) to backfill.`
+                    ? `Saved in Supabase: ${fmtNum(savedCommentsCount)} of ${fmtNum(reportedCommentsCount)} platform-reported comments. Use Full Sync + Mirror in Week view (or REFRESH here) to backfill.`
                     : `${fmtNum(savedCommentsCount)} comments saved in Supabase.`}
                 </p>
 
@@ -1192,6 +1231,8 @@ export default function WeekDetailPage() {
   const [syncStartedAt, setSyncStartedAt] = useState<Date | null>(null);
   const [syncPass, setSyncPass] = useState(0);
   const [syncCoveragePreview, setSyncCoveragePreview] = useState<CommentsCoverageResponse | null>(null);
+  const [syncMirrorCoveragePreview, setSyncMirrorCoveragePreview] = useState<MirrorCoverageResponse | null>(null);
+  const [syncWorkerHealth, setSyncWorkerHealth] = useState<WorkerHealthPayload | null>(null);
   const syncPollGenerationRef = useRef(0);
   const syncPollFailureCountRef = useRef(0);
   const syncSessionGenerationRef = useRef(0);
@@ -1470,7 +1511,7 @@ export default function WeekDetailPage() {
         max_comments_per_post: number;
         max_replies_per_post: number;
         fetch_replies: boolean;
-        ingest_mode: "comments_only";
+        ingest_mode: "posts_and_comments" | "comments_only";
         sync_strategy: "incremental";
         allow_inline_dev_fallback: boolean;
         date_start: string;
@@ -1481,7 +1522,7 @@ export default function WeekDetailPage() {
         max_comments_per_post: 100000,
         max_replies_per_post: 100000,
         fetch_replies: true,
-        ingest_mode: "comments_only",
+        ingest_mode: SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "posts_and_comments" : "comments_only",
         sync_strategy: "incremental",
         allow_inline_dev_fallback: true,
         date_start: dateStart,
@@ -1569,6 +1610,115 @@ export default function WeekDetailPage() {
     [resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
   );
 
+  const fetchMirrorCoverage = useCallback(
+    async ({
+      dateStart,
+      dateEnd,
+      platforms,
+    }: {
+      dateStart: string;
+      dateEnd: string;
+      platforms: Array<Exclude<PlatformFilter, "all">> | null;
+    }) => {
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const coverageParams = new URLSearchParams({
+        source_scope: sourceScope,
+        timezone: SOCIAL_TIME_ZONE,
+        date_start: dateStart,
+        date_end: dateEnd,
+      });
+      if (platforms && platforms.length > 0) {
+        coverageParams.set("platforms", platforms.join(","));
+      }
+      if (resolvedSeasonId) {
+        coverageParams.set("season_id", resolvedSeasonId);
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/mirror-coverage?${coverageParams.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.mirrorCoverage,
+        "Mirror coverage request timed out",
+      );
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Failed to fetch mirror coverage");
+      }
+      return await parseResponseJson<MirrorCoverageResponse>(response, "Failed to fetch mirror coverage");
+    },
+    [resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+  );
+
+  const requeueMirrorJobs = useCallback(
+    async ({
+      dateStart,
+      dateEnd,
+      platforms,
+    }: {
+      dateStart: string;
+      dateEnd: string;
+      platforms: Array<Exclude<PlatformFilter, "all">>;
+    }) => {
+      if (platforms.length === 0) {
+        return { queuedJobs: 0, failed: 0 };
+      }
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      let queuedJobs = 0;
+      let failed = 0;
+      for (const platform of platforms) {
+        const params = new URLSearchParams({
+          platform,
+          source_scope: sourceScope,
+          failed_only: "false",
+          date_start: dateStart,
+          date_end: dateEnd,
+        });
+        if (resolvedSeasonId) {
+          params.set("season_id", resolvedSeasonId);
+        }
+        const response = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/mirror/requeue?${params.toString()}`,
+          {
+            method: "POST",
+            headers,
+          },
+          REQUEST_TIMEOUT_MS.mirrorCoverage,
+          "Mirror requeue request timed out",
+        );
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `Failed to requeue mirror jobs for ${platform}`);
+        }
+        const payload = (await response.json().catch(() => ({}))) as {
+          queued_jobs?: unknown;
+          failed?: unknown;
+        };
+        queuedJobs += Number(payload.queued_jobs ?? 0) || 0;
+        failed += Number(payload.failed ?? 0) || 0;
+      }
+      return { queuedJobs, failed };
+    },
+    [resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+  );
+
+  const fetchSyncWorkerHealth = useCallback(async () => {
+    const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+    const params = new URLSearchParams();
+    if (resolvedSeasonId) {
+      params.set("season_id", resolvedSeasonId);
+    }
+    const response = await fetchWithTimeout(
+      `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest/worker-health${params.toString() ? `?${params.toString()}` : ""}`,
+      { headers, cache: "no-store" },
+      REQUEST_TIMEOUT_MS.workerHealth,
+      "Social worker health request timed out",
+    );
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? "Failed to fetch social worker health");
+    }
+    return await parseResponseJson<WorkerHealthPayload>(response, "Failed to fetch social worker health");
+  }, [resolvedSeasonId, seasonNumber, showIdForApi]);
+
   const syncAllCommentsForWeek = useCallback(async () => {
     if (!data) return;
     const generation = ++syncSessionGenerationRef.current;
@@ -1578,49 +1728,13 @@ export default function WeekDetailPage() {
       setSyncPollError(null);
       setSyncMessage(null);
       setSyncCoveragePreview(null);
+      setSyncMirrorCoveragePreview(null);
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
       }
 
-      const selectedPlatformEntries =
-        platformFilter === "all"
-          ? Object.entries(data.platforms)
-          : [[platformFilter, data.platforms[platformFilter]] as [string, PlatformData | undefined]];
-      const platformEntries = selectedPlatformEntries.filter(([, platformData]) => platformData && platformData.posts.length > 0);
-      const stalePlatforms = new Set<Exclude<PlatformFilter, "all">>();
-      let postsNeedingSync = 0;
-      let postsAlreadyUpToDate = 0;
-      for (const [platform, platformData] of platformEntries) {
-        if (!platformData) continue;
-        for (const post of platformData.posts) {
-          const saved = getSavedCommentsForPost(post);
-          const actual = getActualCommentsForPost(platform, post);
-          if (saved < actual) {
-            postsNeedingSync += 1;
-            stalePlatforms.add(platform as Exclude<PlatformFilter, "all">);
-          } else {
-            postsAlreadyUpToDate += 1;
-          }
-        }
-      }
-      if (postsNeedingSync === 0) {
-        setSyncMessage(
-          `All selected posts are already up to date (${postsAlreadyUpToDate} checked). No comment sync needed.`,
-        );
-        setSyncingComments(false);
-        syncSessionStateRef.current = null;
-        return;
-      }
-
-      let selectedPlatforms: Array<Exclude<PlatformFilter, "all">> | null =
+      const selectedPlatforms: Array<Exclude<PlatformFilter, "all">> | null =
         platformFilter === "all" ? null : [platformFilter];
-      if (platformFilter === "all") {
-        const scopedPlatformCount = platformEntries.length;
-        const stalePlatformList = Array.from(stalePlatforms);
-        if (stalePlatformList.length > 0 && stalePlatformList.length < scopedPlatformCount) {
-          selectedPlatforms = stalePlatformList;
-        }
-      }
 
       syncSessionStateRef.current = {
         dateStart: data.week.start,
@@ -1634,8 +1748,37 @@ export default function WeekDetailPage() {
 
       const platformLabel = platformFilter === "all" ? "all platforms" : PLATFORM_LABELS[platformFilter];
       const weekLabel = data.week.label || (data.week.week_index === 0 ? "Pre-Season" : `Week ${data.week.week_index}`);
+      let localSavedComments = 0;
+      let localReportedComments = 0;
+      const platformEntries =
+        platformFilter === "all"
+          ? Object.entries(data.platforms)
+          : [[platformFilter, data.platforms[platformFilter]] as [string, PlatformData | undefined]];
+      for (const [platform, platformData] of platformEntries) {
+        if (!platformData) continue;
+        for (const post of platformData.posts) {
+          localSavedComments += getSavedCommentsForPost(post);
+          localReportedComments += getActualCommentsForPost(platform, post);
+        }
+      }
+      if (!SOCIAL_FULL_SYNC_MIRROR_ENABLED && !isCommentsCoverageIncomplete(localSavedComments, localReportedComments)) {
+        setSyncMessage(`${weekLabel} (${platformLabel}) is already up to date.`);
+        setSyncingComments(false);
+        syncSessionStateRef.current = null;
+        return;
+      }
       setSyncStartedAt(new Date(syncSessionStateRef.current.startedAtMs));
       setSyncPass(1);
+      try {
+        const health = await fetchSyncWorkerHealth();
+        if (generation === syncSessionGenerationRef.current) {
+          setSyncWorkerHealth(health);
+        }
+      } catch {
+        if (generation === syncSessionGenerationRef.current) {
+          setSyncWorkerHealth(null);
+        }
+      }
       const kickoff = await queueSyncPass({
         pass: 1,
         dateStart: data.week.start,
@@ -1644,15 +1787,24 @@ export default function WeekDetailPage() {
       });
       if (generation !== syncSessionGenerationRef.current) return;
       setSyncMessage(
-        `Pass 1/${COMMENT_SYNC_MAX_PASSES} queued for ${weekLabel} (${platformLabel}) · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · ${postsNeedingSync} post(s) need updates, ${postsAlreadyUpToDate} up to date.`,
+        `Pass 1/${COMMENT_SYNC_MAX_PASSES} queued for ${weekLabel} (${platformLabel}) · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · ${
+          SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Sync + Mirror started." : "Comment sync started."
+        }`,
       );
     } catch (err) {
-      setSyncError(err instanceof Error ? err.message : "Failed to sync comments");
+      setSyncError(
+        err instanceof Error
+          ? err.message
+          : SOCIAL_FULL_SYNC_MIRROR_ENABLED
+            ? "Failed to run full sync + mirror"
+            : "Failed to sync comments",
+      );
       setSyncingComments(false);
       syncSessionStateRef.current = null;
     }
   }, [
     data,
+    fetchSyncWorkerHealth,
     hasValidNumericPathParams,
     invalidPathParamsError,
     platformFilter,
@@ -1719,14 +1871,38 @@ export default function WeekDetailPage() {
             dateEnd: session.dateEnd,
             platforms: session.platforms,
           });
+          const mirrorCoverage = SOCIAL_FULL_SYNC_MIRROR_ENABLED
+            ? await fetchMirrorCoverage({
+                dateStart: session.dateStart,
+                dateEnd: session.dateEnd,
+                platforms: session.platforms,
+              })
+            : {
+                up_to_date: true,
+                needs_mirror_count: 0,
+                mirrored_count: 0,
+                failed_count: 0,
+                partial_count: 0,
+                pending_count: 0,
+                posts_scanned: 0,
+              };
           if (cancelled || generation !== syncPollGenerationRef.current) return;
           setSyncCoveragePreview(coverage);
+          setSyncMirrorCoveragePreview(SOCIAL_FULL_SYNC_MIRROR_ENABLED ? mirrorCoverage : null);
 
           const coverageSaved = Number(coverage.total_saved_comments ?? 0);
           const coverageReported = Number(coverage.total_reported_comments ?? 0);
           const coverageLabel = formatCoverageLabel(coverageSaved, coverageReported);
-          if (coverage.up_to_date) {
-            setSyncMessage(`${terminalMessage} · Coverage ${coverageLabel} · Up-to-Date.`);
+          const mirrorTotal = Number(mirrorCoverage.posts_scanned ?? 0);
+          const mirrorNeeds = Number(mirrorCoverage.needs_mirror_count ?? 0);
+          const mirrorReadyCount = Math.max(0, mirrorTotal - mirrorNeeds);
+          const mirrorLabel = formatMirrorCoverageLabel(mirrorReadyCount, mirrorTotal);
+
+          const strictRunSuccess = currentRun.status === "completed" && failedJobs === 0;
+          const mirrorIsReady = !SOCIAL_FULL_SYNC_MIRROR_ENABLED || mirrorCoverage.up_to_date;
+          if (coverage.up_to_date && mirrorIsReady && strictRunSuccess) {
+            const mirrorToken = SOCIAL_FULL_SYNC_MIRROR_ENABLED ? ` · Mirror ${mirrorLabel}` : "";
+            setSyncMessage(`${terminalMessage} · Coverage ${coverageLabel}${mirrorToken} · Up-to-Date.`);
             setSyncingComments(false);
             syncSessionStateRef.current = null;
             void fetchData();
@@ -1738,7 +1914,9 @@ export default function WeekDetailPage() {
           const withinGuardrail = nextPass <= session.maxPasses && elapsedMs < session.maxDurationMs;
           if (!withinGuardrail) {
             setSyncMessage(
-              `${terminalMessage} · Coverage ${coverageLabel} · Stalled (guardrail reached after ${session.pass}/${session.maxPasses} passes).`,
+              SOCIAL_FULL_SYNC_MIRROR_ENABLED
+                ? `${terminalMessage} · Coverage ${coverageLabel} · Mirror ${mirrorLabel} · Incomplete (guardrail reached after ${session.pass}/${session.maxPasses} passes; pending=${mirrorCoverage.pending_count ?? 0}, failed=${mirrorCoverage.failed_count ?? 0}).`
+                : `${terminalMessage} · Coverage ${coverageLabel} · Stalled (guardrail reached after ${session.pass}/${session.maxPasses} passes).`,
             );
             setSyncingComments(false);
             syncSessionStateRef.current = null;
@@ -1746,16 +1924,39 @@ export default function WeekDetailPage() {
             return;
           }
 
-          const stalePlatforms = Object.entries(coverage.by_platform ?? {})
+          const staleCommentPlatforms = Object.entries(coverage.by_platform ?? {})
             .filter(([, value]) => !value.up_to_date)
             .map(([platform]) => platform)
             .filter((platform): platform is Exclude<PlatformFilter, "all"> =>
               platform === "instagram" || platform === "tiktok" || platform === "twitter" || platform === "youtube",
             );
+          const staleMirrorPlatforms = Object.entries(mirrorCoverage.by_platform ?? {})
+            .filter(([, value]) => !value.up_to_date || Number(value.needs_mirror_count ?? 0) > 0)
+            .map(([platform]) => platform)
+            .filter((platform): platform is Exclude<PlatformFilter, "all"> =>
+              platform === "instagram" || platform === "tiktok" || platform === "twitter" || platform === "youtube",
+            );
+          const mergedStalePlatforms = Array.from(new Set([...staleCommentPlatforms, ...staleMirrorPlatforms]));
+          if (SOCIAL_FULL_SYNC_MIRROR_ENABLED && staleMirrorPlatforms.length > 0) {
+            const requeueResult = await requeueMirrorJobs({
+              dateStart: session.dateStart,
+              dateEnd: session.dateEnd,
+              platforms: staleMirrorPlatforms,
+            });
+            if (cancelled || generation !== syncPollGenerationRef.current) return;
+            setSyncMessage(
+              `${terminalMessage} · Coverage ${coverageLabel} · Mirror ${mirrorLabel} · Requeued ${requeueResult.queuedJobs} mirror job(s) for ${staleMirrorPlatforms.length} platform(s).`,
+            );
+          }
+
           session.pass = nextPass;
-          session.platforms = stalePlatforms.length > 0 ? stalePlatforms : session.platforms;
+          session.platforms = mergedStalePlatforms.length > 0 ? mergedStalePlatforms : session.platforms;
           setSyncPass(session.pass);
-          setSyncMessage(`${terminalMessage} · Coverage ${coverageLabel} · Auto-continuing pass ${session.pass}/${session.maxPasses}...`);
+          setSyncMessage(
+            SOCIAL_FULL_SYNC_MIRROR_ENABLED
+              ? `${terminalMessage} · Coverage ${coverageLabel} · Mirror ${mirrorLabel} · Auto-continuing pass ${session.pass}/${session.maxPasses}...`
+              : `${terminalMessage} · Coverage ${coverageLabel} · Auto-continuing pass ${session.pass}/${session.maxPasses}...`,
+          );
 
           const kickoff = await queueSyncPass({
             pass: session.pass,
@@ -1765,7 +1966,9 @@ export default function WeekDetailPage() {
           });
           if (cancelled || generation !== syncPollGenerationRef.current) return;
           setSyncMessage(
-            `Pass ${session.pass}/${session.maxPasses} queued · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · Coverage ${coverageLabel}.`,
+            SOCIAL_FULL_SYNC_MIRROR_ENABLED
+              ? `Pass ${session.pass}/${session.maxPasses} queued · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · Coverage ${coverageLabel} · Mirror ${mirrorLabel}.`
+              : `Pass ${session.pass}/${session.maxPasses} queued · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · Coverage ${coverageLabel}.`,
           );
           return;
         }
@@ -1797,8 +2000,10 @@ export default function WeekDetailPage() {
   }, [
     fetchCommentsCoverage,
     fetchData,
+    fetchMirrorCoverage,
     fetchSyncProgress,
     queueSyncPass,
+    requeueMirrorJobs,
     syncRunId,
     syncStartedAt,
     syncingComments,
@@ -1987,12 +2192,20 @@ export default function WeekDetailPage() {
     };
     let posts = parseStage("posts");
     let comments = parseStage("comments");
+    let mediaMirror = parseStage("media_mirror");
     const fallback = {
       posts: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
       comments: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
+      mediaMirror: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
     };
     for (const job of syncJobs) {
-      const stage = getJobStage(job) === "comments" ? "comments" : "posts";
+      const stageName = getJobStage(job);
+      const stage =
+        stageName === "comments"
+          ? "comments"
+          : stageName === "media_mirror"
+            ? "mediaMirror"
+            : "posts";
       const current = fallback[stage];
       current.total += 1;
       if (job.status === "completed") current.completed += 1;
@@ -2011,16 +2224,19 @@ export default function WeekDetailPage() {
         current.saved += persistCounters.posts_upserted + persistCounters.comments_upserted;
       }
     }
-    if (posts.total === 0 && comments.total === 0) {
+    if (posts.total === 0 && comments.total === 0 && mediaMirror.total === 0) {
       posts = fallback.posts;
       comments = fallback.comments;
+      mediaMirror = fallback.mediaMirror;
     } else {
       posts.scraped = fallback.posts.scraped;
       posts.saved = fallback.posts.saved;
       comments.scraped = fallback.comments.scraped;
       comments.saved = fallback.comments.saved;
+      mediaMirror.scraped = fallback.mediaMirror.scraped;
+      mediaMirror.saved = fallback.mediaMirror.saved;
     }
-    return { posts, comments };
+    return { posts, comments, mediaMirror };
   }, [syncJobs, syncRun?.summary?.stage_counts]);
 
   const syncLogs = useMemo(() => {
@@ -2032,7 +2248,8 @@ export default function WeekDetailPage() {
       })
       .slice(0, 10)
       .map((job) => {
-        const stage = getJobStage(job) === "comments" ? "comments" : "posts";
+        const stageName = getJobStage(job);
+        const stage = stageName === "comments" ? "comments" : stageName === "media_mirror" ? "media_mirror" : "posts";
         const platform = PLATFORM_LABELS[job.platform] ?? job.platform;
         const account =
           typeof job.config?.account === "string" && job.config.account ? ` @${job.config.account}` : "";
@@ -2123,7 +2340,7 @@ export default function WeekDetailPage() {
     query: breadcrumbQuery,
   });
   const breadcrumbSubTabLabel = socialView
-    ? humanizeSlug(socialView)
+    ? `${humanizeSlug(socialView)} Analytics`
     : socialPlatform
       ? PLATFORM_LABELS[socialPlatform] ?? humanizeSlug(socialPlatform)
       : undefined;
@@ -2155,7 +2372,7 @@ export default function WeekDetailPage() {
                 if (resolvedSeasonId) query.set("season_id", resolvedSeasonId);
                 return query;
               })(),
-            }) as "/admin/trr-shows"}
+            }) as Route}
             className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
           >
             ← Back to Season Social Analytics
@@ -2305,7 +2522,15 @@ export default function WeekDetailPage() {
               disabled={syncingComments}
               className="text-sm rounded-md px-3 py-1.5 bg-gray-900 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {syncingComments ? "Syncing..." : platformFilter === "all" ? "Sync All Comments" : `Sync ${PLATFORM_LABELS[platformFilter]} Comments`}
+              {syncingComments
+                ? "Syncing..."
+                : platformFilter === "all"
+                  ? SOCIAL_FULL_SYNC_MIRROR_ENABLED
+                    ? "Full Sync + Mirror"
+                    : "Sync All Comments"
+                  : SOCIAL_FULL_SYNC_MIRROR_ENABLED
+                    ? `Full Sync ${PLATFORM_LABELS[platformFilter]} + Mirror`
+                    : `Sync ${PLATFORM_LABELS[platformFilter]} Comments`}
             </button>
 
             {/* Result count */}
@@ -2338,6 +2563,14 @@ export default function WeekDetailPage() {
                         }`
                       : "Preparing run"}
                   </p>
+                  {syncWorkerHealth && (
+                    <p className="mt-1 text-xs text-gray-500">
+                      Workers:{" "}
+                      {syncWorkerHealth.queue_enabled
+                        ? `${syncWorkerHealth.healthy_workers ?? 0} healthy${syncWorkerHealth.reason ? ` (${syncWorkerHealth.reason})` : ""}`
+                        : "queue disabled"}
+                    </p>
+                  )}
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-semibold text-gray-900 tabular-nums">{syncProgress.pct}%</div>
@@ -2360,7 +2593,7 @@ export default function WeekDetailPage() {
                 />
               </div>
 
-              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <div className={`mt-3 grid gap-2 ${SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
                 <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
                   <div className="font-medium text-gray-700">Step 1: Queue + Start</div>
                   <div className="mt-1 text-gray-600">
@@ -2389,7 +2622,34 @@ export default function WeekDetailPage() {
                     {syncStageProgress.comments.saved > 0 ? ` · saved ${fmtNum(syncStageProgress.comments.saved)}` : ""}
                   </div>
                 </div>
+                {SOCIAL_FULL_SYNC_MIRROR_ENABLED && (
+                  <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
+                    <div className="font-medium text-gray-700">Step 4: Mirror Stage</div>
+                    <div className="mt-1 text-gray-600 tabular-nums">
+                      {syncStageProgress.mediaMirror.completed + syncStageProgress.mediaMirror.failed}/
+                      {syncStageProgress.mediaMirror.total || "?"} complete
+                      {syncStageProgress.mediaMirror.active > 0 ? ` · ${syncStageProgress.mediaMirror.active} active` : ""}
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {syncMirrorCoveragePreview && (
+                <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                  Mirror Coverage:{" "}
+                  {formatMirrorCoverageLabel(
+                    Math.max(
+                      0,
+                      Number(syncMirrorCoveragePreview.posts_scanned ?? 0) -
+                        Number(syncMirrorCoveragePreview.needs_mirror_count ?? 0),
+                    ),
+                    Number(syncMirrorCoveragePreview.posts_scanned ?? 0),
+                  )}
+                  {` · pending ${fmtNum(Number(syncMirrorCoveragePreview.pending_count ?? 0))}`}
+                  {` · failed ${fmtNum(Number(syncMirrorCoveragePreview.failed_count ?? 0))}`}
+                  {` · partial ${fmtNum(Number(syncMirrorCoveragePreview.partial_count ?? 0))}`}
+                </div>
+              )}
 
               {syncPollError && (
                 <p className="mt-3 text-xs text-amber-700">

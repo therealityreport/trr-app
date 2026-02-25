@@ -8,6 +8,7 @@ describe("admin fonts tab routing", () => {
     expect(getTabFromQuery("colors")).toBe("colors");
     expect(getTabFromQuery("buttons")).toBe("buttons");
     expect(getTabFromQuery("questions-forms")).toBe("questions");
+    expect(getTabFromQuery("nyt-occurrences")).toBe("nyt-occurrences");
     expect(getTabFromQuery("unknown")).toBe("fonts");
   });
 
@@ -16,5 +17,6 @@ describe("admin fonts tab routing", () => {
     expect(buildTabHref("colors")).toBe("/admin/fonts?tab=colors");
     expect(buildTabHref("buttons")).toBe("/admin/fonts?tab=buttons");
     expect(buildTabHref("questions")).toBe("/admin/fonts?tab=questions-forms");
+    expect(buildTabHref("nyt-occurrences")).toBe("/admin/fonts?tab=nyt-occurrences");
   });
 });

@@ -60,14 +60,16 @@ import {
   buildSeasonAdminUrl,
   buildShowAdminUrl,
   cleanLegacyRoutingQuery,
+  parseSocialAnalyticsViewFromPath,
   parseShowRouteState,
 } from "@/lib/admin/show-admin-routes";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
+import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import {
   parseShowCastRouteState,
   writeShowCastRouteState,
 } from "@/lib/admin/cast-route-state";
-import { buildShowBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { buildSeasonSocialBreadcrumb, buildShowBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import {
   buildPipelineRows,
   isRefreshLogTerminalSuccess,
@@ -1865,12 +1867,13 @@ export default function TrrShowDetailPage() {
   const castSearchQueryDeferred = useDeferredValue(castSearchQuery.trim().toLowerCase());
 
   const showSlugForRouting = useMemo(() => {
-    const canonical = show?.canonical_slug?.trim();
-    if (canonical) return canonical;
-    const base = show?.slug?.trim();
-    if (base) return base;
-    return showRouteParam.trim();
-  }, [show?.canonical_slug, show?.slug, showRouteParam]);
+    return resolvePreferredShowRouteSlug({
+      alternativeNames: show?.alternative_names,
+      canonicalSlug: show?.canonical_slug,
+      slug: show?.slug,
+      fallback: showRouteParam,
+    });
+  }, [show?.alternative_names, show?.canonical_slug, show?.slug, showRouteParam]);
 
   useEffect(() => {
     if (!show?.name || !showSlugForRouting) return;
@@ -1897,7 +1900,7 @@ export default function TrrShowDetailPage() {
           tab,
           assetsSubTab: tab === "assets" ? assetsView : undefined,
           query: preservedQuery,
-        }) as "/admin/trr-shows",
+        }) as Route,
         { scroll: false }
       );
     },
@@ -1948,9 +1951,11 @@ export default function TrrShowDetailPage() {
   ]);
 
   const socialAnalyticsView = useMemo<SocialAnalyticsView>(() => {
-    const value = searchParams.get("social_view");
-    return isSocialAnalyticsView(value) ? value : "bravo";
-  }, [searchParams]);
+    const queryValue = searchParams.get("social_view");
+    if (isSocialAnalyticsView(queryValue)) return queryValue;
+    const pathValue = parseSocialAnalyticsViewFromPath(pathname);
+    return isSocialAnalyticsView(pathValue) ? pathValue : "bravo";
+  }, [pathname, searchParams]);
 
   const socialPlatformTab = useMemo<PlatformTab>(() => {
     const value = searchParams.get("social_platform");
@@ -1970,7 +1975,7 @@ export default function TrrShowDetailPage() {
           showSlug: showSlugForRouting,
           tab: "social",
           query: nextQuery,
-        }) as "/admin/trr-shows",
+        }) as Route,
         { scroll: false },
       );
     },
@@ -1990,7 +1995,7 @@ export default function TrrShowDetailPage() {
           showSlug: showSlugForRouting,
           tab: "social",
           query: nextQuery,
-        }) as "/admin/trr-shows",
+        }) as Route,
         { scroll: false },
       );
     },
@@ -2007,7 +2012,7 @@ export default function TrrShowDetailPage() {
           tab: "assets",
           assetsSubTab: view,
           query: preservedQuery,
-        }) as "/admin/trr-shows",
+        }) as Route,
         { scroll: false }
       );
     },
@@ -2105,11 +2110,19 @@ export default function TrrShowDetailPage() {
     if (!showSlugForRouting) return;
 
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+    if (showRouteState.tab === "social") {
+      if (socialAnalyticsView === "bravo") {
+        preservedQuery.delete("social_view");
+      } else {
+        preservedQuery.set("social_view", socialAnalyticsView);
+      }
+    }
     const canonicalRouteUrl = buildShowAdminUrl({
       showSlug: showSlugForRouting,
       tab: showRouteState.tab,
       assetsSubTab: showRouteState.assetsSubTab,
       query: preservedQuery,
+      socialView: showRouteState.tab === "social" ? socialAnalyticsView : undefined,
     });
     const currentHasLegacyRoutingQuery =
       searchParams.has("tab") || searchParams.has("assets");
@@ -2123,11 +2136,12 @@ export default function TrrShowDetailPage() {
       ? (canonicalRouteUrl.split("?")[1] ?? "")
       : "";
     if (!pathMismatch && currentCleanedQuery === canonicalQuery) return;
-    router.replace(canonicalRouteUrl as "/admin/trr-shows", { scroll: false });
+    router.replace(canonicalRouteUrl as Route, { scroll: false });
   }, [
     pathname,
     router,
     searchParams,
+    socialAnalyticsView,
     showSlugForRouting,
     showRouteState.assetsSubTab,
     showRouteState.tab,
@@ -6832,6 +6846,43 @@ export default function TrrShowDetailPage() {
     [selectedSocialSeasonId, socialSeasonOptions]
   );
 
+  useEffect(() => {
+    if (activeTab !== "social") return;
+    if (!selectedSocialSeason) return;
+
+    const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+    if (socialAnalyticsView === "bravo") {
+      nextQuery.delete("social_view");
+    } else {
+      nextQuery.set("social_view", socialAnalyticsView);
+    }
+    if (socialPlatformTab === "overview") {
+      nextQuery.delete("social_platform");
+    } else {
+      nextQuery.set("social_platform", socialPlatformTab);
+    }
+
+    const nextUrl = buildSeasonAdminUrl({
+      showSlug: showSlugForRouting,
+      seasonNumber: selectedSocialSeason.season_number,
+      tab: "social",
+      query: nextQuery,
+      socialView: socialAnalyticsView,
+    });
+    const currentUrl = searchParams.toString() ? `${pathname}?${searchParams.toString()}` : pathname;
+    if (nextUrl === currentUrl) return;
+    router.replace(nextUrl as Route, { scroll: false });
+  }, [
+    activeTab,
+    pathname,
+    router,
+    searchParams,
+    selectedSocialSeason,
+    showSlugForRouting,
+    socialAnalyticsView,
+    socialPlatformTab,
+  ]);
+
   const syncBravoPreviewSeasonOptions = useMemo(() => {
     const set = new Set<number>();
     for (const video of syncBravoPreviewVideos) {
@@ -9285,7 +9336,7 @@ export default function TrrShowDetailPage() {
         <div className="text-center">
           <p className="text-lg font-semibold text-red-600">{slugResolutionError}</p>
           <Link
-            href="/admin/trr-shows"
+            href="/shows"
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
             ← Back to Shows
@@ -9314,7 +9365,7 @@ export default function TrrShowDetailPage() {
             {error || "Show not found"}
           </p>
           <Link
-            href="/admin/trr-shows"
+            href="/shows"
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
             ← Back to Shows
@@ -9602,6 +9653,30 @@ export default function TrrShowDetailPage() {
     });
   }
 
+  const socialHeaderHref = buildShowAdminUrl({
+    showSlug: showSlugForRouting,
+    tab: "social",
+    socialView: socialAnalyticsView,
+  });
+  const socialHeaderNetworkLabel = `${socialAnalyticsView.charAt(0).toUpperCase()}${socialAnalyticsView.slice(1)} Analytics`;
+  const headerBreadcrumbs =
+    activeTab === "social"
+      ? buildSeasonSocialBreadcrumb(show.name, selectedSocialSeason?.season_number ?? "", {
+          showHref: buildShowAdminUrl({ showSlug: showSlugForRouting }),
+          seasonHref: selectedSocialSeason
+            ? buildSeasonAdminUrl({
+                showSlug: showSlugForRouting,
+                seasonNumber: selectedSocialSeason.season_number,
+              })
+            : buildShowAdminUrl({ showSlug: showSlugForRouting }),
+          socialHref: socialHeaderHref,
+          subTabLabel: socialHeaderNetworkLabel,
+          subTabHref: socialHeaderHref,
+        })
+      : buildShowBreadcrumb(show.name, {
+          showHref: buildShowAdminUrl({ showSlug: showSlugForRouting }),
+        });
+
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
@@ -9609,14 +9684,12 @@ export default function TrrShowDetailPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-5">
           <div className="mx-auto max-w-6xl">
             <AdminBreadcrumbs
-              items={buildShowBreadcrumb(show.name, {
-                showHref: buildShowAdminUrl({ showSlug: showSlugForRouting }),
-              })}
+              items={headerBreadcrumbs}
               className="mb-4"
             />
             <div className="mb-4">
               <Link
-                href="/admin/trr-shows"
+                href="/shows"
                 className="text-sm text-zinc-500 hover:text-zinc-900"
               >
                 ← Back to Shows
@@ -11857,7 +11930,7 @@ export default function TrrShowDetailPage() {
 
                 <div>
                   <h4 className="mb-3 text-sm font-semibold text-zinc-700">
-                    Networks & Streaming
+                    Brands (Network & Streaming)
                   </h4>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">

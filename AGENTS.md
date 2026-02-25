@@ -83,9 +83,36 @@ Before ending session:
 3. Update `docs/ai/HANDOFF.md`.
 
 ## Skill Routing (Repo)
-Use minimal skills required for the task.
+Use minimal skills required for the task after the mandatory default skill chain is applied.
+
+## Default Skill Chain (Mandatory)
+Apply this chain for all non-trivial implementation tasks (any task that changes repo-tracked files, validates behavior for a change, or prepares commit/PR/handoff artifacts):
+1. `orchestrate-plan-execution`
+2. `senior-fullstack`
+3. `senior-backend` or `senior-frontend` (pick by primary surface)
+4. `senior-qa`
+5. `code-reviewer`
+
+TRR-APP mapping for step 3:
+- Frontend-first default: choose `senior-frontend` when UI/rendering/interaction is primary and there is no backend/schema/API/pipeline contract risk.
+- Choose `senior-backend` when backend/schema/API/pipeline contract risk is present.
+- Tie-breaker when both surfaces are touched: choose `senior-backend` if any contract/schema/pipeline semantics are changed; otherwise choose `senior-frontend`.
+
+Exceptions:
+- Trivial read-only tasks and simple Q&A.
+- Explicit user override.
+- Skill unavailable (must document fallback).
+
+Domain skills are additive:
+- `figma-frontend-design-engineer`, `senior-devops`, `senior-architect`, and other domain skills may be added, but must not replace the five baseline steps when the trigger rule applies.
+
+Handoff compliance keys for qualifying tasks (`docs/ai/HANDOFF.md`):
+- `default_skill_chain_applied` (`true|false`)
+- `default_skill_chain_used` (ordered list)
+- `default_skill_chain_exception_reason` (required when not applied)
 
 Primary skills:
+- `orchestrate-plan-execution`: Codex-primary default entrypoint for non-trivial plan + execute tasks; Claude remains secondary.
 - `figma-frontend-design-engineer`: default for Figma URL/node-driven design-to-code implementation in this repo.
 - `senior-frontend`: default for Next.js UI/admin/App Router work.
 - `senior-fullstack`: for UI work tightly coupled to backend integration.
@@ -167,12 +194,16 @@ All behavior-changing sessions must record these keys in `docs/ai/HANDOFF.md`:
 - `risk_class`
 - `validation_evidence`
 - `downstream_repos_impacted`
+- `default_skill_chain_applied`
+- `default_skill_chain_used`
+- `default_skill_chain_exception_reason`
 
 Schema requirements:
 1. `mcp_tools_used` must capture primary + fallback choice if fallback is used.
 2. `delegation_map` must include all required roles.
 3. `validation_evidence` must include command(s) and pass/fail result.
 4. `downstream_repos_impacted` must include `TRR-Backend`, `screenalytics`, `TRR-APP` with `yes/no`.
+5. `default_skill_chain_exception_reason` is required when `default_skill_chain_applied=false`.
 
 ## Policy Compliance Checks (Mandatory)
 Run from `TRR-APP/` before handoff:
@@ -183,7 +214,7 @@ rg -n "^## Execution Modes and Risk Gates$" AGENTS.md
 rg -n "^## Acceptance Evidence Schema$" AGENTS.md
 rg -n "^## Policy Compliance Checks \\(Mandatory\\)$" AGENTS.md
 rg -n "^## Escalation and Stop Conditions$" AGENTS.md
-rg -n "primary_skill|supporting_skills|mcp_tools_used|delegation_map|risk_class|validation_evidence|downstream_repos_impacted" docs/ai/HANDOFF.md
+rg -n "primary_skill|supporting_skills|mcp_tools_used|delegation_map|risk_class|validation_evidence|downstream_repos_impacted|default_skill_chain_applied|default_skill_chain_used|default_skill_chain_exception_reason" docs/ai/HANDOFF.md
 ```
 
 Pass criteria:

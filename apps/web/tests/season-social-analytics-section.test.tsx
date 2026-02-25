@@ -80,6 +80,8 @@ type AnalyticsPayload = {
     label: string;
     start: string;
     end: string;
+    week_type?: "preseason" | "episode" | "bye" | "postseason";
+    episode_number?: number | null;
     post_volume: number;
     comment_volume: number;
     engagement: number;
@@ -94,6 +96,8 @@ type AnalyticsPayload = {
     label: string;
     start: string;
     end: string;
+    week_type?: "preseason" | "episode" | "bye" | "postseason";
+    episode_number?: number | null;
     posts: {
       instagram: number;
       youtube: number;
@@ -136,6 +140,8 @@ type AnalyticsPayload = {
     label: string;
     start: string;
     end: string;
+    week_type?: "preseason" | "episode" | "bye" | "postseason";
+    episode_number?: number | null;
     days: Array<{
       day_index: number;
       date_local: string;
@@ -151,8 +157,15 @@ type AnalyticsPayload = {
         tiktok: number;
         twitter: number;
       };
+      reported_comments?: {
+        instagram: number;
+        youtube: number;
+        tiktok: number;
+        twitter: number;
+      };
       total_posts: number;
       total_comments: number;
+      total_reported_comments?: number;
     }>;
   }>;
   weekly_flags?: Array<{
@@ -254,8 +267,15 @@ const makeZeroDay = (day_index: number, date_local: string) => ({
     tiktok: 0,
     twitter: 0,
   },
+  reported_comments: {
+    instagram: 0,
+    youtube: 0,
+    tiktok: 0,
+    twitter: 0,
+  },
   total_posts: 0,
   total_comments: 0,
+  total_reported_comments: 0,
 });
 
 const analyticsBase: AnalyticsPayload = {
@@ -302,6 +322,8 @@ const analyticsBase: AnalyticsPayload = {
       label: "Week 1",
       start: "2026-01-07T00:00:00Z",
       end: "2026-01-13T23:59:59Z",
+      week_type: "episode",
+      episode_number: 1,
       post_volume: 4,
       comment_volume: 8,
       engagement: 1000,
@@ -316,6 +338,8 @@ const analyticsBase: AnalyticsPayload = {
       label: "Week 2",
       start: "2026-01-14T00:00:00Z",
       end: "2026-01-20T23:59:59Z",
+      week_type: "episode",
+      episode_number: 2,
       post_volume: 0,
       comment_volume: 0,
       engagement: 0,
@@ -332,6 +356,8 @@ const analyticsBase: AnalyticsPayload = {
       label: "Week 1",
       start: "2026-01-07T00:00:00Z",
       end: "2026-01-13T23:59:59Z",
+      week_type: "episode",
+      episode_number: 1,
       posts: {
         instagram: 1,
         youtube: 1,
@@ -360,6 +386,8 @@ const analyticsBase: AnalyticsPayload = {
       label: "Week 2",
       start: "2026-01-14T00:00:00Z",
       end: "2026-01-20T23:59:59Z",
+      week_type: "episode",
+      episode_number: 2,
       posts: {
         instagram: 0,
         youtube: 0,
@@ -412,6 +440,8 @@ const analyticsBase: AnalyticsPayload = {
       label: "Week 1",
       start: "2026-01-07T00:00:00Z",
       end: "2026-01-13T23:59:59Z",
+      week_type: "episode",
+      episode_number: 1,
       days: [
         {
           day_index: 0,
@@ -428,8 +458,15 @@ const analyticsBase: AnalyticsPayload = {
             tiktok: 0,
             twitter: 0,
           },
+          reported_comments: {
+            instagram: 5,
+            youtube: 5,
+            tiktok: 0,
+            twitter: 0,
+          },
           total_posts: 2,
           total_comments: 3,
+          total_reported_comments: 10,
         },
         {
           day_index: 1,
@@ -446,8 +483,15 @@ const analyticsBase: AnalyticsPayload = {
             tiktok: 2,
             twitter: 0,
           },
+          reported_comments: {
+            instagram: 0,
+            youtube: 0,
+            tiktok: 5,
+            twitter: 0,
+          },
           total_posts: 1,
           total_comments: 2,
+          total_reported_comments: 5,
         },
         {
           day_index: 2,
@@ -464,8 +508,15 @@ const analyticsBase: AnalyticsPayload = {
             tiktok: 0,
             twitter: 3,
           },
+          reported_comments: {
+            instagram: 0,
+            youtube: 0,
+            tiktok: 0,
+            twitter: 5,
+          },
           total_posts: 1,
           total_comments: 3,
+          total_reported_comments: 5,
         },
         makeZeroDay(3, "2026-01-10"),
         makeZeroDay(4, "2026-01-11"),
@@ -478,6 +529,8 @@ const analyticsBase: AnalyticsPayload = {
       label: "Week 2",
       start: "2026-01-14T00:00:00Z",
       end: "2026-01-20T23:59:59Z",
+      week_type: "episode",
+      episode_number: 2,
       days: [
         makeZeroDay(0, "2026-01-14"),
         makeZeroDay(1, "2026-01-15"),
@@ -536,6 +589,74 @@ const jsonResponse = (body: unknown): Response =>
     json: async () => body,
   }) as Response;
 
+const defaultWeekDetailResponse = (weekIndex: number) => {
+  if (weekIndex !== 1) {
+    return {
+      platforms: {
+        instagram: { posts: [] },
+        youtube: { posts: [] },
+        tiktok: { posts: [] },
+        twitter: { posts: [] },
+      },
+    };
+  }
+  return {
+    platforms: {
+      instagram: {
+        posts: [
+          {
+            source_id: "ig-week1-1",
+            text: "Premiere vibes #RHOSLC @bravotv",
+            hashtags: ["RHOSLC"],
+            mentions: ["@bravotv"],
+            profile_tags: ["@housewife_1"],
+            collaborators: ["@housewife_2"],
+            comments_count: 5,
+            total_comments_available: 5,
+          },
+        ],
+      },
+      youtube: {
+        posts: [
+          {
+            source_id: "yt-week1-1",
+            text: "Watch #RHOSLC now @BravoTV",
+            hashtags: ["RHOSLC"],
+            mentions: ["@BravoTV"],
+            comments_count: 2,
+            total_comments_available: 2,
+          },
+        ],
+      },
+      tiktok: {
+        posts: [
+          {
+            source_id: "tt-week1-1",
+            text: "Clip #TeamLisa @housewife_1",
+            hashtags: ["TeamLisa"],
+            mentions: ["@housewife_1"],
+            comments_count: 1,
+            total_comments_available: 1,
+          },
+        ],
+      },
+      twitter: {
+        posts: [
+          {
+            source_id: "tw-week1-1",
+            text: "Live thread #RHOSLC @bravoandy",
+            hashtags: ["RHOSLC"],
+            mentions: ["@bravoandy"],
+            comments_count: 0,
+            replies_count: 0,
+            total_comments_available: 0,
+          },
+        ],
+      },
+    },
+  };
+};
+
 function mockSeasonSocialFetch(analytics: AnalyticsPayload) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -543,6 +664,10 @@ function mockSeasonSocialFetch(analytics: AnalyticsPayload) {
     if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
     if (url.includes("/social/analytics?")) {
       return jsonResponse(analytics);
+    }
+    const weekDetailMatch = /\/social\/analytics\/week\/(\d+)\?/.exec(url);
+    if (weekDetailMatch) {
+      return jsonResponse(defaultWeekDetailResponse(Number(weekDetailMatch[1])));
     }
     if (url.includes("/social/targets?")) {
       return jsonResponse({ targets: [] });
@@ -569,7 +694,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     (auth as unknown as { currentUser?: { getIdToken: () => Promise<string> } }).currentUser = {
       getIdToken: vi.fn().mockResolvedValue("test-token"),
     };
-    window.history.replaceState({}, "", "/admin/trr-shows/show-1/seasons/6?tab=social");
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/bravo");
   });
 
   afterEach(() => {
@@ -619,6 +744,31 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     expect(screen.getByTestId("social-analytics-skeleton")).toBeInTheDocument();
     await screen.findByText("Weekly Trend");
+  });
+
+  it("formats summary count cards with comma separators", async () => {
+    mockSeasonSocialFetch({
+      ...analyticsBase,
+      summary: {
+        ...analyticsBase.summary,
+        total_posts: 1025,
+        total_comments: 41725,
+        total_engagement: 129_514_143,
+      },
+    });
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    expect(await screen.findByText("1,025")).toBeInTheDocument();
+    expect(screen.getByText("41,725")).toBeInTheDocument();
+    expect(screen.getByText("129,514,143")).toBeInTheDocument();
   });
 
   it("requires two consecutive poll failures before setting retry state", () => {
@@ -675,10 +825,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />
     );
 
-    const weekOneLink = await screen.findByRole("link", { name: "Week 1" });
+    const weekOneLink = await screen.findByRole("link", { name: /Week 1/i });
     const href = weekOneLink.getAttribute("href") ?? "";
 
-    expect(href).toContain("/admin/trr-shows/show-1/seasons/6/social/week/1");
+    expect(href).toContain("/shows/show-1/s6/social/week/1");
     expect(href).toContain("source_scope=bravo");
     expect(href).toContain("season_id=season-1");
     expect(href).not.toContain("?tab=social/week");
@@ -700,12 +850,270 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const platformTabs = screen.getByRole("navigation");
     fireEvent.click(within(platformTabs).getByRole("button", { name: "YouTube" }));
 
-    const weekOneLink = await screen.findByRole("link", { name: "Week 1" });
+    const weekOneLink = await screen.findByRole("link", { name: /Week 1/i });
     const href = weekOneLink.getAttribute("href") ?? "";
     expect(href).toContain("social_platform=youtube");
   });
 
-  it("renders platform tabs above the Filters scope card", async () => {
+  it("renders BYE WEEK labels from backend weekly payloads", async () => {
+    const byePayload: AnalyticsPayload = {
+      ...analyticsBase,
+      weekly: analyticsBase.weekly.map((row) =>
+        row.week_index === 2
+          ? {
+              ...row,
+              label: "BYE WEEK (Jan 15-Jan 22)",
+              week_type: "bye",
+              episode_number: null,
+            }
+          : row,
+      ),
+      weekly_platform_posts: analyticsBase.weekly_platform_posts.map((row) =>
+        row.week_index === 2
+          ? {
+              ...row,
+              label: "BYE WEEK (Jan 15-Jan 22)",
+              week_type: "bye",
+              episode_number: null,
+            }
+          : row,
+      ),
+      weekly_daily_activity: analyticsBase.weekly_daily_activity.map((row) =>
+        row.week_index === 2
+          ? {
+              ...row,
+              label: "BYE WEEK (Jan 15-Jan 22)",
+              week_type: "bye",
+              episode_number: null,
+            }
+          : row,
+      ),
+    };
+    mockSeasonSocialFetch(byePayload);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const byeWeekLink = await screen.findByRole("link", {
+      name: /bye week/i,
+    });
+    expect(byeWeekLink.getAttribute("href") ?? "").toContain("/social/week/2");
+    expect(screen.getAllByText(/BYE WEEK/i).length).toBeGreaterThan(0);
+  });
+
+  it("renders preseason and postseason episode labels in the weekly table", async () => {
+    const payload: AnalyticsPayload = {
+      ...analyticsBase,
+      weekly_platform_posts: [
+        {
+          week_index: 0,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00Z",
+          end: "2025-09-16T23:59:59Z",
+          week_type: "preseason",
+          episode_number: null,
+          posts: { instagram: 1, youtube: 0, tiktok: 0, twitter: 0 },
+          comments: { instagram: 1, youtube: 0, tiktok: 0, twitter: 0 },
+          total_posts: 1,
+          total_comments: 1,
+        },
+        ...analyticsBase.weekly_platform_posts,
+        {
+          week_index: 3,
+          label: "Week 3",
+          start: "2026-01-21T00:00:00Z",
+          end: "2026-01-27T23:59:59Z",
+          week_type: "postseason",
+          episode_number: null,
+          posts: { instagram: 0, youtube: 0, tiktok: 0, twitter: 0 },
+          comments: { instagram: 0, youtube: 0, tiktok: 0, twitter: 0 },
+          total_posts: 0,
+          total_comments: 0,
+        },
+      ],
+      weekly_platform_engagement: [
+        {
+          week_index: 0,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00Z",
+          end: "2025-09-16T23:59:59Z",
+          engagement: { instagram: 10, youtube: 0, tiktok: 0, twitter: 0 },
+          total_engagement: 10,
+          has_data: true,
+        },
+        ...analyticsBase.weekly_platform_engagement,
+        {
+          week_index: 3,
+          label: "Week 3",
+          start: "2026-01-21T00:00:00Z",
+          end: "2026-01-27T23:59:59Z",
+          engagement: { instagram: 0, youtube: 0, tiktok: 0, twitter: 0 },
+          total_engagement: 0,
+          has_data: false,
+        },
+      ],
+    };
+    mockSeasonSocialFetch(payload);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const preseasonLink = await screen.findByRole("link", { name: /Episode 0/i });
+    expect(preseasonLink).toBeInTheDocument();
+    const preseasonRow = preseasonLink.closest("tr");
+    expect(preseasonRow).not.toBeNull();
+    expect(within(preseasonRow as HTMLElement).getByText("Pre-Season")).toBeInTheDocument();
+
+    const postseasonLink = await screen.findByRole("link", { name: /Post-Season/i });
+    expect(postseasonLink).toBeInTheDocument();
+    const postseasonRow = postseasonLink.closest("tr");
+    expect(postseasonRow).not.toBeNull();
+    expect(within(postseasonRow as HTMLElement).getByText("Week 3")).toBeInTheDocument();
+  });
+
+  it("wraps long pre-season periods into 7-day rows in Comfortable view", async () => {
+    const preseasonDates = [
+      "2025-08-14",
+      "2025-08-15",
+      "2025-08-16",
+      "2025-08-17",
+      "2025-08-18",
+      "2025-08-19",
+      "2025-08-20",
+      "2025-08-21",
+      "2025-08-22",
+      "2025-08-23",
+      "2025-08-24",
+      "2025-08-25",
+    ];
+    const payload: AnalyticsPayload = {
+      ...analyticsBase,
+      weekly_daily_activity: [
+        {
+          week_index: 0,
+          label: "Pre-Season",
+          start: "2025-08-14T12:00:00Z",
+          end: "2025-09-16T12:00:00Z",
+          week_type: "preseason",
+          episode_number: null,
+          days: preseasonDates.map((date, index) => ({
+            ...makeZeroDay(index, date),
+            total_posts: index === 0 ? 1 : 0,
+          })),
+        },
+        ...analyticsBase.weekly_daily_activity,
+      ],
+    };
+    mockSeasonSocialFetch(payload);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByTestId("weekly-heatmap-row-0");
+    fireEvent.click(screen.getByRole("button", { name: "Comfortable" }));
+
+    const preseasonRow = screen.getByTestId("weekly-heatmap-row-0");
+    const preseasonDays = within(preseasonRow).getAllByTestId(/weekly-heatmap-day-0-/);
+    expect(preseasonDays).toHaveLength(12);
+
+    const dayGrid = within(preseasonRow).getByTestId("weekly-heatmap-day-0-0").parentElement;
+    expect(dayGrid).not.toBeNull();
+    expect(dayGrid).toHaveClass("grid-cols-7");
+  });
+
+  it("renders BYE weeks as their own week sections with week numbers", async () => {
+    const byePostsByDay = [4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3];
+    const byeCommentsByDay = [40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 38];
+    const byeDays = byePostsByDay.map((posts, index) => {
+      const dayNumber = 16 + index;
+      const dateLocal = `2025-12-${String(dayNumber).padStart(2, "0")}`;
+      return {
+        ...makeZeroDay(index, dateLocal),
+        total_posts: posts,
+        total_comments: byeCommentsByDay[index],
+      };
+    });
+    const payload: AnalyticsPayload = {
+      ...analyticsBase,
+      weekly_daily_activity: [
+        analyticsBase.weekly_daily_activity[0],
+        {
+          week_index: 14,
+          label: "BYE WEEK (Dec 16-Dec 30)",
+          start: "2025-12-16T12:00:00Z",
+          end: "2025-12-30T12:00:00Z",
+          week_type: "bye",
+          episode_number: null,
+          days: byeDays,
+        },
+      ],
+    };
+    mockSeasonSocialFetch(payload);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const byeWeekRow = await screen.findByTestId("weekly-heatmap-row-14");
+    expect(within(byeWeekRow).getByText("Week 14")).toBeInTheDocument();
+    expect(within(byeWeekRow).getByText("BYE WEEK")).toBeInTheDocument();
+    expect(within(byeWeekRow).getByTestId("weekly-heatmap-total-14")).toHaveTextContent("43 posts");
+    expect(within(byeWeekRow).getByTestId("weekly-heatmap-comments-total-14")).toHaveTextContent("558 comments");
+  });
+
+  it("renders premiere and episode/bye metadata tags in the heatmap header", async () => {
+    const payload: AnalyticsPayload = {
+      ...analyticsBase,
+      weekly_daily_activity: analyticsBase.weekly_daily_activity.map((row) =>
+        row.week_index === 2
+          ? {
+              ...row,
+              week_type: "bye",
+              episode_number: null,
+            }
+          : row,
+      ),
+    };
+    mockSeasonSocialFetch(payload);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByTestId("weekly-heatmap-row-1");
+    expect(screen.getByText("PREMIERE WEEK")).toBeInTheDocument();
+    expect(screen.getByText("BYE WEEK")).toBeInTheDocument();
+  });
+
+  it("renders platform tabs as the first control row and hides filter/season-id cards", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
     render(
@@ -718,9 +1126,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     const nav = await screen.findByRole("navigation");
-    const filtersHeading = screen.getByText("Filters");
-    const position = nav.compareDocumentPosition(filtersHeading);
-    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(nav).getByRole("button", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.queryByText("Filters")).not.toBeInTheDocument();
+    expect(screen.queryByText("Season Details")).not.toBeInTheDocument();
+    expect(screen.queryByText("Season ID")).not.toBeInTheDocument();
   });
 
   it("renders actionable current run empty state controls", async () => {
@@ -780,13 +1189,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
   });
 
-  it("copies season id from season details", async () => {
+  it("renders last updated and window under the season title", async () => {
     mockSeasonSocialFetch(analyticsBase);
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(window.navigator, "clipboard", {
-      value: { writeText },
-      configurable: true,
-    });
 
     render(
       <SeasonSocialAnalyticsSection
@@ -797,21 +1201,18 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    const copyButton = await screen.findByRole("button", { name: "Copy" });
-    fireEvent.click(copyButton);
-
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith("season-1");
-      expect(screen.getByText("Copied")).toBeInTheDocument();
-      expect(screen.getByRole("status")).toHaveTextContent("Copied");
-    });
+    await screen.findByText("Last Updated");
+    const windowLabels = screen.getAllByText("Window");
+    expect(windowLabels.length).toBeGreaterThan(0);
+    const windowValue = windowLabels[0].parentElement?.querySelector("dd");
+    expect(windowValue?.textContent).toContain("to");
   });
 
   it("preselects tab from social_platform query param and updates URL on tab change", async () => {
     window.history.replaceState(
       {},
       "",
-      "/admin/trr-shows/show-1/seasons/6?tab=social&social_platform=youtube",
+      "/shows/show-1/s6/social/bravo?social_platform=youtube",
     );
     mockSeasonSocialFetch(analyticsBase);
 
@@ -834,7 +1235,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   it("supports controlled platform tabs without mutating URL and allows hiding internal tabs", async () => {
     mockSeasonSocialFetch(analyticsBase);
     const onPlatformTabChange = vi.fn();
-    window.history.replaceState({}, "", "/admin/trr-shows/show-1/seasons/6?tab=social");
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/bravo");
 
     const { rerender } = render(
       <SeasonSocialAnalyticsSection
@@ -868,7 +1269,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
   });
 
-  it("switches heatmap totals when metric toggle changes", async () => {
+  it("supports Post, Comment, and Completeness heatmap metrics", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
     render(
@@ -882,9 +1283,14 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await screen.findByTestId("weekly-heatmap-row-1");
     expect(screen.getByTestId("weekly-heatmap-total-1")).toHaveTextContent("4 posts");
+    expect(screen.getByTestId("weekly-heatmap-comments-total-1")).toHaveTextContent("8 comments");
 
     fireEvent.click(screen.getByRole("button", { name: "Comment Count" }));
-    expect(screen.getByTestId("weekly-heatmap-total-1")).toHaveTextContent("8 comments");
+    expect(screen.getByTestId("weekly-heatmap-total-1")).toHaveTextContent("4 posts");
+
+    fireEvent.click(screen.getByRole("button", { name: "Completeness" }));
+    const tile = screen.getByTestId("weekly-heatmap-day-1-0").firstElementChild;
+    expect(tile?.className).toContain("bg-red-600");
   });
 
   it("renders data quality badges and supports density query toggle", async () => {
@@ -905,11 +1311,18 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(within(coverageCard as HTMLElement).getByText("40.0%")).toBeInTheDocument();
     expect(screen.getByText("2h ago")).toBeInTheDocument();
 
+    const comfortableButton = screen.getByRole("button", { name: "Comfortable" });
+    expect(comfortableButton.className).toContain("bg-white");
+    expect(window.location.search).not.toContain("social_density=");
+
+    fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+    expect(window.location.search).toContain("social_density=compact");
+
     fireEvent.click(screen.getByRole("button", { name: "Comfortable" }));
-    expect(window.location.search).toContain("social_density=comfortable");
+    expect(window.location.search).not.toContain("social_density=");
 
     const tile = screen.getByTestId("weekly-heatmap-day-1-0").firstElementChild;
-    expect(tile?.className).toContain("h-11");
+    expect(tile?.className).toContain("w-full");
   });
 
   it("shows weekly flag chips and can hide them via alerts toggle", async () => {
@@ -930,7 +1343,33 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.queryByText("zero activity")).not.toBeInTheDocument();
   });
 
-  it("shows simplified weekly coverage labels and progress percent in the bravo table", async () => {
+  it("hides drop and comment gap weekly pills", async () => {
+    mockSeasonSocialFetch({
+      ...analyticsBase,
+      weekly_flags: [
+        { week_index: 1, code: "zero_activity", severity: "info", message: "No posts." },
+        { week_index: 1, code: "spike", severity: "warn", message: "Spike." },
+        { week_index: 1, code: "drop", severity: "warn", message: "Drop." },
+        { week_index: 1, code: "comment_gap", severity: "warn", message: "Gap." },
+      ],
+    });
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("zero activity");
+    expect(screen.getByText("spike")).toBeInTheDocument();
+    expect(screen.queryByText("drop")).not.toBeInTheDocument();
+    expect(screen.queryByText("comment gap")).not.toBeInTheDocument();
+  });
+
+  it("renders episode-oriented weekly table with metric lines under each platform and total progress", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
     render(
@@ -942,30 +1381,336 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />
     );
 
+    expect(await screen.findByRole("columnheader", { name: "Episode" })).toBeInTheDocument();
     expect(await screen.findByRole("columnheader", { name: "PROGRESS" })).toBeInTheDocument();
-    expect(await screen.findAllByText("40.0% saved to DB")).toHaveLength(5);
-    expect(screen.queryByText("40.0% saved to DB (8/20)")).not.toBeInTheDocument();
-    const weekOneRow = (await screen.findByRole("link", { name: "Week 1" })).closest("tr");
+    expect(screen.queryByText(/saved to DB/i)).not.toBeInTheDocument();
+    const weekOneLink = await screen.findByRole("link", { name: /S6\.E1/i });
+    expect(weekOneLink).toBeInTheDocument();
+    expect(screen.getAllByText(/\d{1,2}\/\d{1,2}\/\d{2} - \d{1,2}\/\d{1,2}\/\d{2}/).length).toBeGreaterThan(0);
+
+    const weekOneRow = weekOneLink.closest("tr");
     expect(weekOneRow).not.toBeNull();
     const weekOne = within(weekOneRow as HTMLElement);
-    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Posts: Up-to-Date")).toBeInTheDocument();
-    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Comments: 40.0%")).toBeInTheDocument();
-    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Total: 50.0%")).toBeInTheDocument();
+    expect(weekOne.getByText("Week 1")).toBeInTheDocument();
+    expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("1 post");
+    expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("100 likes");
+    expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("5 comments");
+    expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("1 hashtag");
+    expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("1 mention");
+    expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("2 tags");
+    await waitFor(() => {
+      expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("4 posts");
+      expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("1,000 likes");
+      expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("20 comments");
+      expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("2 hashtags");
+      expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("3 mentions");
+      expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("2 tags");
+    });
+    expect(weekOne.getByTestId("weekly-total-progress-1")).toHaveTextContent("90.0%");
+    const weekOneMissingMetrics = weekOne.getByTestId("weekly-missing-metrics-1");
+    expect(weekOneMissingMetrics).toHaveTextContent("0 posts");
+    expect(weekOneMissingMetrics).toHaveTextContent("0 likes");
+    expect(weekOneMissingMetrics).toHaveTextContent("12 comments");
+    expect(weekOneMissingMetrics).toHaveTextContent("-- hashtags");
+    expect(weekOneMissingMetrics).toHaveTextContent("-- mentions");
+    expect(weekOneMissingMetrics).toHaveTextContent("-- tags");
 
-    const weekTwoRow = (await screen.findByRole("link", { name: "Week 2" })).closest("tr");
+    const weekTwoRow = (await screen.findByRole("link", { name: /S6\.E2/i })).closest("tr");
     expect(weekTwoRow).not.toBeNull();
     const weekTwo = within(weekTwoRow as HTMLElement);
-    expect(weekTwo.getByText((_, element) => element?.textContent?.trim() === "Posts: -")).toBeInTheDocument();
-    expect(weekTwo.getByText((_, element) => element?.textContent?.trim() === "Comments: -")).toBeInTheDocument();
-    expect(weekTwo.getByText((_, element) => element?.textContent?.trim() === "Total: -")).toBeInTheDocument();
+    expect(weekTwo.getByTestId("weekly-total-progress-2")).toHaveTextContent("-");
+    await waitFor(() => {
+      expect(weekTwo.getByTestId("weekly-total-metrics-2")).toHaveTextContent("0 posts");
+      expect(weekTwo.getByTestId("weekly-total-metrics-2")).toHaveTextContent("0 likes");
+      expect(weekTwo.getByTestId("weekly-total-metrics-2")).toHaveTextContent("0 comments");
+      expect(weekTwo.getByTestId("weekly-total-metrics-2")).toHaveTextContent("0 hashtags");
+      expect(weekTwo.getByTestId("weekly-total-metrics-2")).toHaveTextContent("0 mentions");
+      expect(weekTwo.getByTestId("weekly-total-metrics-2")).toHaveTextContent("0 tags");
+    });
+    expect(weekTwo.queryByTestId("weekly-missing-metrics-2")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Sync Metrics" })).toHaveLength(2);
+  });
 
-    const postsLabels = [weekOne.getByText("Posts:"), weekTwo.getByText("Posts:")];
-    const commentsLabels = [weekOne.getByText("Comments:"), weekTwo.getByText("Comments:")];
-    const totalLabels = [weekOne.getByText("Total:"), weekTwo.getByText("Total:")];
-    postsLabels.forEach((label) => expect(label).toHaveClass("font-semibold"));
-    commentsLabels.forEach((label) => expect(label).toHaveClass("font-semibold"));
-    totalLabels.forEach((label) => expect(label).toHaveClass("font-semibold"));
-    expect(screen.getAllByRole("button", { name: "Sync Comments" })).toHaveLength(1);
+  it("persists selected progress metrics in the social_metrics query param", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    const { rerender } = render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const metricsFilter = await screen.findByTestId("weekly-bravo-metric-filter");
+    const weekOneMetricsLine = await screen.findByTestId("weekly-total-metrics-1");
+    await waitFor(() => {
+      expect(weekOneMetricsLine).toHaveTextContent("2 hashtags");
+    });
+    expect(new URLSearchParams(window.location.search).get("social_metrics")).toBeNull();
+
+    fireEvent.click(within(metricsFilter).getByRole("button", { name: "Hashtags" }));
+    await waitFor(() => {
+      const metricsParam = new URLSearchParams(window.location.search).get("social_metrics");
+      expect(metricsParam).toBe("posts,likes,comments,mentions,tags");
+    });
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+    await waitFor(() => {
+      expect(weekOneMetricsLine).not.toHaveTextContent(/hashtags/i);
+    });
+
+    fireEvent.click(within(metricsFilter).getByRole("button", { name: "Hashtags" }));
+    await waitFor(() => {
+      const metricsParam = new URLSearchParams(window.location.search).get("social_metrics");
+      expect(metricsParam).toBeNull();
+    });
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+    await waitFor(() => {
+      expect(weekOneMetricsLine).toHaveTextContent("2 hashtags");
+    });
+  });
+
+  it("persists social_metric_mode in the URL and switches comments between total and saved values", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/admin/trr-shows/show-1/seasons/6?tab=social&social_metric_mode=saved",
+    );
+    mockSeasonSocialFetch(analyticsBase);
+
+    const { rerender } = render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const weekOneMetricsLine = await screen.findByTestId("weekly-total-metrics-1");
+    expect(new URLSearchParams(window.location.search).get("social_metric_mode")).toBe("saved");
+    expect(weekOneMetricsLine).toHaveTextContent("8 comments");
+
+    fireEvent.click(screen.getByRole("button", { name: "Total" }));
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+    await waitFor(() => {
+      expect(new URLSearchParams(window.location.search).get("social_metric_mode")).toBeNull();
+      expect(weekOneMetricsLine).toHaveTextContent("20 comments");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Saved" }));
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+    await waitFor(() => {
+      expect(new URLSearchParams(window.location.search).get("social_metric_mode")).toBe("saved");
+      expect(weekOneMetricsLine).toHaveTextContent("8 comments");
+    });
+  });
+
+  it("supports Select All / Deselect all metric controls", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    const { rerender } = render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const weekOneMetricsLine = await screen.findByTestId("weekly-total-metrics-1");
+    const deselectAllButton = await screen.findByRole("button", { name: "Deselect all" });
+    fireEvent.click(deselectAllButton);
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+    await waitFor(() => {
+      expect(new URLSearchParams(window.location.search).get("social_metrics")).toBe("none");
+      expect(weekOneMetricsLine).toHaveTextContent("No metrics selected");
+    });
+
+    const selectAllButton = await screen.findByRole("button", { name: "Select All" });
+    fireEvent.click(selectAllButton);
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+    await waitFor(() => {
+      expect(new URLSearchParams(window.location.search).get("social_metrics")).toBeNull();
+      expect(weekOneMetricsLine).toHaveTextContent("4 posts");
+      expect(weekOneMetricsLine).toHaveTextContent("1,000 likes");
+    });
+  });
+
+  it("fetches week detail payloads when detail metrics are selected", async () => {
+    const fetchMock = mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByTestId("weekly-total-metrics-1");
+    await waitFor(() => {
+      const weekDetailCalls = fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/social/analytics/week/"),
+      ).length;
+      expect(weekDetailCalls).toBeGreaterThan(0);
+    });
+  });
+
+  it("fetches week detail payloads in hashtags view even when only posts/likes/comments metrics are selected", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/shows/show-1/s6/social/bravo?social_view=hashtags&social_metrics=posts,likes,comments",
+    );
+    const fetchMock = mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="hashtags"
+      />,
+    );
+
+    await screen.findByTestId("hashtag-insights-total-uses");
+    await waitFor(() => {
+      const weekDetailCalls = fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/social/analytics/week/"),
+      ).length;
+      expect(weekDetailCalls).toBeGreaterThan(0);
+    });
+  });
+
+  it("skips week detail payload fetches when only posts/likes/comments metrics are selected", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/shows/show-1/s6/social/bravo?social_metrics=posts,likes,comments",
+    );
+    const fetchMock = mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const weekOneMetricsLine = await screen.findByTestId("weekly-total-metrics-1");
+    expect(weekOneMetricsLine).toHaveTextContent("4 posts");
+    expect(weekOneMetricsLine).toHaveTextContent("1,000 likes");
+    expect(weekOneMetricsLine).toHaveTextContent("20 comments");
+    expect(weekOneMetricsLine).not.toHaveTextContent(/hashtags|mentions|tags/i);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    const weekDetailCalls = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes("/social/analytics/week/"),
+    ).length;
+    expect(weekDetailCalls).toBe(0);
+  });
+
+  it("shows -- fallback for detail metrics while week detail data is loading", async () => {
+    const weekDetailResolvers = new Map<number, () => void>();
+    const deferredFetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      const weekDetailMatch = /\/social\/analytics\/week\/(\d+)\?/.exec(url);
+      if (weekDetailMatch) {
+        const weekIndex = Number(weekDetailMatch[1]);
+        return new Promise<Response>((resolve) => {
+          weekDetailResolvers.set(weekIndex, () => resolve(jsonResponse(defaultWeekDetailResponse(weekIndex))));
+        });
+      }
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/runs/summary?")) return jsonResponse({ summaries: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", deferredFetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const weekOneMetricsLine = await screen.findByTestId("weekly-total-metrics-1");
+    await waitFor(() => {
+      expect(weekOneMetricsLine).toHaveTextContent("-- hashtags");
+      expect(weekOneMetricsLine).toHaveTextContent("-- mentions");
+      expect(weekOneMetricsLine).toHaveTextContent("-- tags");
+    });
+
+    act(() => {
+      weekDetailResolvers.get(1)?.();
+      weekDetailResolvers.get(2)?.();
+    });
+
+    await waitFor(() => {
+      expect(weekOneMetricsLine).toHaveTextContent("2 hashtags");
+      expect(weekOneMetricsLine).toHaveTextContent("3 mentions");
+      expect(weekOneMetricsLine).toHaveTextContent("2 tags");
+    });
   });
 
   it("renders week date ranges under weekly heatmap headers", async () => {
@@ -1030,13 +1775,12 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const upToDateLabels = await screen.findAllByText("Up-to-Date");
     expect(upToDateLabels.length).toBeGreaterThan(0);
-    const weekOneRow = (await screen.findByRole("link", { name: "Week 1" })).closest("tr");
+    const weekOneRow = (await screen.findByRole("link", { name: /Week 1/i })).closest("tr");
     expect(weekOneRow).not.toBeNull();
     const weekOne = within(weekOneRow as HTMLElement);
-    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Posts: Up-to-Date")).toBeInTheDocument();
-    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Comments: Up-to-Date")).toBeInTheDocument();
-    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Total: Up-to-Date")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Sync Comments" })).toHaveLength(1);
+    expect(weekOne.getByTestId("weekly-total-progress-1")).toHaveTextContent("100.0%");
+    expect(weekOne.queryByTestId("weekly-missing-metrics-1")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Sync Metrics" })).toHaveLength(2);
   });
 
   it("flags stale active runs older than 45 minutes with pending/retrying counts", async () => {
@@ -1154,11 +1898,11 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByRole("link", { name: "Week 1" });
+    await screen.findByRole("link", { name: /Week 1/i });
     expect(screen.queryByText(/Potentially stalled ingest runs/i)).not.toBeInTheDocument();
   });
 
-  it("disables weekly Run Week and Sync Comments actions when queue workers are unhealthy", async () => {
+  it("disables weekly Run Week and Sync Metrics actions when queue workers are unhealthy", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
 
@@ -1195,7 +1939,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     screen.getAllByRole("button", { name: "Run Week" }).forEach((button) => {
       expect(button).toBeDisabled();
     });
-    expect(screen.getByRole("button", { name: "Sync Comments" })).toBeDisabled();
+    screen.getAllByRole("button", { name: "Sync Metrics" }).forEach((button) => {
+      expect(button).toBeDisabled();
+    });
   });
 
   it("hydrates from cached social snapshot and suppresses transient timeout banners", async () => {
@@ -1295,7 +2041,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     expect(await screen.findByTestId("weekly-heatmap-unavailable")).toHaveTextContent(
-      "Daily schedule unavailable for selected filters."
+      "Daily schedule unavailable for the current view."
     );
   });
 
@@ -1341,7 +2087,12 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByText("Weekly Trend");
-    expect(screen.getByText("Ingest + Export")).toBeInTheDocument();
+    const ingestHeading = screen.getByRole("heading", { name: "Ingest + Export" });
+    const weeklyTrendHeading = screen.getByRole("heading", { name: "Weekly Trend" });
+    expect(ingestHeading).toBeInTheDocument();
+    expect(
+      Boolean(ingestHeading.compareDocumentPosition(weeklyTrendHeading) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
 
     rerender(
       <SeasonSocialAnalyticsSection
@@ -1355,6 +2106,14 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     expect(await screen.findByTestId("reddit-sources-manager")).toBeInTheDocument();
     expect(screen.queryByText("Weekly Trend")).not.toBeInTheDocument();
+    expect(screen.queryByText("Current Run")).not.toBeInTheDocument();
+    expect(screen.queryByText("Season Details")).not.toBeInTheDocument();
+    expect(screen.queryByText("Filters")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Instagram" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "TikTok" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Twitter/X" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "YouTube" })).not.toBeInTheDocument();
   });
 
   it("renders advanced run health and benchmark panel", async () => {
@@ -1607,40 +2366,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
   });
 
-  it("renders configured and observed hashtags and respects platform scope", async () => {
+  it("renders season hashtag analytics from week detail posts and respects platform scope", async () => {
     const analyticsWithHashtags: AnalyticsPayload = {
       ...analyticsBase,
-      leaderboards: {
-        bravo_content: [
-          {
-            platform: "instagram",
-            source_id: "ig-1",
-            text: "Watch #RHOSLC tonight with #TeamLisa",
-            engagement: 10,
-            url: "https://example.com/ig-1",
-            timestamp: "2026-01-07T00:00:00Z",
-          },
-          {
-            platform: "youtube",
-            source_id: "yt-1",
-            text: "Sneak peek #RHOSLC",
-            engagement: 9,
-            url: "https://example.com/yt-1",
-            timestamp: "2026-01-07T00:00:00Z",
-          },
-        ],
-        viewer_discussion: [
-          {
-            platform: "twitter",
-            source_id: "x-1",
-            text: "Fans say #RHOSLC is #Drama",
-            engagement: 8,
-            url: "https://example.com/x-1",
-            timestamp: "2026-01-07T00:00:00Z",
-            sentiment: "neutral",
-          },
-        ],
-      },
     };
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1649,6 +2377,67 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         return jsonResponse(analyticsWithHashtags);
+      }
+      const weekDetailMatch = /\/social\/analytics\/week\/(\d+)\?/.exec(url);
+      if (weekDetailMatch) {
+        const weekIndex = Number(weekDetailMatch[1]);
+        if (weekIndex === 1) {
+          return jsonResponse({
+            platforms: {
+              instagram: {
+                posts: [
+                  {
+                    source_id: "ig-w1-1",
+                    hashtags: ["RHOSLC", "RHOSLC", "TeamLisa"],
+                    text: "Premiere #RHOSLC #RHOSLC #TeamLisa",
+                  },
+                ],
+              },
+              youtube: {
+                posts: [
+                  {
+                    source_id: "yt-w1-1",
+                    hashtags: ["RHOSLC"],
+                    text: "Sneak peek",
+                  },
+                ],
+              },
+              tiktok: { posts: [] },
+              twitter: {
+                posts: [
+                  {
+                    source_id: "tw-w1-1",
+                    text: "Fans are loud tonight #Drama",
+                  },
+                ],
+              },
+            },
+          });
+        }
+        return jsonResponse({
+          platforms: {
+            instagram: {
+              posts: [
+                {
+                  source_id: "ig-w2-1",
+                  hashtags: ["TeamLisa"],
+                  text: "Aftershow #TeamLisa",
+                },
+              ],
+            },
+            youtube: {
+              posts: [
+                {
+                  source_id: "yt-w2-1",
+                  hashtags: ["AFTERSHOW", "RHOSLC"],
+                  text: "Weekly recap",
+                },
+              ],
+            },
+            tiktok: { posts: [] },
+            twitter: { posts: [] },
+          },
+        });
       }
       if (url.includes("/social/targets?")) {
         return jsonResponse({
@@ -1675,9 +2464,22 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Configured Hashtags");
-    expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
-    expect(screen.getByText("3 mentions")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Hashtags" });
+    expect(screen.queryByText("Configured Hashtags")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("hashtag-insights-total-uses")).toHaveTextContent("8");
+      expect(screen.getByTestId("hashtag-insights-unique-tags")).toHaveTextContent("4");
+      expect(screen.getByTestId("hashtag-insights-top-tag")).toHaveTextContent("#RHOSLC");
+      expect(screen.getByTestId("hashtag-insights-peak-week")).toHaveTextContent("Week 1");
+    });
+
+    const topLeaderboardRow = screen.getByTestId("hashtag-leaderboard-row-0");
+    expect(topLeaderboardRow).toHaveTextContent("#RHOSLC");
+    expect(topLeaderboardRow).toHaveTextContent("4 uses");
+    expect(topLeaderboardRow).toHaveTextContent("50.0%");
+    expect(screen.getByTestId("hashtag-weekly-usage-row-1")).toHaveTextContent("5 uses");
+    expect(screen.getByTestId("hashtag-platform-usage-row-instagram")).toHaveTextContent("4 uses");
+    expect(screen.getByTestId("hashtag-platform-usage-row-youtube")).toHaveTextContent("3 uses");
 
     rerender(
       <SeasonSocialAnalyticsSection
@@ -1690,9 +2492,22 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Configured Hashtags");
-    expect(screen.getByText("1 mention")).toBeInTheDocument();
-    expect(screen.queryByText("3 mentions")).not.toBeInTheDocument();
+    await screen.findByTestId("hashtag-insights-total-uses");
+    await waitFor(() => {
+      expect(screen.getByTestId("hashtag-insights-total-uses")).toHaveTextContent("3");
+      expect(screen.getByTestId("hashtag-insights-unique-tags")).toHaveTextContent("2");
+      expect(screen.getByTestId("hashtag-insights-top-tag")).toHaveTextContent("#RHOSLC");
+      expect(screen.getByTestId("hashtag-insights-peak-week")).toHaveTextContent("Week 2");
+    });
+
+    const youtubeTopRow = screen.getByTestId("hashtag-leaderboard-row-0");
+    expect(youtubeTopRow).toHaveTextContent("#RHOSLC");
+    expect(youtubeTopRow).toHaveTextContent("2 uses");
+    expect(screen.queryByText("#TEAMLISA")).not.toBeInTheDocument();
+    expect(screen.getByTestId("hashtag-platform-usage-row-youtube")).toHaveTextContent("3 uses");
+
+    const weekDetailCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/social/analytics/week/"));
+    expect(weekDetailCalls.length).toBeGreaterThan(0);
   });
 
   it("keeps analytics visible when targets fetch fails", async () => {
@@ -1903,9 +2718,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByTestId("weekly-heatmap-row-1");
-    fireEvent.change(screen.getByRole("combobox", { name: /Week/i }), {
-      target: { value: "1" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "YouTube" }));
 
     expect(await screen.findByText(/analytics unavailable/i)).toBeInTheDocument();
     expect(await screen.findByText(/Showing last successful data from/i)).toBeInTheDocument();
@@ -2132,6 +2945,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
       if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      const weekDetailMatch = /\/social\/analytics\/week\/(\d+)\?/.exec(url);
+      if (weekDetailMatch) {
+        return jsonResponse(defaultWeekDetailResponse(Number(weekDetailMatch[1])));
+      }
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
@@ -2154,11 +2971,11 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Specific Day");
-    fireEvent.change(screen.getByLabelText(/Specific Day/i), {
+    await screen.findByText("Daily Run");
+    fireEvent.change(screen.getByLabelText(/Day/i), {
       target: { value: "2026-01-09" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Run Specific Day \(All Platforms\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Run Selected Day/i }));
 
     await waitFor(() => {
       expect(capturedPayloads.length).toBeGreaterThan(0);
@@ -2174,6 +2991,53 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(end.toISOString()).toBe("2026-01-10T04:59:59.999Z");
     expect(end.getTime()).toBeGreaterThan(start.getTime());
     expect(end.getTime() - start.getTime()).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+  });
+
+  it("supports week-specific platform ingest runs from Ingest + Export", async () => {
+    const runId = "run-week-platform-1";
+    const capturedPayloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+        if (typeof init?.body === "string") {
+          capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 2 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Weekly Run");
+    fireEvent.change(screen.getByRole("combobox", { name: /Week/i }), {
+      target: { value: "2" },
+    });
+    const platformSelects = screen.getAllByRole("combobox", { name: /Platform/i });
+    fireEvent.change(platformSelects[0], { target: { value: "youtube" } });
+    fireEvent.click(screen.getByRole("button", { name: /Run Selected Week/i }));
+
+    await waitFor(() => {
+      expect(capturedPayloads.length).toBeGreaterThan(0);
+    });
+    const payload = capturedPayloads[0];
+    expect(payload.platforms).toEqual(["youtube"]);
+    expect(payload.date_start).toBe("2026-01-14T00:00:00Z");
+    expect(payload.date_end).toBe("2026-01-20T23:59:59Z");
   });
 
   it("sends full_refresh strategy when full refresh mode is selected", async () => {
@@ -2219,7 +3083,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(capturedPayloads[0]?.allow_inline_dev_fallback).toBe(true);
   });
 
-  it("Sync Comments triggers comments_only ingest for the selected week", async () => {
+  it("Sync Metrics triggers posts_and_comments ingest for the selected week", async () => {
     const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
     const capturedPayloads: Array<Record<string, unknown>> = [];
     const ingestUrls: string[] = [];
@@ -2228,6 +3092,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
       if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/analytics/week/")) return jsonResponse(defaultWeekDetailResponse(1));
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
@@ -2251,7 +3116,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    const syncButton = await screen.findByRole("button", { name: "Sync Comments" });
+    const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
+    expect(weekOneRow).not.toBeNull();
+    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync Metrics" });
     fireEvent.click(syncButton);
 
     await waitFor(() => {
@@ -2259,12 +3126,55 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
 
     const payload = capturedPayloads[0];
-    expect(payload.ingest_mode).toBe("comments_only");
+    expect(payload.ingest_mode).toBe("posts_and_comments");
     expect(payload.sync_strategy).toBe("incremental");
+    expect(payload.comment_refresh_policy).toBeUndefined();
+    expect(payload.comment_anchor_source_ids).toBeUndefined();
     expect(payload.date_start).toBe("2026-01-07T00:00:00Z");
     expect(payload.date_end).toBe("2026-01-13T23:59:59Z");
     expect(payload.platforms).toBeUndefined();
     expect(ingestUrls[0]).toContain("season_id=season-1");
+  });
+
+  it("Sync Metrics does not short-circuit when comments are already up-to-date", async () => {
+    const capturedPayloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/analytics/week/")) return jsonResponse(defaultWeekDetailResponse(1));
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+        if (typeof init?.body === "string") {
+          capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+        return jsonResponse({ run_id: "run-sync-metrics", stages: ["posts", "comments"], queued_or_started_jobs: 1 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
+    expect(weekOneRow).not.toBeNull();
+    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync Metrics" });
+    fireEvent.click(syncButton);
+
+    await waitFor(() => {
+      expect(capturedPayloads).toHaveLength(1);
+    });
+    expect(capturedPayloads[0]?.ingest_mode).toBe("posts_and_comments");
   });
 
   it("formats worker-unavailable proxy detail into actionable guidance", () => {

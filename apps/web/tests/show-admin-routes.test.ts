@@ -8,6 +8,7 @@ import {
   buildShowAdminUrl,
   cleanLegacyPersonRoutingQuery,
   cleanLegacyRoutingQuery,
+  parseSocialAnalyticsViewFromPath,
   parsePersonRouteState,
   parseSeasonRouteState,
   parseShowRouteState,
@@ -41,14 +42,14 @@ describe("show-admin-routes", () => {
       buildShowAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city");
 
     expect(
       buildShowAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
         tab: "social",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/social");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/social/bravo");
 
     expect(
       buildShowAdminUrl({
@@ -56,7 +57,7 @@ describe("show-admin-routes", () => {
         tab: "assets",
         assetsSubTab: "brand",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/media-brand");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media?assets=brand");
 
     expect(
       buildShowAdminUrl({
@@ -64,14 +65,14 @@ describe("show-admin-routes", () => {
         tab: "assets",
         assetsSubTab: "videos",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/media-videos");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media?assets=videos");
 
     expect(
       buildShowAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
         tab: "assets",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/media-gallery");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media");
   });
 
   it("parses season path tabs and query fallback", () => {
@@ -88,6 +89,13 @@ describe("show-admin-routes", () => {
         new URLSearchParams()
       )
     ).toMatchObject({ tab: "assets", assetsSubTab: "brand", source: "path" });
+
+    expect(
+      parseSeasonRouteState(
+        "/shows/the-real-housewives-of-salt-lake-city/s4/social/reddit",
+        new URLSearchParams()
+      )
+    ).toMatchObject({ tab: "social", assetsSubTab: "media", source: "path" });
 
     expect(
       parseSeasonRouteState(
@@ -117,7 +125,7 @@ describe("show-admin-routes", () => {
         showSlug: "the-real-housewives-of-salt-lake-city",
         seasonNumber: 4,
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4");
 
     expect(
       buildSeasonAdminUrl({
@@ -125,7 +133,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "overview",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4");
 
     expect(
       buildSeasonAdminUrl({
@@ -133,7 +141,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "episodes",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=episodes");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/episodes");
 
     expect(
       buildSeasonAdminUrl({
@@ -141,7 +149,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "cast",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=cast");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/cast");
 
     expect(
       buildSeasonAdminUrl({
@@ -150,7 +158,7 @@ describe("show-admin-routes", () => {
         tab: "assets",
         assetsSubTab: "brand",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=assets&assets=brand");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/media?assets=brand");
 
     expect(
       buildSeasonAdminUrl({
@@ -158,7 +166,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "assets",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=assets&assets=media");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/media");
 
     expect(
       buildSeasonAdminUrl({
@@ -166,7 +174,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "fandom",
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4?tab=fandom");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/fandom");
   });
 
   it("builds canonical season social week URLs", () => {
@@ -176,7 +184,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         weekIndex: 3,
       })
-    ).toBe("/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4/social/week/3");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/social/week/3");
 
     expect(
       buildSeasonSocialWeekUrl({
@@ -186,8 +194,14 @@ describe("show-admin-routes", () => {
         query: new URLSearchParams("source_scope=bravo&platform=youtube"),
       })
     ).toBe(
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4/social/week/3?source_scope=bravo&platform=youtube"
+      "/shows/the-real-housewives-of-salt-lake-city/s4/social/week/3?source_scope=bravo&platform=youtube"
     );
+  });
+
+  it("parses social analytics view from canonical show and season paths", () => {
+    expect(parseSocialAnalyticsViewFromPath("/shows/rhoslc/social/bravo")).toBe("bravo");
+    expect(parseSocialAnalyticsViewFromPath("/shows/rhoslc/s6/social/reddit")).toBe("reddit");
+    expect(parseSocialAnalyticsViewFromPath("/shows/rhoslc/s6/cast")).toBeNull();
   });
 
   it("removes legacy tab query keys and preserves unrelated params", () => {

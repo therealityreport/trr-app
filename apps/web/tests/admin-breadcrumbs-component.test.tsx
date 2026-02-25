@@ -10,8 +10,8 @@ describe("AdminBreadcrumbs component", () => {
       <AdminBreadcrumbs
         items={[
           { label: "Admin", href: "/admin" },
-          { label: "Networks & Streaming", href: "/admin/networks" },
-          { label: "ABC", href: "/admin/networks/network/abc" },
+          { label: "Brands", href: "/admin/brands" },
+          { label: "ABC", href: "/admin/networks-and-streaming/network/abc" },
         ]}
       />,
     );
@@ -20,12 +20,12 @@ describe("AdminBreadcrumbs component", () => {
     expect(nav).toBeInTheDocument();
 
     expect(within(nav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
-    expect(within(nav).getByRole("link", { name: "Networks & Streaming" })).toHaveAttribute(
+    expect(within(nav).getByRole("link", { name: "Brands" })).toHaveAttribute(
       "href",
-      "/admin/networks",
+      "/admin/brands",
     );
     const current = within(nav).getByRole("link", { name: "ABC" });
-    expect(current).toHaveAttribute("href", "/admin/networks/network/abc");
+    expect(current).toHaveAttribute("href", "/admin/networks-and-streaming/network/abc");
     expect(current).toHaveAttribute("aria-current", "page");
   });
 
@@ -34,8 +34,8 @@ describe("AdminBreadcrumbs component", () => {
       <AdminBreadcrumbs
         items={[
           { label: "Admin", href: "/admin" },
-          { label: "Shows", href: "/admin/trr-shows" },
-          { label: "Sample Show", href: "/admin/trr-shows/sample-show" },
+          { label: "Shows", href: "/shows" },
+          { label: "Sample Show", href: "/shows/sample-show" },
         ]}
       />,
     );

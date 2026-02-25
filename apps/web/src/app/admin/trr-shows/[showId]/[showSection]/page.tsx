@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import type { Route } from "next";
 import ShowAdminPage from "../page";
 
 interface ShowSectionPageProps {
@@ -29,7 +30,7 @@ export default async function ShowSectionRedirectPage({ params }: ShowSectionPag
   if (seasonMatch) {
     const seasonNumber = Number.parseInt(seasonMatch[1], 10);
     if (Number.isFinite(seasonNumber)) {
-      redirect(`/admin/trr-shows/${showId}/seasons/${seasonNumber}`);
+      redirect(`/shows/${showId}/s${seasonNumber}` as Route);
     }
   }
 

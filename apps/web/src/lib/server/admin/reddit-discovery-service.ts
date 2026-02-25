@@ -101,6 +101,7 @@ export interface DiscoverEpisodeDiscussionThreadsInput {
   showName: string;
   showAliases?: string[] | null;
   seasonNumber: number;
+  seasonEpisodes?: Array<{ episode_number: number; air_date: string | null }> | null;
   episodeTitlePatterns?: string[] | null;
   episodeRequiredFlares?: string[] | null;
   isShowFocused?: boolean;
@@ -119,6 +120,21 @@ export interface DiscoverEpisodeDiscussionThreadsResult {
   rate_limited_sorts: RedditListingSort[];
   candidates: RedditEpisodeDiscussionCandidate[];
   episode_matrix: EpisodeDiscussionMatrixRow[];
+  expected_episode_count: number;
+  expected_episode_numbers: number[];
+  coverage_found_episode_count: number;
+  coverage_expected_slots: number;
+  coverage_found_slots: number;
+  coverage_missing_slots: Array<{
+    episode_number: number;
+    discussion_type: EpisodeDiscussionType;
+  }>;
+  discovery_source_summary: {
+    listing_count: number;
+    search_count: number;
+    search_pages_fetched: number;
+    gap_fill_queries_run: number;
+  };
   filters_applied: {
     season_number: number;
     title_patterns: string[];
@@ -160,6 +176,13 @@ interface RedditListingPayload {
   };
 }
 
+interface RedditSearchPayload {
+  data?: {
+    children?: RedditListingChild[];
+    after?: string | null;
+  };
+}
+
 interface SortFetchDiagnostics {
   successful_sorts: RedditListingSort[];
   failed_sorts: RedditListingSort[];
@@ -170,9 +193,14 @@ const DEFAULT_SORTS: RedditListingSort[] = ["new", "hot", "top"];
 const DEFAULT_LIMIT_PER_MODE = 35;
 const DEFAULT_EPISODE_LIMIT_PER_MODE = 65;
 const MAX_LIMIT_PER_MODE = 80;
+const MAX_SEARCH_LIMIT_PER_PAGE = 100;
 const DEFAULT_REDDIT_TIMEOUT_MS = 12_000;
 const DEFAULT_REDDIT_USER_AGENT = "TRRAdminRedditDiscovery/1.0 (+https://thereality.report)";
 const MAX_REDDIT_FETCH_RETRIES = 2;
+const MAX_SEARCH_PAGES_PER_BROAD_QUERY = 3;
+const MAX_SEARCH_PAGES_PER_GAP_QUERY = 1;
+const MAX_GAP_FILL_QUERIES = 12;
+const SEARCH_CONCURRENCY = 3;
 const RETRYABLE_REDDIT_STATUS = new Set([429, 502, 503, 504]);
 
 const FRANCHISE_EXCLUDE_TERMS = [
@@ -412,9 +440,29 @@ const toAbsoluteRedditUrl = (value: string): string => {
 const makeSortUrl = (subreddit: string, sort: RedditListingSort, limit: number): string => {
   const params = new URLSearchParams({ limit: String(limit), raw_json: "1" });
   if (sort === "top") {
-    params.set("t", "month");
+    params.set("t", "all");
   }
   return `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/${sort}.json?${params.toString()}`;
+};
+
+const makeSearchUrl = (
+  subreddit: string,
+  query: string,
+  limit: number,
+  after: string | null,
+): string => {
+  const params = new URLSearchParams({
+    q: query,
+    restrict_sr: "on",
+    sort: "new",
+    t: "all",
+    limit: String(limit),
+    raw_json: "1",
+  });
+  if (after) {
+    params.set("after", after);
+  }
+  return `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/search.json?${params.toString()}`;
 };
 
 const sleep = async (ms: number): Promise<void> =>
@@ -424,7 +472,7 @@ const sleep = async (ms: number): Promise<void> =>
 
 const parseListingPayload = (
   payload: RedditListingPayload,
-  sort: RedditListingSort,
+  sort: RedditListingSort | null,
 ): RedditDiscoveryThread[] => {
   const children = payload.data?.children ?? [];
   return children
@@ -447,7 +495,7 @@ const parseListingPayload = (
         num_comments: Number.isFinite(data.num_comments) ? (data.num_comments as number) : 0,
         posted_at: toIsoOrNull(data.created_utc),
         link_flair_text: flair,
-        source_sorts: [sort],
+        source_sorts: sort ? [sort] : [],
         matched_terms: [],
         matched_cast_terms: [],
         cross_show_terms: [],
@@ -513,6 +561,63 @@ const fetchSort = async (
     }
   }
   throw new RedditDiscoveryError("Failed to fetch subreddit threads", 502);
+};
+
+const fetchSearchPage = async (
+  subreddit: string,
+  query: string,
+  limit: number,
+  after: string | null,
+): Promise<{ rows: RedditDiscoveryThread[]; after: string | null }> => {
+  for (let attempt = 0; attempt <= MAX_REDDIT_FETCH_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), getFetchTimeoutMs());
+    try {
+      const response = await fetch(makeSearchUrl(subreddit, query, limit, after), {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": getRedditUserAgent(),
+        },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+
+      if (response.status === 404) {
+        throw new RedditDiscoveryError("Subreddit not found", 404);
+      }
+      if (response.status === 429) {
+        throw new RedditDiscoveryError("Reddit rate limit hit, try again shortly", 429);
+      }
+      if (!response.ok) {
+        const mappedStatus = RETRYABLE_REDDIT_STATUS.has(response.status) ? response.status : 502;
+        throw new RedditDiscoveryError(`Reddit search request failed (${response.status})`, mappedStatus);
+      }
+
+      const payload = (await response.json()) as RedditSearchPayload;
+      return {
+        rows: parseListingPayload(payload, null),
+        after: payload.data?.after ?? null,
+      };
+    } catch (error) {
+      const mappedError =
+        error instanceof RedditDiscoveryError
+          ? error
+          : (error as { name?: string } | null)?.name === "AbortError"
+            ? new RedditDiscoveryError("Reddit request timed out", 504)
+            : new RedditDiscoveryError("Failed to search subreddit threads", 502);
+      const shouldRetry =
+        RETRYABLE_REDDIT_STATUS.has(mappedError.status) && attempt < MAX_REDDIT_FETCH_RETRIES;
+      if (!shouldRetry) {
+        throw mappedError;
+      }
+
+      const retryDelayMs = 250 * 2 ** attempt + Math.floor(Math.random() * 120);
+      await sleep(retryDelayMs);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw new RedditDiscoveryError("Failed to search subreddit threads", 502);
 };
 
 const fetchSortsWithDiagnostics = async (
@@ -795,8 +900,14 @@ const toMatrixCell = (cell: MutableEpisodeMatrixCell): EpisodeDiscussionMatrixCe
 
 const buildEpisodeDiscussionMatrix = (
   candidates: RedditEpisodeDiscussionCandidate[],
+  expectedEpisodeNumbers: number[] = [],
 ): EpisodeDiscussionMatrixRow[] => {
   const byEpisode = new Map<number, MutableEpisodeMatrixRow>();
+  for (const episodeNumber of expectedEpisodeNumbers) {
+    if (!byEpisode.has(episodeNumber)) {
+      byEpisode.set(episodeNumber, createMutableEpisodeMatrixRow(episodeNumber));
+    }
+  }
 
   for (const candidate of candidates) {
     let row = byEpisode.get(candidate.episode_number);
@@ -836,6 +947,239 @@ const buildEpisodeDiscussionMatrix = (
       total_comments: row.total_comments,
       total_upvotes: row.total_upvotes,
     }));
+};
+
+const PRIMARY_DISCUSSION_SEARCH_PHRASE: Record<EpisodeDiscussionType, string> = {
+  live: "live episode discussion",
+  post: "post episode discussion",
+  weekly: "weekly episode discussion",
+};
+
+const quoteSearchToken = (value: string): string => `"${value.replace(/"/g, '\\"')}"`;
+
+const buildSearchShowTokens = (
+  showName: string,
+  showAliases: string[] | null | undefined,
+  showTerms: string[],
+): string[] => {
+  const seeded = [showName, ...(showAliases ?? [])]
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
+  return dedupeTerms([...seeded, ...showTerms])
+    .filter((value) => value.length >= 4 || value.startsWith("rho"))
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 4);
+};
+
+const buildBroadSearchQuery = (input: {
+  showTokens: string[];
+  seasonNumber: number;
+  discussionType: EpisodeDiscussionType;
+}): string => {
+  const showClause =
+    input.showTokens.length > 0
+      ? `(${input.showTokens.map(quoteSearchToken).join(" OR ")})`
+      : "";
+  const seasonClause = `(${quoteSearchToken(`season ${input.seasonNumber}`)} OR ${quoteSearchToken(
+    `s${input.seasonNumber}`,
+  )})`;
+  const discussionClause = quoteSearchToken(PRIMARY_DISCUSSION_SEARCH_PHRASE[input.discussionType]);
+  return [showClause, seasonClause, discussionClause].filter(Boolean).join(" ");
+};
+
+const buildGapFillSearchQuery = (input: {
+  showTokens: string[];
+  seasonNumber: number;
+  episodeNumber: number;
+  discussionType: EpisodeDiscussionType;
+}): string => {
+  const showClause =
+    input.showTokens.length > 0
+      ? `(${input.showTokens.map(quoteSearchToken).join(" OR ")})`
+      : "";
+  const seasonClause = quoteSearchToken(`season ${input.seasonNumber}`);
+  const episodeClause = `(${quoteSearchToken(`episode ${input.episodeNumber}`)} OR ${quoteSearchToken(
+    `e${input.episodeNumber}`,
+  )} OR ${quoteSearchToken(`s${input.seasonNumber}e${input.episodeNumber}`)})`;
+  const discussionClause = quoteSearchToken(PRIMARY_DISCUSSION_SEARCH_PHRASE[input.discussionType]);
+  return [showClause, seasonClause, episodeClause, discussionClause].filter(Boolean).join(" ");
+};
+
+const runSearchQuery = async (
+  subreddit: string,
+  query: string,
+  maxPages: number,
+): Promise<{ rows: RedditDiscoveryThread[]; pages_fetched: number }> => {
+  let after: string | null = null;
+  let pagesFetched = 0;
+  const rows: RedditDiscoveryThread[] = [];
+  while (pagesFetched < maxPages) {
+    const page = await fetchSearchPage(subreddit, query, MAX_SEARCH_LIMIT_PER_PAGE, after);
+    pagesFetched += 1;
+    rows.push(...page.rows);
+    after = page.after;
+    if (!after) break;
+  }
+  return { rows, pages_fetched: pagesFetched };
+};
+
+const runSearchQuerySet = async (input: {
+  subreddit: string;
+  queries: string[];
+  maxPagesPerQuery: number;
+  concurrency: number;
+}): Promise<{ rows: RedditDiscoveryThread[]; pages_fetched: number }> => {
+  const rows: RedditDiscoveryThread[] = [];
+  let pagesFetched = 0;
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(input.concurrency, input.queries.length)) },
+    () =>
+      (async () => {
+        while (true) {
+          const index = cursor;
+          cursor += 1;
+          const query = input.queries[index];
+          if (!query) return;
+          const result = await runSearchQuery(input.subreddit, query, input.maxPagesPerQuery);
+          rows.push(...result.rows);
+          pagesFetched += result.pages_fetched;
+        }
+      })(),
+  );
+
+  await Promise.all(workers);
+  return { rows, pages_fetched: pagesFetched };
+};
+
+const normalizeExpectedEpisodeNumbers = (
+  seasonEpisodes: DiscoverEpisodeDiscussionThreadsInput["seasonEpisodes"],
+): number[] => {
+  if (!Array.isArray(seasonEpisodes)) return [];
+  const numbers = new Set<number>();
+  for (const episode of seasonEpisodes) {
+    if (!episode || !Number.isFinite(episode.episode_number)) continue;
+    const parsed = Math.floor(episode.episode_number);
+    if (parsed > 0) numbers.add(parsed);
+  }
+  return [...numbers].sort((a, b) => a - b);
+};
+
+const slotKey = (episodeNumber: number, discussionType: EpisodeDiscussionType): string =>
+  `${episodeNumber}:${discussionType}`;
+
+const expectedDiscussionSlots = (episodeNumbers: number[]): Array<{
+  episode_number: number;
+  discussion_type: EpisodeDiscussionType;
+}> => {
+  const rows: Array<{ episode_number: number; discussion_type: EpisodeDiscussionType }> = [];
+  const types: EpisodeDiscussionType[] = ["live", "post", "weekly"];
+  for (const episodeNumber of episodeNumbers) {
+    for (const discussionType of types) {
+      rows.push({ episode_number: episodeNumber, discussion_type: discussionType });
+    }
+  }
+  return rows;
+};
+
+const collectEpisodeDiscussionCandidates = (input: {
+  subreddit: string;
+  threads: RedditDiscoveryThread[];
+  showTerms: string[];
+  titlePatterns: string[];
+  seasonNumber: number;
+  requiredFlairKeys: Set<string>;
+  isShowFocused: boolean;
+  periodStartDate: Date | null;
+  periodEndDate: Date | null;
+  expectedEpisodeNumberSet: Set<number>;
+}): RedditEpisodeDiscussionCandidate[] => {
+  const candidates: RedditEpisodeDiscussionCandidate[] = [];
+
+  for (const thread of input.threads) {
+    const title = normalizeText(thread.title);
+    const text = normalizeText(`${thread.title} ${thread.text ?? ""}`);
+    const discussionType = parseDiscussionTypeFromTitle(thread.title);
+    if (!discussionType) continue;
+    const matchedPatterns = input.titlePatterns.filter((pattern) => {
+      const normalizedPattern = normalizeText(pattern);
+      if (title.includes(normalizedPattern)) {
+        return true;
+      }
+      const patternType = inferDiscussionTypeFromPattern(pattern);
+      return patternType !== null && discussionType === patternType;
+    });
+    if (matchedPatterns.length === 0) continue;
+
+    const matchedShowTerms = findMatchedTerms(text, input.showTerms);
+    if (matchedShowTerms.length === 0) continue;
+    if (!hasSeasonToken(text, input.seasonNumber)) continue;
+
+    const episodeNumber = parseEpisodeNumberFromTitle(thread.title);
+    if (!episodeNumber) continue;
+    if (
+      input.expectedEpisodeNumberSet.size > 0 &&
+      !input.expectedEpisodeNumberSet.has(episodeNumber)
+    ) {
+      continue;
+    }
+
+    const postedAtDate = parseIsoDate(thread.posted_at);
+    if (input.periodStartDate || input.periodEndDate) {
+      if (!postedAtDate) continue;
+      if (input.periodStartDate && postedAtDate.getTime() < input.periodStartDate.getTime()) continue;
+      if (input.periodEndDate && postedAtDate.getTime() > input.periodEndDate.getTime()) continue;
+    }
+
+    const normalizedThreadFlair = thread.link_flair_text
+      ? normalizeRedditFlairLabel(input.subreddit, thread.link_flair_text)
+      : null;
+    if (!input.isShowFocused && input.requiredFlairKeys.size > 0) {
+      const flairKey = normalizedThreadFlair?.toLowerCase() ?? null;
+      if (!flairKey || !input.requiredFlairKeys.has(flairKey)) {
+        continue;
+      }
+    }
+
+    const matchReasons = [
+      `title pattern: ${matchedPatterns[0]}`,
+      `show term: ${matchedShowTerms[0]}`,
+      `season: ${input.seasonNumber}`,
+      `episode: ${episodeNumber}`,
+      `type: ${discussionType}`,
+    ];
+    if (normalizedThreadFlair) {
+      matchReasons.push(`flair: ${normalizedThreadFlair}`);
+    }
+
+    candidates.push({
+      reddit_post_id: thread.reddit_post_id,
+      title: thread.title,
+      text: thread.text,
+      url: thread.url,
+      permalink: thread.permalink,
+      author: thread.author,
+      score: thread.score,
+      num_comments: thread.num_comments,
+      posted_at: thread.posted_at,
+      link_flair_text: normalizedThreadFlair ?? thread.link_flair_text,
+      episode_number: episodeNumber,
+      discussion_type: discussionType,
+      source_sorts: thread.source_sorts,
+      match_reasons: matchReasons,
+    });
+  }
+
+  candidates.sort((a, b) => {
+    if (a.episode_number !== b.episode_number) return a.episode_number - b.episode_number;
+    if (DISCUSSION_TYPE_ORDER[a.discussion_type] !== DISCUSSION_TYPE_ORDER[b.discussion_type]) {
+      return DISCUSSION_TYPE_ORDER[a.discussion_type] - DISCUSSION_TYPE_ORDER[b.discussion_type];
+    }
+    if (b.num_comments !== a.num_comments) return b.num_comments - a.num_comments;
+    return b.score - a.score;
+  });
+
+  return candidates;
 };
 
 export async function discoverEpisodeDiscussionThreads(
@@ -879,87 +1223,129 @@ export async function discoverEpisodeDiscussionThreads(
     sortModes,
     limitPerMode,
   );
-  const mergedThreads = mergeByPostId(fetchedRows);
+  const mergedListingRows = mergeByPostId(fetchedRows);
+  const listingCount = mergedListingRows.length;
 
-  const candidates: RedditEpisodeDiscussionCandidate[] = [];
-  for (const thread of mergedThreads) {
-    const title = normalizeText(thread.title);
-    const text = normalizeText(`${thread.title} ${thread.text ?? ""}`);
-    const discussionType = parseDiscussionTypeFromTitle(thread.title);
-    if (!discussionType) continue;
-    const matchedPatterns = titlePatterns.filter((pattern) => {
-      const normalizedPattern = normalizeText(pattern);
-      if (title.includes(normalizedPattern)) {
-        return true;
-      }
-      const patternType = inferDiscussionTypeFromPattern(pattern);
-      return patternType !== null && discussionType === patternType;
+  const expectedEpisodeNumbers = normalizeExpectedEpisodeNumbers(input.seasonEpisodes);
+  const expectedEpisodeNumberSet = new Set(expectedEpisodeNumbers);
+  const expectedSlots = expectedDiscussionSlots(expectedEpisodeNumbers);
+  const expectedSlotKeys = new Set(
+    expectedSlots.map((slot) => slotKey(slot.episode_number, slot.discussion_type)),
+  );
+
+  const searchShowTokens = buildSearchShowTokens(input.showName, input.showAliases ?? [], showTerms);
+  let searchRows: RedditDiscoveryThread[] = [];
+  let searchPagesFetched = 0;
+  let gapFillQueriesRun = 0;
+
+  if (expectedEpisodeNumbers.length > 0) {
+    const broadQueries = (["live", "post", "weekly"] as EpisodeDiscussionType[]).map((discussionType) =>
+      buildBroadSearchQuery({
+        showTokens: searchShowTokens,
+        seasonNumber,
+        discussionType,
+      }),
+    );
+
+    const broadSearch = await runSearchQuerySet({
+      subreddit,
+      queries: broadQueries,
+      maxPagesPerQuery: MAX_SEARCH_PAGES_PER_BROAD_QUERY,
+      concurrency: SEARCH_CONCURRENCY,
     });
-    if (matchedPatterns.length === 0) continue;
-
-    const matchedShowTerms = findMatchedTerms(text, showTerms);
-    if (matchedShowTerms.length === 0) continue;
-
-    if (!hasSeasonToken(text, seasonNumber)) continue;
-    const episodeNumber = parseEpisodeNumberFromTitle(thread.title);
-    if (!episodeNumber) continue;
-
-    const postedAtDate = parseIsoDate(thread.posted_at);
-    if (periodStartDate || periodEndDate) {
-      if (!postedAtDate) continue;
-      if (periodStartDate && postedAtDate.getTime() < periodStartDate.getTime()) continue;
-      if (periodEndDate && postedAtDate.getTime() > periodEndDate.getTime()) continue;
-    }
-
-    const normalizedThreadFlair = thread.link_flair_text
-      ? normalizeRedditFlairLabel(subreddit, thread.link_flair_text)
-      : null;
-    if (!isShowFocused && requiredFlairKeys.size > 0) {
-      const flairKey = normalizedThreadFlair?.toLowerCase() ?? null;
-      if (!flairKey || !requiredFlairKeys.has(flairKey)) {
-        continue;
-      }
-    }
-
-    const matchReasons = [
-      `title pattern: ${matchedPatterns[0]}`,
-      `show term: ${matchedShowTerms[0]}`,
-      `season: ${seasonNumber}`,
-      `episode: ${episodeNumber}`,
-      `type: ${discussionType}`,
-    ];
-    if (normalizedThreadFlair) {
-      matchReasons.push(`flair: ${normalizedThreadFlair}`);
-    }
-
-    candidates.push({
-      reddit_post_id: thread.reddit_post_id,
-      title: thread.title,
-      text: thread.text,
-      url: thread.url,
-      permalink: thread.permalink,
-      author: thread.author,
-      score: thread.score,
-      num_comments: thread.num_comments,
-      posted_at: thread.posted_at,
-      link_flair_text: normalizedThreadFlair ?? thread.link_flair_text,
-      episode_number: episodeNumber,
-      discussion_type: discussionType,
-      source_sorts: thread.source_sorts,
-      match_reasons: matchReasons,
-    });
+    searchRows = broadSearch.rows;
+    searchPagesFetched = broadSearch.pages_fetched;
   }
 
-  candidates.sort((a, b) => {
-    if (a.episode_number !== b.episode_number) return a.episode_number - b.episode_number;
-    if (DISCUSSION_TYPE_ORDER[a.discussion_type] !== DISCUSSION_TYPE_ORDER[b.discussion_type]) {
-      return DISCUSSION_TYPE_ORDER[a.discussion_type] - DISCUSSION_TYPE_ORDER[b.discussion_type];
-    }
-    if (b.num_comments !== a.num_comments) return b.num_comments - a.num_comments;
-    return b.score - a.score;
+  let mergedThreads = mergeByPostId([...mergedListingRows, ...searchRows]);
+  let candidates = collectEpisodeDiscussionCandidates({
+    subreddit,
+    threads: mergedThreads,
+    showTerms,
+    titlePatterns,
+    seasonNumber,
+    requiredFlairKeys,
+    isShowFocused,
+    periodStartDate,
+    periodEndDate,
+    expectedEpisodeNumberSet,
   });
 
-  const episodeMatrix = buildEpisodeDiscussionMatrix(candidates);
+  const computeMissingSlots = (
+    evaluatedCandidates: RedditEpisodeDiscussionCandidate[],
+  ): Array<{ episode_number: number; discussion_type: EpisodeDiscussionType }> => {
+    if (expectedSlotKeys.size === 0) return [];
+    const found = new Set(
+      evaluatedCandidates
+        .map((candidate) => slotKey(candidate.episode_number, candidate.discussion_type))
+        .filter((key) => expectedSlotKeys.has(key)),
+    );
+    return expectedSlots.filter((slot) => !found.has(slotKey(slot.episode_number, slot.discussion_type)));
+  };
+
+  let missingSlots = computeMissingSlots(candidates);
+  if (expectedEpisodeNumbers.length > 0) {
+    const gapQueryQueue = missingSlots
+      .map((slot) =>
+        buildGapFillSearchQuery({
+          showTokens: searchShowTokens,
+          seasonNumber,
+          episodeNumber: slot.episode_number,
+          discussionType: slot.discussion_type,
+        }),
+      )
+      .slice(0, MAX_GAP_FILL_QUERIES);
+
+    for (const query of gapQueryQueue) {
+      if (missingSlots.length === 0) break;
+      const gapResult = await runSearchQuery(subreddit, query, MAX_SEARCH_PAGES_PER_GAP_QUERY);
+      gapFillQueriesRun += 1;
+      searchPagesFetched += gapResult.pages_fetched;
+      if (gapResult.rows.length === 0) {
+        continue;
+      }
+      searchRows = [...searchRows, ...gapResult.rows];
+      mergedThreads = mergeByPostId([...mergedListingRows, ...searchRows]);
+      candidates = collectEpisodeDiscussionCandidates({
+        subreddit,
+        threads: mergedThreads,
+        showTerms,
+        titlePatterns,
+        seasonNumber,
+        requiredFlairKeys,
+        isShowFocused,
+        periodStartDate,
+        periodEndDate,
+        expectedEpisodeNumberSet,
+      });
+      missingSlots = computeMissingSlots(candidates);
+    }
+  }
+
+  const episodeMatrix = buildEpisodeDiscussionMatrix(candidates, expectedEpisodeNumbers);
+  const foundEpisodeSet = new Set(
+    candidates
+      .map((candidate) => candidate.episode_number)
+      .filter((episodeNumber) =>
+        expectedEpisodeNumberSet.size > 0 ? expectedEpisodeNumberSet.has(episodeNumber) : true,
+      ),
+  );
+  const foundSlotKeys = new Set(
+    candidates
+      .map((candidate) => slotKey(candidate.episode_number, candidate.discussion_type))
+      .filter((key) => (expectedSlotKeys.size > 0 ? expectedSlotKeys.has(key) : true)),
+  );
+  const searchCount = mergeByPostId(searchRows).length;
+  const coverageExpectedSlots = expectedSlotKeys.size;
+  const coverageFoundSlots = coverageExpectedSlots > 0 ? foundSlotKeys.size : 0;
+  const coverageFoundEpisodeCount =
+    expectedEpisodeNumberSet.size > 0 ? foundEpisodeSet.size : new Set(candidates.map((candidate) => candidate.episode_number)).size;
+  const coverageMissingSlots =
+    coverageExpectedSlots > 0
+      ? expectedSlots.filter(
+          (slot) => !foundSlotKeys.has(slotKey(slot.episode_number, slot.discussion_type)),
+        )
+      : [];
 
   console.info("[reddit_discover_episode_discussions_complete]", {
     subreddit,
@@ -968,6 +1354,14 @@ export async function discoverEpisodeDiscussionThreads(
     successful_sorts: diagnostics.successful_sorts,
     failed_sorts: diagnostics.failed_sorts,
     rate_limited_sorts: diagnostics.rate_limited_sorts,
+    listing_count: listingCount,
+    search_count: searchCount,
+    search_pages_fetched: searchPagesFetched,
+    gap_fill_queries_run: gapFillQueriesRun,
+    expected_episode_count: expectedEpisodeNumbers.length,
+    coverage_found_episode_count: coverageFoundEpisodeCount,
+    coverage_expected_slots: coverageExpectedSlots,
+    coverage_found_slots: coverageFoundSlots,
     candidates_returned: candidates.length,
     duration_ms: Date.now() - requestStartedAt,
   });
@@ -981,6 +1375,18 @@ export async function discoverEpisodeDiscussionThreads(
     rate_limited_sorts: diagnostics.rate_limited_sorts,
     candidates,
     episode_matrix: episodeMatrix,
+    expected_episode_count: expectedEpisodeNumbers.length,
+    expected_episode_numbers: expectedEpisodeNumbers,
+    coverage_found_episode_count: coverageFoundEpisodeCount,
+    coverage_expected_slots: coverageExpectedSlots,
+    coverage_found_slots: coverageFoundSlots,
+    coverage_missing_slots: coverageMissingSlots,
+    discovery_source_summary: {
+      listing_count: listingCount,
+      search_count: searchCount,
+      search_pages_fetched: searchPagesFetched,
+      gap_fill_queries_run: gapFillQueriesRun,
+    },
     filters_applied: {
       season_number: seasonNumber,
       title_patterns: titlePatterns,

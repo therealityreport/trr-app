@@ -47,7 +47,7 @@ describe("AdminGlobalHeader", () => {
       "Games",
       "Survey Editor",
       "Social Media",
-      "Networks & Streaming",
+      "Brands",
       "Users",
       "Groups",
       "UI Design System",
@@ -58,7 +58,7 @@ describe("AdminGlobalHeader", () => {
 
     expect(screen.getByRole("button", { name: "Toggle shows submenu" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("No recent shows yet.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/admin/trr-shows");
+    expect(screen.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/shows");
   });
 
   it("renders recent shows from storage and limits to five", async () => {
@@ -68,7 +68,7 @@ describe("AdminGlobalHeader", () => {
         Array.from({ length: 6 }, (_, index) => ({
           slug: `show-${index + 1}`,
           label: `Show ${index + 1}`,
-          href: `/admin/trr-shows/show-${index + 1}`,
+          href: `/shows/show-${index + 1}`,
           touchedAt: index + 1,
         })),
       ),

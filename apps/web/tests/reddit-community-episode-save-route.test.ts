@@ -86,6 +86,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/save",
       expect.objectContaining({
         trrShowId: SHOW_ID,
         trrShowName: "The Real Housewives of Salt Lake City",
+        sourceKind: "episode_discussion",
       }),
     );
   });

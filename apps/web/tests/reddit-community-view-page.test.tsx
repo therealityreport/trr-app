@@ -54,7 +54,7 @@ describe("reddit community view page", () => {
     usePathnameMock.mockReturnValue("/admin/social-media/reddit/communities/community-1");
     useSearchParamsMock.mockReturnValue(
       new URLSearchParams({
-        return_to: "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/6?tab=social&social_platform=reddit",
+        return_to: "/shows/the-real-housewives-of-salt-lake-city/s6/social/reddit",
       }),
     );
 
@@ -63,7 +63,7 @@ describe("reddit community view page", () => {
     expect(screen.getByTestId("reddit-sources-manager")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute(
       "href",
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/6?tab=social&social_platform=reddit",
+      "/shows/the-real-housewives-of-salt-lake-city/s6/social/reddit",
     );
 
     expect(redditSourcesManagerMock).toHaveBeenLastCalledWith(
@@ -83,6 +83,7 @@ describe("reddit community view page", () => {
       managerProps?.onCommunityContextChange?.({
         communityLabel: "r/BravoRealHousewives",
         showLabel: "RHOSLC",
+        showFullName: "The Real Housewives of Salt Lake City",
         showSlug: "the-real-housewives-of-salt-lake-city",
         seasonLabel: "S6",
         showId: "show-1",
@@ -91,27 +92,42 @@ describe("reddit community view page", () => {
       });
     });
 
-    expect(screen.getByRole("heading", { name: "r/BravoRealHousewives" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "The Real Housewives of Salt Lake City · Season 6",
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
-    expect(screen.getByRole("link", { name: "RHOSLC" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Shows" })).toHaveAttribute("href", "/shows");
+    expect(
+      screen.getByRole("link", { name: "The Real Housewives of Salt Lake City" }),
+    ).toHaveAttribute(
       "href",
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city",
+      "/shows/the-real-housewives-of-salt-lake-city",
     );
-    expect(screen.getByRole("link", { name: "S6" })).toHaveAttribute(
+    expect(
+      screen
+        .getAllByRole("link", { name: "Social Media" })
+        .some(
+          (link) =>
+            link.getAttribute("href") === "/shows/the-real-housewives-of-salt-lake-city/s6/social/reddit",
+        ),
+    ).toBe(true);
+    expect(screen.getByRole("link", { name: "Reddit Analytics" })).toHaveAttribute(
       "href",
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/6",
+      "/shows/the-real-housewives-of-salt-lake-city/s6/social/reddit",
     );
-    expect(screen.getByRole("link", { name: "Social Analytics" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute(
       "href",
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/6?tab=social",
+      "/shows/the-real-housewives-of-salt-lake-city",
     );
-    expect(screen.getByRole("link", { name: "Reddit" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Social Media" })).toHaveAttribute(
       "href",
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/6?tab=social&social_platform=reddit",
+      "/shows/the-real-housewives-of-salt-lake-city/s6/social/reddit",
     );
-    expect(screen.getByRole("link", { name: "r/BravoRealHousewives" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "REDDIT ANALYTICS" })).toHaveAttribute(
       "href",
-      "/admin/social-media/reddit/communities/community-1?return_to=%2Fadmin%2Ftrr-shows%2Fthe-real-housewives-of-salt-lake-city%2Fseasons%2F6%3Ftab%3Dsocial%26social_platform%3Dreddit",
+      "/shows/the-real-housewives-of-salt-lake-city/s6/social/reddit",
     );
   });
 
@@ -131,6 +147,26 @@ describe("reddit community view page", () => {
         backHref: "/admin/social-media",
         episodeDiscussionsPlacement: "inline",
         enableEpisodeSync: true,
+      }),
+    );
+  });
+
+  it("rejects non-local return_to values and keeps default back href", () => {
+    useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
+    useParamsMock.mockReturnValue({ communityId: "community-3" });
+    usePathnameMock.mockReturnValue("/admin/social-media/reddit/communities/community-3");
+    useSearchParamsMock.mockReturnValue(
+      new URLSearchParams({
+        return_to: "https://example.com/not-allowed",
+      }),
+    );
+
+    render(<RedditCommunityViewPage />);
+
+    expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute("href", "/admin/social-media");
+    expect(redditSourcesManagerMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        backHref: "/admin/social-media",
       }),
     );
   });

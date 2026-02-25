@@ -30,7 +30,7 @@ vi.mock("@/lib/admin/client-auth", () => ({
 }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/admin/networks/network/bravo",
+  usePathname: () => "/admin/networks-and-streaming/network/bravo",
   useParams: () => mocks.params,
   useRouter: () => mocks.router,
 }));
@@ -177,7 +177,7 @@ describe("Admin network detail page", () => {
 
     await waitFor(() => {
       const suggestionLink = screen.getByRole("link", { name: "Bravo" });
-      expect(suggestionLink).toHaveAttribute("href", "/admin/networks/network/bravo");
+      expect(suggestionLink).toHaveAttribute("href", "/admin/networks-and-streaming/network/bravo");
     });
   });
 

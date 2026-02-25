@@ -22,7 +22,7 @@ test.describe("admin global header menu", () => {
       "Games",
       "Survey Editor",
       "Social Media",
-      "Networks & Streaming",
+      "Brands",
       "Users",
       "Groups",
       "UI Design System",
@@ -32,7 +32,7 @@ test.describe("admin global header menu", () => {
     }
 
     await expect(nav.getByRole("button", { name: "Toggle shows submenu" })).toHaveAttribute("aria-expanded", "true");
-    await expect(nav.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/admin/trr-shows");
+    await expect(nav.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/shows");
   });
 
   test("limits recent shows submenu to the latest five", async ({ page }) => {
@@ -40,7 +40,7 @@ test.describe("admin global header menu", () => {
       const entries = Array.from({ length: 6 }, (_, index) => ({
         slug: `show-${index + 1}`,
         label: `Show ${index + 1}`,
-        href: `/admin/trr-shows/show-${index + 1}`,
+        href: `/shows/show-${index + 1}`,
         touchedAt: index + 1,
       }));
       window.localStorage.setItem(storageKey, JSON.stringify(entries));
@@ -99,7 +99,7 @@ test.describe("admin global header menu", () => {
       "epsilon-show",
       "zeta-show",
     ]) {
-      await page.goto(`/admin/trr-shows/${slug}`);
+      await page.goto(`/shows/${slug}`);
       await waitForAdminReady(page);
     }
 
@@ -115,15 +115,15 @@ test.describe("admin global header menu", () => {
       elements.map((element) => element.getAttribute("href")),
     );
     expect(hrefs).toEqual([
-      "/admin/trr-shows/zeta-show",
-      "/admin/trr-shows/epsilon-show",
-      "/admin/trr-shows/delta-show",
-      "/admin/trr-shows/gamma-show",
-      "/admin/trr-shows/beta-show",
+      "/shows/zeta-show",
+      "/shows/epsilon-show",
+      "/shows/delta-show",
+      "/shows/gamma-show",
+      "/shows/beta-show",
     ]);
 
     await expect(nav.getByRole("link", { name: "View All Shows" })).toBeVisible();
-    await expect(nav.locator('a[href="/admin/trr-shows/alpha-show"]')).toHaveCount(0);
+    await expect(nav.locator('a[href="/shows/alpha-show"]')).toHaveCount(0);
   });
 
   test("closes on escape, backdrop click, and navigation", async ({ page }) => {

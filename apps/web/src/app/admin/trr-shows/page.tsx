@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
@@ -10,6 +11,7 @@ import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
+import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 
 interface TrrShow {
   id: string;
@@ -34,6 +36,7 @@ interface CoveredShow {
   trr_show_id: string;
   show_name: string;
   canonical_slug?: string | null;
+  alternative_names?: string[] | null;
   show_total_episodes?: number | null;
   poster_url?: string | null;
   created_at: string;
@@ -403,7 +406,7 @@ export default function TrrShowsPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-5">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows", "/admin/trr-shows")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows", "/shows")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Shows</h1>
               <p className="text-sm text-zinc-500">
                 Browse shows from the TRR metadata database. Create surveys and
@@ -469,6 +472,12 @@ export default function TrrShowsPage() {
                         const isCovered = coveredShowIds.has(show.id);
                         const displayName = getShowDisplayName(show);
                         const networks = show.networks.slice(0, 2).join(" · ");
+                        const routeSlug = resolvePreferredShowRouteSlug({
+                          alternativeNames: show.alternative_names,
+                          canonicalSlug: show.canonical_slug,
+                          slug: show.slug,
+                          fallback: show.id,
+                        });
                         const seasonsText =
                           typeof show.show_total_seasons === "number" && show.show_total_seasons > 0
                             ? `${show.show_total_seasons} seasons`
@@ -480,8 +489,8 @@ export default function TrrShowsPage() {
                             <div className="min-w-0 flex-1">
                               <Link
                                 href={buildShowAdminUrl({
-                                  showSlug: show.canonical_slug || show.slug || show.id,
-                                }) as "/admin/trr-shows"}
+                                  showSlug: routeSlug,
+                                }) as Route}
                                 className="block rounded-md px-1 py-0.5 transition hover:bg-zinc-50"
                               >
                                 <p className="truncate text-sm font-semibold text-zinc-900">
@@ -601,10 +610,11 @@ export default function TrrShowsPage() {
                   const label = getCoveredShowDisplayName(show.show_name);
                   const posterUrl = normalizePosterUrl(show.poster_url);
                   const totalEpisodes = toFiniteNumber(show.show_total_episodes);
-                  const canonicalSlug =
-                    typeof show.canonical_slug === "string" && show.canonical_slug.trim()
-                      ? show.canonical_slug.trim()
-                      : show.trr_show_id;
+                  const routeSlug = resolvePreferredShowRouteSlug({
+                    alternativeNames: show.alternative_names,
+                    canonicalSlug: show.canonical_slug,
+                    fallback: show.show_name || show.trr_show_id,
+                  });
                   return (
                     <div
                       key={show.id}
@@ -612,8 +622,8 @@ export default function TrrShowsPage() {
                     >
                       <Link
                         href={buildShowAdminUrl({
-                          showSlug: canonicalSlug,
-                        }) as "/admin/trr-shows"}
+                          showSlug: routeSlug,
+                        }) as Route}
                         className="group flex min-w-0 flex-1 items-start gap-3"
                       >
                         <div className="relative w-20 flex-shrink-0 aspect-[4/5] overflow-hidden rounded-md bg-zinc-200">

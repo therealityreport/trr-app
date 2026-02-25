@@ -9,7 +9,7 @@ describe("admin navigation config", () => {
       "Games",
       "Survey Editor",
       "Social Media",
-      "Networks & Streaming",
+      "Brands",
       "Users",
       "Groups",
       "UI Design System",
@@ -18,11 +18,11 @@ describe("admin navigation config", () => {
 
     expect(ADMIN_NAV_ITEMS.map((item) => item.href)).toEqual([
       "/admin/dev-dashboard",
-      "/admin/trr-shows",
+      "/shows",
       "/admin/games",
       "/admin/surveys",
       "/admin/social-media",
-      "/admin/networks",
+      "/admin/brands",
       "/admin/users",
       "/admin/groups",
       "/admin/fonts",
@@ -34,7 +34,7 @@ describe("admin navigation config", () => {
     const submenuItems = ADMIN_NAV_ITEMS.filter((item) => item.hasShowsSubmenu);
     expect(submenuItems).toHaveLength(1);
     expect(submenuItems[0]?.title).toBe("Shows");
-    expect(submenuItems[0]?.href).toBe("/admin/trr-shows");
+    expect(submenuItems[0]?.href).toBe("/shows");
   });
 
   it("reuses the shared navigation config for dashboard tools", () => {

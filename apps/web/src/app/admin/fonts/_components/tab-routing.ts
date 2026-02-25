@@ -1,4 +1,4 @@
-export type TabId = "fonts" | "questions" | "colors" | "buttons";
+export type TabId = "fonts" | "questions" | "colors" | "buttons" | "nyt-occurrences";
 
 export type TabDefinition = {
   id: TabId;
@@ -11,6 +11,7 @@ export const TAB_DEFINITIONS: TabDefinition[] = [
   { id: "colors", label: "Colors", queryValue: "colors" },
   { id: "buttons", label: "Buttons", queryValue: "buttons" },
   { id: "questions", label: "Questions & Forms", queryValue: "questions-forms" },
+  { id: "nyt-occurrences", label: "NYT Occurrences", queryValue: "nyt-occurrences" },
 ];
 
 const TAB_QUERY_TO_ID: Record<string, TabId> = {
@@ -19,6 +20,8 @@ const TAB_QUERY_TO_ID: Record<string, TabId> = {
   buttons: "buttons",
   questions: "questions",
   "questions-forms": "questions",
+  nyt: "nyt-occurrences",
+  "nyt-occurrences": "nyt-occurrences",
 };
 
 export function getTabFromQuery(tabQueryValue: string | null): TabId {
@@ -35,11 +38,13 @@ export type TabHref =
   | "/admin/fonts"
   | "/admin/fonts?tab=colors"
   | "/admin/fonts?tab=buttons"
-  | "/admin/fonts?tab=questions-forms";
+  | "/admin/fonts?tab=questions-forms"
+  | "/admin/fonts?tab=nyt-occurrences";
 
 export function buildTabHref(tabId: TabId): TabHref {
   if (tabId === "colors") return "/admin/fonts?tab=colors";
   if (tabId === "buttons") return "/admin/fonts?tab=buttons";
   if (tabId === "questions") return "/admin/fonts?tab=questions-forms";
+  if (tabId === "nyt-occurrences") return "/admin/fonts?tab=nyt-occurrences";
   return "/admin/fonts";
 }
