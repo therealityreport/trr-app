@@ -21,7 +21,9 @@ interface AdminGlobalHeaderProps {
 }
 
 export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6" }: AdminGlobalHeaderProps) {
-  const pathname = usePathnameSafe();
+  const rawPathname = usePathnameSafe();
+  const pathname =
+    typeof rawPathname === "string" && rawPathname.startsWith("/") ? rawPathname : "/";
   const [menuOpen, setMenuOpen] = useState(false);
   const [recentShows, setRecentShows] = useState<AdminRecentShowEntry[]>([]);
 

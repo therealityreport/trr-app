@@ -11,11 +11,14 @@ describe("show news tab google wiring", () => {
     expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{(?:showId|requestShowId)\}\/google-news\/sync\/\$\{encodeURIComponent\(jobId\)\}/);
     expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{(?:showId|requestShowId)\}\/news\?/);
     expect(contents).toMatch(/setNewsSort\("trending"\)/);
-    expect(contents).toMatch(/setNewsSort\("latest"\)/);
+    expect(contents).toMatch(/onSetNewsSort=\{setNewsSort\}/);
     expect(contents).toMatch(/setNewsSourceFilter/);
     expect(contents).toMatch(/setNewsPersonFilter/);
     expect(contents).toMatch(/setNewsTopicFilter/);
     expect(contents).toMatch(/setNewsSeasonFilter/);
+    expect(contents).toMatch(/syncGoogleNews\(/);
+    expect(contents).toMatch(/const loadUnifiedNews = useCallback/);
+    expect(contents).toMatch(/sort: newsSort/);
     expect(contents).toMatch(/newsRequestSeqRef/);
     expect(contents).toMatch(/newsInFlightQueryKeyRef/);
     expect(contents).toMatch(/pendingNewsReloadRef/);
