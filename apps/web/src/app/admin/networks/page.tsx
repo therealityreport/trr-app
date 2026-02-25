@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming-entity";
@@ -483,7 +484,7 @@ export default function AdminNetworksPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Networks & Streaming", "/admin/networks")} className="mb-1" />
@@ -501,7 +502,7 @@ export default function AdminNetworksPage() {
               </Link>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">

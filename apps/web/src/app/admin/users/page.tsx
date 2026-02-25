@@ -3,6 +3,7 @@
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
@@ -27,10 +28,10 @@ export default function AdminUsersPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Users")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Users", "/admin/users")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Users</h1>
               <p className="text-sm text-zinc-500">User and access management tools.</p>
             </div>
@@ -41,7 +42,7 @@ export default function AdminUsersPage() {
               Back to Admin
             </Link>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">

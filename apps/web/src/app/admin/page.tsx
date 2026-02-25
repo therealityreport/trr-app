@@ -3,74 +3,10 @@
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminRootBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_DASHBOARD_TOOLS } from "@/lib/admin/admin-navigation";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-
-const ADMIN_TOOLS = [
-  {
-    key: "dev-dashboard",
-    title: "Dev Dashboard",
-    description: "Git status, branches, PRs, commits, and outstanding tasks across all TRR workspace repos.",
-    href: "/admin/dev-dashboard" as const,
-    badge: "Dev",
-  },
-  {
-    key: "trr-shows",
-    title: "Shows",
-    description: "Browse the TRR metadata database. View shows, seasons, cast, and create linked surveys.",
-    href: "/admin/trr-shows" as const,
-    badge: "API",
-  },
-  {
-    key: "networks-streaming",
-    title: "Networks & Streaming",
-    description: "View network/provider coverage counts and run sync/mirror enrichment workflows.",
-    href: "/admin/networks" as const,
-    badge: "Data",
-  },
-  {
-    key: "users",
-    title: "Users",
-    description: "Manage users, roles, and admin access controls.",
-    href: "/admin/users" as const,
-    badge: "Admin",
-  },
-  {
-    key: "games",
-    title: "Games",
-    description: "Manage games and interactive experiences.",
-    href: "/admin/games" as const,
-    badge: "Games",
-  },
-  {
-    key: "social-media",
-    title: "Social Media",
-    description: "Manage social media pipelines, templates, and publishing workflows.",
-    href: "/admin/social-media" as const,
-    badge: "Social",
-  },
-  {
-    key: "groups",
-    title: "Groups",
-    description: "Manage user groups and community segmentation.",
-    href: "/admin/groups" as const,
-    badge: "Groups",
-  },
-  {
-    key: "settings",
-    title: "Settings",
-    description: "Configure environment and application settings.",
-    href: "/admin/settings" as const,
-    badge: "Settings",
-  },
-  {
-    key: "design-system",
-    title: "UI Design System",
-    description: "Reference for fonts, survey question components, and form patterns used across the app.",
-    href: "/admin/fonts" as const,
-    badge: "Design",
-  },
-] as const;
 
 export default function AdminDashboardPage() {
   const { user, checking, hasAccess } = useAdminGuard();
@@ -95,7 +31,7 @@ export default function AdminDashboardPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <AdminBreadcrumbs items={buildAdminRootBreadcrumb()} className="mb-1" />
@@ -113,7 +49,7 @@ export default function AdminDashboardPage() {
               </Link>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           <section className="mb-8 rounded-2xl border border-zinc-200 bg-white/80 p-6 shadow-sm">
@@ -137,11 +73,11 @@ export default function AdminDashboardPage() {
                 <p className="text-sm text-zinc-500">Jump into any admin experience from one place.</p>
               </div>
               <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-600">
-                {ADMIN_TOOLS.length} tools
+                {ADMIN_DASHBOARD_TOOLS.length} tools
               </span>
             </div>
             <div className="grid gap-6 md:grid-cols-2">
-              {ADMIN_TOOLS.map((tool) => (
+              {ADMIN_DASHBOARD_TOOLS.map((tool) => (
                 <Link
                   key={tool.key}
                   href={tool.href}

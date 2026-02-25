@@ -5,9 +5,14 @@ import {
   discoverEpisodeDiscussionThreads,
   type RedditListingSort,
 } from "@/lib/server/admin/reddit-discovery-service";
-import { getRedditCommunityById } from "@/lib/server/admin/reddit-sources-repository";
+import type { AuthContext } from "@/lib/server/postgres";
+import {
+  createRedditThread,
+  getRedditCommunityById,
+} from "@/lib/server/admin/reddit-sources-repository";
 import { resolveEpisodeDiscussionRules } from "@/lib/server/admin/reddit-episode-rules";
 import {
+  getEpisodesBySeasonId,
   getSeasonById,
   getSeasonsByShowId,
   getShowById,
@@ -23,6 +28,24 @@ interface RouteParams {
 const SORTS: RedditListingSort[] = ["new", "hot", "top"];
 const MAX_PERIOD_LABELS = 5;
 const MAX_PERIOD_LABEL_LENGTH = 120;
+const EPISODE_SYNC_TIME_ZONE = "America/New_York";
+type SyncCandidateStatus = "auto_saved" | "skipped_conflict" | "not_eligible";
+type SyncCandidateReasonCode =
+  | "auto_saved_success"
+  | "already_saved_other_community"
+  | "author_not_automoderator"
+  | "title_missing_episode_discussion"
+  | "missing_episode_air_date"
+  | "missing_post_timestamp"
+  | "invalid_post_timestamp"
+  | "posted_date_mismatch";
+
+interface SyncCandidateResult {
+  reddit_post_id: string;
+  status: SyncCandidateStatus;
+  reason_code: SyncCandidateReasonCode;
+  reason: string;
+}
 
 const parseSortModes = (input: string | null): RedditListingSort[] => {
   if (!input) return SORTS;
@@ -70,10 +93,101 @@ const sanitizePeriodLabels = (values: string[]): string[] => {
   return output;
 };
 
+const parseBoolean = (input: string | null): boolean => {
+  if (!input) return false;
+  const normalized = input.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const formatDateKeyInTimeZone = (value: string, timeZone: string): string | null => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(parsed);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) return null;
+  return `${year}-${month}-${day}`;
+};
+
+const normalizeAirDateKey = (value: string | null | undefined): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const direct = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (direct) {
+    return `${direct[1]}-${direct[2]}-${direct[3]}`;
+  }
+  return formatDateKeyInTimeZone(trimmed, EPISODE_SYNC_TIME_ZONE);
+};
+
+const evaluateEpisodeSyncEligibility = (input: {
+  author: string | null;
+  title: string;
+  postedAt: string | null;
+  episodeAirDateKey: string | null;
+}): { eligible: boolean; reason: string; reasonCode: SyncCandidateReasonCode } => {
+  if ((input.author ?? "").trim().toLowerCase() !== "automoderator") {
+    return {
+      eligible: false,
+      reason: "Author is not AutoModerator.",
+      reasonCode: "author_not_automoderator",
+    };
+  }
+  if (!/episode discussion/i.test(input.title)) {
+    return {
+      eligible: false,
+      reason: "Title does not include 'Episode Discussion'.",
+      reasonCode: "title_missing_episode_discussion",
+    };
+  }
+  if (!input.postedAt || !input.episodeAirDateKey) {
+    if (!input.episodeAirDateKey) {
+      return {
+        eligible: false,
+        reason: "No episode air date found for parsed episode number.",
+        reasonCode: "missing_episode_air_date",
+      };
+    }
+    return {
+      eligible: false,
+      reason: "Post timestamp is missing.",
+      reasonCode: "missing_post_timestamp",
+    };
+  }
+  const postedDateKey = formatDateKeyInTimeZone(input.postedAt, EPISODE_SYNC_TIME_ZONE);
+  if (!postedDateKey) {
+    return {
+      eligible: false,
+      reason: "Post timestamp is invalid.",
+      reasonCode: "invalid_post_timestamp",
+    };
+  }
+  if (postedDateKey !== input.episodeAirDateKey) {
+    return {
+      eligible: false,
+      reason: `Post date ${postedDateKey} does not match episode air date ${input.episodeAirDateKey} (${EPISODE_SYNC_TIME_ZONE}).`,
+      reasonCode: "posted_date_mismatch",
+    };
+  }
+  return {
+    eligible: true,
+    reason: "Eligible for auto-sync.",
+    reasonCode: "auto_saved_success",
+  };
+};
+
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const requestStartedAt = Date.now();
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
+    const authContext: AuthContext = { firebaseUid: user.uid, isAdmin: true };
 
     const { communityId } = await params;
     if (!communityId) {
@@ -96,6 +210,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const seasonId = request.nextUrl.searchParams.get("season_id");
+    const syncRequested = parseBoolean(request.nextUrl.searchParams.get("sync"));
     if (seasonId && !isValidUuid(seasonId)) {
       return NextResponse.json({ error: "season_id must be a valid UUID" }, { status: 400 });
     }
@@ -193,6 +308,83 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       request.nextUrl.searchParams.getAll("period_label"),
     );
 
+    const episodeAirDateByNumber = new Map<number, string>();
+    if (syncRequested) {
+      const episodes = await getEpisodesBySeasonId(resolvedSeason.id, { limit: 500, offset: 0 });
+      for (const episode of episodes) {
+        if (!Number.isFinite(episode.episode_number)) continue;
+        const airDateKey = normalizeAirDateKey(episode.air_date);
+        if (!airDateKey) continue;
+        if (!episodeAirDateByNumber.has(episode.episode_number)) {
+          episodeAirDateByNumber.set(episode.episode_number, airDateKey);
+        }
+      }
+    }
+
+    const syncAutoSavedPostIds: string[] = [];
+    const syncSkippedConflicts: string[] = [];
+    const syncCandidateResults: SyncCandidateResult[] = [];
+    let syncSkippedIneligibleCount = 0;
+    if (syncRequested) {
+      for (const candidate of discovery.candidates) {
+        const episodeAirDateKey = episodeAirDateByNumber.get(candidate.episode_number) ?? null;
+        const evaluation = evaluateEpisodeSyncEligibility({
+          author: candidate.author,
+          title: candidate.title,
+          postedAt: candidate.posted_at,
+          episodeAirDateKey,
+        });
+        if (!evaluation.eligible) {
+          syncSkippedIneligibleCount += 1;
+          syncCandidateResults.push({
+            reddit_post_id: candidate.reddit_post_id,
+            status: "not_eligible",
+            reason_code: evaluation.reasonCode,
+            reason: evaluation.reason,
+          });
+          continue;
+        }
+        try {
+          await createRedditThread(authContext, {
+            communityId,
+            trrShowId: community.trr_show_id,
+            trrShowName: community.trr_show_name,
+            trrSeasonId: resolvedSeason.id,
+            redditPostId: candidate.reddit_post_id,
+            title: candidate.title,
+            url: candidate.url,
+            permalink: candidate.permalink,
+            author: candidate.author,
+            score: candidate.score,
+            numComments: candidate.num_comments,
+            postedAt: candidate.posted_at,
+          });
+          syncAutoSavedPostIds.push(candidate.reddit_post_id);
+          syncCandidateResults.push({
+            reddit_post_id: candidate.reddit_post_id,
+            status: "auto_saved",
+            reason_code: "auto_saved_success",
+            reason: "Auto-synced successfully.",
+          });
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === "Thread already exists in another community for this show"
+          ) {
+            syncSkippedConflicts.push(candidate.reddit_post_id);
+            syncCandidateResults.push({
+              reddit_post_id: candidate.reddit_post_id,
+              status: "skipped_conflict",
+              reason_code: "already_saved_other_community",
+              reason: "Already saved in another community for this show.",
+            });
+            continue;
+          }
+          throw error;
+        }
+      }
+    }
+
     console.info("[reddit_episode_refresh_complete]", {
       community_id: communityId,
       show_id: showId,
@@ -203,6 +395,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       failed_sorts: discovery.failed_sorts,
       rate_limited_sorts: discovery.rate_limited_sorts,
       candidates_found: discovery.candidates.length,
+      sync_requested: syncRequested,
+      sync_auto_saved_count: syncAutoSavedPostIds.length,
+      sync_skipped_conflicts_count: syncSkippedConflicts.length,
+      sync_skipped_ineligible_count: syncSkippedIneligibleCount,
       duration_ms: Date.now() - requestStartedAt,
     });
 
@@ -231,6 +427,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             parsedPeriodEnd.value ?? discovery.filters_applied.period_end ?? null,
           selected_period_labels: selectedPeriodLabels,
         },
+        sync_requested: syncRequested,
+        sync_auto_saved_count: syncAutoSavedPostIds.length,
+        sync_auto_saved_post_ids: syncAutoSavedPostIds,
+        sync_skipped_conflicts: syncSkippedConflicts,
+        sync_skipped_ineligible_count: syncSkippedIneligibleCount,
+        sync_candidate_results: syncCandidateResults,
       },
     });
   } catch (error) {

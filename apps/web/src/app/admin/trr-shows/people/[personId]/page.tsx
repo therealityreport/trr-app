@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildPersonBreadcrumb, humanizeSlug } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
@@ -17,15 +18,23 @@ import {
   cleanLegacyPersonRoutingQuery,
   parsePersonRouteState,
 } from "@/lib/admin/show-admin-routes";
+import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
-import FandomSyncModal, {
-  type FandomSyncOptions,
-  type FandomSyncPreviewResponse,
-} from "@/components/admin/FandomSyncModal";
+import ShowNewsTab from "@/components/admin/show-tabs/ShowNewsTab";
+import FandomSyncModal from "@/components/admin/FandomSyncModal";
 import ReassignImageModal from "@/components/admin/ReassignImageModal";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
+import {
+  type FandomDynamicSection,
+  type FandomSyncOptions,
+  type FandomSyncPreviewResponse,
+  fandomSectionBucket,
+  normalizeFandomBioCard,
+  normalizeFandomDynamicSections,
+  normalizeFandomSyncPreviewResponse,
+} from "@/lib/admin/fandom-sync-types";
 import { mapPhotoToMetadata, resolveMetadataDimensions } from "@/lib/photo-metadata";
 import {
   THUMBNAIL_CROP_LIMITS,
@@ -377,10 +386,47 @@ interface BravoVideoItem {
 
 interface BravoNewsItem {
   headline?: string | null;
+  source_id?: string | null;
+  publisher_name?: string | null;
+  publisher_domain?: string | null;
+  feed_rank?: number | null;
+  hosted_image_url?: string | null;
+  original_image_url?: string | null;
   image_url?: string | null;
   article_url: string;
   published_at?: string | null;
   person_tags?: BravoPersonTag[];
+  topic_tags?: string[] | null;
+  season_matches?: Array<{ season_number?: number | null; match_types?: string[] | null }> | null;
+}
+
+interface UnifiedNewsFacetSource {
+  token: string;
+  label: string;
+  count: number;
+}
+
+interface UnifiedNewsFacetPerson {
+  person_id: string;
+  person_name: string;
+  count: number;
+}
+
+interface UnifiedNewsFacetTopic {
+  topic: string;
+  count: number;
+}
+
+interface UnifiedNewsFacetSeason {
+  season_number: number;
+  count: number;
+}
+
+interface UnifiedNewsFacets {
+  sources: UnifiedNewsFacetSource[];
+  people: UnifiedNewsFacetPerson[];
+  topics: UnifiedNewsFacetTopic[];
+  seasons: UnifiedNewsFacetSeason[];
 }
 
 type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom";
@@ -568,8 +614,20 @@ const PERSON_PAGE_STREAM_START_DEADLINE_MS = 20_000;
 const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
 const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
 const BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
+const NEWS_LOAD_TIMEOUT_MS = 45_000;
+const NEWS_SYNC_TIMEOUT_MS = 60_000;
+const NEWS_SYNC_POLL_INTERVAL_MS = 1_500;
+const NEWS_SYNC_POLL_TIMEOUT_MS = 90_000;
+const NEWS_PAGE_SIZE = 50;
 const MAX_PHOTO_FETCH_PAGES = 30;
 const TEXT_OVERLAY_DETECT_CONCURRENCY = 4;
+
+const EMPTY_NEWS_FACETS: UnifiedNewsFacets = {
+  sources: [],
+  people: [],
+  topics: [],
+  seasons: [],
+};
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";
@@ -903,6 +961,10 @@ function GalleryPhoto({
   const cardCandidates = useMemo(() => getPersonPhotoCardUrlCandidates(photo), [photo]);
   const primarySrc = cardCandidates[0] ?? null;
   const fallbackCandidates = useMemo(() => cardCandidates.slice(1), [cardCandidates]);
+  const fallbackCandidatesSignature = useMemo(
+    () => fallbackCandidates.join("\u0001"),
+    [fallbackCandidates]
+  );
   const [currentSrc, setCurrentSrc] = useState<string | null>(primarySrc);
   const [fallbackIndex, setFallbackIndex] = useState(0);
   const [naturalDimensions, setNaturalDimensions] = useState<{
@@ -954,7 +1016,7 @@ function GalleryPhoto({
       onFallbackEvent("attempt");
       telemetryStateRef.current.attempted = true;
     }
-  }, [fallbackCandidates, onFallbackEvent, primarySrc]);
+  }, [fallbackCandidatesSignature, onFallbackEvent, primarySrc]);
 
   const imageDimensions = useMemo(() => {
     const resolvedWidth = naturalDimensions?.width ?? parseDimensionValue(photo.width) ?? null;
@@ -2277,10 +2339,29 @@ export default function PersonProfilePage() {
   const [bravoVideoSyncWarning, setBravoVideoSyncWarning] = useState<string | null>(null);
   const bravoVideoSyncAttemptedRef = useRef(false);
   const bravoVideoSyncInFlightRef = useRef<Promise<boolean> | null>(null);
-  const [bravoNews, setBravoNews] = useState<BravoNewsItem[]>([]);
-  const [bravoNewsLoaded, setBravoNewsLoaded] = useState(false);
-  const [bravoNewsLoading, setBravoNewsLoading] = useState(false);
-  const [bravoNewsError, setBravoNewsError] = useState<string | null>(null);
+  const [unifiedNews, setUnifiedNews] = useState<BravoNewsItem[]>([]);
+  const [newsLoaded, setNewsLoaded] = useState(false);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsNotice, setNewsNotice] = useState<string | null>(null);
+  const [newsGoogleUrlMissing, setNewsGoogleUrlMissing] = useState(false);
+  const [newsSyncing, setNewsSyncing] = useState(false);
+  const [newsFacets, setNewsFacets] = useState<UnifiedNewsFacets>(EMPTY_NEWS_FACETS);
+  const [newsNextCursor, setNewsNextCursor] = useState<string | null>(null);
+  const [newsPageCount, setNewsPageCount] = useState(0);
+  const [newsTotalCount, setNewsTotalCount] = useState(0);
+  const [newsSort, setNewsSort] = useState<"trending" | "latest">("trending");
+  const [newsSourceFilter, setNewsSourceFilter] = useState<string>("");
+  const [newsTopicFilter, setNewsTopicFilter] = useState<string>("");
+  const [newsSeasonFilter, setNewsSeasonFilter] = useState<string>("");
+  const newsAutoSyncAttemptedRef = useRef(false);
+  const newsSyncInFlightRef = useRef<Promise<boolean> | null>(null);
+  const newsLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const newsLoadedQueryKeyRef = useRef<string | null>(null);
+  const newsCursorQueryKeyRef = useRef<string | null>(null);
+  const newsRequestSeqRef = useRef(0);
+  const pendingNewsReloadRef = useRef(false);
+  const pendingNewsReloadArgsRef = useRef<{ force: boolean; forceSync: boolean; queryKey: string } | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>(personRouteState.tab);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2330,6 +2411,7 @@ export default function PersonProfilePage() {
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
   const refreshLogCounterRef = useRef(0);
+  const personRefreshRequestCounterRef = useRef(0);
   const textOverlayDetectControllerRef = useRef<AbortController | null>(null);
   const showBrokenRowsRef = useRef(showBrokenRows);
 
@@ -2342,6 +2424,22 @@ export default function PersonProfilePage() {
     },
     []
   );
+
+  const buildPersonRefreshRequestId = useCallback(() => {
+    const counter = ++personRefreshRequestCounterRef.current;
+    const timestampToken = Date.now().toString(36);
+    const showToken = String(showIdForApi || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32);
+    const personToken = String(personId || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32);
+    return `person-refresh-${showToken}-p${personToken}-${timestampToken}-${counter}`;
+  }, [personId, showIdForApi]);
 
   const trackGalleryFallbackEvent = useCallback((event: "attempt" | "recovered" | "failed") => {
     setGalleryFallbackTelemetry((prev) => {
@@ -2386,15 +2484,35 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     setBravoVideos([]);
-    setBravoNews([]);
     setBravoVideosLoaded(false);
-    setBravoNewsLoaded(false);
     setBravoVideosError(null);
     setBravoVideoSyncWarning(null);
     setBravoVideoSyncing(false);
     bravoVideoSyncAttemptedRef.current = false;
     bravoVideoSyncInFlightRef.current = null;
-    setBravoNewsError(null);
+    setUnifiedNews([]);
+    setNewsLoaded(false);
+    setNewsLoading(false);
+    setNewsError(null);
+    setNewsNotice(null);
+    setNewsGoogleUrlMissing(false);
+    setNewsSyncing(false);
+    setNewsFacets(EMPTY_NEWS_FACETS);
+    setNewsNextCursor(null);
+    setNewsPageCount(0);
+    setNewsTotalCount(0);
+    setNewsSort("trending");
+    setNewsSourceFilter("");
+    setNewsTopicFilter("");
+    setNewsSeasonFilter("");
+    newsAutoSyncAttemptedRef.current = false;
+    newsSyncInFlightRef.current = null;
+    newsLoadInFlightRef.current = null;
+    newsLoadedQueryKeyRef.current = null;
+    newsCursorQueryKeyRef.current = null;
+    newsRequestSeqRef.current = 0;
+    pendingNewsReloadRef.current = false;
+    pendingNewsReloadArgsRef.current = null;
     setFandomData([]);
     setFandomError(null);
     setFandomLoaded(false);
@@ -3364,11 +3482,10 @@ export default function PersonProfilePage() {
             body: JSON.stringify(options),
           }
         );
-        const data = (await response.json().catch(() => ({}))) as FandomSyncPreviewResponse & {
-          error?: string;
-        };
+        const rawData = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        const data = normalizeFandomSyncPreviewResponse(rawData);
         if (!response.ok) {
-          throw new Error(data.error || "Fandom preview failed");
+          throw new Error(typeof rawData.error === "string" ? rawData.error : "Fandom preview failed");
         }
         setFandomSyncPreview(data);
       } catch (err) {
@@ -3527,47 +3644,307 @@ export default function PersonProfilePage() {
     }
   }, [getAuthHeaders, personId, showIdForApi, syncBravoVideoThumbnails]);
 
-  const fetchBravoNews = useCallback(async (options?: { signal?: AbortSignal }) => {
-    if (!personId || !showIdForApi) {
-      setBravoNews([]);
-      setBravoNewsLoaded(false);
-      setBravoNewsError(null);
-      return;
-    }
-    const signal = options?.signal;
-    if (signal?.aborted) return;
+  const syncGoogleNews = useCallback(
+    async ({ force = false }: { force?: boolean } = {}): Promise<boolean> => {
+      if (!showIdForApi) return false;
+      if (newsSyncInFlightRef.current) {
+        return await newsSyncInFlightRef.current;
+      }
 
-    try {
-      setBravoNewsLoading(true);
-      setBravoNewsError(null);
-      const headers = await getAuthHeaders();
-      const newsResponse = await fetch(
-        `/api/admin/trr-api/shows/${showIdForApi}/bravo/news?person_id=${personId}`,
-        {
-          headers,
-          cache: "no-store",
-          signal,
+      const request = (async (): Promise<boolean> => {
+        try {
+          setNewsSyncing(true);
+          const headers = await getAuthHeaders();
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showIdForApi}/google-news/sync`,
+            {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({ force, async: true }),
+            },
+            NEWS_SYNC_TIMEOUT_MS
+          );
+          const data = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            job_id?: string;
+          };
+          if (!response.ok) {
+            if (response.status === 409) {
+              setNewsGoogleUrlMissing(true);
+              setNewsNotice(data.error || "Google News URL is not configured for this show.");
+              return false;
+            }
+            throw new Error(data.error || "Failed to sync Google News");
+          }
+
+          const jobId = typeof data.job_id === "string" ? data.job_id.trim() : "";
+          if (jobId) {
+            const headers = await getAuthHeaders();
+            const pollStartedAt = Date.now();
+            while (Date.now() - pollStartedAt < NEWS_SYNC_POLL_TIMEOUT_MS) {
+              const statusResponse = await fetchWithTimeout(
+                `/api/admin/trr-api/shows/${showIdForApi}/google-news/sync/${encodeURIComponent(jobId)}`,
+                { headers, cache: "no-store" },
+                NEWS_SYNC_TIMEOUT_MS
+              );
+              const statusData = (await statusResponse.json().catch(() => ({}))) as {
+                error?: string;
+                status?: string;
+                result?: { error?: string } | null;
+              };
+              if (!statusResponse.ok) {
+                throw new Error(statusData.error || "Failed to fetch Google News sync status");
+              }
+              const status = String(statusData.status || "").trim().toLowerCase();
+              if (status === "completed") break;
+              if (status === "failed") {
+                throw new Error(
+                  (statusData.result && typeof statusData.result.error === "string" && statusData.result.error) ||
+                    statusData.error ||
+                    "Google News sync failed"
+                );
+              }
+              await new Promise((resolve) => setTimeout(resolve, NEWS_SYNC_POLL_INTERVAL_MS));
+            }
+            if (Date.now() - pollStartedAt >= NEWS_SYNC_POLL_TIMEOUT_MS) {
+              throw new Error(
+                `Google News sync polling timed out after ${Math.round(NEWS_SYNC_POLL_TIMEOUT_MS / 1000)}s`
+              );
+            }
+          }
+
+          setNewsGoogleUrlMissing(false);
+          setNewsNotice(null);
+          return true;
+        } catch (error) {
+          if (isAbortError(error)) {
+            throw new Error(`Timed out syncing Google News after ${Math.round(NEWS_SYNC_TIMEOUT_MS / 1000)}s`);
+          }
+          throw error instanceof Error ? error : new Error("Failed to sync Google News");
+        } finally {
+          setNewsSyncing(false);
         }
-      );
-      const newsData = (await newsResponse.json().catch(() => ({}))) as {
-        news?: BravoNewsItem[];
-        error?: string;
-      };
-      if (signal?.aborted) return;
-      if (!newsResponse.ok) {
-        throw new Error(newsData.error || "Failed to fetch person news");
+      })();
+
+      newsSyncInFlightRef.current = request;
+      try {
+        return await request;
+      } finally {
+        if (newsSyncInFlightRef.current === request) {
+          newsSyncInFlightRef.current = null;
+        }
       }
-      setBravoNews(Array.isArray(newsData.news) ? newsData.news : []);
-    } catch (err) {
-      if (signal?.aborted || isAbortError(err)) return;
-      setBravoNewsError(err instanceof Error ? err.message : "Failed to fetch person news");
-    } finally {
-      setBravoNewsLoading(false);
-      if (!signal?.aborted) {
-        setBravoNewsLoaded(true);
+    },
+    [getAuthHeaders, showIdForApi]
+  );
+
+  const loadUnifiedNews = useCallback(
+    async ({ force = false, forceSync = false, append = false }: { force?: boolean; forceSync?: boolean; append?: boolean } = {}) => {
+      if (!personId || !showIdForApi) {
+        setUnifiedNews([]);
+        setNewsLoaded(false);
+        setNewsError(null);
+        setNewsNotice(null);
+        setNewsNextCursor(null);
+        setNewsFacets(EMPTY_NEWS_FACETS);
+        setNewsPageCount(0);
+        setNewsTotalCount(0);
+        newsLoadedQueryKeyRef.current = null;
+        newsCursorQueryKeyRef.current = null;
+        return;
       }
-    }
-  }, [getAuthHeaders, personId, showIdForApi]);
+
+      const baseParams = new URLSearchParams({
+        sources: "bravo,google_news",
+        person_id: personId,
+        sort: newsSort,
+        limit: String(NEWS_PAGE_SIZE),
+      });
+      if (newsSourceFilter) baseParams.set("source", newsSourceFilter);
+      if (newsTopicFilter) baseParams.set("topic", newsTopicFilter);
+      if (newsSeasonFilter) baseParams.set("season_number", newsSeasonFilter);
+      const queryKey = baseParams.toString();
+
+      let shouldAppend = append;
+      let shouldForce = force;
+      if (shouldAppend && (!newsNextCursor || newsCursorQueryKeyRef.current !== queryKey)) {
+        shouldAppend = false;
+        shouldForce = true;
+      }
+      if (!shouldForce && !shouldAppend && newsLoaded && newsLoadedQueryKeyRef.current === queryKey) {
+        return;
+      }
+      if (!shouldAppend && newsLoadedQueryKeyRef.current && newsLoadedQueryKeyRef.current !== queryKey) {
+        setNewsNextCursor(null);
+        newsCursorQueryKeyRef.current = null;
+      }
+      if (newsLoadInFlightRef.current) {
+        pendingNewsReloadRef.current = true;
+        pendingNewsReloadArgsRef.current = { force: shouldForce, forceSync, queryKey };
+        return;
+      }
+
+      const requestSeq = newsRequestSeqRef.current + 1;
+      newsRequestSeqRef.current = requestSeq;
+
+      const request = (async () => {
+        try {
+          setNewsLoading(true);
+          setNewsError(null);
+          if (!shouldAppend && (forceSync || !newsAutoSyncAttemptedRef.current)) {
+            const syncSuccess = await syncGoogleNews({ force: forceSync });
+            if (syncSuccess) newsAutoSyncAttemptedRef.current = true;
+          }
+
+          const headers = await getAuthHeaders();
+          const requestParams = new URLSearchParams(baseParams);
+          if (shouldAppend && newsNextCursor) {
+            requestParams.set("cursor", newsNextCursor);
+          }
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showIdForApi}/news?${requestParams.toString()}`,
+            {
+              headers,
+              cache: "no-store",
+            },
+            NEWS_LOAD_TIMEOUT_MS
+          );
+          const data = (await response.json().catch(() => ({}))) as {
+            news?: BravoNewsItem[];
+            error?: string;
+            count?: number;
+            total_count?: number;
+            next_cursor?: string | null;
+            facets?: {
+              sources?: Array<{ token?: string; label?: string; count?: number }>;
+              people?: Array<{ person_id?: string; person_name?: string; count?: number }>;
+              topics?: Array<{ topic?: string; count?: number }>;
+              seasons?: Array<{ season_number?: number; count?: number }>;
+            };
+          };
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to fetch person news");
+          }
+          if (requestSeq !== newsRequestSeqRef.current) return;
+
+          const nextItems = Array.isArray(data.news) ? data.news : [];
+          const nextFacets: UnifiedNewsFacets = {
+            sources: Array.isArray(data.facets?.sources)
+              ? data.facets.sources
+                  .map((row) => ({
+                    token: String(row?.token || "").trim(),
+                    label: String(row?.label || "").trim(),
+                    count: Number.isFinite(Number(row?.count ?? 0)) ? Number(row?.count ?? 0) : 0,
+                  }))
+                  .filter((row) => row.token && row.label)
+              : [],
+            people: Array.isArray(data.facets?.people)
+              ? data.facets.people
+                  .map((row) => ({
+                    person_id: String(row?.person_id || "").trim(),
+                    person_name: String(row?.person_name || "").trim(),
+                    count: Number.isFinite(Number(row?.count ?? 0)) ? Number(row?.count ?? 0) : 0,
+                  }))
+                  .filter((row) => row.person_id && row.person_name)
+              : [],
+            topics: Array.isArray(data.facets?.topics)
+              ? data.facets.topics
+                  .map((row) => ({
+                    topic: String(row?.topic || "").trim(),
+                    count: Number.isFinite(Number(row?.count ?? 0)) ? Number(row?.count ?? 0) : 0,
+                  }))
+                  .filter((row) => row.topic)
+              : [],
+            seasons: Array.isArray(data.facets?.seasons)
+              ? data.facets.seasons
+                  .map((row) => ({
+                    season_number: Number(row?.season_number || 0),
+                    count: Number.isFinite(Number(row?.count ?? 0)) ? Number(row?.count ?? 0) : 0,
+                  }))
+                  .filter((row) => Number.isFinite(row.season_number) && row.season_number > 0)
+              : [],
+          };
+
+          const responseCount =
+            typeof data.count === "number" && Number.isFinite(data.count) ? data.count : nextItems.length;
+          setUnifiedNews((prev) => (shouldAppend ? [...prev, ...nextItems] : nextItems));
+          setNewsPageCount((prev) => (shouldAppend ? prev + responseCount : responseCount));
+          setNewsTotalCount((prev) =>
+            typeof data.total_count === "number" && Number.isFinite(data.total_count)
+              ? data.total_count
+              : shouldAppend
+                ? prev + responseCount
+                : responseCount
+          );
+          setNewsFacets(nextFacets);
+          const nextCursor =
+            typeof data.next_cursor === "string" && data.next_cursor.trim().length > 0
+              ? data.next_cursor
+              : null;
+          setNewsNextCursor(nextCursor);
+          newsCursorQueryKeyRef.current = nextCursor ? queryKey : null;
+          setNewsLoaded(true);
+          newsLoadedQueryKeyRef.current = queryKey;
+        } catch (error) {
+          if (requestSeq !== newsRequestSeqRef.current) return;
+          const message = isAbortError(error)
+            ? `Timed out loading news after ${Math.round(NEWS_LOAD_TIMEOUT_MS / 1000)}s`
+            : error instanceof Error
+              ? error.message
+              : "Failed to load unified news";
+          if (shouldAppend) {
+            setNewsNextCursor(null);
+            newsCursorQueryKeyRef.current = null;
+            setNewsError(`Failed to load more news: ${message}. Cursor reset. Refresh to continue.`);
+            return;
+          }
+          setNewsLoaded(false);
+          setNewsPageCount(0);
+          setNewsTotalCount(0);
+          setNewsFacets(EMPTY_NEWS_FACETS);
+          setNewsNextCursor(null);
+          setUnifiedNews([]);
+          newsLoadedQueryKeyRef.current = null;
+          newsCursorQueryKeyRef.current = null;
+          setNewsError(message);
+        } finally {
+          if (requestSeq !== newsRequestSeqRef.current) return;
+          setNewsLoading(false);
+        }
+      })();
+
+      newsLoadInFlightRef.current = request;
+      try {
+        await request;
+      } finally {
+        if (newsLoadInFlightRef.current === request) {
+          newsLoadInFlightRef.current = null;
+          const pendingReload = pendingNewsReloadRef.current ? pendingNewsReloadArgsRef.current : null;
+          pendingNewsReloadRef.current = false;
+          pendingNewsReloadArgsRef.current = null;
+          if (pendingReload) {
+            void loadUnifiedNews({
+              force: pendingReload.force,
+              forceSync: pendingReload.forceSync,
+              append: false,
+            });
+          }
+        }
+      }
+    },
+    [
+      getAuthHeaders,
+      newsLoaded,
+      newsNextCursor,
+      newsSeasonFilter,
+      newsSort,
+      newsSourceFilter,
+      newsTopicFilter,
+      personId,
+      showIdForApi,
+      syncGoogleNews,
+    ]
+  );
 
   // Set cover photo
   const handleSetCover = async (photo: TrrPersonPhoto) => {
@@ -4210,6 +4587,7 @@ export default function PersonProfilePage() {
   const handleRefreshImages = useCallback(async (mode: "full" | "sync" = "full") => {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
+    const requestId = buildPersonRefreshRequestId();
     const refreshBody =
       mode === "sync"
         ? {
@@ -4242,7 +4620,7 @@ export default function PersonProfilePage() {
       current: null,
       total: null,
       rawStage: "syncing",
-      runId: null,
+      runId: requestId,
       lastEventAt: Date.now(),
     });
     setRefreshNotice(null);
@@ -4254,6 +4632,7 @@ export default function PersonProfilePage() {
       stage: "syncing",
       message: mode === "sync" ? "Sync stage started" : "Refresh Images started",
       level: "info",
+      runId: requestId,
     });
 
     try {
@@ -4305,7 +4684,11 @@ export default function PersonProfilePage() {
             `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
             {
               method: "POST",
-              headers: { ...headers, "Content-Type": "application/json" },
+              headers: {
+                ...headers,
+                "Content-Type": "application/json",
+                "x-trr-request-id": requestId,
+              },
               body: JSON.stringify(refreshBody),
               signal: streamController.signal,
             }
@@ -4392,6 +4775,7 @@ export default function PersonProfilePage() {
                   stage: "stream_connected",
                   message: "Stream connected.",
                   level: "info",
+                  runId: requestId,
                 });
               }
 
@@ -4438,6 +4822,11 @@ export default function PersonProfilePage() {
                   typeof (payload as { run_id?: unknown }).run_id === "string"
                     ? ((payload as { run_id: string }).run_id)
                     : null;
+                const payloadRequestId =
+                  typeof (payload as { request_id?: unknown }).request_id === "string"
+                    ? ((payload as { request_id: string }).request_id)
+                    : null;
+                const resolvedRunId = payloadRequestId ?? runId ?? requestId;
                 const currentRaw = (payload as { current?: unknown }).current;
                 const totalRaw = (payload as { total?: unknown }).total;
                 const current =
@@ -4484,7 +4873,7 @@ export default function PersonProfilePage() {
                   rawStage,
                   message: enrichedMessage || message || heartbeatMessage || null,
                   detailMessage: enrichedMessage || message || heartbeatMessage || null,
-                  runId,
+                  runId: resolvedRunId,
                   lastEventAt: Date.now(),
                 });
                 if (!heartbeat) {
@@ -4493,11 +4882,15 @@ export default function PersonProfilePage() {
                     stage: rawStage ?? "progress",
                     message: enrichedMessage || "Refresh progress update",
                     level: "info",
-                    runId,
+                    runId: resolvedRunId,
                   });
                 }
               } else if (eventType === "complete") {
                 sawComplete = true;
+                const payloadRequestId =
+                  payload && typeof payload === "object" && typeof payload.request_id === "string"
+                    ? payload.request_id
+                    : requestId;
                 const completeLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
                 setRefreshLiveCounts(completeLiveCounts);
                 const summary = payload && typeof payload === "object" && "summary" in payload
@@ -4518,14 +4911,17 @@ export default function PersonProfilePage() {
                   message: summaryText || "Images refreshed.",
                   detail: liveCountSuffix,
                   level: "success",
+                  runId: payloadRequestId,
                 });
                 shouldStopReading = true;
               } else if (eventType === "error") {
                 const errorPayload =
                   payload && typeof payload === "object"
-                    ? (payload as { stage?: string; error?: string; detail?: string })
+                    ? (payload as { stage?: string; error?: string; detail?: string; request_id?: string })
                     : null;
                 const stage = errorPayload?.stage ? `[${errorPayload.stage}] ` : "";
+                const payloadRequestId =
+                  typeof errorPayload?.request_id === "string" ? errorPayload.request_id : requestId;
                 const errorText =
                   errorPayload?.error && errorPayload?.detail
                     ? `${stage}${errorPayload.error}: ${errorPayload.detail}`
@@ -4539,6 +4935,7 @@ export default function PersonProfilePage() {
                   message: errorPayload?.error || "Failed to refresh images",
                   detail: errorPayload?.detail,
                   level: "error",
+                  runId: payloadRequestId,
                 });
                 throw backendErr;
               }
@@ -4611,6 +5008,7 @@ export default function PersonProfilePage() {
               stage: "stream_recovered",
               message: "Stream recovered.",
               level: "success",
+              runId: requestId,
             });
           }
           streamError = null;
@@ -4644,6 +5042,7 @@ export default function PersonProfilePage() {
             message: "Stream disconnected, retrying refresh...",
             detail: streamError,
             level: "error",
+            runId: requestId,
           });
           continue;
         }
@@ -4657,7 +5056,7 @@ export default function PersonProfilePage() {
         fetchCredits(),
         fetchFandomData(),
         fetchBravoVideos(),
-        fetchBravoNews(),
+        loadUnifiedNews({ force: true }),
         fetchPhotos(),
         fetchCoverPhoto(),
       ]);
@@ -4672,6 +5071,7 @@ export default function PersonProfilePage() {
         message: "Refresh Images failed",
         detail: errorMessage,
         level: "error",
+        runId: requestId,
       });
     } finally {
       setRefreshingImages(false);
@@ -4686,7 +5086,7 @@ export default function PersonProfilePage() {
     fetchCredits,
     fetchFandomData,
     fetchBravoVideos,
-    fetchBravoNews,
+    loadUnifiedNews,
     fetchPhotos,
     fetchCoverPhoto,
     getAuthHeaders,
@@ -4694,11 +5094,13 @@ export default function PersonProfilePage() {
     refreshLiveCounts,
     showIdForApi,
     activeShowName,
+    buildPersonRefreshRequestId,
   ]);
 
   const handleReprocessImages = useCallback(async (stage: ReprocessStageKey = "all") => {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
+    const requestId = buildPersonRefreshRequestId();
     const stageRequest: Record<
       ReprocessStageKey,
       {
@@ -4759,6 +5161,9 @@ export default function PersonProfilePage() {
       message: selectedStage.startMessage,
       current: null,
       total: null,
+      runId: requestId,
+      rawStage: "reprocess_start",
+      lastEventAt: Date.now(),
     });
     setRefreshNotice(null);
     setRefreshError(null);
@@ -4767,6 +5172,7 @@ export default function PersonProfilePage() {
       stage: "reprocess_start",
       message: selectedStage.startLabel,
       level: "info",
+      runId: requestId,
     });
 
     try {
@@ -4775,7 +5181,11 @@ export default function PersonProfilePage() {
         `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
         {
           method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+            "x-trr-request-id": requestId,
+          },
           body: JSON.stringify(selectedStage.body),
         }
       );
@@ -4848,6 +5258,15 @@ export default function PersonProfilePage() {
               typeof current === "number" && Number.isFinite(current) ? current : null;
             const numericTotal =
               typeof total === "number" && Number.isFinite(total) ? total : null;
+            const runId =
+              typeof (payload as { run_id?: unknown }).run_id === "string"
+                ? ((payload as { run_id: string }).run_id)
+                : null;
+            const payloadRequestId =
+              typeof (payload as { request_id?: unknown }).request_id === "string"
+                ? ((payload as { request_id: string }).request_id)
+                : null;
+            const resolvedRunId = payloadRequestId ?? runId ?? requestId;
             const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
             setRefreshLiveCounts(nextLiveCounts);
             const enrichedMessage = appendLiveCountsToMessage(message ?? "", nextLiveCounts);
@@ -4856,15 +5275,23 @@ export default function PersonProfilePage() {
               total: numericTotal,
               phase: mappedPhase ?? rawPhase,
               message: enrichedMessage || message || null,
+              runId: resolvedRunId,
+              rawStage: rawPhase,
+              lastEventAt: Date.now(),
             });
             appendRefreshLog({
               source: "page_refresh",
               stage: rawPhase ?? "reprocess_progress",
               message: enrichedMessage || message || "Count & Crop progress update",
               level: "info",
+              runId: resolvedRunId,
             });
           } else if (eventType === "complete") {
             sawComplete = true;
+            const payloadRequestId =
+              payload && typeof payload === "object" && typeof payload.request_id === "string"
+                ? payload.request_id
+                : requestId;
             const completeLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
             setRefreshLiveCounts(completeLiveCounts);
             const summary = payload && typeof payload === "object" && "summary" in payload
@@ -4885,13 +5312,16 @@ export default function PersonProfilePage() {
               message: summaryText || "Reprocessing complete.",
               detail: liveCountSuffix,
               level: "success",
+              runId: payloadRequestId,
             });
           } else if (eventType === "error") {
             hadError = true;
             const message =
               payload && typeof payload === "object"
-                ? (payload as { error?: string; detail?: string })
+                ? (payload as { error?: string; detail?: string; request_id?: string })
                 : null;
+            const payloadRequestId =
+              typeof message?.request_id === "string" ? message.request_id : requestId;
             const errorText =
               message?.error && message?.detail
                 ? `${message.error}: ${message.detail}`
@@ -4903,6 +5333,7 @@ export default function PersonProfilePage() {
               message: message?.error || "Failed to reprocess images",
               detail: message?.detail,
               level: "error",
+              runId: payloadRequestId,
             });
           }
 
@@ -4917,6 +5348,7 @@ export default function PersonProfilePage() {
           stage: "reprocess_complete",
           message: selectedStage.defaultSuccessMessage,
           level: "success",
+          runId: requestId,
         });
       }
 
@@ -4933,6 +5365,7 @@ export default function PersonProfilePage() {
         message: selectedStage.failureLabel,
         detail: errorMessage,
         level: "error",
+        runId: requestId,
       });
     } finally {
       setReprocessingImages(false);
@@ -4947,6 +5380,7 @@ export default function PersonProfilePage() {
     getAuthHeaders,
     personId,
     refreshLiveCounts,
+    buildPersonRefreshRequestId,
   ]);
 
   // Initial load
@@ -5006,13 +5440,13 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     if (activeTab !== "news") return;
-    if (!showIdForApi || bravoNewsLoaded) return;
+    if (!showIdForApi || !personId) return;
     const controller = new AbortController();
-    void fetchBravoNews({ signal: controller.signal });
+    void loadUnifiedNews();
     return () => {
       controller.abort();
     };
-  }, [activeTab, bravoNewsLoaded, fetchBravoNews, showIdForApi]);
+  }, [activeTab, loadUnifiedNews, personId, showIdForApi]);
 
   useEffect(() => {
     if (activeTab !== "fandom") return;
@@ -5023,6 +5457,44 @@ export default function PersonProfilePage() {
       controller.abort();
     };
   }, [activeTab, fandomLoaded, fetchFandomData, hasAccess]);
+
+  const newsSourceOptions = useMemo(
+    () => newsFacets.sources,
+    [newsFacets.sources]
+  );
+
+  const newsPeopleOptions = useMemo(() => {
+    const fromFacets = newsFacets.people
+      .filter((row) => row.person_id === personId)
+      .map((row) => ({ id: row.person_id, name: row.person_name, count: row.count }));
+    if (fromFacets.length > 0) {
+      return fromFacets;
+    }
+    if (personId && person?.full_name) {
+      return [
+        {
+          id: personId,
+          name: person.full_name,
+          count: newsTotalCount > 0 ? newsTotalCount : unifiedNews.length,
+        },
+      ];
+    }
+    return [];
+  }, [newsFacets.people, newsTotalCount, person?.full_name, personId, unifiedNews.length]);
+
+  const newsTopicOptions = useMemo(
+    () => newsFacets.topics.map((topic) => ({ topic: topic.topic, count: topic.count })),
+    [newsFacets.topics]
+  );
+
+  const newsSeasonOptions = useMemo(
+    () =>
+      newsFacets.seasons.map((season) => ({
+        seasonNumber: season.season_number,
+        count: season.count,
+      })),
+    [newsFacets.seasons]
+  );
 
   // Open lightbox with photo, index, and trigger element for focus restoration
   const openLightbox = (
@@ -5330,7 +5802,19 @@ export default function PersonProfilePage() {
         : null;
   const breadcrumbShowHref = backShowTarget
     ? buildShowAdminUrl({ showSlug: backShowTarget })
-    : null;
+    : undefined;
+  useEffect(() => {
+    if (!showSlugForRouting || !breadcrumbShowName) return;
+    recordAdminRecentShow({
+      slug: showSlugForRouting,
+      label: breadcrumbShowName,
+    });
+  }, [breadcrumbShowName, showSlugForRouting]);
+
+  const breadcrumbPersonHref = (() => {
+    const queryString = searchParams.toString();
+    return queryString ? `${pathname}?${queryString}` : pathname;
+  })();
   const currentShowCastEpisodeTotal = useMemo(
     () =>
       (showScopedCredits?.cast_groups ?? []).reduce(
@@ -5461,11 +5945,12 @@ export default function PersonProfilePage() {
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
         {/* Header */}
-        <header className="border-b border-zinc-200 bg-white px-6 py-5">
+        <AdminGlobalHeader bodyClassName="px-6 py-5">
           <div className="mx-auto max-w-6xl">
             <div className="mb-4">
               <AdminBreadcrumbs
                 items={buildPersonBreadcrumb(person.full_name, {
+                  personHref: breadcrumbPersonHref,
                   showName: breadcrumbShowName,
                   showHref: breadcrumbShowHref,
                 })}
@@ -5540,7 +6025,7 @@ export default function PersonProfilePage() {
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <p className={`text-xs font-semibold ${levelClass}`}>
-                                  {entry.message}
+                                  {entry.runId ? `[req:${entry.runId}] ${entry.message}` : entry.message}
                                 </p>
                                 <span className="shrink-0 text-[10px] text-zinc-500">{timestamp}</span>
                               </div>
@@ -5565,7 +6050,7 @@ export default function PersonProfilePage() {
               </div>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         {/* Tabs */}
         <div className="border-b border-zinc-200 bg-white">
@@ -5576,7 +6061,7 @@ export default function PersonProfilePage() {
                   { id: "overview", label: "Overview" },
                   { id: "gallery", label: `Gallery (${photos.length})` },
                   { id: "videos", label: `Videos (${bravoVideos.length})` },
-                  { id: "news", label: `News (${bravoNews.length})` },
+                  { id: "news", label: `News (${unifiedNews.length})` },
                   { id: "credits", label: `Credits (${credits.length})` },
                   { id: "fandom", label: fandomData.length > 0 ? `Fandom (${fandomData.length})` : "Fandom" },
                 ] as const
@@ -6318,57 +6803,49 @@ export default function PersonProfilePage() {
 
           {/* News Tab */}
           {activeTab === "news" && (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Bravo News
-                  </p>
-                  <h3 className="text-xl font-bold text-zinc-900">{person.full_name}</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void fetchBravoNews()}
-                  disabled={bravoNewsLoading}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  {bravoNewsLoading ? "Refreshing..." : "Refresh"}
-                </button>
-              </div>
-              {bravoNewsError && <p className="mb-4 text-sm text-red-600">{bravoNewsError}</p>}
-              {!bravoNewsLoading && bravoNews.length === 0 && !bravoNewsError && (
-                <p className="text-sm text-zinc-500">No persisted Bravo news found for this person.</p>
+            <ShowNewsTab
+              showName={person.full_name}
+              newsSort={newsSort}
+              onSetNewsSort={setNewsSort}
+              onRefreshNews={() => void loadUnifiedNews({ force: true, forceSync: true })}
+              newsLoading={newsLoading}
+              newsSyncing={newsSyncing}
+              newsSourceFilter={newsSourceFilter}
+              onSetNewsSourceFilter={setNewsSourceFilter}
+              newsPersonFilter={personId}
+              onSetNewsPersonFilter={() => {}}
+              newsTopicFilter={newsTopicFilter}
+              onSetNewsTopicFilter={setNewsTopicFilter}
+              newsSeasonFilter={newsSeasonFilter}
+              onSetNewsSeasonFilter={setNewsSeasonFilter}
+              onClearFilters={() => {
+                setNewsSourceFilter("");
+                setNewsTopicFilter("");
+                setNewsSeasonFilter("");
+              }}
+              newsSourceOptions={newsSourceOptions}
+              newsPeopleOptions={newsPeopleOptions}
+              newsTopicOptions={newsTopicOptions}
+              newsSeasonOptions={newsSeasonOptions}
+              newsPageCount={newsPageCount}
+              newsTotalCount={newsTotalCount}
+              newsError={newsError}
+              newsNotice={newsNotice}
+              newsGoogleUrlMissing={newsGoogleUrlMissing}
+              unifiedNews={unifiedNews}
+              formatPublishedDate={formatBravoPublishedDate}
+              newsNextCursor={newsNextCursor}
+              onLoadMore={() => void loadUnifiedNews({ append: true })}
+              renderNewsImage={({ src, alt, sizes, className }) => (
+                <Image
+                  src={src}
+                  alt={alt}
+                  fill
+                  className={className}
+                  sizes={sizes}
+                />
               )}
-              <div className="grid gap-4 sm:grid-cols-2">
-                {bravoNews.map((item, index) => (
-                  <article key={`${item.article_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                    <a href={item.article_url} target="_blank" rel="noopener noreferrer" className="group block">
-                      <div className="relative mb-3 aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200">
-                        {item.image_url ? (
-                          <Image
-                            src={item.image_url}
-                            alt={item.headline || "Bravo news"}
-                            fill
-                            className="object-cover transition group-hover:scale-105"
-                            sizes="(max-width: 640px) 100vw, 50vw"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
-                        )}
-                      </div>
-                      <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
-                        {item.headline || "Untitled story"}
-                      </h4>
-                    </a>
-                    {formatBravoPublishedDate(item.published_at) && (
-                      <p className="mt-2 text-xs text-zinc-500">
-                        Posted {formatBravoPublishedDate(item.published_at)}
-                      </p>
-                    )}
-                  </article>
-                ))}
-              </div>
-            </div>
+            />
           )}
 
           {/* Credits Tab */}
@@ -6847,21 +7324,8 @@ export default function PersonProfilePage() {
                       <FandomReunionSeating seating={fandom.reunion_seating} />
                     )}
 
-                    {fandom.bio_card && (
-                      <div className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                        <h4 className="text-sm font-semibold text-zinc-700 mb-2">Bio Card</h4>
-                        <pre className="overflow-auto text-xs text-zinc-700">{JSON.stringify(fandom.bio_card, null, 2)}</pre>
-                      </div>
-                    )}
-
-                    {Array.isArray(fandom.dynamic_sections) && fandom.dynamic_sections.length > 0 && (
-                      <div className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                        <h4 className="text-sm font-semibold text-zinc-700 mb-2">Dynamic Sections</h4>
-                        <pre className="overflow-auto text-xs text-zinc-700">
-                          {JSON.stringify(fandom.dynamic_sections, null, 2)}
-                        </pre>
-                      </div>
-                    )}
+                    <FandomBioCard card={fandom.bio_card} />
+                    <FandomDynamicSections sections={fandom.dynamic_sections} />
 
                     {(Array.isArray(fandom.citations) || Array.isArray(fandom.conflicts)) && (
                       <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -7096,6 +7560,130 @@ function FandomJsonList({ title, data }: { title: string; data: Record<string, u
           <li key={i} className="text-sm text-zinc-700">• {item}</li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function fandomValueToText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => fandomValueToText(item)).filter(Boolean).join(", ");
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => `${key}: ${fandomValueToText(entry)}`)
+      .join(" | ");
+  }
+  return "—";
+}
+
+function toFandomStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" && item.trim() ? item.trim() : null))
+    .filter((item): item is string => Boolean(item));
+}
+
+function FandomDynamicSectionCard({ title, section }: { title: string; section: FandomDynamicSection }) {
+  const paragraphs = toFandomStringList(section.paragraphs);
+  const bullets = toFandomStringList(section.bullets);
+  const tableRows = Array.isArray(section.table_rows) ? section.table_rows : [];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+      <h4 className="mb-2 text-sm font-semibold text-zinc-700">{title}</h4>
+      {paragraphs.length > 0 && (
+        <div className="space-y-2 text-sm text-zinc-700">
+          {paragraphs.map((paragraph, idx) => (
+            <p key={`${title}-paragraph-${idx}`}>{paragraph}</p>
+          ))}
+        </div>
+      )}
+      {bullets.length > 0 && (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+          {bullets.map((bullet, idx) => (
+            <li key={`${title}-bullet-${idx}`}>{bullet}</li>
+          ))}
+        </ul>
+      )}
+      {tableRows.length > 0 && (
+        <pre className="mt-2 overflow-auto text-xs text-zinc-700">{JSON.stringify(tableRows, null, 2)}</pre>
+      )}
+    </div>
+  );
+}
+
+function FandomBioCard({ card }: { card: unknown }) {
+  const normalizedCard = normalizeFandomBioCard(card);
+  if (!normalizedCard) return null;
+  const groups: Array<{ key: string; label: string }> = [
+    { key: "general", label: "General" },
+    { key: "appearance", label: "Appearance" },
+    { key: "relationships", label: "Relationships" },
+    { key: "production", label: "Production" },
+  ];
+  const visibleGroups = groups.filter(({ key }) => normalizedCard[key] && typeof normalizedCard[key] === "object");
+  if (visibleGroups.length === 0) return null;
+
+  return (
+    <div className="mt-6">
+      <h4 className="mb-3 text-sm font-semibold text-zinc-700">Bio Card</h4>
+      <div className="grid gap-4 lg:grid-cols-2">
+        {visibleGroups.map(({ key, label }) => {
+          const section = normalizedCard[key];
+          if (!section) return null;
+          return (
+            <div key={key} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">{label}</p>
+              <div className="space-y-1.5">
+                {Object.entries(section).map(([field, value]) => (
+                  <div key={field} className="text-sm text-zinc-700">
+                    <span className="font-medium text-zinc-900">{field.replaceAll("_", " ")}:</span>{" "}
+                    {fandomValueToText(value)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FandomDynamicSections({ sections }: { sections: unknown }) {
+  const normalized = normalizeFandomDynamicSections(sections);
+  if (normalized.length === 0) return null;
+
+  const casting = normalized.find((section) => fandomSectionBucket(section) === "casting");
+  const biography = normalized.find((section) => fandomSectionBucket(section) === "biography");
+  const taglines = normalized.find((section) => fandomSectionBucket(section) === "taglines");
+  const reunion = normalized.find((section) => fandomSectionBucket(section) === "reunion");
+  const otherSections = normalized.filter((section) => fandomSectionBucket(section) === "other");
+
+  return (
+    <div className="mt-6 space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        {casting && <FandomDynamicSectionCard title="Casting" section={casting} />}
+        {biography && <FandomDynamicSectionCard title="Biography" section={biography} />}
+        {taglines && <FandomDynamicSectionCard title="Taglines" section={taglines} />}
+        {reunion && <FandomDynamicSectionCard title="Reunion Seating" section={reunion} />}
+      </div>
+      {otherSections.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-zinc-700">Other Sections</h4>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {otherSections.map((section, idx) => (
+              <FandomDynamicSectionCard
+                key={`${section.title ?? section.canonical_title ?? "section"}-${idx}`}
+                title={String(section.title ?? section.canonical_title ?? `Section ${idx + 1}`)}
+                section={section}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

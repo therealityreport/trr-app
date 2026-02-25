@@ -1,7 +1,7 @@
 # Status — Task 6 (Bravo Import + Cast Eligibility + Videos/News)
 
 Repo: TRR-APP
-Last updated: February 17, 2026
+Last updated: February 25, 2026
 
 ## Phase Status
 
@@ -19,6 +19,53 @@ Last updated: February 17, 2026
 None.
 
 ## Recent Activity
+
+- February 25, 2026: Fandom Sync type-error stabilization closeout completed (Fandom-only scope).
+  - Added deterministic typecheck lanes:
+    - `apps/web/tsconfig.typecheck.json`
+    - `apps/web/tsconfig.typecheck.fandom.json`
+  - Added shared Fandom typing/normalization module:
+    - `apps/web/src/lib/admin/fandom-sync-types.ts`
+  - Updated Fandom import modal/person/season pages to consume shared typings and canonical section helpers.
+  - Hardened person/season import-fandom preview+commit proxy routes with normalized request payloads and warning-safe preview normalization.
+  - Added CI gate in `web-tests.yml`:
+    - full lane runs `pnpm run typecheck:fandom`.
+  - Validation:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run typecheck:fandom` (pass)
+    - contamination guard (`synthetic-break.d.ts` under `.next-e2e/dev/types`) still passes `typecheck:fandom`
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web vitest run tests/fandom-sync-modal.test.tsx tests/person-fandom-import-routes.test.ts tests/season-fandom-import-routes.test.ts tests/person-fandom-route-proxy.test.ts tests/season-fandom-route-proxy.test.ts tests/show-admin-routes.test.ts` (pass, `6 files / 22 tests`)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit` (pass)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run build` (pass)
+
+- February 24, 2026: RHOSLC person-stream closeout completed (request-id + startup/heartbeat).
+  - Person page refresh/reprocess now stamps and forwards `x-trr-request-id`; log lines render request-id prefix.
+  - Proxy routes forward request id and include `request_id` in JSON error payloads for correlation.
+  - Added runtime wiring tests:
+    - `tests/person-refresh-images-stream-route.test.ts`
+    - `tests/person-reprocess-images-stream-route.test.ts`
+    - `tests/person-refresh-request-id-wiring.test.ts`
+  - Validation:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-images-stream-route.test.ts tests/person-reprocess-images-stream-route.test.ts tests/person-refresh-request-id-wiring.test.ts` (pass, `11 tests`)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route.ts' 'src/app/api/admin/trr-api/people/[personId]/reprocess-images/stream/route.ts' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'tests/person-refresh-images-stream-route.test.ts' 'tests/person-reprocess-images-stream-route.test.ts' 'tests/person-refresh-request-id-wiring.test.ts'` (pass)
+  - Runtime evidence:
+    - normal mode person refresh stream: `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-normal/person-refresh-stream-sample.sse`
+    - normal mode person reprocess stream: `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-normal/person-reprocess-stream-sample.sse`
+    - degraded mode person refresh stream: `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-degraded/person-refresh-stream-sample.sse`
+  - Closeout:
+    - RHOSLC checklist blocker cleared.
+    - Go/No-Go: **GO**.
+
+- February 24, 2026: RHOSLC runtime closeout execution (normal + degraded modes).
+  - Normal mode (`TRR_BACKEND_RELOAD=0 make dev`) verification:
+    - show refresh stream: request-id + heartbeat events observed.
+    - season refresh-photos stream: immediate start event + request-id observed.
+    - per-image stage endpoints (`mirror`, `auto-count`, `detect-text-overlay`, `variants`) verified on RHOSLC cast-photo id `ec03ed6e-07aa-4b7e-9dc3-6f8dab044a5b`.
+  - Degraded mode (`make dev-lite`) verification:
+    - count-dependent endpoint (`cast-photos/{id}/auto-count`) failed fast with explicit Screenalytics unavailable detail (no indefinite wait).
+  - Evidence files:
+    - `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-normal/show-refresh-stream-sample.sse`
+    - `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-normal/season-refresh-stream-sample.sse`
 
 - February 17, 2026: Fixed person fandom ownership leakage and added deduced-family fallback for missing fandom pages.
   - Files:

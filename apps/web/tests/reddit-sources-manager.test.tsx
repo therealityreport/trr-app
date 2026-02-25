@@ -694,6 +694,453 @@ describe("RedditSourcesManager", () => {
     expect(screen.queryByRole("checkbox", { name: /Show matched only/i })).not.toBeInTheDocument();
   });
 
+  it("renders episode discussions inline on community view mode and keeps settings focused on title phrases", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+        enableEpisodeSync
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Episode Discussion Communities")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Refresh Episode Discussions" })).toBeInTheDocument();
+    expect(screen.getByText("No episode discussion candidates loaded yet.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+    expect(await screen.findByText("Title Phrases")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Required flares for episode refresh are sourced from/i),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("combobox", { name: "Season" })).toHaveLength(1);
+    expect(screen.getAllByRole("combobox", { name: "Period" })).toHaveLength(1);
+  });
+
+  it("includes sync=true for inline community refresh and shows sync summary", async () => {
+    const refreshPayload = {
+      community: baseCommunity,
+      candidates: [],
+      episode_matrix: [],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 0,
+        sync_requested: true,
+        sync_auto_saved_count: 1,
+        sync_auto_saved_post_ids: ["episode-1"],
+        sync_skipped_conflicts: ["episode-conflict"],
+        sync_skipped_ineligible_count: 2,
+        sync_candidate_results: [
+          {
+            reddit_post_id: "episode-1",
+            status: "auto_saved",
+            reason_code: "auto_saved_success",
+            reason: "Auto-synced successfully.",
+          },
+        ],
+        season_context: { season_id: "season-1", season_number: 6 },
+        period_context: {
+          selected_window_start: "2026-01-01T00:00:00.000Z",
+          selected_window_end: "2026-01-14T23:59:59.000Z",
+          selected_period_labels: ["All Periods"],
+        },
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+        enableEpisodeSync
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refresh Episode Discussions" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Episode Discussions" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/episode-discussions/refresh"),
+        expect.anything(),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("sync=true"),
+        expect.anything(),
+      );
+    });
+
+    expect(await screen.findByText(/Auto-synced 1 posts/i)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter((call) => String(call[0]).includes("/api/admin/reddit/communities")).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows per-candidate reason when a post is not auto-synced", async () => {
+    const refreshPayload = {
+      community: baseCommunity,
+      candidates: [
+        {
+          reddit_post_id: "episode-2",
+          title: "RHOSLC - Season 6 - Episode 4 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-2/test/",
+          permalink: "/r/BravoRealHousewives/comments/episode-2/test/",
+          author: "user2",
+          score: 11,
+          num_comments: 7,
+          posted_at: "2026-02-24T12:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 4,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 1,
+        sync_requested: true,
+        sync_auto_saved_count: 0,
+        sync_auto_saved_post_ids: [],
+        sync_skipped_conflicts: [],
+        sync_skipped_ineligible_count: 1,
+        sync_candidate_results: [
+          {
+            reddit_post_id: "episode-2",
+            status: "not_eligible",
+            reason_code: "author_not_automoderator",
+            reason: "Author is not AutoModerator.",
+          },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+        enableEpisodeSync
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refresh Episode Discussions" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Episode Discussions" }));
+
+    expect(await screen.findByText("Not auto-synced")).toBeInTheDocument();
+    expect(screen.getByText("Author is not AutoModerator.")).toBeInTheDocument();
+    expect(screen.getByText("Reason code: author_not_automoderator")).toBeInTheDocument();
+  });
+
+  it("filters candidates by sync status and reason code", async () => {
+    const refreshPayload = {
+      community: baseCommunity,
+      candidates: [
+        {
+          reddit_post_id: "episode-a",
+          title: "RHOSLC - Season 6 - Episode 4 - Live Episode Discussion [A]",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-a/test/",
+          permalink: "/r/BravoRealHousewives/comments/episode-a/test/",
+          author: "AutoModerator",
+          score: 111,
+          num_comments: 21,
+          posted_at: "2026-02-24T12:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 4,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+        {
+          reddit_post_id: "episode-b",
+          title: "RHOSLC - Season 6 - Episode 5 - Live Episode Discussion [B]",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-b/test/",
+          permalink: "/r/BravoRealHousewives/comments/episode-b/test/",
+          author: "user-b",
+          score: 22,
+          num_comments: 6,
+          posted_at: "2026-02-24T12:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 5,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+        {
+          reddit_post_id: "episode-c",
+          title: "RHOSLC - Season 6 - Episode 6 - Live Episode Discussion [C]",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-c/test/",
+          permalink: "/r/BravoRealHousewives/comments/episode-c/test/",
+          author: "user-c",
+          score: 33,
+          num_comments: 7,
+          posted_at: "2026-02-24T12:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 6,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 3,
+        sync_requested: true,
+        sync_auto_saved_count: 1,
+        sync_auto_saved_post_ids: ["episode-a"],
+        sync_skipped_conflicts: [],
+        sync_skipped_ineligible_count: 1,
+        sync_candidate_results: [
+          {
+            reddit_post_id: "episode-a",
+            status: "auto_saved",
+            reason_code: "auto_saved_success",
+            reason: "Auto-synced successfully.",
+          },
+          {
+            reddit_post_id: "episode-b",
+            status: "not_eligible",
+            reason_code: "author_not_automoderator",
+            reason: "Author is not AutoModerator.",
+          },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+        enableEpisodeSync
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refresh Episode Discussions" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Episode Discussions" }));
+
+    expect(await screen.findByText(/\[A\]/i)).toBeInTheDocument();
+    expect(screen.getByText(/\[B\]/i)).toBeInTheDocument();
+    expect(screen.getByText(/\[C\]/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Auto-sync status" }), {
+      target: { value: "not_eligible" },
+    });
+    expect(screen.queryByText(/\[A\]/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/\[B\]/i)).toBeInTheDocument();
+    expect(screen.queryByText(/\[C\]/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Auto-sync reason" }), {
+      target: { value: "author_not_automoderator" },
+    });
+    expect(screen.getByText(/\[B\]/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Auto-sync status" }), {
+      target: { value: "no_sync_result" },
+    });
+    expect(screen.queryByText(/\[A\]/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\[B\]/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/\[C\]/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText(/\[C\]/i)).toBeInTheDocument();
+  });
+
+  it("exports sync candidate results to CSV", async () => {
+    const refreshPayload = {
+      community: baseCommunity,
+      candidates: [
+        {
+          reddit_post_id: "episode-export",
+          title: "RHOSLC - Season 6 - Episode 4 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-export/test/",
+          permalink: "/r/BravoRealHousewives/comments/episode-export/test/",
+          author: "user-export",
+          score: 44,
+          num_comments: 10,
+          posted_at: "2026-02-24T12:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 4,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 1,
+        sync_requested: true,
+        sync_auto_saved_count: 0,
+        sync_auto_saved_post_ids: [],
+        sync_skipped_conflicts: [],
+        sync_skipped_ineligible_count: 1,
+        season_context: { season_id: "season-1", season_number: 6 },
+        period_context: {
+          selected_window_start: "2026-01-01T00:00:00.000Z",
+          selected_window_end: "2026-01-14T23:59:59.000Z",
+          selected_period_labels: ["All Periods"],
+        },
+        sync_candidate_results: [
+          {
+            reddit_post_id: "episode-export",
+            status: "not_eligible",
+            reason_code: "author_not_automoderator",
+            reason: "Author is not AutoModerator.",
+          },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    class CsvBlobMock {
+      parts: string[];
+      type: string;
+
+      constructor(parts: unknown[], options?: { type?: string }) {
+        this.parts = parts.map((part) => String(part));
+        this.type = options?.type ?? "";
+      }
+
+      async text(): Promise<string> {
+        return this.parts.join("");
+      }
+    }
+    vi.stubGlobal("Blob", CsvBlobMock as unknown as typeof Blob);
+
+    const createObjectUrlMock = vi.fn(() => "blob:sync-csv");
+    const revokeObjectUrlMock = vi.fn();
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    Object.defineProperty(window.URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectUrlMock,
+    });
+    Object.defineProperty(window.URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectUrlMock,
+    });
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+        enableEpisodeSync
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refresh Episode Discussions" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Episode Discussions" }));
+    await screen.findByRole("button", { name: "Export Sync Audit CSV" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Export Sync Audit CSV" }));
+
+    expect(createObjectUrlMock).toHaveBeenCalledTimes(1);
+    const csvBlob = createObjectUrlMock.mock.calls[0]?.[0] as { text: () => Promise<string> };
+    const csvText = await csvBlob.text();
+    expect(csvText).toContain("reason_code");
+    expect(csvText).toContain("author_not_automoderator");
+    expect(csvText).toContain("episode-export");
+    expect(anchorClickSpy).toHaveBeenCalled();
+    expect(revokeObjectUrlMock).toHaveBeenCalledWith("blob:sync-csv");
+
+    anchorClickSpy.mockRestore();
+  });
+
   it("refreshes episode discussion candidates and bulk-saves selected threads", async () => {
     const refreshPayload = {
       community: baseCommunity,

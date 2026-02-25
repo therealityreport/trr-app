@@ -5,10 +5,12 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import Link from "next/link";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import {
   buildSeasonWeekBreadcrumb,
   humanizeSlug,
 } from "@/lib/admin/admin-breadcrumbs";
+import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildSeasonAdminUrl, buildSeasonSocialWeekUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
@@ -1222,6 +1224,19 @@ export default function WeekDetailPage() {
     return dayFilterFromQuery;
   }, [data, dayFilterFromQuery]);
 
+  const recentShowLabel = useMemo(() => {
+    const showName = data?.season.show_name?.trim();
+    return showName || humanizeSlug(showSlugForRouting);
+  }, [data?.season.show_name, showSlugForRouting]);
+
+  useEffect(() => {
+    if (!showSlugForRouting || !recentShowLabel) return;
+    recordAdminRecentShow({
+      slug: showSlugForRouting,
+      label: recentShowLabel,
+    });
+  }, [recentShowLabel, showSlugForRouting]);
+
   useEffect(() => {
     if (authLoading || !isAdmin) return;
     const raw = showRouteParam?.trim() ?? "";
@@ -2081,50 +2096,86 @@ export default function WeekDetailPage() {
     );
   }
 
-  const breadcrumbShowName = data?.season.show_name?.trim() || humanizeSlug(showSlugForRouting);
+  const breadcrumbShowName = recentShowLabel;
   const breadcrumbWeekLabel = data?.week.label?.trim() || `Week ${weekIndexInt}`;
   const breadcrumbShowHref = buildShowAdminUrl({ showSlug: showSlugForRouting });
+  const breadcrumbQuery = (() => {
+    const query = new URLSearchParams({ source_scope: sourceScope });
+    if (socialPlatform) query.set("social_platform", socialPlatform);
+    if (socialView) query.set("social_view", socialView);
+    if (resolvedSeasonId) query.set("season_id", resolvedSeasonId);
+    return query;
+  })();
+  const breadcrumbSeasonHref = buildSeasonAdminUrl({
+    showSlug: showSlugForRouting,
+    seasonNumber,
+  });
+  const breadcrumbSocialHref = buildSeasonAdminUrl({
+    showSlug: showSlugForRouting,
+    seasonNumber,
+    tab: "social",
+    query: breadcrumbQuery,
+  });
+  const breadcrumbWeekHref = buildSeasonSocialWeekUrl({
+    showSlug: showSlugForRouting,
+    seasonNumber,
+    weekIndex: weekIndexInt,
+    query: breadcrumbQuery,
+  });
+  const breadcrumbSubTabLabel = socialView
+    ? humanizeSlug(socialView)
+    : socialPlatform
+      ? PLATFORM_LABELS[socialPlatform] ?? humanizeSlug(socialPlatform)
+      : undefined;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
-      {/* Back link + header */}
-      <div className="mb-6">
-        <AdminBreadcrumbs
-          items={buildSeasonWeekBreadcrumb(breadcrumbShowName, seasonNumber, breadcrumbWeekLabel, {
-            showHref: breadcrumbShowHref,
-          })}
-          className="mb-2"
-        />
-        <Link
-          href={buildSeasonAdminUrl({
-            showSlug: showSlugForRouting,
-            seasonNumber,
-            tab: "social",
-            query: (() => {
-              const query = new URLSearchParams({ source_scope: sourceScope });
-              if (socialPlatform) query.set("social_platform", socialPlatform);
-              if (socialView) query.set("social_view", socialView);
-              if (resolvedSeasonId) query.set("season_id", resolvedSeasonId);
-              return query;
-            })(),
-          }) as "/admin/trr-shows"}
-          className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
-        >
-          ← Back to Season Social Analytics
-        </Link>
+    <div className="min-h-screen bg-zinc-50">
+      <AdminGlobalHeader bodyClassName="px-6 py-5">
+        <div className="mx-auto max-w-6xl">
+          <AdminBreadcrumbs
+            items={buildSeasonWeekBreadcrumb(breadcrumbShowName, seasonNumber, breadcrumbWeekLabel, {
+              showHref: breadcrumbShowHref,
+              seasonHref: breadcrumbSeasonHref,
+              socialHref: breadcrumbSocialHref,
+              subTabLabel: breadcrumbSubTabLabel,
+              subTabHref: breadcrumbSocialHref,
+              weekHref: breadcrumbWeekHref,
+            })}
+            className="mb-2"
+          />
+          <Link
+            href={buildSeasonAdminUrl({
+              showSlug: showSlugForRouting,
+              seasonNumber,
+              tab: "social",
+              query: (() => {
+                const query = new URLSearchParams({ source_scope: sourceScope });
+                if (socialPlatform) query.set("social_platform", socialPlatform);
+                if (socialView) query.set("social_view", socialView);
+                if (resolvedSeasonId) query.set("season_id", resolvedSeasonId);
+                return query;
+              })(),
+            }) as "/admin/trr-shows"}
+            className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            ← Back to Season Social Analytics
+          </Link>
 
-        {data && (
-          <div className="mt-2">
-            <h1 className="text-2xl font-bold text-gray-900">
-              {data.week.label}
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              {data.season.show_name} — Season {data.season.season_number} ·{" "}
-              {fmtDate(data.week.start)} – {fmtDate(data.week.end)}
-            </p>
-          </div>
-        )}
-      </div>
+          {data && (
+            <div className="mt-2">
+              <h1 className="text-2xl font-bold text-gray-900">
+                {data.week.label}
+              </h1>
+              <p className="mt-1 text-sm text-gray-500">
+                {data.season.show_name} — Season {data.season.season_number} ·{" "}
+                {fmtDate(data.week.start)} – {fmtDate(data.week.end)}
+              </p>
+            </div>
+          )}
+        </div>
+      </AdminGlobalHeader>
+
+      <main className="mx-auto max-w-6xl px-4 py-6">
 
       {/* Loading / Error */}
       {loading && (
@@ -2422,6 +2473,7 @@ export default function WeekDetailPage() {
           )}
         </>
       )}
+      </main>
     </div>
   );
 }

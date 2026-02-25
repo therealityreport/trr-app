@@ -30,6 +30,7 @@ describe("cast smoke preflight script", () => {
     });
 
     expect(report.ok).toBe(true);
+    expect(report.auth_mode).toBe("none");
     expect(report.summary).toEqual({ total: 3, passed: 3, failed: 0 });
     expect(report.checks.map((check: { name: string }) => check.name)).toEqual([
       "backend_health",
@@ -37,6 +38,12 @@ describe("cast smoke preflight script", () => {
       "cast_role_members_proxy",
     ]);
     expect(report.checks.every((check: { status: number }) => check.status === 200)).toBe(true);
+    expect(
+      report.checks.every(
+        (check: { auth_mode: string; auth_status: string }) =>
+          check.auth_mode === "none" && check.auth_status === "unknown"
+      )
+    ).toBe(true);
   });
 
   it("reports retryable metadata when roles/cast-role-members checks fail", async () => {
@@ -90,12 +97,83 @@ describe("cast smoke preflight script", () => {
       code: "UPSTREAM_TIMEOUT",
       retryable: true,
       upstream_status: 504,
+      auth_mode: "none",
+      auth_status: "unknown",
     });
     expect(castCheck).toMatchObject({
       status: 502,
       code: "BACKEND_UNREACHABLE",
       retryable: true,
       upstream_status: 502,
+      auth_mode: "none",
+      auth_status: "unknown",
+    });
+  });
+
+  it("passes raw cookie header through app proxy checks", async () => {
+    const script = await import(modulePath);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "healthy" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
+
+    await script.runPreflight({
+      showId: "show-1",
+      appOrigin: "http://admin.localhost:3000",
+      backendOrigin: "http://127.0.0.1:8000",
+      timeoutMs: 20_000,
+      cookieHeader: "session=abc123; path=/",
+      fetchImpl: fetchMock,
+      now: () => Date.now(),
+    });
+
+    const backendCallOptions = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> };
+    const rolesCallOptions = fetchMock.mock.calls[1]?.[1] as { headers?: Record<string, string> };
+    const castCallOptions = fetchMock.mock.calls[2]?.[1] as { headers?: Record<string, string> };
+
+    expect(backendCallOptions?.headers).toBeUndefined();
+    expect(rolesCallOptions?.headers?.Cookie).toBe("session=abc123; path=/");
+    expect(castCallOptions?.headers?.Cookie).toBe("session=abc123; path=/");
+  });
+
+  it("maps 401 app-proxy responses to non-retryable AUTH_REQUIRED", async () => {
+    const script = await import(modulePath);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "healthy" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "forbidden" }), { status: 401 }));
+
+    const report = await script.runPreflight({
+      showId: "show-1",
+      appOrigin: "http://admin.localhost:3000",
+      backendOrigin: "http://127.0.0.1:8000",
+      timeoutMs: 20_000,
+      cookieHeader: "session=abc123",
+      fetchImpl: fetchMock,
+      now: () => Date.now(),
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.auth_mode).toBe("cookie");
+    const rolesCheck = report.checks.find((check: { name: string }) => check.name === "show_roles_proxy");
+    const castCheck = report.checks.find((check: { name: string }) => check.name === "cast_role_members_proxy");
+    expect(rolesCheck).toMatchObject({
+      status: 401,
+      code: "AUTH_REQUIRED",
+      retryable: false,
+      upstream_status: 401,
+      auth_mode: "cookie",
+      auth_status: "unauthorized",
+    });
+    expect(castCheck).toMatchObject({
+      status: 401,
+      code: "AUTH_REQUIRED",
+      retryable: false,
+      upstream_status: 401,
+      auth_mode: "cookie",
+      auth_status: "unauthorized",
     });
   });
 
@@ -107,11 +185,33 @@ describe("cast smoke preflight script", () => {
       app_origin: "http://admin.localhost:3000",
       backend_origin: "http://127.0.0.1:8000",
       timeout_ms: 20_000,
+      auth_mode: "none",
       checked_at: "2026-02-24T00:00:00.000Z",
       checks: [
-        { name: "backend_health", ok: true, status: 200, latency_ms: 11 },
-        { name: "show_roles_proxy", ok: true, status: 200, latency_ms: 12 },
-        { name: "cast_role_members_proxy", ok: true, status: 200, latency_ms: 13 },
+        {
+          name: "backend_health",
+          ok: true,
+          status: 200,
+          latency_ms: 11,
+          auth_mode: "none",
+          auth_status: "unknown",
+        },
+        {
+          name: "show_roles_proxy",
+          ok: true,
+          status: 200,
+          latency_ms: 12,
+          auth_mode: "none",
+          auth_status: "unknown",
+        },
+        {
+          name: "cast_role_members_proxy",
+          ok: true,
+          status: 200,
+          latency_ms: 13,
+          auth_mode: "none",
+          auth_status: "unknown",
+        },
       ],
       summary: {
         total: 3,

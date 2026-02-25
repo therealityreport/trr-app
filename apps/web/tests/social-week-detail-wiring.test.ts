@@ -69,7 +69,7 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/query\.set\("season_id", resolvedSeasonId\)/);
   });
 
-  it("wires a clickable show breadcrumb back to the show admin page", () => {
+  it("wires deep social breadcrumbs with linked show and social ancestors", () => {
     const filePath = path.resolve(
       __dirname,
       "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
@@ -78,6 +78,9 @@ describe("social week detail wiring", () => {
 
     expect(contents).toMatch(/buildShowAdminUrl\(\{ showSlug: showSlugForRouting \}\)/);
     expect(contents).toMatch(/showHref:\s*breadcrumbShowHref/);
+    expect(contents).toMatch(/seasonHref:\s*breadcrumbSeasonHref/);
+    expect(contents).toMatch(/socialHref:\s*breadcrumbSocialHref/);
+    expect(contents).toMatch(/subTabLabel:\s*breadcrumbSubTabLabel/);
     expect(contents).toMatch(/buildSeasonWeekBreadcrumb\(/);
   });
 

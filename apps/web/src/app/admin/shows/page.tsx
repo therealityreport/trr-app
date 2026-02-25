@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { shows, type ShowAssets, type SeasonAssets } from "@/lib/admin/shows/data";
@@ -81,10 +82,10 @@ export default function AdminShowsPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-5">
+        <AdminGlobalHeader bodyClassName="px-6 py-5">
           <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows Assets")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows Assets", "/admin/shows")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">{activeShow.title}</h1>
               <p className="text-sm text-zinc-500">{activeShow.logline}</p>
             </div>
@@ -117,7 +118,7 @@ export default function AdminShowsPage() {
               </select>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-8">
           <section className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">

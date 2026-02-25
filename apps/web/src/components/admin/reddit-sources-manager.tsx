@@ -121,6 +121,25 @@ interface EpisodeDiscussionMatrixRow {
   total_upvotes: number;
 }
 
+type SyncCandidateStatus = "auto_saved" | "skipped_conflict" | "not_eligible";
+
+type SyncCandidateReasonCode =
+  | "auto_saved_success"
+  | "already_saved_other_community"
+  | "author_not_automoderator"
+  | "title_missing_episode_discussion"
+  | "missing_episode_air_date"
+  | "missing_post_timestamp"
+  | "invalid_post_timestamp"
+  | "posted_date_mismatch";
+
+interface SyncCandidateResult {
+  reddit_post_id: string;
+  status: SyncCandidateStatus;
+  reason_code?: SyncCandidateReasonCode;
+  reason: string;
+}
+
 interface EpisodeDiscussionRefreshPayload {
   community?: RedditCommunityResponse;
   candidates?: EpisodeDiscussionCandidate[];
@@ -144,6 +163,12 @@ interface EpisodeDiscussionRefreshPayload {
       selected_window_end?: string | null;
       selected_period_labels?: string[];
     };
+    sync_requested?: boolean;
+    sync_auto_saved_count?: number;
+    sync_auto_saved_post_ids?: string[];
+    sync_skipped_conflicts?: string[];
+    sync_skipped_ineligible_count?: number;
+    sync_candidate_results?: SyncCandidateResult[];
   };
   error?: string;
 }
@@ -216,6 +241,8 @@ export interface RedditSourcesManagerProps {
   initialCommunityId?: string;
   hideCommunityList?: boolean;
   backHref?: string;
+  episodeDiscussionsPlacement?: "settings" | "inline";
+  enableEpisodeSync?: boolean;
   onCommunityContextChange?: (context: RedditCommunityContext | null) => void;
 }
 
@@ -302,6 +329,58 @@ const formatDiscussionTypeLabel = (type: "live" | "post" | "weekly"): string => 
   if (type === "live") return "Live";
   if (type === "post") return "Post";
   return "Weekly";
+};
+
+type EpisodeSyncStatusFilter =
+  | "all"
+  | "auto_saved"
+  | "skipped_conflict"
+  | "not_eligible"
+  | "no_sync_result";
+
+const SYNC_STATUS_FILTER_OPTIONS: Array<{ value: EpisodeSyncStatusFilter; label: string }> = [
+  { value: "all", label: "All results" },
+  { value: "auto_saved", label: "Auto-synced" },
+  { value: "skipped_conflict", label: "Skipped conflict" },
+  { value: "not_eligible", label: "Not eligible" },
+  { value: "no_sync_result", label: "No sync result" },
+];
+
+const SYNC_REASON_LABELS: Record<SyncCandidateReasonCode, string> = {
+  auto_saved_success: "Auto-saved successfully",
+  already_saved_other_community: "Already saved in another community",
+  author_not_automoderator: "Author is not AutoModerator",
+  title_missing_episode_discussion: "Title missing 'Episode Discussion'",
+  missing_episode_air_date: "No mapped episode air date",
+  missing_post_timestamp: "Post timestamp missing",
+  invalid_post_timestamp: "Post timestamp invalid",
+  posted_date_mismatch: "Posted date does not match episode air date",
+};
+
+const formatSyncStatusLabel = (status: SyncCandidateStatus): string => {
+  if (status === "auto_saved") return "Auto-synced";
+  if (status === "skipped_conflict") return "Skipped conflict";
+  return "Not auto-synced";
+};
+
+const formatSyncReasonCodeLabel = (reasonCode: SyncCandidateReasonCode | undefined): string => {
+  if (!reasonCode) return "Unknown";
+  return SYNC_REASON_LABELS[reasonCode] ?? reasonCode;
+};
+
+const toCsvCell = (value: string): string => `"${value.replace(/"/g, "\"\"")}"`;
+
+const buildCsv = (rows: string[][]): string =>
+  rows.map((row) => row.map((cell) => toCsvCell(cell)).join(",")).join("\n");
+
+const formatCsvTimestamp = (date = new Date()): string => {
+  const year = String(date.getFullYear());
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+  return `${year}${month}${day}-${hour}${minute}${second}`;
 };
 
 const buildPeriodOptions = (weeklyRows: SocialAnalyticsPeriodRow[]): EpisodePeriodOption[] => {
@@ -401,6 +480,8 @@ export default function RedditSourcesManager({
   initialCommunityId,
   hideCommunityList = false,
   backHref,
+  episodeDiscussionsPlacement = "settings",
+  enableEpisodeSync = false,
   onCommunityContextChange,
 }: RedditSourcesManagerProps) {
   const pathname = usePathname();
@@ -457,6 +538,10 @@ export default function RedditSourcesManager({
   const [selectedShowSlug, setSelectedShowSlug] = useState<string | null>(null);
   const [episodeMeta, setEpisodeMeta] = useState<EpisodeDiscussionRefreshPayload["meta"] | null>(
     null,
+  );
+  const [syncStatusFilter, setSyncStatusFilter] = useState<EpisodeSyncStatusFilter>("all");
+  const [syncReasonCodeFilter, setSyncReasonCodeFilter] = useState<"all" | SyncCandidateReasonCode>(
+    "all",
   );
   const isBusy = busyAction !== null;
   const seasonOptionsCacheRef = useRef<Map<string, ShowSeasonOption[]>>(new Map());
@@ -658,6 +743,8 @@ export default function RedditSourcesManager({
     setShowCommunitySettingsModal(false);
     setSelectedShowLabel(null);
     setSelectedShowSlug(null);
+    setSyncStatusFilter("all");
+    setSyncReasonCodeFilter("all");
   }, [selectedCommunityId]);
 
   const selectedCommunity = useMemo(
@@ -694,6 +781,64 @@ export default function RedditSourcesManager({
     }
     return null;
   }, [episodeMeta?.season_context?.season_number, episodeSeasonId, seasonOptions]);
+
+  const syncCandidateResults = useMemo(
+    () => episodeMeta?.sync_candidate_results ?? [],
+    [episodeMeta?.sync_candidate_results],
+  );
+
+  const syncCandidateResultByPostId = useMemo(
+    () => new Map(syncCandidateResults.map((item) => [item.reddit_post_id, item])),
+    [syncCandidateResults],
+  );
+
+  const availableSyncReasonCodes = useMemo(() => {
+    const codes = new Set<SyncCandidateReasonCode>();
+    for (const item of syncCandidateResults) {
+      if (item.reason_code) {
+        codes.add(item.reason_code);
+      }
+    }
+    return [...codes].sort((a, b) => formatSyncReasonCodeLabel(a).localeCompare(formatSyncReasonCodeLabel(b)));
+  }, [syncCandidateResults]);
+
+  const filteredEpisodeCandidates = useMemo(
+    () =>
+      episodeCandidates.filter((candidate) => {
+        const syncResult = syncCandidateResultByPostId.get(candidate.reddit_post_id);
+        if (syncStatusFilter === "no_sync_result" && syncResult) {
+          return false;
+        }
+        if (syncStatusFilter !== "all" && syncStatusFilter !== "no_sync_result") {
+          if (!syncResult || syncResult.status !== syncStatusFilter) {
+            return false;
+          }
+        }
+        const shouldApplyReasonFilter =
+          syncReasonCodeFilter !== "all" && syncStatusFilter !== "no_sync_result";
+        if (shouldApplyReasonFilter) {
+          if (!syncResult || syncResult.reason_code !== syncReasonCodeFilter) {
+            return false;
+          }
+        }
+        return true;
+      }),
+    [episodeCandidates, syncCandidateResultByPostId, syncReasonCodeFilter, syncStatusFilter],
+  );
+
+  useEffect(() => {
+    if (syncStatusFilter === "no_sync_result" && syncReasonCodeFilter !== "all") {
+      setSyncReasonCodeFilter("all");
+      return;
+    }
+  }, [syncReasonCodeFilter, syncStatusFilter]);
+
+  useEffect(() => {
+    if (syncReasonCodeFilter === "all") return;
+    if (!availableSyncReasonCodes.includes(syncReasonCodeFilter)) {
+      setSyncReasonCodeFilter("all");
+    }
+  }, [availableSyncReasonCodes, syncReasonCodeFilter]);
 
   const isEpisodeContextRequestActive = useCallback(
     (requestToken: number, signal?: AbortSignal) =>
@@ -1480,6 +1625,9 @@ export default function RedditSourcesManager({
         params.set("period_end", selectedPeriod.end);
         params.set("period_label", selectedPeriod.label);
       }
+      if (enableEpisodeSync) {
+        params.set("sync", "true");
+      }
       const response = await fetchWithTimeout(
         `/api/admin/reddit/communities/${selectedCommunity.id}/episode-discussions/refresh?${params.toString()}`,
         {
@@ -1511,19 +1659,60 @@ export default function RedditSourcesManager({
       if (typeof resolvedSeasonId === "string" && resolvedSeasonId.trim().length > 0) {
         setEpisodeSeasonId(resolvedSeasonId);
       }
+      if ((payload.meta?.sync_auto_saved_count ?? 0) > 0) {
+        await fetchCommunities();
+      }
     } catch (err) {
       setError(toErrorMessage(err, "Failed to refresh episode discussions"));
     } finally {
       setEpisodeRefreshing(false);
     }
   }, [
+    enableEpisodeSync,
     episodeSeasonId,
+    fetchCommunities,
     fetchWithTimeout,
     getAuthHeaders,
     mergeCommunityPatch,
     selectedPeriod,
     selectedCommunity,
   ]);
+
+  const handleEpisodeSeasonChange = useCallback(
+    (nextSeasonId: string | null) => {
+      if (!selectedCommunity) return;
+      setEpisodeSeasonId(nextSeasonId);
+      const season = seasonOptions.find((item) => item.id === nextSeasonId);
+      if (season) {
+        const requestToken = episodeContextRequestTokenRef.current + 1;
+        episodeContextRequestTokenRef.current = requestToken;
+        episodeContextAbortRef.current?.abort();
+        const controller = new AbortController();
+        episodeContextAbortRef.current = controller;
+        setPeriodsLoading(true);
+        void loadPeriodOptionsForSeason(selectedCommunity, season, {
+          signal: controller.signal,
+          requestToken,
+        })
+          .catch((err) => {
+            setEpisodeContextWarning(
+              toErrorMessage(err, "Failed to load social periods for selected season"),
+            );
+          })
+          .finally(() => {
+            if (
+              !controller.signal.aborted &&
+              episodeContextRequestTokenRef.current === requestToken
+            ) {
+              setPeriodsLoading(false);
+            }
+          });
+      } else {
+        setPeriodOptions([]);
+      }
+    },
+    [loadPeriodOptionsForSeason, seasonOptions, selectedCommunity],
+  );
 
   const handleSaveSelectedEpisodeDiscussions = useCallback(async () => {
     if (!selectedCommunity) return;
@@ -1579,6 +1768,507 @@ export default function RedditSourcesManager({
     getAuthHeaders,
     selectedCommunity,
   ]);
+
+  const handleExportSyncAuditCsv = useCallback(() => {
+    if (!selectedCommunity || syncCandidateResults.length === 0) {
+      return;
+    }
+    const candidateByPostId = new Map(
+      episodeCandidates.map((candidate) => [candidate.reddit_post_id, candidate]),
+    );
+    const seasonIdForExport = episodeMeta?.season_context?.season_id ?? episodeSeasonId ?? "";
+    const seasonNumberForExport = episodeMeta?.season_context?.season_number ?? selectedSeasonNumber;
+    const primaryPeriodLabel = episodeMeta?.period_context?.selected_period_labels?.[0] ?? "";
+    const rows: string[][] = [
+      [
+        "community_id",
+        "subreddit",
+        "show_id",
+        "show_name",
+        "season_id",
+        "season_number",
+        "period_label",
+        "reddit_post_id",
+        "title",
+        "url",
+        "permalink",
+        "author",
+        "posted_at",
+        "episode_number",
+        "discussion_type",
+        "link_flair_text",
+        "sync_status",
+        "reason_code",
+        "reason",
+      ],
+    ];
+
+    for (const result of syncCandidateResults) {
+      const candidate = candidateByPostId.get(result.reddit_post_id);
+      rows.push([
+        selectedCommunity.id,
+        selectedCommunity.subreddit,
+        selectedCommunity.trr_show_id,
+        selectedCommunity.trr_show_name,
+        seasonIdForExport,
+        seasonNumberForExport != null ? String(seasonNumberForExport) : "",
+        primaryPeriodLabel,
+        result.reddit_post_id,
+        candidate?.title ?? "",
+        candidate?.url ?? "",
+        candidate?.permalink ?? "",
+        candidate?.author ?? "",
+        candidate?.posted_at ?? "",
+        typeof candidate?.episode_number === "number" ? String(candidate.episode_number) : "",
+        candidate?.discussion_type ?? "",
+        candidate?.link_flair_text ?? "",
+        result.status,
+        result.reason_code ?? "",
+        result.reason ?? "",
+      ]);
+    }
+
+    const csv = buildCsv(rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const objectUrl = window.URL.createObjectURL(blob);
+    const safeSubreddit = selectedCommunity.subreddit.replace(/[^a-z0-9_-]+/gi, "-");
+    const seasonFragment =
+      seasonNumberForExport != null && Number.isFinite(seasonNumberForExport)
+        ? `s${seasonNumberForExport}`
+        : "sna";
+    const filename = `reddit-sync-audit-${safeSubreddit}-${seasonFragment}-${formatCsvTimestamp()}.csv`;
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(objectUrl);
+  }, [
+    episodeCandidates,
+    episodeMeta?.period_context?.selected_period_labels,
+    episodeMeta?.season_context?.season_id,
+    episodeMeta?.season_context?.season_number,
+    episodeSeasonId,
+    selectedCommunity,
+    selectedSeasonNumber,
+    syncCandidateResults,
+  ]);
+
+  const renderEpisodeTitlePhraseSettings = () => {
+    if (!selectedCommunity) return null;
+
+    return (
+      <div className="rounded-lg border border-zinc-200 p-3">
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+          Title Phrases
+        </p>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {selectedCommunity.episode_title_patterns.length === 0 && (
+            <span className="text-xs text-zinc-500">No episode title patterns.</span>
+          )}
+          {selectedCommunity.episode_title_patterns.map((pattern) => (
+            <button
+              key={`episode-pattern-${selectedCommunity.id}-${pattern}`}
+              type="button"
+              disabled={isBusy}
+              onClick={() => {
+                const nextPatterns = selectedCommunity.episode_title_patterns.filter(
+                  (value) => value.toLowerCase() !== pattern.toLowerCase(),
+                );
+                void persistEpisodeRules(selectedCommunity.id, {
+                  episodeTitlePatterns: nextPatterns,
+                });
+              }}
+              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60"
+            >
+              {pattern} ×
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={episodePatternInput}
+            onChange={(event) => setEpisodePatternInput(event.target.value)}
+            placeholder="Add episode title phrase"
+            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+          />
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => {
+              const nextPatterns = pushListValue(
+                selectedCommunity.episode_title_patterns,
+                episodePatternInput,
+              );
+              setEpisodePatternInput("");
+              void persistEpisodeRules(selectedCommunity.id, {
+                episodeTitlePatterns: nextPatterns,
+              });
+            }}
+            className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+          >
+            Add
+          </button>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {episodePatternSuggestions
+            .filter(
+              (pattern) =>
+                !selectedCommunity.episode_title_patterns.some(
+                  (value) => value.toLowerCase() === pattern.toLowerCase(),
+                ),
+            )
+            .map((pattern) => (
+              <button
+                key={`episode-pattern-suggestion-${selectedCommunity.id}-${pattern}`}
+                type="button"
+                disabled={isBusy}
+                onClick={() => {
+                  void persistEpisodeRules(selectedCommunity.id, {
+                    episodeTitlePatterns: [
+                      ...selectedCommunity.episode_title_patterns,
+                      pattern,
+                    ],
+                  });
+                }}
+                className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+              >
+                + {pattern}
+              </button>
+            ))}
+        </div>
+        {!selectedCommunity.is_show_focused && (
+          <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-600">
+            Required flares for episode refresh are sourced from{" "}
+            <span className="font-semibold">All Posts With Flair</span>.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderEpisodeDiscussionPanel = () => {
+    if (!selectedCommunity) return null;
+
+    return (
+      <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <div className="mb-2">
+          <p className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">
+            Episode Discussion Communities
+          </p>
+        </div>
+        <p className="mb-2 text-xs text-zinc-500">
+          Episode Discussions are post types in this subreddit matched by title phrases.
+        </p>
+        {episodeContextWarning && (
+          <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+            {episodeContextWarning}
+          </div>
+        )}
+
+        <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+              Season
+            </span>
+            <select
+              value={episodeSeasonId ?? ""}
+              disabled={isBusy || periodsLoading || seasonOptions.length === 0}
+              onChange={(event) => handleEpisodeSeasonChange(event.target.value || null)}
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
+            >
+              {seasonOptions.length === 0 ? (
+                <option value="">No seasons</option>
+              ) : (
+                seasonOptions.map((season) => (
+                  <option key={season.id} value={season.id}>
+                    Season {season.season_number}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+              Period
+            </span>
+            <select
+              value={selectedPeriodKey}
+              disabled={isBusy || periodsLoading || periodOptions.length === 0}
+              onChange={(event) => setSelectedPeriodKey(event.target.value)}
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
+            >
+              {periodOptions.length === 0 ? (
+                <option value="all-periods">All Periods</option>
+              ) : (
+                periodOptions.map((period) => (
+                  <option key={period.key} value={period.key}>
+                    {period.label}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={isBusy || periodsLoading || episodeRefreshing}
+            onClick={() => void handleRefreshEpisodeDiscussions()}
+            className="self-end rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+          >
+            {episodeRefreshing ? "Refreshing..." : "Refresh Episode Discussions"}
+          </button>
+        </div>
+
+        {episodeMeta?.auto_seeded_required_flares && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+            Using temporary required flair: Salt Lake City (set in All Posts With Flair to persist).
+          </div>
+        )}
+
+        {episodeMeta?.sync_requested && (
+          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-700">
+            Auto-synced {episodeMeta.sync_auto_saved_count ?? 0} posts
+            {episodeMeta.sync_skipped_conflicts && episodeMeta.sync_skipped_conflicts.length > 0
+              ? ` · skipped conflicts: ${episodeMeta.sync_skipped_conflicts.length}`
+              : ""}
+            {typeof episodeMeta.sync_skipped_ineligible_count === "number"
+              ? ` · skipped ineligible: ${episodeMeta.sync_skipped_ineligible_count}`
+              : ""}
+          </div>
+        )}
+
+        {syncCandidateResults.length > 0 && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={handleExportSyncAuditCsv}
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+            >
+              Export Sync Audit CSV
+            </button>
+          </div>
+        )}
+
+        {episodeMeta && (
+          <p className="mb-3 text-xs text-zinc-500">
+            Found {episodeMeta.total_found ?? 0} candidates ·{" "}
+            {typeof episodeMeta.fetched_at === "string" ? fmtDateTime(episodeMeta.fetched_at) : "-"}
+            {episodeMeta.season_context?.season_number
+              ? ` · Season ${episodeMeta.season_context.season_number}`
+              : ""}
+            {episodeMeta.period_context?.selected_period_labels?.[0]
+              ? ` · ${episodeMeta.period_context.selected_period_labels[0]}`
+              : ""}
+            {episodeMeta.failed_sorts && episodeMeta.failed_sorts.length > 0
+              ? ` · Failed sorts: ${episodeMeta.failed_sorts.join(", ")}`
+              : ""}
+            {episodeMeta.rate_limited_sorts && episodeMeta.rate_limited_sorts.length > 0
+              ? ` · Rate-limited: ${episodeMeta.rate_limited_sorts.join(", ")}`
+              : ""}
+          </p>
+        )}
+
+        {episodeMatrix.length > 0 && (
+          <div className="mb-3 overflow-x-auto rounded-lg border border-zinc-200">
+            <table className="min-w-full text-left text-xs">
+              <thead className="bg-zinc-50 text-zinc-600">
+                <tr>
+                  <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Episode</th>
+                  <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Live</th>
+                  <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Post</th>
+                  <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Weekly</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100">
+                {episodeMatrix.map((row) => {
+                  const cells: Array<["live" | "post" | "weekly", EpisodeDiscussionMatrixCell]> = [
+                    ["live", row.live],
+                    ["post", row.post],
+                    ["weekly", row.weekly],
+                  ];
+                  return (
+                    <tr key={`episode-matrix-${row.episode_number}`}>
+                      <td className="whitespace-nowrap px-2 py-2 font-semibold text-zinc-800">
+                        Episode {row.episode_number}
+                      </td>
+                      {cells.map(([cellKey, cell]) => (
+                        <td
+                          key={`episode-matrix-cell-${row.episode_number}-${cellKey}`}
+                          className="px-2 py-2 text-zinc-600"
+                        >
+                          <div>{fmtNum(cell.post_count)} posts</div>
+                          <div>{fmtNum(cell.total_comments)} comments</div>
+                          {cell.top_post_url && (
+                            <a
+                              href={cell.top_post_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-semibold text-blue-700 hover:underline"
+                            >
+                              Top post
+                            </a>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {episodeCandidates.length > 0 && (
+          <div className="mb-3 grid gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                Auto-sync status
+              </span>
+              <select
+                value={syncStatusFilter}
+                onChange={(event) =>
+                  setSyncStatusFilter(event.target.value as EpisodeSyncStatusFilter)
+                }
+                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+              >
+                {SYNC_STATUS_FILTER_OPTIONS.map((option) => (
+                  <option key={`sync-status-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                Auto-sync reason
+              </span>
+              <select
+                value={syncReasonCodeFilter}
+                onChange={(event) =>
+                  setSyncReasonCodeFilter(event.target.value as "all" | SyncCandidateReasonCode)
+                }
+                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
+                disabled={
+                  syncStatusFilter === "no_sync_result" || availableSyncReasonCodes.length === 0
+                }
+              >
+                <option value="all">All reasons</option>
+                {availableSyncReasonCodes.map((reasonCode) => (
+                  <option key={`sync-reason-${reasonCode}`} value={reasonCode}>
+                    {formatSyncReasonCodeLabel(reasonCode)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setSyncStatusFilter("all");
+                  setSyncReasonCodeFilter("all");
+                }}
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                Clear filters
+              </button>
+            </div>
+          </div>
+        )}
+
+        {episodeCandidates.length === 0 ? (
+          <p className="text-xs text-zinc-500">No episode discussion candidates loaded yet.</p>
+        ) : filteredEpisodeCandidates.length === 0 ? (
+          <p className="text-xs text-zinc-500">No candidates match current filters.</p>
+        ) : (
+          <div className="space-y-2">
+            {filteredEpisodeCandidates.map((candidate) => {
+              const checked = episodeSelectedPostIds.includes(candidate.reddit_post_id);
+              const syncResult = syncCandidateResultByPostId.get(candidate.reddit_post_id);
+              return (
+                <div
+                  key={`episode-candidate-${candidate.reddit_post_id}`}
+                  className="rounded-lg border border-zinc-100 bg-zinc-50/60 p-2"
+                >
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => {
+                        setEpisodeSelectedPostIds((current) =>
+                          event.target.checked
+                            ? [...current, candidate.reddit_post_id]
+                            : current.filter((id) => id !== candidate.reddit_post_id),
+                        );
+                      }}
+                    />
+                    <div className="min-w-0">
+                      <a
+                        href={candidate.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:underline"
+                      >
+                        {candidate.title}
+                      </a>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                        <span>
+                          Episode {candidate.episode_number} ·{" "}
+                          {formatDiscussionTypeLabel(candidate.discussion_type)}
+                        </span>
+                        <span>{fmtNum(candidate.score)} upvotes</span>
+                        <span>{fmtNum(candidate.num_comments)} comments</span>
+                        <span>{fmtDateTime(candidate.posted_at)}</span>
+                        {candidate.link_flair_text && (
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                            Flair: {candidate.link_flair_text}
+                          </span>
+                        )}
+                        {syncResult && (
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                              syncResult.status === "auto_saved"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : syncResult.status === "skipped_conflict"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-zinc-200 text-zinc-700"
+                            }`}
+                          >
+                            {formatSyncStatusLabel(syncResult.status)}
+                          </span>
+                        )}
+                      </div>
+                      {syncResult && syncResult.status !== "auto_saved" && (
+                        <>
+                          <p className="mt-1 text-[11px] text-zinc-600">{syncResult.reason}</p>
+                          {syncResult.reason_code && (
+                            <p className="mt-0.5 text-[10px] uppercase tracking-[0.08em] text-zinc-500">
+                              Reason code: {syncResult.reason_code}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-3">
+          <button
+            type="button"
+            disabled={episodeSaving || episodeSelectedPostIds.length === 0}
+            onClick={() => void handleSaveSelectedEpisodeDiscussions()}
+            className="rounded-lg bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+          >
+            {episodeSaving ? "Saving..." : "Save Selected"}
+          </button>
+        </div>
+      </article>
+    );
+  };
 
   if (mode === "season" && (!showId || !showName)) {
     return (
@@ -2120,6 +2810,8 @@ export default function RedditSourcesManager({
                   )}
                 </article>
 
+                {episodeDiscussionsPlacement === "inline" && renderEpisodeDiscussionPanel()}
+
                 {showCommunitySettingsModal && (
                   <div
                     className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -2493,352 +3185,8 @@ export default function RedditSourcesManager({
                       </div>
                     )}
 
-                    <div className="rounded-lg border border-zinc-200 p-3">
-                      <div className="mb-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                          Episode Discussion Communities
-                        </p>
-                      </div>
-
-                      <p className="mb-2 text-xs text-zinc-500">
-                        Episode Discussions are post types in this subreddit matched by title phrases.
-                      </p>
-                      {episodeContextWarning && (
-                        <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-                          {episodeContextWarning}
-                        </div>
-                      )}
-
-                      <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                        <label className="flex flex-col gap-1">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                            Season
-                          </span>
-                          <select
-                            value={episodeSeasonId ?? ""}
-                            disabled={isBusy || periodsLoading || seasonOptions.length === 0}
-                            onChange={(event) => {
-                              const nextSeasonId = event.target.value || null;
-                              setEpisodeSeasonId(nextSeasonId);
-                              const season = seasonOptions.find((item) => item.id === nextSeasonId);
-                              if (season) {
-                                const requestToken = episodeContextRequestTokenRef.current + 1;
-                                episodeContextRequestTokenRef.current = requestToken;
-                                episodeContextAbortRef.current?.abort();
-                                const controller = new AbortController();
-                                episodeContextAbortRef.current = controller;
-                                setPeriodsLoading(true);
-                                void loadPeriodOptionsForSeason(selectedCommunity, season, {
-                                  signal: controller.signal,
-                                  requestToken,
-                                })
-                                  .catch((err) => {
-                                    setEpisodeContextWarning(
-                                      toErrorMessage(
-                                        err,
-                                        "Failed to load social periods for selected season",
-                                      ),
-                                    );
-                                  })
-                                  .finally(() => {
-                                    if (
-                                      !controller.signal.aborted &&
-                                      episodeContextRequestTokenRef.current === requestToken
-                                    ) {
-                                      setPeriodsLoading(false);
-                                    }
-                                  });
-                              } else {
-                                setPeriodOptions([]);
-                              }
-                            }}
-                            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
-                          >
-                            {seasonOptions.length === 0 ? (
-                              <option value="">No seasons</option>
-                            ) : (
-                              seasonOptions.map((season) => (
-                                <option key={season.id} value={season.id}>
-                                  Season {season.season_number}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                        </label>
-                        <label className="flex flex-col gap-1">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                            Period
-                          </span>
-                          <select
-                            value={selectedPeriodKey}
-                            disabled={isBusy || periodsLoading || periodOptions.length === 0}
-                            onChange={(event) => setSelectedPeriodKey(event.target.value)}
-                            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
-                          >
-                            {periodOptions.length === 0 ? (
-                              <option value="all-periods">All Periods</option>
-                            ) : (
-                              periodOptions.map((period) => (
-                                <option key={period.key} value={period.key}>
-                                  {period.label}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                        </label>
-                        <button
-                          type="button"
-                          disabled={isBusy || periodsLoading || episodeRefreshing}
-                          onClick={() => void handleRefreshEpisodeDiscussions()}
-                          className="self-end rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
-                        >
-                          {episodeRefreshing ? "Refreshing..." : "Refresh Episode Discussions"}
-                        </button>
-                      </div>
-
-                      <div className="mb-3">
-                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                          Title Phrases
-                        </p>
-                        <div className="mb-2 flex flex-wrap gap-1.5">
-                          {selectedCommunity.episode_title_patterns.length === 0 && (
-                            <span className="text-xs text-zinc-500">No episode title patterns.</span>
-                          )}
-                          {selectedCommunity.episode_title_patterns.map((pattern) => (
-                            <button
-                              key={`episode-pattern-${selectedCommunity.id}-${pattern}`}
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() => {
-                                const nextPatterns = selectedCommunity.episode_title_patterns.filter(
-                                  (value) => value.toLowerCase() !== pattern.toLowerCase(),
-                                );
-                                void persistEpisodeRules(selectedCommunity.id, {
-                                  episodeTitlePatterns: nextPatterns,
-                                });
-                              }}
-                              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60"
-                            >
-                              {pattern} ×
-                            </button>
-                          ))}
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            value={episodePatternInput}
-                            onChange={(event) => setEpisodePatternInput(event.target.value)}
-                            placeholder="Add episode title phrase"
-                            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
-                          />
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => {
-                              const nextPatterns = pushListValue(
-                                selectedCommunity.episode_title_patterns,
-                                episodePatternInput,
-                              );
-                              setEpisodePatternInput("");
-                              void persistEpisodeRules(selectedCommunity.id, {
-                                episodeTitlePatterns: nextPatterns,
-                              });
-                            }}
-                            className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
-                          >
-                            Add
-                          </button>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {episodePatternSuggestions
-                            .filter(
-                              (pattern) =>
-                                !selectedCommunity.episode_title_patterns.some(
-                                  (value) => value.toLowerCase() === pattern.toLowerCase(),
-                                ),
-                            )
-                            .map((pattern) => (
-                              <button
-                                key={`episode-pattern-suggestion-${selectedCommunity.id}-${pattern}`}
-                                type="button"
-                                disabled={isBusy}
-                                onClick={() => {
-                                  void persistEpisodeRules(selectedCommunity.id, {
-                                    episodeTitlePatterns: [
-                                      ...selectedCommunity.episode_title_patterns,
-                                      pattern,
-                                    ],
-                                  });
-                                }}
-                                className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
-                              >
-                                + {pattern}
-                              </button>
-                            ))}
-                        </div>
-                      </div>
-
-                      {!selectedCommunity.is_show_focused && (
-                        <div className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-600">
-                          Required flares for episode refresh are sourced from
-                          {" "}
-                          <span className="font-semibold">All Posts With Flair</span>.
-                          {selectedCommunity.analysis_all_flares.length === 0 &&
-                            !episodeMeta?.auto_seeded_required_flares && (
-                            <span className="block pt-1 text-amber-700">
-                              No all-post flares selected. Episode refresh may be less strict for this multi-show community.
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {episodeMeta?.auto_seeded_required_flares && (
-                        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-                          Using temporary required flair: Salt Lake City (set in All Posts With Flair to persist).
-                        </div>
-                      )}
-
-                      {episodeMeta && (
-                        <p className="mb-3 text-xs text-zinc-500">
-                          Found {episodeMeta.total_found ?? 0} candidates ·{" "}
-                          {typeof episodeMeta.fetched_at === "string"
-                            ? fmtDateTime(episodeMeta.fetched_at)
-                            : "-"}
-                          {episodeMeta.season_context?.season_number
-                            ? ` · Season ${episodeMeta.season_context.season_number}`
-                            : ""}
-                          {episodeMeta.period_context?.selected_period_labels?.[0]
-                            ? ` · ${episodeMeta.period_context.selected_period_labels[0]}`
-                            : ""}
-                          {episodeMeta.failed_sorts && episodeMeta.failed_sorts.length > 0
-                            ? ` · Failed sorts: ${episodeMeta.failed_sorts.join(", ")}`
-                            : ""}
-                          {episodeMeta.rate_limited_sorts &&
-                          episodeMeta.rate_limited_sorts.length > 0
-                            ? ` · Rate-limited: ${episodeMeta.rate_limited_sorts.join(", ")}`
-                            : ""}
-                        </p>
-                      )}
-
-                      {episodeMatrix.length > 0 && (
-                        <div className="mb-3 overflow-x-auto rounded-lg border border-zinc-200">
-                          <table className="min-w-full text-left text-xs">
-                            <thead className="bg-zinc-50 text-zinc-600">
-                              <tr>
-                                <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Episode</th>
-                                <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Live</th>
-                                <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Post</th>
-                                <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Weekly</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-zinc-100">
-                              {episodeMatrix.map((row) => {
-                                const cells: Array<["live" | "post" | "weekly", EpisodeDiscussionMatrixCell]> = [
-                                  ["live", row.live],
-                                  ["post", row.post],
-                                  ["weekly", row.weekly],
-                                ];
-                                return (
-                                  <tr key={`episode-matrix-${row.episode_number}`}>
-                                    <td className="whitespace-nowrap px-2 py-2 font-semibold text-zinc-800">
-                                      Episode {row.episode_number}
-                                    </td>
-                                    {cells.map(([cellKey, cell]) => (
-                                      <td
-                                        key={`episode-matrix-cell-${row.episode_number}-${cellKey}`}
-                                        className="px-2 py-2 text-zinc-600"
-                                      >
-                                        <div>{fmtNum(cell.post_count)} posts</div>
-                                        <div>{fmtNum(cell.total_comments)} comments</div>
-                                        {(() => {
-                                          if (!cell.top_post_url) return null;
-                                          return (
-                                            <a
-                                              href={cell.top_post_url}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="text-[11px] font-semibold text-blue-700 hover:underline"
-                                            >
-                                              Top post
-                                            </a>
-                                          );
-                                        })()}
-                                      </td>
-                                    ))}
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-
-                      {episodeCandidates.length === 0 ? (
-                        <p className="text-xs text-zinc-500">
-                          No episode discussion candidates loaded yet.
-                        </p>
-                      ) : (
-                        <div className="space-y-2">
-                          {episodeCandidates.map((candidate) => {
-                            const checked = episodeSelectedPostIds.includes(candidate.reddit_post_id);
-                            return (
-                              <div
-                                key={`episode-candidate-${candidate.reddit_post_id}`}
-                                className="rounded-lg border border-zinc-100 bg-zinc-50/60 p-2"
-                              >
-                                <div className="flex items-start gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={(event) => {
-                                      setEpisodeSelectedPostIds((current) =>
-                                        event.target.checked
-                                          ? [...current, candidate.reddit_post_id]
-                                          : current.filter((id) => id !== candidate.reddit_post_id),
-                                      );
-                                    }}
-                                  />
-                                  <div className="min-w-0">
-                                    <a
-                                      href={candidate.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:underline"
-                                    >
-                                      {candidate.title}
-                                    </a>
-                                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                                      <span>
-                                        Episode {candidate.episode_number} ·{" "}
-                                        {formatDiscussionTypeLabel(candidate.discussion_type)}
-                                      </span>
-                                      <span>{fmtNum(candidate.score)} upvotes</span>
-                                      <span>{fmtNum(candidate.num_comments)} comments</span>
-                                      <span>{fmtDateTime(candidate.posted_at)}</span>
-                                      {candidate.link_flair_text && (
-                                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                                          Flair: {candidate.link_flair_text}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      <div className="mt-3">
-                        <button
-                          type="button"
-                          disabled={episodeSaving || episodeSelectedPostIds.length === 0}
-                          onClick={() => void handleSaveSelectedEpisodeDiscussions()}
-                          className="rounded-lg bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
-                        >
-                          {episodeSaving ? "Saving..." : "Save Selected"}
-                        </button>
-                      </div>
-                    </div>
+                    {renderEpisodeTitlePhraseSettings()}
+                    {episodeDiscussionsPlacement === "settings" && renderEpisodeDiscussionPanel()}
                   </div>
                     </article>
                   </div>

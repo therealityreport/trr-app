@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -95,10 +96,10 @@ export default function AdminSurveysPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Survey Editor")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Survey Editor", "/admin/surveys")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Survey Configuration</h1>
               <p className="text-sm text-zinc-500">
                 Create and manage survey themes, cast members, episodes, and air schedules.
@@ -113,7 +114,7 @@ export default function AdminSurveysPage() {
               </Link>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           {error && (

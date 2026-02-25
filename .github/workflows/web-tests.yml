@@ -55,6 +55,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run lint
         run: pnpm run lint
+      - name: Run targeted fandom typecheck (Node 20 full lane)
+        if: matrix.lane == 'full'
+        run: pnpm run typecheck:fandom
       - name: Run unit tests with coverage (Node 20 full lane)
         if: matrix.lane == 'full'
         run: pnpm run test:ci -- --coverage

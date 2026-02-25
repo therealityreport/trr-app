@@ -30,6 +30,7 @@ vi.mock("@/lib/admin/client-auth", () => ({
 }));
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin/networks/network/bravo",
   useParams: () => mocks.params,
   useRouter: () => mocks.router,
 }));

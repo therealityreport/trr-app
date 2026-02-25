@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -99,14 +100,14 @@ export default function NormalizedSurveysListPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto max-w-6xl">
-            <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Normalized Surveys")} className="mb-1" />
+            <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Normalized Surveys", "/admin/surveys/normalized")} className="mb-1" />
             <h1 className="mt-2 text-2xl font-bold text-zinc-900">
               Survey Management
             </h1>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           {error && (

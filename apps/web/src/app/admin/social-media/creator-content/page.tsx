@@ -3,6 +3,7 @@
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
@@ -45,11 +46,14 @@ export default function CreatorContentDashboardPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <AdminBreadcrumbs
-                items={[...buildAdminSectionBreadcrumb("Social Analytics", "/admin/social-media"), { label: "Creator Content" }]}
+                items={[
+                  ...buildAdminSectionBreadcrumb("Social Analytics", "/admin/social-media"),
+                  { label: "Creator Content", href: "/admin/social-media/creator-content" },
+                ]}
                 className="mb-1"
               />
               <h1 className="text-3xl font-bold text-zinc-900">Creator Content</h1>
@@ -64,7 +68,7 @@ export default function CreatorContentDashboardPage() {
               Back
             </Link>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
           <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">

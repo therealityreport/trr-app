@@ -347,6 +347,52 @@ describe("reddit-discovery-service", () => {
     ]);
   });
 
+  it("matches the full RHOSLC BravoRealHousewives title shape for live episode discussions", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify(
+          makeListing([
+            {
+              id: "real-title-shape",
+              title:
+                "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Live Episode Discussion",
+              selftext:
+                "Angie arranges a surprise RV trip for the women while tensions rise across the cast.",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/real-title-shape/test/",
+              permalink: "/r/BravoRealHousewives/comments/real-title-shape/test/",
+              author: "AutoModerator",
+              score: 170,
+              num_comments: 2700,
+              created_utc: 1_706_001_450,
+              link_flair_text: "Salt Lake City",
+            },
+          ]),
+        ),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      episodeTitlePatterns: ["Live Episode Discussion"],
+      episodeRequiredFlares: ["Salt Lake City"],
+      isShowFocused: false,
+      sortModes: ["new"],
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      reddit_post_id: "real-title-shape",
+      discussion_type: "live",
+      episode_number: 1,
+      link_flair_text: "Salt Lake City",
+    });
+  });
+
   it("enforces required flair filter for non-show-focused episode discovery", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(

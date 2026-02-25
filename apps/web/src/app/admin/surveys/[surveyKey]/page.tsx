@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildSurveyDetailBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -775,12 +776,15 @@ export default function SurveyEditorPage({
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto max-w-6xl">
             <div className="flex items-center justify-between">
               <div>
                 <AdminBreadcrumbs
-                  items={buildSurveyDetailBreadcrumb(survey.title || survey.key)}
+                  items={buildSurveyDetailBreadcrumb(
+                    survey.title || survey.key,
+                    `/admin/surveys/${encodeURIComponent(surveyKey)}`,
+                  )}
                   className="mb-1"
                 />
                 <h1 className="text-3xl font-bold text-zinc-900">{survey.title}</h1>
@@ -814,7 +818,7 @@ export default function SurveyEditorPage({
               ))}
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           {/* Notifications */}

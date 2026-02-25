@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import {
+  normalizeFandomSyncOptions,
+  normalizeFandomSyncPreviewResponse,
+} from "@/lib/admin/fandom-sync-types";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +29,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = normalizeFandomSyncOptions(await request.json().catch(() => ({})));
     const response = await fetch(backendUrl, {
       method: "POST",
       headers: {
@@ -34,13 +38,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
       body: JSON.stringify(body),
     });
-    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const rawData = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const data = normalizeFandomSyncPreviewResponse(rawData);
     if (!response.ok) {
       const error =
-        typeof data.error === "string"
-          ? data.error
-          : typeof data.detail === "string"
-            ? data.detail
+        typeof rawData.error === "string"
+          ? rawData.error
+          : typeof rawData.detail === "string"
+            ? rawData.detail
             : "Fandom commit failed";
       return NextResponse.json({ error }, { status: response.status });
     }

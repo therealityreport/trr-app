@@ -76,6 +76,7 @@ describe("season cast tab quality wiring", () => {
     expect(castRouteStateContents).toMatch(/cast_role_filters/);
     expect(castRouteStateContents).toMatch(/cast_credit_filters/);
     expect(contents).toMatch(/Search Name/);
+    expect(contents).toMatch(/Roles & Credit/);
   });
 
   it("uses non-blocking supplemental show-cast warning when role members exist", () => {
@@ -100,5 +101,10 @@ describe("season cast tab quality wiring", () => {
     expect(contents).toMatch(/const buildShowCastRoleEditorQuery = useCallback/);
     expect(contents).toMatch(/writeShowCastRouteState\(new URLSearchParams\(\), \{/);
     expect(contents).toMatch(/query: buildShowCastRoleEditorQuery\(member\.person_id\)/);
+  });
+
+  it("passes zero-episode exclusion through season cast intelligence loaders", () => {
+    expect(contents).toMatch(/exclude_zero_episode_members=1/);
+    expect(contents).toMatch(/params\.set\("exclude_zero_episode_members", "1"\)/);
   });
 });

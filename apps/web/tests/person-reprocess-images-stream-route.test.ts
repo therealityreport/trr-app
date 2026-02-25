@@ -16,12 +16,15 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 
 import { POST } from "@/app/api/admin/trr-api/people/[personId]/reprocess-images/stream/route";
 
-const makeRequest = () =>
+const makeRequest = (requestId?: string) =>
   new NextRequest(
     "http://localhost/api/admin/trr-api/people/person-1/reprocess-images/stream",
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(requestId ? { "x-trr-request-id": requestId } : {}),
+      },
       body: JSON.stringify({}),
     },
   );
@@ -50,7 +53,7 @@ describe("person reprocess-images stream proxy route", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await POST(makeRequest(), {
+    const response = await POST(makeRequest("req-reprocess-1"), {
       params: Promise.resolve({ personId: "person-1" }),
     });
     const payload = await response.text();
@@ -60,11 +63,29 @@ describe("person reprocess-images stream proxy route", () => {
     expect(payload).toContain("\"auto_count\"");
   });
 
+  it("forwards x-trr-request-id to backend", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("event: progress\ndata: {\"stage\":\"auto_count\"}\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest("req-reprocess-forward"), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    await response.text();
+
+    const callHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string> | undefined;
+    expect(callHeaders?.["x-trr-request-id"]).toBe("req-reprocess-forward");
+  });
+
   it("returns non-200 JSON error payload when backend fails", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("bad gateway", { status: 502 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await POST(makeRequest(), {
+    const response = await POST(makeRequest("req-reprocess-2"), {
       params: Promise.resolve({ personId: "person-1" }),
     });
     const payload = await response.json();
@@ -73,5 +94,6 @@ describe("person reprocess-images stream proxy route", () => {
     expect(payload.stage).toBe("backend");
     expect(payload.error).toBe("Backend reprocess failed");
     expect(String(payload.detail ?? "")).not.toContain("TRR_API_URL");
+    expect(payload.request_id).toBe("req-reprocess-2");
   });
 });

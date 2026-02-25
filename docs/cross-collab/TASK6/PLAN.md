@@ -1,7 +1,7 @@
 # Bravo Import + Cast Eligibility + Videos/News — Task 6 Plan
 
 Repo: TRR-APP
-Last updated: February 11, 2026
+Last updated: February 25, 2026
 
 ## Goal
 
@@ -40,3 +40,26 @@ Wire admin proxy routes and UI for persisted Bravo content, and enforce default 
 3. Show page has `Sync by Bravo` under `Refresh` and import modal workflow.
 4. Show cast defaults to `minEpisodes=1` behavior.
 5. App targeted tests pass for new route behavior.
+
+## RHOSLC Closeout Follow-up (2026-02-24)
+
+- Consume stabilized show/season stream behavior with request-id/heartbeat diagnostics.
+- Complete RHOSLC manual closeout in normal + degraded modes.
+- Person refresh-stream first-event behavior resolved and re-verified (normal + degraded evidence captured).
+- Closeout decision: **GO**.
+
+## Fandom Sync Type Stabilization Addendum (2026-02-25)
+
+- Stabilize Fandom sync type safety in app-only scope without backend contract changes.
+- Add deterministic typecheck lanes excluding generated `.next*` artifacts:
+  - `apps/web/tsconfig.typecheck.json`
+  - `apps/web/tsconfig.typecheck.fandom.json`
+- Consolidate duplicate Fandom Sync payload/section interfaces into shared module:
+  - `apps/web/src/lib/admin/fandom-sync-types.ts`
+- Apply shared types to:
+  - `apps/web/src/components/admin/FandomSyncModal.tsx`
+  - `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - Fandom import proxy routes (person + season preview/commit).
+- Add targeted CI gate:
+  - `pnpm run typecheck:fandom` in `TRR-APP/.github/workflows/web-tests.yml` full lane.

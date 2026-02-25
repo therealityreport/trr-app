@@ -7,6 +7,7 @@ import Image from "next/image";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import AdminModal from "@/components/admin/AdminModal";
 import { buildSeasonBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -14,10 +15,7 @@ import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
-import FandomSyncModal, {
-  type FandomSyncOptions,
-  type FandomSyncPreviewResponse,
-} from "@/components/admin/FandomSyncModal";
+import FandomSyncModal from "@/components/admin/FandomSyncModal";
 import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import SeasonSocialAnalyticsSection, {
   type SocialAnalyticsView,
@@ -57,6 +55,14 @@ import {
   getMissingVariantKeys,
   hasMissingVariants,
 } from "@/lib/admin/gallery-diagnostics";
+import {
+  type FandomDynamicSection,
+  type FandomSyncOptions,
+  type FandomSyncPreviewResponse,
+  fandomSectionBucket,
+  normalizeFandomDynamicSections,
+  normalizeFandomSyncPreviewResponse,
+} from "@/lib/admin/fandom-sync-types";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
 import {
   THUMBNAIL_DEFAULTS,
@@ -91,6 +97,7 @@ import {
   cleanLegacyRoutingQuery,
   parseSeasonRouteState,
 } from "@/lib/admin/show-admin-routes";
+import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import {
   parseSeasonCastRouteState,
   writeShowCastRouteState,
@@ -114,6 +121,77 @@ interface TrrShow {
   canonical_slug: string;
   imdb_id: string | null;
   tmdb_id: number | null;
+}
+
+function seasonFandomStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" && item.trim().length > 0 ? item.trim() : null))
+    .filter((item): item is string => Boolean(item));
+}
+
+function SeasonFandomSectionCard({ title, section }: { title: string; section: FandomDynamicSection }) {
+  const paragraphs = seasonFandomStringList(section.paragraphs);
+  const bullets = seasonFandomStringList(section.bullets);
+  const tableRows = Array.isArray(section.table_rows) ? section.table_rows : [];
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">{title}</p>
+      {paragraphs.length > 0 && (
+        <div className="space-y-2 text-sm text-zinc-700">
+          {paragraphs.map((paragraph, idx) => (
+            <p key={`${title}-p-${idx}`}>{paragraph}</p>
+          ))}
+        </div>
+      )}
+      {bullets.length > 0 && (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+          {bullets.map((bullet, idx) => (
+            <li key={`${title}-b-${idx}`}>{bullet}</li>
+          ))}
+        </ul>
+      )}
+      {tableRows.length > 0 && (
+        <pre className="mt-2 overflow-auto text-xs text-zinc-700">{JSON.stringify(tableRows, null, 2)}</pre>
+      )}
+    </div>
+  );
+}
+
+function SeasonFandomDynamicSections({ sections }: { sections: unknown }) {
+  const normalized = normalizeFandomDynamicSections(sections);
+  if (normalized.length === 0) return null;
+
+  const canonical = normalized.filter((section) => fandomSectionBucket(section) !== "other");
+  const otherSections = normalized.filter((section) => fandomSectionBucket(section) === "other");
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 lg:grid-cols-2">
+        {canonical.map((section, idx) => (
+          <SeasonFandomSectionCard
+            key={`${section.title ?? section.canonical_title ?? "canonical"}-${idx}`}
+            title={String(section.canonical_title ?? section.title ?? `Section ${idx + 1}`)}
+            section={section}
+          />
+        ))}
+      </div>
+      {otherSections.length > 0 && (
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Other Sections</p>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {otherSections.map((section, idx) => (
+              <SeasonFandomSectionCard
+                key={`${section.title ?? section.canonical_title ?? "section"}-${idx}`}
+                title={String(section.title ?? section.canonical_title ?? `Section ${idx + 1}`)}
+                section={section}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface TrrSeason {
@@ -485,6 +563,10 @@ function GalleryImage({
     }
     return out;
   }, [src, srcCandidates]);
+  const fallbackCandidatesSignature = useMemo(
+    () => fallbackCandidates.join("\u0001"),
+    [fallbackCandidates]
+  );
   const [hasError, setHasError] = useState(false);
   const [currentSrc, setCurrentSrc] = useState(src);
   const [fallbackIndex, setFallbackIndex] = useState(0);
@@ -507,7 +589,7 @@ function GalleryImage({
       onFallbackEvent("attempt");
       telemetryStateRef.current.attempted = true;
     }
-  }, [src, fallbackCandidates, onFallbackEvent]);
+  }, [src, fallbackCandidatesSignature, onFallbackEvent]);
 
   const handleError = () => {
     const nextCandidate = fallbackCandidates[fallbackIndex] ?? null;
@@ -659,6 +741,15 @@ const isCrewCreditCategory = (value: string | null | undefined): boolean => {
     normalized.includes("producer") ||
     normalized.includes("production")
   );
+};
+
+const areStringArraysEqual = (a: string[], b: string[]): boolean => {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
 };
 
 function RefreshProgressBar({
@@ -1076,8 +1167,16 @@ export default function SeasonDetailPage() {
     setCastSortBy(seasonCastRouteState.sortBy);
     setCastSortOrder(seasonCastRouteState.sortOrder);
     setCastHasImageFilter(seasonCastRouteState.hasImageFilter);
-    setCastRoleFilters(seasonCastRouteState.roleFilters);
-    setCastCreditFilters(seasonCastRouteState.creditFilters);
+    setCastRoleFilters((prev) =>
+      areStringArraysEqual(prev, seasonCastRouteState.roleFilters)
+        ? prev
+        : seasonCastRouteState.roleFilters
+    );
+    setCastCreditFilters((prev) =>
+      areStringArraysEqual(prev, seasonCastRouteState.creditFilters)
+        ? prev
+        : seasonCastRouteState.creditFilters
+    );
     setCastSearchQuery(seasonCastRouteState.searchQuery);
   }, [
     seasonCastRouteState.creditFilters,
@@ -1103,6 +1202,14 @@ export default function SeasonDetailPage() {
     if (base) return base;
     return showRouteParam.trim();
   }, [show?.canonical_slug, show?.slug, showRouteParam]);
+
+  useEffect(() => {
+    if (!show?.name || !showSlugForRouting) return;
+    recordAdminRecentShow({
+      slug: showSlugForRouting,
+      label: show.name,
+    });
+  }, [show?.name, showSlugForRouting]);
 
   const setTab = useCallback(
     (tab: TabId) => {
@@ -1366,7 +1473,7 @@ export default function SeasonDetailPage() {
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(
-        `/api/admin/trr-api/shows/${showId}/cast?limit=500&photo_fallback=none`,
+        `/api/admin/trr-api/shows/${showId}/cast?limit=500&photo_fallback=none&exclude_zero_episode_members=1`,
         {
           headers,
         }
@@ -1404,6 +1511,7 @@ export default function SeasonDetailPage() {
         const headers = await getAuthHeaders();
         const params = new URLSearchParams();
         params.set("seasons", String(seasonNumber));
+        params.set("exclude_zero_episode_members", "1");
 
         let lastError: unknown = null;
         for (let attempt = 1; attempt <= SEASON_CAST_ROLE_MEMBERS_MAX_ATTEMPTS; attempt += 1) {
@@ -1669,10 +1777,11 @@ export default function SeasonDetailPage() {
             body: JSON.stringify(options),
           }
         );
-        const data = (await response.json().catch(() => ({}))) as FandomSyncPreviewResponse & {
-          error?: string;
-        };
-        if (!response.ok) throw new Error(data.error || "Season fandom preview failed");
+        const rawData = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        const data = normalizeFandomSyncPreviewResponse(rawData);
+        if (!response.ok) {
+          throw new Error(typeof rawData.error === "string" ? rawData.error : "Season fandom preview failed");
+        }
         setFandomSyncPreview(data);
       } catch (err) {
         setFandomSyncError(err instanceof Error ? err.message : "Season fandom preview failed");
@@ -4591,7 +4700,7 @@ export default function SeasonDetailPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-5">
+        <AdminGlobalHeader bodyClassName="px-6 py-5">
           <div className="mx-auto max-w-6xl">
             <div className="mb-4">
               <Link
@@ -4606,6 +4715,10 @@ export default function SeasonDetailPage() {
                 <AdminBreadcrumbs
                   items={buildSeasonBreadcrumb(show.name, season.season_number, {
                     showHref: buildShowAdminUrl({ showSlug: showSlugForRouting }),
+                    seasonHref: buildSeasonAdminUrl({
+                      showSlug: showSlugForRouting,
+                      seasonNumber: season.season_number,
+                    }),
                   })}
                   className="mb-1"
                 />
@@ -4641,7 +4754,7 @@ export default function SeasonDetailPage() {
               </div>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <div className="border-b border-zinc-200 bg-white">
           <div className="mx-auto max-w-6xl px-6">
@@ -5505,12 +5618,7 @@ export default function SeasonDetailPage() {
                       )}
                     </div>
                     {fandom.summary && <p className="mb-4 text-sm leading-relaxed text-zinc-700">{fandom.summary}</p>}
-                    {Array.isArray(fandom.dynamic_sections) && fandom.dynamic_sections.length > 0 && (
-                      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Dynamic Sections</p>
-                        <pre className="overflow-auto text-xs text-zinc-700">{JSON.stringify(fandom.dynamic_sections, null, 2)}</pre>
-                      </div>
-                    )}
+                    <SeasonFandomDynamicSections sections={fandom.dynamic_sections} />
                     <div className="mt-4 grid gap-3 lg:grid-cols-2">
                       {Array.isArray(fandom.citations) && (
                         <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
@@ -5767,7 +5875,10 @@ export default function SeasonDetailPage() {
                 <div className="mt-3 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Roles
+                      Roles & Credit
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                      Role
                     </span>
                     {availableCastRoles.length === 0 ? (
                       <span className="text-xs text-zinc-500">No roles configured.</span>
@@ -5801,7 +5912,7 @@ export default function SeasonDetailPage() {
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
                       Credit
                     </span>
                     {availableCastCreditCategories.length === 0 ? (
@@ -6188,23 +6299,19 @@ export default function SeasonDetailPage() {
           )}
 
           {activeTab === "social" && (
-            <SeasonSocialTab>
-              <div className="space-y-3">
-              {seasonSupplementalWarning && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                  Season supplemental data warning: {seasonSupplementalWarning}. Social analytics remains available.
-                </div>
-              )}
-              <SeasonSocialAnalyticsSection
-                showId={showId}
-                showSlug={showSlugForRouting}
-                seasonNumber={season.season_number}
-                seasonId={season.id}
-                showName={show.name}
-                analyticsView={socialAnalyticsView}
-              />
-              </div>
-            </SeasonSocialTab>
+            <SeasonSocialTab
+              seasonSupplementalWarning={seasonSupplementalWarning}
+              analyticsSection={
+                <SeasonSocialAnalyticsSection
+                  showId={showId}
+                  showSlug={showSlugForRouting}
+                  seasonNumber={season.season_number}
+                  seasonId={season.id}
+                  showName={show.name}
+                  analyticsView={socialAnalyticsView}
+                />
+              }
+            />
           )}
 
           {activeTab === "overview" && (

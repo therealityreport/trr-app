@@ -1,6 +1,6 @@
 export type AdminBreadcrumbItem = {
   label: string;
-  href?: string;
+  href: string;
 };
 
 const ADMIN_ROOT_LABEL = "Admin";
@@ -40,84 +40,140 @@ export const humanizePersonSlug = (slug: string): string => {
 };
 
 export const buildAdminRootBreadcrumb = (): AdminBreadcrumbItem[] => [
-  { label: ADMIN_ROOT_LABEL },
+  { label: ADMIN_ROOT_LABEL, href: ADMIN_ROOT_HREF },
 ];
 
 export const buildAdminSectionBreadcrumb = (
   sectionLabel: string,
-  sectionHref?: string,
+  sectionHref: string,
 ): AdminBreadcrumbItem[] => [
   { label: ADMIN_ROOT_LABEL, href: ADMIN_ROOT_HREF },
-  sectionHref ? { label: sectionLabel, href: sectionHref } : { label: sectionLabel },
+  { label: sectionLabel, href: sectionHref },
 ];
 
-export const buildNetworkDetailBreadcrumb = (entityLabel: string): AdminBreadcrumbItem[] => [
+export const buildNetworkDetailBreadcrumb = (
+  entityLabel: string,
+  entityHref: string,
+): AdminBreadcrumbItem[] => [
   ...buildAdminSectionBreadcrumb("Networks & Streaming", "/admin/networks"),
-  { label: entityLabel },
+  { label: entityLabel, href: entityHref },
 ];
 
 export const buildShowBreadcrumb = (
   showName: string,
-  options?: { showHref?: string | null },
+  options: { showHref: string },
 ): AdminBreadcrumbItem[] => {
-  const showHref = options?.showHref?.trim();
   return [
     ...buildAdminSectionBreadcrumb("Shows", "/admin/trr-shows"),
-    showHref ? { label: showName, href: showHref } : { label: showName },
+    { label: showName, href: options.showHref.trim() || "/admin/trr-shows" },
   ];
 };
 
 export const buildSeasonBreadcrumb = (
   showName: string,
   seasonNumber: number | string,
-  options?: { showHref?: string | null },
+  options: { showHref: string; seasonHref: string },
 ): AdminBreadcrumbItem[] => [
-  ...buildShowBreadcrumb(showName, { showHref: options?.showHref }),
-  { label: `Season ${seasonNumber}` },
+  ...buildShowBreadcrumb(showName, { showHref: options.showHref }),
+  { label: `Season ${seasonNumber}`, href: options.seasonHref.trim() || "/admin/trr-shows" },
 ];
 
 export const buildPersonBreadcrumb = (
   personName: string,
-  options?: {
+  options: {
+    personHref: string;
     showName?: string | null;
-    showHref?: string | null;
+    showHref?: string;
   },
 ): AdminBreadcrumbItem[] => {
   const showName = options?.showName?.trim();
-  const showHref = options?.showHref?.trim();
+  const showHref = options?.showHref?.trim() || "/admin/trr-shows";
+  const personHref = options.personHref.trim() || "/admin/trr-shows";
   if (!showName) {
     return [
       ...buildAdminSectionBreadcrumb("Shows", "/admin/trr-shows"),
-      { label: personName },
+      { label: personName, href: personHref },
     ];
   }
   return [
     ...buildAdminSectionBreadcrumb("Shows", "/admin/trr-shows"),
-    showHref ? { label: showName, href: showHref } : { label: showName },
-    { label: personName },
+    { label: showName, href: showHref },
+    { label: personName, href: personHref },
   ];
+};
+
+export const buildSeasonSocialBreadcrumb = (
+  showName: string,
+  seasonNumber: number | string,
+  options: {
+    showHref: string;
+    seasonHref: string;
+    socialHref: string;
+    socialLabel?: string;
+    subTabLabel?: string;
+    subTabHref?: string;
+  },
+): AdminBreadcrumbItem[] => {
+  const socialLabel = options.socialLabel?.trim() || "Social Analytics";
+  const trail: AdminBreadcrumbItem[] = [
+    ...buildSeasonBreadcrumb(showName, seasonNumber, {
+      showHref: options.showHref,
+      seasonHref: options.seasonHref,
+    }),
+    { label: socialLabel, href: options.socialHref.trim() || options.seasonHref.trim() || "/admin/trr-shows" },
+  ];
+  const subTabLabel = options.subTabLabel?.trim();
+  if (subTabLabel) {
+    trail.push({
+      label: subTabLabel,
+      href: options.subTabHref?.trim() || options.socialHref.trim() || options.seasonHref.trim() || "/admin/trr-shows",
+    });
+  }
+  return trail;
 };
 
 export const buildSeasonWeekBreadcrumb = (
   showName: string,
   seasonNumber: number | string,
   weekLabel: string,
-  options?: { showHref?: string | null },
+  options: {
+    showHref: string;
+    seasonHref: string;
+    weekHref: string;
+    socialHref?: string;
+    socialLabel?: string;
+    subTabLabel?: string;
+    subTabHref?: string;
+  },
 ): AdminBreadcrumbItem[] => [
-  ...buildSeasonBreadcrumb(showName, seasonNumber, { showHref: options?.showHref }),
-  { label: weekLabel },
+  ...(options.socialHref
+    ? buildSeasonSocialBreadcrumb(showName, seasonNumber, {
+        showHref: options.showHref,
+        seasonHref: options.seasonHref,
+        socialHref: options.socialHref,
+        socialLabel: options.socialLabel,
+        subTabLabel: options.subTabLabel,
+        subTabHref: options.subTabHref,
+      })
+    : buildSeasonBreadcrumb(showName, seasonNumber, {
+        showHref: options.showHref,
+        seasonHref: options.seasonHref,
+      })),
+  { label: weekLabel, href: options.weekHref.trim() || options.seasonHref.trim() || "/admin/trr-shows" },
 ];
 
 export const buildSurveyDetailBreadcrumb = (
   surveyTitleOrKey: string,
+  surveyHref: string,
 ): AdminBreadcrumbItem[] => [
   ...buildAdminSectionBreadcrumb("Survey Editor", "/admin/surveys"),
-  { label: surveyTitleOrKey },
+  { label: surveyTitleOrKey, href: surveyHref },
 ];
 
 export const buildNormalizedSurveyDetailBreadcrumb = (
   surveyTitleOrSlug: string,
+  surveyHref: string,
 ): AdminBreadcrumbItem[] => [
   ...buildAdminSectionBreadcrumb("Normalized Surveys", "/admin/surveys/normalized"),
-  { label: surveyTitleOrSlug },
+  { label: surveyTitleOrSlug, href: surveyHref },
 ];

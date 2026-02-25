@@ -24,6 +24,7 @@ const { mockParams, mockSearch, mockRouter } = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin/trr-shows/7782652f-783a-488b-8860-41b97de32e75/seasons/6/social/week/1",
   useParams: () => mockParams,
   useSearchParams: () => new URLSearchParams(mockSearch.value),
   useRouter: () => mockRouter,

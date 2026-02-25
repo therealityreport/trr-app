@@ -213,6 +213,10 @@ type SeasonBackendOptions = FetchWithRetryOptions & {
   seasonIdHint?: string | null;
 };
 
+type SocialBackendOptions = FetchWithRetryOptions & {
+  queryString?: string;
+};
+
 async function fetchWithTimeout(
   input: string,
   init: RequestInit,
@@ -324,6 +328,15 @@ export const buildSeasonBackendUrl = async (
   return backendUrl;
 };
 
+export const buildSocialBackendUrl = (socialPath: string): string => {
+  const normalizedSocialPath = socialPath.startsWith("/") ? socialPath : `/${socialPath}`;
+  const backendUrl = getBackendApiUrl(`/admin/socials${normalizedSocialPath}`);
+  if (!backendUrl) {
+    throw new Error("Backend API not configured");
+  }
+  return backendUrl;
+};
+
 export const fetchSeasonBackendJson = async (
   showId: string,
   seasonNumberRaw: string,
@@ -331,6 +344,22 @@ export const fetchSeasonBackendJson = async (
   options: SeasonBackendOptions,
 ): Promise<Record<string, unknown>> => {
   const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath, options.seasonIdHint);
+  const backendUrl = appendQuery(backendBase, options.queryString ?? "");
+  const response = await fetchBackend(backendUrl, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${getServiceRoleKey()}`,
+      ...(options.headers ?? {}),
+    },
+  });
+  return (await response.json().catch(() => ({}))) as Record<string, unknown>;
+};
+
+export const fetchSocialBackendJson = async (
+  socialPath: string,
+  options: SocialBackendOptions,
+): Promise<Record<string, unknown>> => {
+  const backendBase = buildSocialBackendUrl(socialPath);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
   const response = await fetchBackend(backendUrl, {
     ...options,

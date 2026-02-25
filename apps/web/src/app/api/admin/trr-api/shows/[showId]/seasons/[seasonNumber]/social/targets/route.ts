@@ -68,7 +68,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       seasonIdHint,
       fallbackError: "Failed to fetch social targets",
       retries: 0,
-      timeoutMs: 15_000,
+      timeoutMs: 12_000,
     });
     return NextResponse.json(data);
   } catch (error) {

@@ -1,12 +1,13 @@
 # Other Projects — Task 6 (Bravo Import + Cast Eligibility + Videos/News)
 
 Repo: TRR-APP
-Last updated: February 11, 2026
+Last updated: February 25, 2026
 
 ## Cross-Repo Snapshot
 
-- TRR-Backend: Implemented Bravo parsing/persistence APIs (TASK7).
-- TRR-APP: Implemented proxy + UI + cast filtering (this task).
+- TRR-Backend: Stream reliability updates applied for RHOSLC closeout (`refresh/stream`, `refresh-photos/stream` first-event behavior).
+- TRR-APP: Person stream proxy/UI request-id diagnostics and log correlation completed; RHOSLC closeout blocker cleared.
+- TRR-APP: Fandom Sync type stabilization added deterministic typecheck lanes and shared payload typings; no backend contract drift.
 - screenalytics: No code changes expected; status-only task folder update (TASK6).
 
 ## Dependency Order

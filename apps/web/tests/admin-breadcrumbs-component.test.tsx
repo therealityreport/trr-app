@@ -5,13 +5,13 @@ import { axe } from "vitest-axe";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 
 describe("AdminBreadcrumbs component", () => {
-  it("renders clickable ancestors and a non-link current crumb", () => {
+  it("renders clickable ancestors and clickable current crumb", () => {
     render(
       <AdminBreadcrumbs
         items={[
           { label: "Admin", href: "/admin" },
           { label: "Networks & Streaming", href: "/admin/networks" },
-          { label: "ABC" },
+          { label: "ABC", href: "/admin/networks/network/abc" },
         ]}
       />,
     );
@@ -24,8 +24,9 @@ describe("AdminBreadcrumbs component", () => {
       "href",
       "/admin/networks",
     );
-    expect(within(nav).queryByRole("link", { name: "ABC" })).not.toBeInTheDocument();
-    expect(within(nav).getByText("ABC")).toBeInTheDocument();
+    const current = within(nav).getByRole("link", { name: "ABC" });
+    expect(current).toHaveAttribute("href", "/admin/networks/network/abc");
+    expect(current).toHaveAttribute("aria-current", "page");
   });
 
   it("has no basic axe violations", async () => {
@@ -34,7 +35,7 @@ describe("AdminBreadcrumbs component", () => {
         items={[
           { label: "Admin", href: "/admin" },
           { label: "Shows", href: "/admin/trr-shows" },
-          { label: "Sample Show" },
+          { label: "Sample Show", href: "/admin/trr-shows/sample-show" },
         ]}
       />,
     );
