@@ -1201,10 +1201,12 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Last Updated");
-    const windowLabels = screen.getAllByText("Window");
-    expect(windowLabels.length).toBeGreaterThan(0);
-    const windowValue = windowLabels[0].parentElement?.querySelector("dd");
+    const lastUpdated = await screen.findByText("Last Updated");
+    const seasonMetadata = lastUpdated.closest("dl");
+    expect(seasonMetadata).toBeTruthy();
+    const metadataRows = seasonMetadata!.querySelectorAll("div");
+    expect(metadataRows.length).toBeGreaterThan(1);
+    const windowValue = metadataRows[1].querySelector("dd");
     expect(windowValue?.textContent).toContain("to");
   });
 
