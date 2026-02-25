@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -674,7 +675,7 @@ export default function ScrapeImagesPage() {
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
         {/* Header */}
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto max-w-6xl">
             <div className="flex items-center gap-4">
               <Link
@@ -684,14 +685,14 @@ export default function ScrapeImagesPage() {
                 &larr; Admin
               </Link>
               <div>
-                <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Scrape Images")} className="mb-1" />
+                <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Scrape Images", "/admin/scrape-images")} className="mb-1" />
                 <h1 className="text-2xl font-bold text-zinc-900">
                   Scrape Images from URL
                 </h1>
               </div>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           {/* Error Display */}

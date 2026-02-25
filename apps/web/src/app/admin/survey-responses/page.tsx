@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
@@ -318,10 +319,10 @@ export default function AdminSurveyResponsesPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-4">
+        <AdminGlobalHeader bodyClassName="px-6 py-4">
           <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Survey Responses")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Survey Responses", "/admin/survey-responses")} className="mb-1" />
               <h1 className="text-2xl font-bold text-zinc-900">Survey Responses</h1>
               <p className="text-sm text-zinc-500">View, filter, and export survey submissions</p>
             </div>
@@ -350,7 +351,7 @@ export default function AdminSurveyResponsesPage() {
               </button>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-6">
           <section className="mb-6 grid gap-6 rounded-2xl border border-white bg-white/80 p-4 shadow-sm sm:grid-cols-2">

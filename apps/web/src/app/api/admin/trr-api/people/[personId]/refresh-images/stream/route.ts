@@ -64,8 +64,10 @@ const getErrorDetail = (error: unknown): string => {
  * Proxies refresh images request to TRR-Backend with SSE streaming.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
+  let requestId: string | null = null;
   try {
     await requireAdmin(request);
+    requestId = request.headers.get("x-trr-request-id")?.trim() || null;
 
     const { personId } = await params;
     if (!personId) {
@@ -73,6 +75,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           stage: "proxy",
           error: "personId is required",
+          ...(requestId ? { request_id: requestId } : {}),
         },
         400
       );
@@ -93,6 +96,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           stage: "proxy",
           error: "Backend API not configured",
+          ...(requestId ? { request_id: requestId } : {}),
         },
         500
       );
@@ -104,6 +108,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           stage: "proxy",
           error: "Backend auth not configured",
+          ...(requestId ? { request_id: requestId } : {}),
         },
         500
       );
@@ -120,6 +125,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${serviceRoleKey}`,
+            ...(requestId ? { "x-trr-request-id": requestId } : {}),
           },
           body: JSON.stringify(body ?? {}),
           signal: controller.signal,
@@ -145,6 +151,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           stage: "proxy",
           error: "Backend fetch failed",
           detail: getErrorDetail(lastError),
+          ...(requestId ? { request_id: requestId } : {}),
         },
         502
       );
@@ -157,6 +164,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           stage: "backend",
           error: "Backend refresh failed",
           detail: errorText || `HTTP ${backendResponse.status}`,
+          ...(requestId ? { request_id: requestId } : {}),
         },
         backendResponse.status
       );
@@ -167,6 +175,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           stage: "backend",
           error: "No response body from backend",
+          ...(requestId ? { request_id: requestId } : {}),
         },
         502
       );
@@ -186,6 +195,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         stage: "proxy",
         error: "Refresh stream request failed",
         detail: getErrorDetail(error),
+        ...(requestId ? { request_id: requestId } : {}),
       },
       500
     );

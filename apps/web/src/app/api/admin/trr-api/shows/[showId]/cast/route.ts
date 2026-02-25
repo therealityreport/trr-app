@@ -48,6 +48,7 @@ const parsePhotoFallbackMode = (value: string | null): CastPhotoFallbackMode =>
  * - limit: max results (default 20, max 500)
  * - offset: pagination offset (default 0)
  * - minEpisodes: filter to cast with at least N total episodes
+ * - exclude_zero_episode_members: when true, always remove members with <=0 regular episodes
  * - requireImage: filter to cast with at least 1 image URL
  * - photo_fallback: none|bravo (default none)
  */
@@ -70,6 +71,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
     const minEpisodes = searchParams.get("minEpisodes");
     const hasExplicitMinEpisodes = searchParams.has("minEpisodes");
+    const excludeZeroEpisodeMembers =
+      String(searchParams.get("exclude_zero_episode_members") ?? "").trim().toLowerCase() === "1" ||
+      String(searchParams.get("exclude_zero_episode_members") ?? "").trim().toLowerCase() === "true";
     const requireImage = searchParams.get("requireImage");
     const rosterModeRaw = String(searchParams.get("roster_mode") ?? "")
       .trim()
@@ -187,6 +191,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           Number(
             (member as { total_episodes?: number | null }).total_episodes ?? 0
           ) >= minEpisodesValue
+      );
+    }
+
+    if (excludeZeroEpisodeMembers) {
+      cast = cast.filter(
+        (member) => Number((member as { total_episodes?: number | null }).total_episodes ?? 0) > 0
       );
     }
 

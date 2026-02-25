@@ -1,24 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-
-export interface FandomSyncOptions {
-  manual_page_urls?: string[];
-  max_candidates?: number;
-  include_allpages_scan?: boolean;
-  allpages_max_pages?: number;
-  community_domains?: string[];
-  save_source_variants?: boolean;
-  selected_page_urls?: string[];
-}
-
-export interface FandomSyncPreviewResponse {
-  candidate_pages?: Array<{ url: string; title?: string; source?: string; score?: number }>;
-  selected_pages?: Array<{ url: string; title?: string; source?: string; score?: number }>;
-  warnings?: string[];
-  profile?: Record<string, unknown>;
-  season_profile?: Record<string, unknown>;
-}
+import {
+  type FandomBioCard,
+  type FandomDynamicSection,
+  type FandomSyncOptions,
+  type FandomSyncPreviewResponse,
+  fandomSectionBucket,
+  normalizeFandomBioCard,
+  normalizeFandomDynamicSections,
+  normalizeFandomPreviewProfile,
+  normalizeFandomWarnings,
+} from "@/lib/admin/fandom-sync-types";
 
 interface Props {
   isOpen: boolean;
@@ -31,12 +24,105 @@ interface Props {
   entityLabel: string;
 }
 
+function toText(value: unknown): string | null {
+  if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
+function toStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => toText(item)).filter((item): item is string => Boolean(item));
+}
+
+function formatValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => toText(item) ?? JSON.stringify(item)).filter(Boolean);
+    return items.join(", ");
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => {
+        const text = toText(entry);
+        return text ? `${key}: ${text}` : `${key}: ${JSON.stringify(entry)}`;
+      })
+      .filter(Boolean);
+    return entries.join(" | ");
+  }
+  return toText(value) ?? "—";
+}
+
 function JsonBlock({ value }: { value: unknown }) {
-  if (!value) return null;
+  if (value === null || value === undefined) return null;
   return (
     <pre className="max-h-64 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
       {JSON.stringify(value, null, 2)}
     </pre>
+  );
+}
+
+function BioCardPanel({ value }: { value: FandomBioCard | null | undefined }) {
+  const card = normalizeFandomBioCard(value);
+  if (!card) return null;
+  const sections: Array<{ key: string; label: string }> = [
+    { key: "general", label: "General" },
+    { key: "appearance", label: "Appearance" },
+    { key: "relationships", label: "Relationships" },
+    { key: "production", label: "Production" },
+  ];
+  const visible = sections.filter(({ key }) => card[key] && typeof card[key] === "object");
+  if (visible.length === 0) return null;
+  return (
+    <div className="grid gap-3 lg:grid-cols-2">
+      {visible.map(({ key, label }) => {
+        const section = card[key];
+        if (!section) return null;
+        return (
+          <div key={key} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">{label}</p>
+            <div className="space-y-1.5">
+              {Object.entries(section).map(([field, fieldValue]) => (
+                <div key={field} className="text-sm text-zinc-700">
+                  <span className="font-medium text-zinc-900">{field.replaceAll("_", " ")}:</span>{" "}
+                  {formatValue(fieldValue)}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SectionCard({ title, section }: { title: string; section: FandomDynamicSection }) {
+  const paragraphs = toStringList(section.paragraphs);
+  const bullets = toStringList(section.bullets);
+  const tableRows = Array.isArray(section.table_rows) ? section.table_rows : [];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">{title}</p>
+      {paragraphs.length > 0 && (
+        <div className="space-y-2 text-sm text-zinc-700">
+          {paragraphs.map((paragraph, idx) => (
+            <p key={`${title}-p-${idx}`}>{paragraph}</p>
+          ))}
+        </div>
+      )}
+      {bullets.length > 0 && (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+          {bullets.map((bullet, idx) => (
+            <li key={`${title}-b-${idx}`}>{bullet}</li>
+          ))}
+        </ul>
+      )}
+      {tableRows.length > 0 && (
+        <div className="mt-2">
+          <JsonBlock value={tableRows} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -65,8 +151,16 @@ export default function FandomSyncModal({
 
   if (!isOpen) return null;
 
-  const profile = (previewData?.profile ?? previewData?.season_profile ?? null) as Record<string, unknown> | null;
+  const warnings = normalizeFandomWarnings(previewData?.warnings);
+  const profile = normalizeFandomPreviewProfile(previewData);
   const selectedPageUrls = (previewData?.selected_pages ?? []).map((item) => item.url).filter(Boolean);
+  const sections = normalizeFandomDynamicSections(profile?.dynamic_sections);
+  const canonicalSections = sections.filter((section) => fandomSectionBucket(section) !== "other");
+  const otherSections = sections.filter((section) => fandomSectionBucket(section) === "other");
+  const biographySection = canonicalSections.find((section) => fandomSectionBucket(section) === "biography");
+  const taglinesSection = canonicalSections.find((section) => fandomSectionBucket(section) === "taglines");
+  const reunionSection = canonicalSections.find((section) => fandomSectionBucket(section) === "reunion");
+  const castingSection = canonicalSections.find((section) => fandomSectionBucket(section) === "casting");
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
@@ -118,11 +212,11 @@ export default function FandomSyncModal({
                 <p className="text-sm text-zinc-600">Preview is read-only. Save persists to Supabase.</p>
               </div>
 
-              {previewData?.warnings && previewData.warnings.length > 0 && (
+              {warnings.length > 0 && (
                 <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Warnings</p>
                   <ul className="mt-2 space-y-1 text-sm text-amber-900">
-                    {previewData.warnings.map((warning, idx) => (
+                    {warnings.map((warning, idx) => (
                       <li key={`${warning}-${idx}`}>• {warning}</li>
                     ))}
                   </ul>
@@ -162,24 +256,37 @@ export default function FandomSyncModal({
 
               {profile && (
                 <div className="space-y-3">
-                  <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="grid gap-3">
                     <div className="rounded-lg border border-zinc-200 p-3">
                       <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                         Casting Summary
                       </p>
                       <p className="text-sm text-zinc-700">{String(profile.casting_summary ?? profile.summary ?? "—")}</p>
                     </div>
+                  </div>
+                  <BioCardPanel value={profile.bio_card} />
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {castingSection && <SectionCard title="Casting" section={castingSection} />}
+                    {biographySection && <SectionCard title="Biography" section={biographySection} />}
+                    {taglinesSection && <SectionCard title="Taglines" section={taglinesSection} />}
+                    {reunionSection && <SectionCard title="Reunion Seating" section={reunionSection} />}
+                  </div>
+                  {otherSections.length > 0 && (
                     <div className="rounded-lg border border-zinc-200 p-3">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Bio Card</p>
-                      <JsonBlock value={profile.bio_card} />
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Other Sections
+                      </p>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        {otherSections.map((section, idx) => (
+                          <SectionCard
+                            key={`${section.title ?? section.canonical_title ?? "section"}-${idx}`}
+                            title={String(section.title ?? section.canonical_title ?? `Section ${idx + 1}`)}
+                            section={section}
+                          />
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                  <div className="rounded-lg border border-zinc-200 p-3">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Dynamic Sections
-                    </p>
-                    <JsonBlock value={profile.dynamic_sections} />
-                  </div>
+                  )}
                   <div className="grid gap-3 lg:grid-cols-2">
                     <div className="rounded-lg border border-zinc-200 p-3">
                       <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Citations</p>

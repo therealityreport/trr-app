@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin/networks/network/bravo",
   useParams: () => mocks.params,
   useRouter: () => mocks.router,
 }));

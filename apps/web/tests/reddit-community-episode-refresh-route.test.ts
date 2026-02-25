@@ -7,6 +7,8 @@ const {
   getShowByIdMock,
   getSeasonByIdMock,
   getSeasonsByShowIdMock,
+  getEpisodesBySeasonIdMock,
+  createRedditThreadMock,
   discoverEpisodeDiscussionThreadsMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -14,6 +16,8 @@ const {
   getShowByIdMock: vi.fn(),
   getSeasonByIdMock: vi.fn(),
   getSeasonsByShowIdMock: vi.fn(),
+  getEpisodesBySeasonIdMock: vi.fn(),
+  createRedditThreadMock: vi.fn(),
   discoverEpisodeDiscussionThreadsMock: vi.fn(),
 }));
 
@@ -23,12 +27,14 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   getRedditCommunityById: getRedditCommunityByIdMock,
+  createRedditThread: createRedditThreadMock,
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getShowById: getShowByIdMock,
   getSeasonById: getSeasonByIdMock,
   getSeasonsByShowId: getSeasonsByShowIdMock,
+  getEpisodesBySeasonId: getEpisodesBySeasonIdMock,
 }));
 
 vi.mock("@/lib/server/admin/reddit-discovery-service", () => ({
@@ -56,6 +62,8 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     getShowByIdMock.mockReset();
     getSeasonByIdMock.mockReset();
     getSeasonsByShowIdMock.mockReset();
+    getEpisodesBySeasonIdMock.mockReset();
+    createRedditThreadMock.mockReset();
     discoverEpisodeDiscussionThreadsMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
@@ -87,6 +95,18 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       id: SHOW_ID,
       name: "The Real Housewives of Salt Lake City",
       alternative_names: ["RHOSLC"],
+    });
+    getEpisodesBySeasonIdMock.mockResolvedValue([
+      {
+        id: "ep-1",
+        season_id: SEASON_ID,
+        episode_number: 4,
+        air_date: "2026-02-24",
+      },
+    ]);
+    createRedditThreadMock.mockResolvedValue({
+      id: "thread-1",
+      reddit_post_id: "post-1",
     });
     discoverEpisodeDiscussionThreadsMock.mockResolvedValue({
       subreddit: "BravoRealHousewives",
@@ -186,6 +206,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
         includeEpisodeSignal: true,
       }),
     );
+    expect(createRedditThreadMock).not.toHaveBeenCalled();
   });
 
   it("falls back to highest season number when none have episode air_date signal", async () => {
@@ -372,5 +393,398 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     expect(response.status).toBe(400);
     expect(payload.error).toContain("Legacy params");
     expect(discoverEpisodeDiscussionThreadsMock).not.toHaveBeenCalled();
+  });
+
+  it("sync=true auto-saves only eligible AutoModerator same-day episode discussion posts", async () => {
+    discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
+      subreddit: "BravoRealHousewives",
+      fetched_at: "2026-02-24T12:00:00.000Z",
+      sources_fetched: ["new"],
+      successful_sorts: ["new"],
+      failed_sorts: [],
+      rate_limited_sorts: [],
+      candidates: [
+        {
+          reddit_post_id: "eligible-post",
+          title:
+            "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/eligible-post/test/",
+          permalink: "/r/BravoRealHousewives/comments/eligible-post/test/",
+          author: "AutoModerator",
+          score: 120,
+          num_comments: 55,
+          posted_at: "2026-02-25T04:20:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 1,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+        {
+          reddit_post_id: "ineligible-post",
+          title:
+            "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/ineligible-post/test/",
+          permalink: "/r/BravoRealHousewives/comments/ineligible-post/test/",
+          author: "user-123",
+          score: 15,
+          num_comments: 5,
+          posted_at: "2026-02-25T04:20:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 1,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      filters_applied: {
+        season_number: 6,
+        title_patterns: ["Live Episode Discussion"],
+        required_flares: ["Salt Lake City"],
+        show_focused: false,
+        period_start: null,
+        period_end: null,
+      },
+    });
+    getEpisodesBySeasonIdMock.mockResolvedValueOnce([
+      {
+        id: "ep-1",
+        season_id: SEASON_ID,
+        episode_number: 1,
+        air_date: "2026-02-24",
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?sync=true`,
+      { method: "GET" },
+    );
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.sync_requested).toBe(true);
+    expect(payload.meta?.sync_auto_saved_count).toBe(1);
+    expect(payload.meta?.sync_auto_saved_post_ids).toEqual(["eligible-post"]);
+    expect(payload.meta?.sync_skipped_ineligible_count).toBe(1);
+    expect(payload.meta?.sync_candidate_results).toEqual([
+      expect.objectContaining({
+        reddit_post_id: "eligible-post",
+        status: "auto_saved",
+        reason_code: "auto_saved_success",
+      }),
+      expect.objectContaining({
+        reddit_post_id: "ineligible-post",
+        status: "not_eligible",
+        reason_code: "author_not_automoderator",
+        reason: "Author is not AutoModerator.",
+      }),
+    ]);
+    expect(createRedditThreadMock).toHaveBeenCalledTimes(1);
+    expect(createRedditThreadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ firebaseUid: "admin-uid", isAdmin: true }),
+      expect.objectContaining({
+        communityId: COMMUNITY_ID,
+        trrSeasonId: SEASON_ID,
+        redditPostId: "eligible-post",
+      }),
+    );
+  });
+
+  it("sync=true tracks cross-community conflicts without failing", async () => {
+    discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
+      subreddit: "BravoRealHousewives",
+      fetched_at: "2026-02-24T12:00:00.000Z",
+      sources_fetched: ["new"],
+      successful_sorts: ["new"],
+      failed_sorts: [],
+      rate_limited_sorts: [],
+      candidates: [
+        {
+          reddit_post_id: "conflict-post",
+          title: "RHOSLC - Season 6 - Episode 4 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/conflict-post/test/",
+          permalink: "/r/BravoRealHousewives/comments/conflict-post/test/",
+          author: "AutoModerator",
+          score: 120,
+          num_comments: 55,
+          posted_at: "2026-02-25T04:20:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 4,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      filters_applied: {
+        season_number: 6,
+        title_patterns: ["Live Episode Discussion"],
+        required_flares: ["Salt Lake City"],
+        show_focused: false,
+        period_start: null,
+        period_end: null,
+      },
+    });
+    createRedditThreadMock.mockRejectedValueOnce(
+      new Error("Thread already exists in another community for this show"),
+    );
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?sync=1`,
+      { method: "GET" },
+    );
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.sync_requested).toBe(true);
+    expect(payload.meta?.sync_auto_saved_count).toBe(0);
+    expect(payload.meta?.sync_skipped_conflicts).toEqual(["conflict-post"]);
+    expect(payload.meta?.sync_candidate_results).toEqual([
+      expect.objectContaining({
+        reddit_post_id: "conflict-post",
+        status: "skipped_conflict",
+        reason_code: "already_saved_other_community",
+      }),
+    ]);
+  });
+
+  it("sync uses America/New_York date matching for UTC boundary times", async () => {
+    discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
+      subreddit: "BravoRealHousewives",
+      fetched_at: "2026-02-24T12:00:00.000Z",
+      sources_fetched: ["new"],
+      successful_sorts: ["new"],
+      failed_sorts: [],
+      rate_limited_sorts: [],
+      candidates: [
+        {
+          reddit_post_id: "tz-post",
+          title: "RHOSLC - Season 6 - Episode 4 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/tz-post/test/",
+          permalink: "/r/BravoRealHousewives/comments/tz-post/test/",
+          author: "AutoModerator",
+          score: 120,
+          num_comments: 55,
+          posted_at: "2026-02-24T04:30:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 4,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      filters_applied: {
+        season_number: 6,
+        title_patterns: ["Live Episode Discussion"],
+        required_flares: ["Salt Lake City"],
+        show_focused: false,
+        period_start: null,
+        period_end: null,
+      },
+    });
+    getEpisodesBySeasonIdMock.mockResolvedValueOnce([
+      {
+        id: "ep-1",
+        season_id: SEASON_ID,
+        episode_number: 4,
+        air_date: "2026-02-23",
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?sync=true`,
+      { method: "GET" },
+    );
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.sync_auto_saved_count).toBe(1);
+    expect(payload.meta?.sync_candidate_results).toEqual([
+      expect.objectContaining({
+        reddit_post_id: "tz-post",
+        status: "auto_saved",
+        reason_code: "auto_saved_success",
+      }),
+    ]);
+    expect(createRedditThreadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sync=true returns explicit reason_code branches for non-eligible candidates", async () => {
+    discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
+      subreddit: "BravoRealHousewives",
+      fetched_at: "2026-02-24T12:00:00.000Z",
+      sources_fetched: ["new"],
+      successful_sorts: ["new"],
+      failed_sorts: [],
+      rate_limited_sorts: [],
+      candidates: [
+        {
+          reddit_post_id: "missing-title-token",
+          title: "RHOSLC - Season 6 - Episode 2 - Live Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/missing-title-token/test/",
+          permalink: "/r/BravoRealHousewives/comments/missing-title-token/test/",
+          author: "AutoModerator",
+          score: 20,
+          num_comments: 10,
+          posted_at: "2026-02-24T13:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 2,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+        {
+          reddit_post_id: "missing-air-date",
+          title: "RHOSLC - Season 6 - Episode 3 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/missing-air-date/test/",
+          permalink: "/r/BravoRealHousewives/comments/missing-air-date/test/",
+          author: "AutoModerator",
+          score: 25,
+          num_comments: 11,
+          posted_at: "2026-02-24T13:10:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 3,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+        {
+          reddit_post_id: "missing-posted-at",
+          title: "RHOSLC - Season 6 - Episode 4 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/missing-posted-at/test/",
+          permalink: "/r/BravoRealHousewives/comments/missing-posted-at/test/",
+          author: "AutoModerator",
+          score: 30,
+          num_comments: 12,
+          posted_at: null,
+          link_flair_text: "Salt Lake City",
+          episode_number: 4,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+        {
+          reddit_post_id: "invalid-posted-at",
+          title: "RHOSLC - Season 6 - Episode 5 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/invalid-posted-at/test/",
+          permalink: "/r/BravoRealHousewives/comments/invalid-posted-at/test/",
+          author: "AutoModerator",
+          score: 40,
+          num_comments: 13,
+          posted_at: "not-a-date",
+          link_flair_text: "Salt Lake City",
+          episode_number: 5,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+        {
+          reddit_post_id: "posted-date-mismatch",
+          title: "RHOSLC - Season 6 - Episode 6 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/posted-date-mismatch/test/",
+          permalink: "/r/BravoRealHousewives/comments/posted-date-mismatch/test/",
+          author: "AutoModerator",
+          score: 50,
+          num_comments: 14,
+          posted_at: "2026-02-24T20:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 6,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      filters_applied: {
+        season_number: 6,
+        title_patterns: ["Live Episode Discussion"],
+        required_flares: ["Salt Lake City"],
+        show_focused: false,
+        period_start: null,
+        period_end: null,
+      },
+    });
+    getEpisodesBySeasonIdMock.mockResolvedValueOnce([
+      {
+        id: "ep-2",
+        season_id: SEASON_ID,
+        episode_number: 2,
+        air_date: "2026-02-24",
+      },
+      {
+        id: "ep-4",
+        season_id: SEASON_ID,
+        episode_number: 4,
+        air_date: "2026-02-24",
+      },
+      {
+        id: "ep-5",
+        season_id: SEASON_ID,
+        episode_number: 5,
+        air_date: "2026-02-24",
+      },
+      {
+        id: "ep-6",
+        season_id: SEASON_ID,
+        episode_number: 6,
+        air_date: "2026-02-23",
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?sync=true`,
+      { method: "GET" },
+    );
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.sync_auto_saved_count).toBe(0);
+    expect(payload.meta?.sync_skipped_ineligible_count).toBe(5);
+    expect(createRedditThreadMock).not.toHaveBeenCalled();
+
+    expect(payload.meta?.sync_candidate_results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reddit_post_id: "missing-title-token",
+          status: "not_eligible",
+          reason_code: "title_missing_episode_discussion",
+        }),
+        expect.objectContaining({
+          reddit_post_id: "missing-air-date",
+          status: "not_eligible",
+          reason_code: "missing_episode_air_date",
+        }),
+        expect.objectContaining({
+          reddit_post_id: "missing-posted-at",
+          status: "not_eligible",
+          reason_code: "missing_post_timestamp",
+        }),
+        expect.objectContaining({
+          reddit_post_id: "invalid-posted-at",
+          status: "not_eligible",
+          reason_code: "invalid_post_timestamp",
+        }),
+        expect.objectContaining({
+          reddit_post_id: "posted-date-mismatch",
+          status: "not_eligible",
+          reason_code: "posted_date_mismatch",
+        }),
+      ]),
+    );
   });
 });

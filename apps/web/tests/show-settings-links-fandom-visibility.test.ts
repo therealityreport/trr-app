@@ -12,4 +12,14 @@ describe("show settings links fandom visibility", () => {
     expect(contents).toMatch(/links: sortLinks\(showPageLinks\)/);
     expect(contents).toMatch(/No links in this category yet\./);
   });
+
+  it("renders overview metadata sections and keeps cast announcements out of show-wide external IDs", () => {
+    const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/External IDs/);
+    expect(contents).toMatch(/Social Handles/);
+    expect(contents).toMatch(/Season URL Coverage/);
+    expect(contents).toMatch(/link\.link_kind !== "cast_announcement"/);
+  });
 });

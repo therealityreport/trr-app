@@ -22,25 +22,35 @@ export default function AdminBreadcrumbs({ items, className }: AdminBreadcrumbsP
       <ol className="flex flex-wrap items-center gap-1 text-xs font-semibold text-zinc-500">
         {visibleItems.map((item, index) => {
           const isCurrent = item === currentItem;
-          const href = item.href?.trim() || null;
-          const isInternalHref = Boolean(href && href.startsWith("/"));
+          const href = item.href.trim();
+          const isInternalHref = href.startsWith("/");
           const itemKey = visibleItems
             .slice(0, index + 1)
-            .map((segment) => `${segment.href ?? "__current__"}:${segment.label}`)
+            .map((segment) => `${segment.href}:${segment.label}`)
             .join(">");
           return (
             <li key={itemKey} className="flex items-center gap-1">
               {index > 0 ? <span aria-hidden>/</span> : null}
-              {href && !isCurrent && isInternalHref ? (
-                <Link href={href as Route} className="transition hover:text-zinc-800 hover:underline">
+              {isInternalHref ? (
+                <Link
+                  href={href as Route}
+                  aria-current={isCurrent ? "page" : undefined}
+                  className={`transition hover:text-zinc-800 hover:underline ${
+                    isCurrent ? "text-zinc-700" : ""
+                  }`}
+                >
                   {item.label}
                 </Link>
-              ) : href && !isCurrent ? (
-                <a href={href} className="transition hover:text-zinc-800 hover:underline">
+              ) : (
+                <a
+                  href={href}
+                  aria-current={isCurrent ? "page" : undefined}
+                  className={`transition hover:text-zinc-800 hover:underline ${
+                    isCurrent ? "text-zinc-700" : ""
+                  }`}
+                >
                   {item.label}
                 </a>
-              ) : (
-                <span className={isCurrent ? "text-zinc-700" : undefined}>{item.label}</span>
               )}
             </li>
           );

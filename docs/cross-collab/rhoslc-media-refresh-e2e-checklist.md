@@ -128,3 +128,42 @@ Submit results grouped by:
 5. Degraded mode
 
 Include request ids and screenshot evidence for any failures.
+
+## Latest Execution (2026-02-24)
+
+Mode A (normal, `TRR_BACKEND_RELOAD=0`):
+- Show refresh stream:
+  - Result: PASS
+  - Evidence: `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-normal/show-refresh-stream-sample.sse`
+  - Notes: includes heartbeat payloads (`heartbeat=true`, `elapsed_ms`) and echoed `request_id`.
+- Season refresh request-id stream echo:
+  - Result: PASS
+  - Evidence: `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-normal/season-refresh-stream-sample.sse`
+  - Notes: immediate `starting` event + echoed `request_id`.
+- Per-image stage endpoints (`mirror`, `auto-count`, `detect-text-overlay`, `variants`) on cast photo `ec03ed6e-07aa-4b7e-9dc3-6f8dab044a5b`:
+  - Result: PASS
+
+Mode B (degraded, `dev-lite`):
+- Count-dependent endpoint (`cast-photos/{id}/auto-count`):
+  - Result: PASS
+  - Notes: fails fast (~1.45s) with explicit Screenalytics unavailable detail; no indefinite spinner/hang.
+
+Closeout rerun (same day):
+- Mode A (normal) person stream checks:
+  - `refresh-images/stream` result: PASS
+  - Evidence: `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-normal/person-refresh-stream-sample.sse`
+  - Notes: first event `stage=starting` includes `request_id=req-person-refresh-runtime-1`; terminal `complete` echoes same request id.
+- Mode A (normal) person reprocess stream checks:
+  - `reprocess-images/stream` result: PASS
+  - Evidence: `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-normal/person-reprocess-stream-sample.sse`
+  - Notes: startup progress emitted and request id echoed in progress/complete.
+- Mode B (degraded) person stream checks:
+  - `refresh-images/stream` result: PASS
+  - Evidence: `/Users/thomashulihan/Projects/TRR/.logs/manual-e2e/rhoslc-degraded/person-refresh-stream-sample.sse`
+  - Notes: explicit `service_unavailable` + `retry_after_s` markers present; stream completes without hanging.
+
+Outstanding:
+- None.
+
+Go/No-Go:
+- **GO** for RHOSLC media refresh closeout.

@@ -223,6 +223,55 @@ describe("show cast route default minEpisodes behavior", () => {
     expect(merged?.total_episodes).toBe(12);
   });
 
+  it("enforces exclude_zero_episode_members even when minEpisodes is explicitly 0", async () => {
+    getShowCastWithStatsMock.mockResolvedValue([
+      {
+        id: "ev-1",
+        person_id: "p1",
+        total_episodes: 0,
+      },
+      {
+        id: "ev-2",
+        person_id: "p2",
+        total_episodes: 5,
+      },
+    ]);
+    getCastByShowIdMock.mockResolvedValue([
+      {
+        id: "base-1",
+        person_id: "p1",
+        full_name: "Zero Episodes",
+        cast_member_name: "Zero Episodes",
+        role: "Friend",
+        billing_order: 1,
+        credit_category: "cast",
+        photo_url: null,
+        total_episodes: null,
+      },
+      {
+        id: "base-2",
+        person_id: "p2",
+        full_name: "Has Episodes",
+        cast_member_name: "Has Episodes",
+        role: "Housewife",
+        billing_order: 2,
+        credit_category: "cast",
+        photo_url: null,
+        total_episodes: null,
+      },
+    ]);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/cast?roster_mode=imdb_show_membership&minEpisodes=0&exclude_zero_episode_members=1"
+    );
+    const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.cast).toHaveLength(1);
+    expect(payload.cast[0].person_id).toBe("p2");
+  });
+
   it("passes through photo_fallback=bravo only for that request", async () => {
     getShowCastWithStatsMock.mockResolvedValue([]);
     getCastByShowIdMock.mockResolvedValue([

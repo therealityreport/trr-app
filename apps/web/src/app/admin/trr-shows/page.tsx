@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -399,10 +400,10 @@ export default function TrrShowsPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-5">
+        <AdminGlobalHeader bodyClassName="px-6 py-5">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows", "/admin/trr-shows")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Shows</h1>
               <p className="text-sm text-zinc-500">
                 Browse shows from the TRR metadata database. Create surveys and
@@ -426,7 +427,7 @@ export default function TrrShowsPage() {
               </Link>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           {/* Search */}

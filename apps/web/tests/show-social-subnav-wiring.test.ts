@@ -15,16 +15,22 @@ describe("show social subnav wiring", () => {
   });
 
   it("renders platform tabs above Social Scope in the social first container", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
+    const pagePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+    const socialTabPath = path.resolve(__dirname, "../src/components/admin/show-tabs/ShowSocialTab.tsx");
+    const pageContents = fs.readFileSync(pagePath, "utf8");
+    const socialTabContents = fs.readFileSync(socialTabPath, "utf8");
 
-    expect(contents).toMatch(/SHOW_SOCIAL_PLATFORM_TABS\.map/);
-    expect(contents).toMatch(/SHOW_SOCIAL_PLATFORM_TABS\.map[\s\S]*Social Scope/);
+    expect(pageContents).toMatch(/SHOW_SOCIAL_PLATFORM_TABS/);
+    expect(pageContents).toMatch(/socialPlatformOptions=\{SHOW_SOCIAL_PLATFORM_TABS\}/);
+    expect(pageContents).toMatch(/socialPlatformTab=\{socialPlatformTab\}/);
+    expect(pageContents).toMatch(/onSelectSocialPlatformTab=\{setSocialPlatformTab\}/);
+    expect(socialTabContents).toMatch(/Social Scope/);
+    expect(socialTabContents).toMatch(/\{selectedSocialSeason \? \(/);
   });
 
   it("passes controlled social props to SeasonSocialAnalyticsSection", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
+    const pagePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+    const contents = fs.readFileSync(pagePath, "utf8");
 
     expect(contents).toMatch(/platformTab=\{socialPlatformTab\}/);
     expect(contents).toMatch(/onPlatformTabChange=\{setSocialPlatformTab\}/);

@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.typecheck.json",
+  "include": [
+    "next-env.d.ts",
+    "src/components/admin/FandomSyncModal.tsx",
+    "src/lib/admin/fandom-sync-types.ts",
+    "src/app/admin/trr-shows/people/[personId]/page.tsx",
+    "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
+    "src/app/api/admin/trr-api/people/[personId]/import-fandom/preview/route.ts",
+    "src/app/api/admin/trr-api/people/[personId]/import-fandom/commit/route.ts",
+    "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/import-fandom/preview/route.ts",
+    "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/import-fandom/commit/route.ts",
+    "src/lib/admin/show-admin-routes.ts"
+  ]
+}

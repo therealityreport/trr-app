@@ -24,6 +24,7 @@ const { mockParams, mockSearch, mockRouter } = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin/trr-shows/7782652f-783a-488b-8860-41b97de32e75/seasons/6/social/week/1",
   useParams: () => mockParams,
   useSearchParams: () => new URLSearchParams(mockSearch.value),
   useRouter: () => mockRouter,
@@ -411,7 +412,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Sync All Comments" }));
+    const syncButton = await screen.findByRole("button", { name: /Sync .*Comments/i });
+    fireEvent.click(syncButton);
 
     await waitFor(() => {
       expect(
@@ -473,7 +475,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Sync All Comments" }));
+    const syncButton = await screen.findByRole("button", { name: /Sync .*Comments/i });
+    fireEvent.click(syncButton);
 
     await waitFor(() => {
       expect(screen.getByText(/already up to date/i)).toBeInTheDocument();

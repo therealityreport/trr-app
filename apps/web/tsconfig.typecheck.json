@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "tests",
+    "vitest.config.ts",
+    ".next",
+    ".next/**",
+    ".next-e2e",
+    ".next-e2e/**",
+    ".next-e2e-debug",
+    ".next-e2e-debug/**"
+  ]
+}

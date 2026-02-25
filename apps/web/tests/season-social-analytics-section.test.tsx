@@ -539,6 +539,8 @@ const jsonResponse = (body: unknown): Response =>
 function mockSeasonSocialFetch(analytics: AnalyticsPayload) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+
+    if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
     if (url.includes("/social/analytics?")) {
       return jsonResponse(analytics);
     }
@@ -743,6 +745,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const activeRunId = "run-active-123";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
@@ -895,8 +899,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Coverage");
-    expect(screen.getByText("40.0%")).toBeInTheDocument();
+    const coverageLabel = await screen.findByText("Coverage");
+    const coverageCard = coverageLabel.closest("div");
+    expect(coverageCard).not.toBeNull();
+    expect(within(coverageCard as HTMLElement).getByText("40.0%")).toBeInTheDocument();
     expect(screen.getByText("2h ago")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Comfortable" }));
@@ -939,7 +945,27 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(await screen.findByRole("columnheader", { name: "PROGRESS" })).toBeInTheDocument();
     expect(await screen.findAllByText("40.0% saved to DB")).toHaveLength(5);
     expect(screen.queryByText("40.0% saved to DB (8/20)")).not.toBeInTheDocument();
-    expect(await screen.findByText("50.0% saved")).toBeInTheDocument();
+    const weekOneRow = (await screen.findByRole("link", { name: "Week 1" })).closest("tr");
+    expect(weekOneRow).not.toBeNull();
+    const weekOne = within(weekOneRow as HTMLElement);
+    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Posts: Up-to-Date")).toBeInTheDocument();
+    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Comments: 40.0%")).toBeInTheDocument();
+    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Total: 50.0%")).toBeInTheDocument();
+
+    const weekTwoRow = (await screen.findByRole("link", { name: "Week 2" })).closest("tr");
+    expect(weekTwoRow).not.toBeNull();
+    const weekTwo = within(weekTwoRow as HTMLElement);
+    expect(weekTwo.getByText((_, element) => element?.textContent?.trim() === "Posts: -")).toBeInTheDocument();
+    expect(weekTwo.getByText((_, element) => element?.textContent?.trim() === "Comments: -")).toBeInTheDocument();
+    expect(weekTwo.getByText((_, element) => element?.textContent?.trim() === "Total: -")).toBeInTheDocument();
+
+    const postsLabels = [weekOne.getByText("Posts:"), weekTwo.getByText("Posts:")];
+    const commentsLabels = [weekOne.getByText("Comments:"), weekTwo.getByText("Comments:")];
+    const totalLabels = [weekOne.getByText("Total:"), weekTwo.getByText("Total:")];
+    postsLabels.forEach((label) => expect(label).toHaveClass("font-semibold"));
+    commentsLabels.forEach((label) => expect(label).toHaveClass("font-semibold"));
+    totalLabels.forEach((label) => expect(label).toHaveClass("font-semibold"));
+    expect(screen.getAllByRole("button", { name: "Sync Comments" })).toHaveLength(1);
   });
 
   it("renders week date ranges under weekly heatmap headers", async () => {
@@ -967,8 +993,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
           ? {
               ...row,
               comments: {
-                ...row.comments,
+                instagram: 5,
                 youtube: 5,
+                tiktok: 5,
+                twitter: 5,
               },
               reported_comments: {
                 ...(row.reported_comments ?? {
@@ -977,8 +1005,14 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
                   tiktok: 0,
                   twitter: 0,
                 }),
+                instagram: 5,
                 youtube: 5,
+                tiktok: 5,
+                twitter: 5,
               },
+              total_comments: 20,
+              total_reported_comments: 20,
+              comments_saved_pct: 100.0,
             }
           : row,
       ),
@@ -996,6 +1030,172 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const upToDateLabels = await screen.findAllByText("Up-to-Date");
     expect(upToDateLabels.length).toBeGreaterThan(0);
+    const weekOneRow = (await screen.findByRole("link", { name: "Week 1" })).closest("tr");
+    expect(weekOneRow).not.toBeNull();
+    const weekOne = within(weekOneRow as HTMLElement);
+    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Posts: Up-to-Date")).toBeInTheDocument();
+    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Comments: Up-to-Date")).toBeInTheDocument();
+    expect(weekOne.getByText((_, element) => element?.textContent?.trim() === "Total: Up-to-Date")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Sync Comments" })).toHaveLength(1);
+  });
+
+  it("flags stale active runs older than 45 minutes with pending/retrying counts", async () => {
+    const staleTime = new Date(Date.now() - 120 * 60 * 1000).toISOString();
+    const runId = "run-stale-001";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs/summary?")) return jsonResponse({ summaries: [] });
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: runId,
+              status: "running",
+              created_at: staleTime,
+              updated_at: staleTime,
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({
+          jobs: [
+            {
+              id: "job-1",
+              run_id: runId,
+              platform: "instagram",
+              status: "pending",
+              created_at: staleTime,
+              updated_at: staleTime,
+            },
+            {
+              id: "job-2",
+              run_id: runId,
+              platform: "youtube",
+              status: "retrying",
+              created_at: staleTime,
+              updated_at: staleTime,
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Potentially stalled ingest runs/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/pending \d+ · retrying \d+/)).toBeInTheDocument();
+  });
+
+  it("does not flag active runs newer than the stale threshold", async () => {
+    const freshTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs/summary?")) return jsonResponse({ summaries: [] });
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: "run-fresh-001",
+              status: "running",
+              created_at: freshTime,
+              updated_at: freshTime,
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({
+          jobs: [
+            {
+              id: "job-fresh-1",
+              run_id: "run-fresh-001",
+              platform: "instagram",
+              status: "pending",
+              created_at: freshTime,
+              updated_at: freshTime,
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByRole("link", { name: "Week 1" });
+    expect(screen.queryByText(/Potentially stalled ingest runs/i)).not.toBeInTheDocument();
+  });
+
+  it("disables weekly Run Week and Sync Comments actions when queue workers are unhealthy", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({
+          queue_enabled: true,
+          healthy: false,
+          healthy_workers: 0,
+          reason: "no_healthy_workers",
+        });
+      }
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/runs/summary?")) return jsonResponse({ summaries: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/disabled until workers recover/i)).toBeInTheDocument();
+    });
+
+    screen.getAllByRole("button", { name: "Run Week" }).forEach((button) => {
+      expect(button).toBeDisabled();
+    });
+    expect(screen.getByRole("button", { name: "Sync Comments" })).toBeDisabled();
   });
 
   it("hydrates from cached social snapshot and suppresses transient timeout banners", async () => {
@@ -1019,6 +1219,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         throw new Error("Social analytics request timed out");
       }
@@ -1158,6 +1360,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   it("renders advanced run health and benchmark panel", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
@@ -1198,6 +1402,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const runId = "run-fail-1";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs/summary?")) {
@@ -1323,6 +1529,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     } as unknown as AnalyticsPayload;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsWithPartialBenchmark);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
@@ -1437,6 +1645,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         return jsonResponse(analyticsWithHashtags);
       }
@@ -1488,6 +1698,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   it("keeps analytics visible when targets fetch fails", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         return jsonResponse(analyticsBase);
       }
@@ -1527,6 +1739,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   it("renders runs and targets when analytics request fails", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         return ({
           ok: false,
@@ -1578,6 +1792,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         return await new Promise<Response>((_resolve, reject) => {
           const signal = init?.signal as AbortSignal | undefined;
@@ -1626,6 +1842,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const requestedUrls: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       requestedUrls.push(url);
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
@@ -1657,6 +1875,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     let analyticsCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         analyticsCalls += 1;
         if (analyticsCalls === 1) return jsonResponse(analyticsBase);
@@ -1714,6 +1934,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   it("loads jobs for the selected run id", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         return jsonResponse(analyticsBase);
       }
@@ -1781,6 +2003,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     let failJobsRefresh = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         return jsonResponse(analyticsBase);
       }
@@ -1853,6 +2077,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const ingestUrls: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) {
@@ -1903,6 +2129,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const capturedPayloads: Array<Record<string, unknown>> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
@@ -1953,6 +2181,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const capturedPayloads: Array<Record<string, unknown>> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
@@ -1989,6 +2219,54 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(capturedPayloads[0]?.allow_inline_dev_fallback).toBe(true);
   });
 
+  it("Sync Comments triggers comments_only ingest for the selected week", async () => {
+    const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
+    const capturedPayloads: Array<Record<string, unknown>> = [];
+    const ingestUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+        ingestUrls.push(url);
+        if (typeof init?.body === "string") {
+          capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 2 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const syncButton = await screen.findByRole("button", { name: "Sync Comments" });
+    fireEvent.click(syncButton);
+
+    await waitFor(() => {
+      expect(capturedPayloads.length).toBeGreaterThan(0);
+    });
+
+    const payload = capturedPayloads[0];
+    expect(payload.ingest_mode).toBe("comments_only");
+    expect(payload.sync_strategy).toBe("incremental");
+    expect(payload.date_start).toBe("2026-01-07T00:00:00Z");
+    expect(payload.date_end).toBe("2026-01-13T23:59:59Z");
+    expect(payload.platforms).toBeUndefined();
+    expect(ingestUrls[0]).toContain("season_id=season-1");
+  });
+
   it("formats worker-unavailable proxy detail into actionable guidance", () => {
     const message = formatIngestErrorMessage({
       error: "Failed to run social ingest (SOCIAL_WORKER_UNAVAILABLE)",
@@ -2010,6 +2288,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) {
         return jsonResponse(analyticsBase);
       }
@@ -2068,6 +2348,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     let runJobsCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) {

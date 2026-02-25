@@ -29,6 +29,7 @@ type SocialJob = {
   started_at?: string | null;
   completed_at?: string | null;
   created_at?: string;
+  updated_at?: string | null;
   config?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   job_error_code?: "RATE_LIMIT" | "AUTH" | "PARSER" | "NETWORK" | "UNKNOWN" | string;
@@ -60,6 +61,7 @@ type SocialRun = {
   started_at?: string | null;
   completed_at?: string | null;
   cancelled_at?: string | null;
+  updated_at?: string | null;
 };
 
 type SocialRunSummary = {
@@ -95,6 +97,30 @@ type SocialTarget = {
   hashtags?: string[];
   keywords?: string[];
   is_active?: boolean;
+};
+
+type WorkerHealthPayload = {
+  queue_enabled?: boolean;
+  healthy?: boolean;
+  healthy_workers?: number;
+  reason?: string | null;
+  checked_at?: string | null;
+};
+
+type WorkerHealthState = {
+  queueEnabled: boolean | null;
+  healthy: boolean | null;
+  healthyWorkers: number | null;
+  reason: string | null;
+  checkedAt: string | null;
+};
+
+type StaleRunState = {
+  runId: string;
+  ingestMode: string;
+  ageMinutes: number;
+  pendingJobs: number;
+  retryingJobs: number;
 };
 
 type AnalyticsResponse = {
@@ -384,6 +410,7 @@ const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed
 const COMMENT_SYNC_MAX_PASSES = 8;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
 const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter"];
+const STALE_RUN_THRESHOLD_DEFAULT_MINUTES = 45;
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
 const SOCIAL_TIME_ZONE = "America/New_York";
@@ -587,15 +614,27 @@ const buildIsoDayRange = (dayLocal: string): { dateStart: string; dateEnd: strin
 };
 
 type CoverageSummary = {
+  postsPctLabel: string | null;
+  postsUpToDate: boolean;
   commentsPctLabel: string | null;
+  commentsUpToDate: boolean;
   progressPctLabel: string | null;
   progressPct: number | null;
+  progressUpToDate: boolean;
   upToDate: boolean;
 };
 
 const toNonNegative = (value: number | null | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.max(0, value);
+};
+
+const isCoveragePctUpToDate = (value: number | null): boolean =>
+  typeof value === "number" && value >= 99.95;
+
+const formatProgressMetricValue = (pctLabel: string | null, upToDate: boolean): string => {
+  if (upToDate) return "Up-to-Date";
+  return pctLabel ?? "-";
 };
 
 const buildCoverageSummary = ({
@@ -612,6 +651,7 @@ const buildCoverageSummary = ({
   const safePostsSaved = toNonNegative(postsSaved);
   const safeCommentsSaved = toNonNegative(commentsSaved);
   const safeReportedComments = toNonNegative(reportedComments);
+  const postsPctRaw = safePostsSaved > 0 ? 100 : null;
   const expectedComments = Math.max(safeReportedComments, safeCommentsSaved);
   const commentsPctRaw =
     expectedComments > 0
@@ -625,12 +665,18 @@ const buildCoverageSummary = ({
   const totalExpectedUnits = safePostsSaved + expectedComments;
   const totalSavedUnits = safePostsSaved + safeCommentsSaved;
   const progressPctRaw = totalExpectedUnits > 0 ? Math.min(100, (totalSavedUnits * 100) / totalExpectedUnits) : null;
-  const upToDate = typeof progressPctRaw === "number" && progressPctRaw >= 99.95;
+  const postsUpToDate = isCoveragePctUpToDate(postsPctRaw);
+  const commentsUpToDate = isCoveragePctUpToDate(commentsPctRaw);
+  const progressUpToDate = isCoveragePctUpToDate(progressPctRaw);
   return {
+    postsPctLabel: postsPctRaw == null ? null : `${postsPctRaw.toFixed(1)}%`,
+    postsUpToDate,
     commentsPctLabel: commentsPctRaw == null ? null : `${commentsPctRaw.toFixed(1)}%`,
+    commentsUpToDate,
     progressPctLabel: progressPctRaw == null ? null : `${progressPctRaw.toFixed(1)}%`,
     progressPct: progressPctRaw,
-    upToDate,
+    progressUpToDate,
+    upToDate: progressUpToDate,
   };
 };
 
@@ -663,6 +709,7 @@ const REQUEST_TIMEOUT_MS = {
   targets: 12_000,
   jobs: 15_000,
   commentsCoverage: 35_000,
+  workerHealth: 12_000,
 } as const;
 const ANALYTICS_POLL_REFRESH_MS = 30_000;
 const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
@@ -724,6 +771,36 @@ const parseDateOrNull = (value: unknown): Date | null => {
   const ts = Date.parse(value);
   if (Number.isNaN(ts)) return null;
   return new Date(ts);
+};
+
+const parseTimestampMs = (value: unknown): number | null => {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const ts = Date.parse(value);
+  if (Number.isNaN(ts)) return null;
+  return ts;
+};
+
+const normalizeWorkerHealth = (value: unknown): WorkerHealthState | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const payload = value as WorkerHealthPayload;
+  const queueEnabled = typeof payload.queue_enabled === "boolean" ? payload.queue_enabled : null;
+  const healthy = typeof payload.healthy === "boolean" ? payload.healthy : null;
+  const healthyWorkers =
+    typeof payload.healthy_workers === "number" && Number.isFinite(payload.healthy_workers)
+      ? payload.healthy_workers
+      : null;
+  const reason = typeof payload.reason === "string" && payload.reason.trim() ? payload.reason.trim() : null;
+  const checkedAt =
+    typeof payload.checked_at === "string" && payload.checked_at.trim() ? payload.checked_at : null;
+  return {
+    queueEnabled,
+    healthy,
+    healthyWorkers,
+    reason,
+    checkedAt,
+  };
 };
 
 const isTransientBackendSectionError = (message: string | null | undefined): boolean => {
@@ -1060,6 +1137,9 @@ export default function SeasonSocialAnalyticsSection({
     jobs: null,
   });
   const [runSummaryError, setRunSummaryError] = useState<string | null>(null);
+  const [workerHealth, setWorkerHealth] = useState<WorkerHealthState | null>(null);
+  const [workerHealthError, setWorkerHealthError] = useState<string | null>(null);
+  const [staleThresholdMinutes] = useState<number>(STALE_RUN_THRESHOLD_DEFAULT_MINUTES);
   const [ingestMessage, setIngestMessage] = useState<string | null>(null);
   const [runningIngest, setRunningIngest] = useState(false);
   const [cancellingRun, setCancellingRun] = useState(false);
@@ -1464,6 +1544,36 @@ export default function SeasonSocialAnalyticsSection({
     }
   }, [getAuthHeaders, readErrorMessage, scope, seasonId, seasonNumber, showId]);
 
+  const fetchWorkerHealth = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchAdminWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest/worker-health`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.workerHealth,
+        "Social worker health request timed out",
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to load social worker health"));
+      }
+      const data = await parseResponseJson<Record<string, unknown>>(
+        response,
+        "Failed to load social worker health",
+      );
+      const normalized = normalizeWorkerHealth(data.worker_health ?? data);
+      setWorkerHealth(normalized);
+      setWorkerHealthError(null);
+      return normalized;
+    } catch (workerHealthFetchError) {
+      const message =
+        workerHealthFetchError instanceof Error
+          ? workerHealthFetchError.message
+          : "Failed to load social worker health";
+      setWorkerHealthError(message);
+      throw workerHealthFetchError;
+    }
+  }, [getAuthHeaders, readErrorMessage, seasonNumber, showId]);
+
   const fetchTargets = useCallback(async () => {
     const existingRequest = inFlightRef.current.targetsByKey.get(runsRequestKey);
     if (existingRequest) {
@@ -1598,6 +1708,8 @@ export default function SeasonSocialAnalyticsSection({
           runs: null,
           jobs: null,
         });
+        setWorkerHealth(null);
+        setWorkerHealthError(null);
         return;
       }
 
@@ -1610,10 +1722,11 @@ export default function SeasonSocialAnalyticsSection({
         jobs: null as string | null,
       };
 
-      const [targetsResult, runsResult, runSummariesResult] = await Promise.allSettled([
+      const [targetsResult, runsResult, runSummariesResult, workerHealthResult] = await Promise.allSettled([
         fetchTargets(),
         fetchRuns(),
         fetchRunSummaries(),
+        fetchWorkerHealth(),
       ]);
 
       if (targetsResult.status === "rejected") {
@@ -1650,6 +1763,15 @@ export default function SeasonSocialAnalyticsSection({
       } else {
         setRunSummaryError(null);
       }
+      if (workerHealthResult.status === "rejected") {
+        setWorkerHealthError(
+          workerHealthResult.reason instanceof Error
+            ? workerHealthResult.reason.message
+            : "Failed to load social worker health",
+        );
+      } else {
+        setWorkerHealthError(null);
+      }
 
       try {
         await fetchJobs(runIdToLoad);
@@ -1681,7 +1803,17 @@ export default function SeasonSocialAnalyticsSection({
         inFlightRef.current.refreshAll = null;
       }
     }
-  }, [analyticsView, fetchAnalytics, fetchJobs, fetchRunSummaries, fetchRuns, fetchTargets, runningIngest, selectedRunId]);
+  }, [
+    analyticsView,
+    fetchAnalytics,
+    fetchJobs,
+    fetchRunSummaries,
+    fetchRuns,
+    fetchTargets,
+    fetchWorkerHealth,
+    runningIngest,
+    selectedRunId,
+  ]);
 
   useEffect(() => {
     void refreshAll();
@@ -2111,9 +2243,10 @@ export default function SeasonSocialAnalyticsSection({
       if (cancelled || inFlight) return;
       inFlight = true;
       try {
-        const [runsResult, jobsResult] = await Promise.allSettled([
+        const [runsResult, jobsResult, workerHealthResult] = await Promise.allSettled([
           fetchRuns({ runId: activeRunId, limit: 1 }),
           fetchJobs(activeRunId, { preserveLastGoodIfEmpty: true, limit: 100 }),
+          fetchWorkerHealth(),
         ]);
         if (cancelled || generation !== pollGenerationRef.current) return;
 
@@ -2129,10 +2262,19 @@ export default function SeasonSocialAnalyticsSection({
               ? jobsResult.reason.message
               : "Failed to refresh social jobs"
             : null;
+        const workerHealthErrorRaw =
+          workerHealthResult.status === "rejected"
+            ? workerHealthResult.reason instanceof Error
+              ? workerHealthResult.reason.message
+              : "Failed to refresh social worker health"
+            : null;
         const runsError = isTransientDevRestartMessage(runsErrorRaw) ? null : runsErrorRaw;
         const jobsError = isTransientDevRestartMessage(jobsErrorRaw) ? null : jobsErrorRaw;
+        const workerHealthError = isTransientDevRestartMessage(workerHealthErrorRaw)
+          ? null
+          : workerHealthErrorRaw;
         const runAndJobsSucceeded = runsResult.status === "fulfilled" && jobsResult.status === "fulfilled";
-        const failureMessages = [runsErrorRaw, jobsErrorRaw].filter(
+        const failureMessages = [runsErrorRaw, jobsErrorRaw, workerHealthErrorRaw].filter(
           (message): message is string => Boolean(message && message.trim()),
         );
         const transientRestartWindowFailure =
@@ -2143,6 +2285,7 @@ export default function SeasonSocialAnalyticsSection({
           runs: runsError,
           jobs: jobsError,
         }));
+        setWorkerHealthError(workerHealthError);
 
         if (runAndJobsSucceeded && !runningIngest) {
           const now = Date.now();
@@ -2188,7 +2331,7 @@ export default function SeasonSocialAnalyticsSection({
         window.clearTimeout(timer);
       }
     };
-  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, hasRunningJobs, runningIngest]);
+  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, fetchWorkerHealth, hasRunningJobs, runningIngest]);
 
   useEffect(() => {
     if (pollingStatus !== "recovered") return;
@@ -2553,6 +2696,85 @@ export default function SeasonSocialAnalyticsSection({
       medianDurationSeconds,
     };
   }, [runSummaries]);
+  const workerHealthWarning = useMemo(() => {
+    if (!workerHealth) {
+      return null;
+    }
+    if (workerHealth.queueEnabled !== true) {
+      return null;
+    }
+    const healthyWorkers = workerHealth.healthyWorkers ?? 0;
+    const hasHealthyWorker = workerHealth.healthy === true || healthyWorkers > 0;
+    if (hasHealthyWorker) {
+      return null;
+    }
+    const reason = workerHealth.reason ? ` (${workerHealth.reason})` : "";
+    return `Queue mode is enabled but no healthy workers are reporting${reason}.`;
+  }, [workerHealth]);
+  const workerHealthUnavailableWarning = useMemo(() => {
+    if (!workerHealthError) {
+      return null;
+    }
+    if (isTransientBackendSectionError(workerHealthError)) {
+      return `Worker health check is temporarily unavailable: ${workerHealthError}`;
+    }
+    return `Worker health check failed: ${workerHealthError}`;
+  }, [workerHealthError]);
+  const ingestActionsBlockedReason = workerHealthWarning
+    ? `${workerHealthWarning} Run Week and Sync Comments are disabled until workers recover.`
+    : null;
+  const staleRuns = useMemo<StaleRunState[]>(() => {
+    const thresholdMs = staleThresholdMinutes * 60_000;
+    if (thresholdMs <= 0) {
+      return [];
+    }
+    const jobsByRunId = new Map<string, SocialJob[]>();
+    for (const job of jobs) {
+      if (!job.run_id) continue;
+      const current = jobsByRunId.get(job.run_id) ?? [];
+      current.push(job);
+      jobsByRunId.set(job.run_id, current);
+    }
+
+    const now = Date.now();
+    const staleItems: StaleRunState[] = [];
+    for (const run of runs) {
+      if (!ACTIVE_RUN_STATUSES.has(run.status)) continue;
+      const runJobs = jobsByRunId.get(run.id) ?? [];
+      const timestamps = [
+        parseTimestampMs(run.updated_at),
+        parseTimestampMs(run.started_at),
+        parseTimestampMs(run.created_at),
+        ...runJobs.map((job) => parseTimestampMs(job.updated_at)),
+        ...runJobs.map((job) => parseTimestampMs(job.started_at)),
+        ...runJobs.map((job) => parseTimestampMs(job.created_at)),
+      ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+      if (timestamps.length === 0) continue;
+      const latestActivityMs = Math.max(...timestamps);
+      const ageMs = now - latestActivityMs;
+      if (ageMs < thresholdMs) continue;
+
+      const pendingJobs =
+        runJobs.length > 0
+          ? runJobs.filter((job) => job.status === "queued" || job.status === "pending").length
+          : Math.max(0, Number(run.summary?.active_jobs ?? 0));
+      const retryingJobs =
+        runJobs.length > 0 ? runJobs.filter((job) => job.status === "retrying").length : 0;
+      const config = run.config as Record<string, unknown> | undefined;
+      const ingestMode =
+        typeof config?.ingest_mode === "string" && config.ingest_mode.trim()
+          ? config.ingest_mode
+          : "unknown";
+      staleItems.push({
+        runId: run.id,
+        ingestMode,
+        ageMinutes: Math.max(1, Math.floor(ageMs / 60_000)),
+        pendingJobs,
+        retryingJobs,
+      });
+    }
+    return staleItems.sort((a, b) => b.ageMinutes - a.ageMinutes || a.runId.localeCompare(b.runId));
+  }, [jobs, runs, staleThresholdMinutes]);
   const activeFailureErrorCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const job of runScopedJobs) {
@@ -3870,6 +4092,35 @@ export default function SeasonSocialAnalyticsSection({
               <h4 className="text-lg font-semibold text-zinc-900">Weekly Bravo Post Count Table</h4>
               <span className="text-xs uppercase tracking-[0.2em] text-zinc-400">Trailer to Finale</span>
             </div>
+            {(ingestActionsBlockedReason || workerHealthUnavailableWarning || staleRuns.length > 0) && (
+              <div className="mb-4 space-y-2">
+                {ingestActionsBlockedReason && (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <span className="font-semibold">Worker Health:</span> {ingestActionsBlockedReason}
+                  </div>
+                )}
+                {workerHealthUnavailableWarning && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    <span className="font-semibold">Worker Health:</span> {workerHealthUnavailableWarning}
+                  </div>
+                )}
+                {staleRuns.length > 0 && (
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+                    <p className="font-semibold text-zinc-800">
+                      Potentially stalled ingest runs ({staleThresholdMinutes}+ minutes):
+                    </p>
+                    <ul className="mt-1 space-y-1 text-xs text-zinc-600">
+                      {staleRuns.map((staleRun) => (
+                        <li key={staleRun.runId}>
+                          <span className="font-medium">{staleRun.runId.slice(0, 8)}</span> · {staleRun.ingestMode} ·{" "}
+                          {staleRun.ageMinutes}m old · pending {staleRun.pendingJobs} · retrying {staleRun.retryingJobs}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse text-sm">
                 <thead>
@@ -3898,9 +4149,21 @@ export default function SeasonSocialAnalyticsSection({
                     if (analyticsView !== "bravo") {
                       weekLinkQuery.set("social_view", analyticsView);
                     }
+                    const postsProgressValue = formatProgressMetricValue(
+                      totalCoverage.postsPctLabel,
+                      totalCoverage.postsUpToDate,
+                    );
+                    const commentsProgressValue = formatProgressMetricValue(
+                      totalCoverage.commentsPctLabel,
+                      totalCoverage.commentsUpToDate,
+                    );
+                    const totalProgressValue = formatProgressMetricValue(
+                      totalCoverage.progressPctLabel,
+                      totalCoverage.progressUpToDate,
+                    );
                     return (
                       <tr key={`table-week-${week.week_index}`} className="border-b border-zinc-100 text-zinc-700">
-                        <td className="px-3 py-2 font-semibold">
+                        <td className="px-3 py-2 align-top font-semibold">
                           <Link
                             href={buildSeasonSocialWeekUrl({
                               showSlug: showRouteSlug,
@@ -3913,54 +4176,74 @@ export default function SeasonSocialAnalyticsSection({
                             {week.label ?? (week.week_index === 0 ? "Pre-Season" : `Week ${week.week_index}`)}
                           </Link>
                         </td>
-                        <td className="px-3 py-2 text-xs text-zinc-500">
+                        <td className="px-3 py-2 align-top text-xs text-zinc-500">
                           {formatDateTime(week.start)} to {formatDateTime(week.end)}
                         </td>
                         {PLATFORM_ORDER.map((platform) => {
                           const coverage = getPlatformCoverage(week, platform);
                           return (
-                            <td key={`${week.week_index}-${platform}`} className="px-3 py-2">
-                              <div>{week.posts[platform]}</div>
-                              <div className="text-xs text-zinc-400">{week.comments?.[platform] ?? 0} comments</div>
-                              {coverage.upToDate ? (
-                                <div className="text-[11px] text-emerald-700">Up-to-Date</div>
-                              ) : coverage.commentsPctLabel ? (
-                                <div className="text-[11px] text-zinc-500">{coverage.commentsPctLabel} saved to DB</div>
-                              ) : null}
+                            <td key={`${week.week_index}-${platform}`} className="px-3 py-2 align-top">
+                              <div className="flex flex-col gap-0.5 leading-tight">
+                                <div>{week.posts[platform]}</div>
+                                <div className="text-xs text-zinc-400">{week.comments?.[platform] ?? 0} comments</div>
+                                {coverage.upToDate ? (
+                                  <div className="text-[11px] text-emerald-700 whitespace-nowrap">Up-to-Date</div>
+                                ) : coverage.commentsPctLabel ? (
+                                  <div className="text-[11px] text-zinc-500 whitespace-nowrap">{coverage.commentsPctLabel} saved to DB</div>
+                                ) : null}
+                              </div>
                             </td>
                           );
                         })}
-                        <td className="px-3 py-2 font-semibold text-zinc-900">
-                          <div>{week.total_posts}</div>
-                          <div className="text-xs font-normal text-zinc-400">{week.total_comments ?? 0} comments</div>
-                          {totalCoverage.upToDate ? (
-                            <div className="text-[11px] font-normal text-emerald-700">Up-to-Date</div>
-                          ) : totalCoverage.commentsPctLabel ? (
-                            <div className="text-[11px] font-normal text-zinc-500">{totalCoverage.commentsPctLabel} saved to DB</div>
-                          ) : null}
+                        <td className="px-3 py-2 align-top font-semibold text-zinc-900">
+                          <div className="flex flex-col gap-0.5 leading-tight">
+                            <div>{week.total_posts}</div>
+                            <div className="text-xs font-normal text-zinc-400">{week.total_comments ?? 0} comments</div>
+                            {totalCoverage.upToDate ? (
+                              <div className="text-[11px] font-normal text-emerald-700 whitespace-nowrap">Up-to-Date</div>
+                            ) : totalCoverage.commentsPctLabel ? (
+                              <div className="text-[11px] font-normal text-zinc-500 whitespace-nowrap">{totalCoverage.commentsPctLabel} saved to DB</div>
+                            ) : null}
+                          </div>
                         </td>
-                        <td className="px-3 py-2">
-                          {totalCoverage.upToDate ? (
-                            <span className="text-xs font-semibold text-emerald-700">Up-to-Date</span>
-                          ) : totalCoverage.progressPctLabel ? (
-                            <span className="text-xs font-semibold text-zinc-700">{totalCoverage.progressPctLabel} saved</span>
-                          ) : (
-                            <span className="text-xs text-zinc-400">-</span>
-                          )}
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex flex-col gap-0.5 text-xs leading-tight text-zinc-700">
+                            <span className="whitespace-nowrap">
+                              <span className="font-semibold">Posts:</span> {postsProgressValue}
+                            </span>
+                            <span className="whitespace-nowrap">
+                              <span className="font-semibold">Comments:</span> {commentsProgressValue}
+                            </span>
+                            <span className="whitespace-nowrap">
+                              <span className="font-semibold">Total:</span> {totalProgressValue}
+                            </span>
+                          </div>
                         </td>
-                        <td className="px-3 py-2">
-                          <button
-                            type="button"
-                            onClick={() => runIngest({ week: week.week_index })}
-                            disabled={runningIngest}
-                            className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                              runningIngest && ingestingWeek === week.week_index
-                                ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
-                                : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
-                            }`}
-                          >
-                            {runningIngest && ingestingWeek === week.week_index ? "Ingesting..." : "Run Week"}
-                          </button>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => runIngest({ week: week.week_index })}
+                              disabled={runningIngest || Boolean(ingestActionsBlockedReason)}
+                              className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                                runningIngest && ingestingWeek === week.week_index
+                                  ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
+                                  : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+                              }`}
+                            >
+                              {runningIngest && ingestingWeek === week.week_index ? "Ingesting..." : "Run Week"}
+                            </button>
+                            {totalCoverage.postsUpToDate ? (
+                              <button
+                                type="button"
+                                onClick={() => runIngest({ week: week.week_index, ingestMode: "comments_only" })}
+                                disabled={runningIngest || Boolean(ingestActionsBlockedReason)}
+                                className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Sync Comments
+                              </button>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     );

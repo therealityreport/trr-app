@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin",
   redirect: (path: string) => {
     throw new Error(`REDIRECT:${path}`);
   },

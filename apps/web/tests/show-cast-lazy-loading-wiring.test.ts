@@ -19,6 +19,14 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/void fetchCast\(\);/);
   });
 
+  it("hardens cast loading with longer timeout, retry, and zero-episode exclusion", () => {
+    expect(contents).toMatch(/SHOW_CAST_LOAD_TIMEOUT_MS = 90_000/);
+    expect(contents).toMatch(/SHOW_CAST_LOAD_MAX_ATTEMPTS = 2/);
+    expect(contents).toMatch(/SHOW_CAST_LOAD_RETRY_BACKOFF_MS = 250/);
+    expect(contents).toMatch(/params\.set\("exclude_zero_episode_members", "1"\)/);
+    expect(contents).toMatch(/Showing last successful cast snapshot\./);
+  });
+
   it("provides explicit enrich missing cast photos action with bravo fallback", () => {
     expect(contents).toMatch(/Enrich Missing Cast Photos/);
     expect(contents).toMatch(/photoFallbackMode: "bravo"/);

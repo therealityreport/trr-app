@@ -100,6 +100,8 @@ type FetchOverrides = {
   fandom?: (url: string) => Response;
   videos?: (url: string) => Response;
   news?: (url: string) => Response;
+  googleSync?: (url: string) => Response;
+  googleSyncStatus?: (url: string) => Response;
 };
 
 const createFetchMock = (overrides: FetchOverrides = {}) =>
@@ -141,9 +143,23 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
       if (overrides.videos) return overrides.videos(url);
       return jsonResponse({ videos: [] });
     }
-    if (url.includes(`/api/admin/trr-api/shows/${SHOW_ID}/bravo/news`)) {
+    if (url.includes(`/api/admin/trr-api/shows/${SHOW_ID}/google-news/sync/`)) {
+      if (overrides.googleSyncStatus) return overrides.googleSyncStatus(url);
+      return jsonResponse({ status: "completed", result: { synced: true } });
+    }
+    if (url.includes(`/api/admin/trr-api/shows/${SHOW_ID}/google-news/sync`)) {
+      if (overrides.googleSync) return overrides.googleSync(url);
+      return jsonResponse({ show_id: SHOW_ID, queued: true, job_id: "job-1", status: "queued" });
+    }
+    if (url.includes(`/api/admin/trr-api/shows/${SHOW_ID}/news`)) {
       if (overrides.news) return overrides.news(url);
-      return jsonResponse({ news: [] });
+      return jsonResponse({
+        news: [],
+        count: 0,
+        total_count: 0,
+        next_cursor: null,
+        facets: { sources: [], people: [], topics: [], seasons: [] },
+      });
     }
     return jsonResponse({ error: "not mocked" }, 404);
   });
@@ -173,7 +189,7 @@ describe("people page tab runtime behavior", () => {
     const requestedUrls = fetchMock.mock.calls.map(([url]) => String(url));
     expect(requestedUrls.some((url) => url.includes("/fandom"))).toBe(false);
     expect(requestedUrls.some((url) => url.includes("/bravo/videos"))).toBe(false);
-    expect(requestedUrls.some((url) => url.includes("/bravo/news"))).toBe(false);
+    expect(requestedUrls.some((url) => url.includes(`/shows/${SHOW_ID}/news`))).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: /^Fandom/i }));
     await waitFor(() => {
@@ -187,7 +203,10 @@ describe("people page tab runtime behavior", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^News/i }));
     await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/bravo/news"))).toBe(true);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/google-news/sync`))).toBe(
+        true
+      );
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/news`))).toBe(true);
     });
   });
 
@@ -204,6 +223,15 @@ describe("people page tab runtime behavior", () => {
               published_at: "2026-02-20T12:00:00.000Z",
             },
           ],
+          count: 1,
+          total_count: 1,
+          next_cursor: null,
+          facets: {
+            sources: [{ token: "example.com", label: "Example", count: 1 }],
+            people: [{ person_id: PERSON_ID, person_name: "Andy Cohen", count: 1 }],
+            topics: [],
+            seasons: [],
+          },
         }),
     });
     vi.stubGlobal("fetch", fetchMock);

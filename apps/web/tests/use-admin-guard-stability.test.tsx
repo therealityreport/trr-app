@@ -60,6 +60,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin",
   useRouter: () => mocks.router,
 }));
 

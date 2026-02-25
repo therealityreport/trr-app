@@ -33,9 +33,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const forwardedSearchParams = new URLSearchParams(request.nextUrl.searchParams.toString());
-    const timeoutProfileRaw = forwardedSearchParams.get("timeout_profile");
-    const timeoutProfile =
-      timeoutProfileRaw?.trim().toLowerCase() === "background" ? "background" : "interactive";
     forwardedSearchParams.delete("timeout_profile");
     const seasonIdHintRaw = forwardedSearchParams.get("season_id");
     if (seasonIdHintRaw && !isValidUuid(seasonIdHintRaw)) {
@@ -51,8 +48,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       queryString: forwardedSearchParams.toString(),
       seasonIdHint,
       fallbackError: "Failed to fetch social analytics",
-      retries: timeoutProfile === "background" ? 1 : 0,
-      timeoutMs: timeoutProfile === "background" ? 35_000 : 12_000,
+      retries: 0,
+      timeoutMs: 22_000,
     });
     return NextResponse.json(data);
   } catch (error) {

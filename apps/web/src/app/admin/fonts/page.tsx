@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import {
@@ -1199,11 +1200,11 @@ function AdminFontsPageContent() {
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
         {/* Header */}
-        <header className="border-b border-zinc-200 bg-white px-6 py-4">
+        <AdminGlobalHeader bodyClassName="px-6 py-4">
           <div className="mx-auto max-w-5xl">
             <div className="flex items-center justify-between">
               <div>
-                <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("UI Design System")} className="mb-1" />
+                <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("UI Design System", "/admin/fonts")} className="mb-1" />
                 <h1 className="text-2xl font-bold text-zinc-900">UI Design System</h1>
                 <p className="mt-1 text-sm text-zinc-500">
                   Fonts, colors, buttons, question components, and form patterns used across the app.
@@ -1227,7 +1228,7 @@ function AdminFontsPageContent() {
               </div>
             </div>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         {/* Tabs */}
         <div className="border-b border-zinc-200 bg-white">

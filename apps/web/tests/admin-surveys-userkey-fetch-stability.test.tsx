@@ -15,6 +15,7 @@ const guardState = {
 };
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin/surveys",
   useRouter: () => ({ push: vi.fn() }),
 }));
 

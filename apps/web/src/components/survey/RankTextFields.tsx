@@ -315,6 +315,7 @@ export default function RankTextFields({
   const [orderedIds, setOrderedIds] = React.useState<string[]>(() => normalizeOrder(value));
   const orderedIdsRef = React.useRef<string[]>(orderedIds);
   const dragStartOrderRef = React.useRef<string[] | null>(null);
+  const dragPreviewReorderedRef = React.useRef(false);
 
   React.useEffect(() => {
     orderedIdsRef.current = orderedIds;
@@ -465,6 +466,7 @@ export default function RankTextFields({
   const handleDragStart = React.useCallback((event: DragStartEvent) => {
     setActiveId(event.active.id as string);
     dragStartOrderRef.current = [...orderedIdsRef.current];
+    dragPreviewReorderedRef.current = false;
   }, []);
 
   const handleDragOver = React.useCallback((event: DragOverEvent) => {
@@ -473,8 +475,10 @@ export default function RankTextFields({
     if (!over) return;
     setOrderedIds((prev) => {
       const next = reorderIds(prev, active, over);
+      const changed = next.join("|") !== prev.join("|");
+      if (changed) dragPreviewReorderedRef.current = true;
       orderedIdsRef.current = next;
-      return next;
+      return changed ? next : prev;
     });
   }, []);
 
@@ -482,6 +486,7 @@ export default function RankTextFields({
     setActiveId(null);
     const startedOrder = dragStartOrderRef.current;
     dragStartOrderRef.current = null;
+    dragPreviewReorderedRef.current = false;
     if (!startedOrder) return;
     orderedIdsRef.current = startedOrder;
     setOrderedIds(startedOrder);
@@ -490,7 +495,9 @@ export default function RankTextFields({
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     setActiveId(null);
     const startedOrder = dragStartOrderRef.current;
+    const hadPreviewReorder = dragPreviewReorderedRef.current;
     dragStartOrderRef.current = null;
+    dragPreviewReorderedRef.current = false;
     const active = event.active.id as string;
     const over = event.over?.id as string | undefined;
     if (!over) {
@@ -500,9 +507,11 @@ export default function RankTextFields({
       return;
     }
     const latest = orderedIdsRef.current;
-    const next = reorderIds(latest, active, over);
-    orderedIdsRef.current = next;
-    setOrderedIds(next);
+    const next = hadPreviewReorder ? latest : reorderIds(latest, active, over);
+    if (!hadPreviewReorder) {
+      orderedIdsRef.current = next;
+      setOrderedIds(next);
+    }
 
     const baseline = startedOrder ?? latest;
     if (next.join("|") !== baseline.join("|")) {

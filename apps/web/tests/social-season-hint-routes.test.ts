@@ -68,6 +68,28 @@ describe("social routes season_id hint forwarding", () => {
     expect(String(options.queryString ?? "")).not.toContain("season_id=");
   });
 
+  it("forwards season_id hint on targets route with bounded timeout", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/targets?season_id=${seasonId}&source_scope=bravo`,
+      { method: "GET" },
+    );
+
+    const response = await getTargets(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
+    expect(response.status).toBe(200);
+    expect(fetchSeasonBackendJsonMock).toHaveBeenCalledWith(
+      showId,
+      "6",
+      "/targets",
+      expect.objectContaining({
+        seasonIdHint: seasonId,
+        retries: 0,
+        timeoutMs: 12_000,
+      }),
+    );
+    const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
+    expect(String(options.queryString ?? "")).not.toContain("season_id=");
+  });
+
   it("returns 400 for invalid season_id on jobs route", async () => {
     const request = new NextRequest(
       `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/jobs?season_id=bad-id`,
@@ -157,8 +179,8 @@ describe("social routes season_id hint forwarding", () => {
       "/analytics",
       expect.objectContaining({
         seasonIdHint: seasonId,
-        retries: 1,
-        timeoutMs: 35_000,
+        retries: 0,
+        timeoutMs: 22_000,
       }),
     );
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };

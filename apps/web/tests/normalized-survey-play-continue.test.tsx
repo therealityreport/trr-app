@@ -8,6 +8,7 @@ const useNormalizedSurveyMock = vi.fn();
 const scrollIntoViewMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin/trr-shows/1/surveys",
   useRouter: () => ({ push }),
 }));
 

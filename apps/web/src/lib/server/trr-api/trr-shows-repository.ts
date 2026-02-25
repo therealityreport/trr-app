@@ -3732,7 +3732,7 @@ export async function getAssetsByShowSeason(
       id: string;
       source: string;
       kind: string;
-      image_type: string | null;
+      inferred_image_type: string | null;
       url: string | null;
       url_original: string | null;
       hosted_url: string | null;
@@ -3741,7 +3741,18 @@ export async function getAssetsByShowSeason(
       created_at: string | null;
       metadata: Record<string, unknown> | null;
     }>(
-      `SELECT id, source, kind, image_type, url, url_original, hosted_url, width, height, created_at, metadata
+      `SELECT
+         id,
+         source,
+         kind,
+         COALESCE(metadata->>'image_type', kind) AS inferred_image_type,
+         url,
+         url_original,
+         hosted_url,
+         width,
+         height,
+         created_at,
+         metadata
        FROM core.season_images
        WHERE show_id = $1::uuid
          AND season_number = $2::int
@@ -3753,7 +3764,7 @@ export async function getAssetsByShowSeason(
     for (const img of seasonImages.rows) {
       if (!img.hosted_url) continue;
       if (hostedUrlSeen.has(img.hosted_url)) continue;
-      const imageKind = img.image_type ?? img.kind ?? "poster";
+      const imageKind = img.inferred_image_type ?? img.kind ?? "poster";
       assets.push({
         id: img.id,
         type: "season",
@@ -3795,7 +3806,7 @@ export async function getAssetsByShowSeason(
       id: string;
       source: string;
       kind: string;
-      image_type: string | null;
+      inferred_image_type: string | null;
       url: string | null;
       url_original: string | null;
       hosted_url: string | null;
@@ -3805,7 +3816,19 @@ export async function getAssetsByShowSeason(
       created_at: string | null;
       metadata: Record<string, unknown> | null;
     }>(
-      `SELECT id, source, kind, image_type, url, url_original, hosted_url, width, height, episode_number, created_at, metadata
+      `SELECT
+         id,
+         source,
+         kind,
+         COALESCE(metadata->>'image_type', kind) AS inferred_image_type,
+         url,
+         url_original,
+         hosted_url,
+         width,
+         height,
+         episode_number,
+         created_at,
+         metadata
        FROM core.episode_images
        WHERE show_id = $1::uuid
          AND season_number = $2::int
@@ -3818,7 +3841,7 @@ export async function getAssetsByShowSeason(
     for (const img of episodeImages.rows) {
       if (!img.hosted_url) continue;
       if (hostedUrlSeen.has(img.hosted_url)) continue;
-      const imageKind = img.image_type ?? img.kind ?? "still";
+      const imageKind = img.inferred_image_type ?? img.kind ?? "still";
       assets.push({
         id: img.id,
         type: "episode",

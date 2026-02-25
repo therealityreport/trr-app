@@ -64,8 +64,10 @@ const isRetryableNetworkError = (error: unknown): boolean => {
  * Unlike refresh-images, this does NOT sync or mirror — it only reprocesses existing photos.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
+  let requestId: string | null = null;
   try {
     await requireAdmin(request);
+    requestId = request.headers.get("x-trr-request-id")?.trim() || null;
 
     const { personId } = await params;
     if (!personId) {
@@ -73,6 +75,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           stage: "proxy",
           error: "personId is required",
+          ...(requestId ? { request_id: requestId } : {}),
         },
         400
       );
@@ -84,6 +87,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           stage: "proxy",
           error: "Backend API not configured",
+          ...(requestId ? { request_id: requestId } : {}),
         },
         500
       );
@@ -95,6 +99,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           stage: "proxy",
           error: "Backend auth not configured",
+          ...(requestId ? { request_id: requestId } : {}),
         },
         500
       );
@@ -120,6 +125,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${serviceRoleKey}`,
+            ...(requestId ? { "x-trr-request-id": requestId } : {}),
           },
           body: JSON.stringify(body ?? {}),
           signal: controller.signal,
@@ -151,6 +157,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           stage: "proxy",
           error: "Backend fetch failed",
           detail,
+          ...(requestId ? { request_id: requestId } : {}),
         },
         502
       );
@@ -163,6 +170,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           stage: "backend",
           error: "Backend reprocess failed",
           detail: errorText || `HTTP ${backendResponse.status}`,
+          ...(requestId ? { request_id: requestId } : {}),
         },
         backendResponse.status
       );
@@ -173,6 +181,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           stage: "backend",
           error: "No response body from backend",
+          ...(requestId ? { request_id: requestId } : {}),
         },
         502
       );
@@ -194,6 +203,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         stage: "proxy",
         error: "Reprocess stream request failed",
         detail: message,
+        ...(requestId ? { request_id: requestId } : {}),
       },
       status
     );

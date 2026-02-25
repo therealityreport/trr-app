@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import {
   buildNetworkDetailBreadcrumb,
   humanizeSlug,
@@ -242,10 +243,10 @@ export default function AdminNetworkStreamingDetailPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <header className="border-b border-zinc-200 bg-white px-6 py-6">
+        <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto max-w-6xl">
             <AdminBreadcrumbs
-              items={buildNetworkDetailBreadcrumb(pageTitle)}
+              items={buildNetworkDetailBreadcrumb(pageTitle, `/admin/networks/${routeEntityType}/${routeEntitySlug}`)}
               className="mb-1"
             />
             <h1 className="mt-2 break-words text-3xl font-bold text-zinc-900">{pageTitle}</h1>
@@ -258,7 +259,7 @@ export default function AdminNetworkStreamingDetailPage() {
               profile with saved assets, metadata, and added shows.
             </p>
           </div>
-        </header>
+        </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
           {error && error !== "not_found" ? (
