@@ -1421,45 +1421,7 @@ export default function SeasonDetailPage() {
   ]);
 
   useEffect(() => {
-    const canonicalSlug = show?.canonical_slug?.trim() || show?.slug?.trim();
-    if (!canonicalSlug) return;
-
-    const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
-    if (seasonRouteState.tab === "social") {
-      if (socialAnalyticsView === "bravo") {
-        preservedQuery.delete("social_view");
-      } else {
-        preservedQuery.set("social_view", socialAnalyticsView);
-      }
-    }
-    const canonicalUrl = buildSeasonAdminUrl({
-      showSlug: canonicalSlug,
-      seasonNumber,
-      tab: seasonRouteState.tab,
-      assetsSubTab: seasonRouteState.assetsSubTab,
-      query: preservedQuery,
-      socialView: seasonRouteState.tab === "social" ? socialAnalyticsView : undefined,
-    });
-    const currentQuery = searchParams.toString();
-    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
-    if (currentUrl === canonicalUrl) return;
-    router.replace(canonicalUrl as Route, { scroll: false });
-  }, [
-    pathname,
-    router,
-    searchParams,
-    seasonNumber,
-    socialAnalyticsView,
-    seasonRouteState.assetsSubTab,
-    seasonRouteState.tab,
-    show?.canonical_slug,
-    show?.slug,
-  ]);
-
-  useEffect(() => {
-    const routeSlug = showRouteParam.trim();
-    if (!routeSlug) return;
-    if (!Number.isFinite(seasonNumber)) return;
+    if (!showSlugForRouting) return;
 
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
     if (seasonRouteState.tab === "social") {
@@ -1470,26 +1432,35 @@ export default function SeasonDetailPage() {
       }
     }
     const canonicalRouteUrl = buildSeasonAdminUrl({
-      showSlug: routeSlug,
+      showSlug: showSlugForRouting,
       seasonNumber,
       tab: seasonRouteState.tab,
       assetsSubTab: seasonRouteState.assetsSubTab,
       query: preservedQuery,
       socialView: seasonRouteState.tab === "social" ? socialAnalyticsView : undefined,
     });
-    const currentQuery = searchParams.toString();
-    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
-    if (currentUrl === canonicalRouteUrl) return;
+    const currentHasLegacyRoutingQuery =
+      searchParams.has("tab") || searchParams.has("assets");
+    const canonicalPath = canonicalRouteUrl.split("?")[0] ?? canonicalRouteUrl;
+    const currentPath = pathname;
+    const pathMismatch = currentPath !== canonicalPath;
+    if (!pathMismatch && !currentHasLegacyRoutingQuery) return;
+
+    const currentCleanedQuery = preservedQuery.toString();
+    const canonicalQuery = canonicalRouteUrl.includes("?")
+      ? (canonicalRouteUrl.split("?")[1] ?? "")
+      : "";
+    if (!pathMismatch && currentCleanedQuery === canonicalQuery) return;
     router.replace(canonicalRouteUrl as Route, { scroll: false });
   }, [
     pathname,
     router,
     searchParams,
     seasonNumber,
+    showSlugForRouting,
     socialAnalyticsView,
     seasonRouteState.assetsSubTab,
     seasonRouteState.tab,
-    showRouteParam,
   ]);
   const fetchShowCastForBrand = useCallback(async () => {
     if (!showId) return;

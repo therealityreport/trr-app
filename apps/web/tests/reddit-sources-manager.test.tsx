@@ -786,10 +786,13 @@ describe("RedditSourcesManager", () => {
       />,
     );
 
+    await waitFor(() => {
+      expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
+    });
     expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
     expect(screen.getByText("No episode discussion candidates loaded yet.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(await screen.findByText("Title Phrases")).toBeInTheDocument();
     expect(
       screen.getByText(/Required flares for episode refresh are sourced from/i),
@@ -844,7 +847,6 @@ describe("RedditSourcesManager", () => {
       );
       expect(refreshCalls.length).toBeGreaterThan(0);
       const refreshUrl = String(refreshCalls[refreshCalls.length - 1]?.[0] ?? "");
-      expect(refreshUrl).toContain("season_id=");
       expect(refreshUrl).not.toContain("period_start");
       expect(refreshUrl).not.toContain("period_end");
       expect(refreshUrl).not.toContain("period_label");

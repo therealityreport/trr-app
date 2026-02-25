@@ -2398,7 +2398,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
                   {
                     source_id: "yt-w1-1",
                     hashtags: ["RHOSLC"],
-                    text: "Sneak peek",
+                    text: "Sneak peek #RHOSLC",
                   },
                 ],
               },
@@ -2430,7 +2430,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
                 {
                   source_id: "yt-w2-1",
                   hashtags: ["AFTERSHOW", "RHOSLC"],
-                  text: "Weekly recap",
+                  text: "Weekly recap #AFTERSHOW #RHOSLC",
                 },
               ],
             },

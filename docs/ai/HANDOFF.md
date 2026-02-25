@@ -2,6 +2,114 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-25) — Reddit community shell parity + dedicated UX alignment
+
+- February 25, 2026: implemented dedicated Reddit community page parity with season Reddit Analytics shell, dedicated community UX simplification, and episode-discussion source labeling display in `TRR-APP`.
+  - primary_skill: `orchestrate-plan-execution`
+  - supporting_skills: `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+  - mcp_tools_used:
+    - primary: `functions.exec_command`
+    - fallback: `functions.apply_patch`
+  - delegation_map:
+    - role: `Design Context Owner`
+      scope: `map season Reddit Analytics shell parity requirements to dedicated community route`
+      deliverable: `breadcrumb/title/back/tabs parity contract plus community-body-only content boundaries`
+      verification_command: `pnpm -C apps/web exec vitest run tests/reddit-community-view-page.test.tsx`
+      status: `completed`
+    - role: `UI Implementer`
+      scope: `community route + manager rendering updates for dedicated mode`
+      deliverable: `season shell parity, dedicated heading/actions cleanup, all-period episode refresh controls, assigned threads collapsible, EPISODE DISCUSSION badge mapping`
+      verification_command: `pnpm -C apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-view-page.test.tsx`
+      status: `completed`
+    - role: `API Integration Owner`
+      scope: `episode-discussion source provenance write-path verification and migration application`
+      deliverable: `episode refresh/save/manual-thread write path sourceKind assertions covered and migration 029 applied in local DB`
+      verification_command: `pnpm -C apps/web run db:migrate`
+      status: `completed`
+    - role: `QA Owner`
+      scope: `regression coverage updates across route/page/manager surfaces`
+      deliverable: `updated tests for dedicated shell, controls, and source-kind behavior with passing targeted suite`
+      verification_command: `pnpm -C apps/web exec vitest run tests/reddit-community-view-page.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts tests/reddit-threads-route.test.ts tests/reddit-communities-route.test.ts`
+      status: `completed`
+  - risk_class: `code_first`
+  - files_changed:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/reddit/communities/[communityId]/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-view-page.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-refresh-route.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-save-route.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-threads-route.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - validation_evidence:
+    - `pnpm -C apps/web run db:migrate` (pass; applied `029_add_source_kind_to_admin_reddit_threads.sql` in local environment)
+    - `pnpm -C apps/web exec vitest run tests/reddit-community-view-page.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts tests/reddit-threads-route.test.ts tests/reddit-communities-route.test.ts` (pass, `6 files / 58 tests`)
+    - `pnpm -C apps/web run lint` (pass)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+  - downstream_repos_impacted:
+    - `TRR-Backend`: `no`
+    - `screenalytics`: `no`
+    - `TRR-APP`: `yes`
+  - default_skill_chain_applied: `true`
+  - default_skill_chain_used:
+    - `orchestrate-plan-execution`
+    - `senior-fullstack`
+    - `senior-backend`
+    - `senior-qa`
+    - `code-reviewer`
+  - default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-25) — Show/season slug canonicalization loop fix + social hashtags normalization
+
+- February 25, 2026: fixed admin show/season URL canonicalization to prevent RHOSLC slug flip loops and preserve canonical social hashtags paths.
+  - primary_skill: `orchestrate-plan-execution`
+  - supporting_skills: `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+  - mcp_tools_used:
+    - primary: `functions.exec_command`
+    - fallback: `functions.apply_patch`
+  - delegation_map:
+    - role: `Design Context Owner`
+      scope: `identify slug canonicalization conflict between season route effects`
+      deliverable: `single alias-first canonicalization policy for season admin routes`
+      verification_command: `pnpm -C apps/web exec vitest run tests/season-route-canonicalization-wiring.test.ts`
+      status: `completed`
+    - role: `UI Implementer`
+      scope: `season page route normalization effect consolidation`
+      deliverable: `removed dual competing effects and replaced with one showSlugForRouting-based canonical effect`
+      verification_command: `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx'`
+      status: `completed`
+    - role: `API Integration Owner`
+      scope: `ensure route-only changes do not alter backend contracts`
+      deliverable: `no backend/schema/API contract changes; query preservation maintained client-side`
+      verification_command: `rg -n \"buildSeasonAdminUrl|cleanLegacyRoutingQuery\" apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+      status: `completed`
+    - role: `QA Owner`
+      scope: `lock canonical route expectations and regression checks`
+      deliverable: `route builder assertions for short-slug cast/social-hashtags + new season canonicalization wiring test`
+      verification_command: `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts tests/season-tab-alias-redirect.test.ts tests/season-route-canonicalization-wiring.test.ts`
+      status: `completed`
+  - risk_class: `code_first`
+  - files_changed:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-admin-routes.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-route-canonicalization-wiring.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - validation_evidence:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-admin-routes.test.ts tests/season-tab-alias-redirect.test.ts tests/season-route-canonicalization-wiring.test.ts` (pass, `3 files / 17 tests`)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'tests/show-admin-routes.test.ts' 'tests/season-route-canonicalization-wiring.test.ts'` (pass)
+  - downstream_repos_impacted:
+    - `TRR-Backend`: `no`
+    - `screenalytics`: `no`
+    - `TRR-APP`: `yes`
+  - default_skill_chain_applied: `true`
+  - default_skill_chain_used:
+    - `orchestrate-plan-execution`
+    - `senior-fullstack`
+    - `senior-frontend`
+    - `senior-qa`
+    - `code-reviewer`
+  - default_skill_chain_exception_reason: `n/a`
+
 ## Latest Update (2026-02-25) — Brands IA split + UI Design System NYT occurrence scanner
 
 - February 25, 2026: implemented admin Brands information architecture updates and added an authenticated NYT occurrence scanner tab in UI Design System.
@@ -8721,3 +8829,48 @@ Continuation (same session, 2026-02-25) — Week/Season Full Sync + Mirror orche
 - validation_evidence:
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/week-social-thumbnails.test.tsx tests/season-social-analytics-section.test.tsx tests/social-mirror-coverage-route.test.ts tests/social-mirror-requeue-route.test.ts` (pass, `4 files / 73 tests`)
   - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/components/admin/season-social-analytics-section.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/mirror-coverage/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/mirror/requeue/route.ts'` (pass)
+
+Continuation (same session, 2026-02-25) — Hashtag source narrowed to post captions only.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.apply_patch`
+  - fallback: `functions.exec_command`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `hashtag source-of-truth`
+    deliverable: `aligned hashtag analytics counting to caption text extraction only`
+    verification_command: `rg -n "const postHashtags = extractHashtags\(post\.text\)" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `season hashtag aggregation`
+    deliverable: `removed reliance on structured hashtag arrays for hashtags analytics aggregation`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `week-detail contract compatibility`
+    deliverable: `kept existing payload contract untouched; consumer logic now reads caption text only`
+    verification_command: `rg -n "deriveWeekDetailHashtagUsage|extractHashtags\(post\.text\)" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `fixture and behavior verification`
+    deliverable: `updated hashtag test fixture captions to carry expected hashtags under caption-only logic`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+- risk_class: `low` (small analytics derivation refinement)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Hashtag analytics now derives hashtags exclusively from each post caption/text (`post.text`).
+  - Structured `post.hashtags` arrays are no longer used for this specific analytics aggregate.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (pass, `1 file / 61 tests`)

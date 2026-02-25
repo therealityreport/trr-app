@@ -1364,8 +1364,7 @@ const deriveWeekDetailHashtagUsage = (detail: WeekDetailResponse): WeekDetailHas
   for (const platform of PLATFORM_ORDER) {
     const posts = detail.platforms?.[platform]?.posts ?? [];
     for (const post of posts) {
-      const postHashtags =
-        Array.isArray(post.hashtags) && post.hashtags.length > 0 ? post.hashtags : extractHashtags(post.text);
+      const postHashtags = extractHashtags(post.text);
       for (const hashtag of postHashtags) {
         const normalized = normalizeHashtag(hashtag);
         if (!normalized) continue;

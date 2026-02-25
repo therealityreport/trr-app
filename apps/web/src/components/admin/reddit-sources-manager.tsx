@@ -552,7 +552,6 @@ export default function RedditSourcesManager({
   seasonNumber,
   initialCommunityId,
   hideCommunityList = false,
-  backHref,
   episodeDiscussionsPlacement = "settings",
   enableEpisodeSync = false,
   onCommunityContextChange,

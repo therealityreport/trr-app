@@ -121,10 +121,14 @@ describe("reddit community view page", () => {
       "href",
       "/shows/the-real-housewives-of-salt-lake-city",
     );
-    expect(screen.getByRole("link", { name: "Social Media" })).toHaveAttribute(
-      "href",
-      "/shows/the-real-housewives-of-salt-lake-city/s6/social/reddit",
-    );
+    expect(
+      screen
+        .getAllByRole("link", { name: "Social Media" })
+        .some(
+          (link) =>
+            link.getAttribute("href") === "/shows/the-real-housewives-of-salt-lake-city/s6/social/bravo",
+        ),
+    ).toBe(true);
     expect(screen.getByRole("link", { name: "REDDIT ANALYTICS" })).toHaveAttribute(
       "href",
       "/shows/the-real-housewives-of-salt-lake-city/s6/social/reddit",

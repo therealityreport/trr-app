@@ -73,6 +73,13 @@ describe("show-admin-routes", () => {
         tab: "assets",
       })
     ).toBe("/shows/the-real-housewives-of-salt-lake-city/media");
+
+    expect(
+      buildShowAdminUrl({
+        showSlug: "rhoslc",
+        tab: "cast",
+      })
+    ).toBe("/shows/rhoslc/cast");
   });
 
   it("parses season path tabs and query fallback", () => {
@@ -175,6 +182,23 @@ describe("show-admin-routes", () => {
         tab: "fandom",
       })
     ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/fandom");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+        tab: "cast",
+      })
+    ).toBe("/shows/rhoslc/s6/cast");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+        tab: "social",
+        socialView: "hashtags",
+      })
+    ).toBe("/shows/rhoslc/s6/social/hashtags");
   });
 
   it("builds canonical season social week URLs", () => {
