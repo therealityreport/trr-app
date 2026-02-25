@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
 import type { PlatformTab } from "@/components/admin/season-social-analytics-section";
 
 type SocialSeason = {
@@ -64,7 +65,10 @@ export default function ShowSocialTab({
                       : "text-zinc-600 hover:bg-white/70 hover:text-zinc-800"
                   }`}
                 >
-                  {tab.label}
+                  <span className="inline-flex items-center gap-1.5">
+                    <SocialPlatformTabIcon tab={tab.key} />
+                    <span>{tab.label}</span>
+                  </span>
                 </button>
               ))}
             </nav>

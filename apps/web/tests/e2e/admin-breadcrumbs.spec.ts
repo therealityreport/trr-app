@@ -13,7 +13,7 @@ test.describe("admin breadcrumbs", () => {
 
   test("renders clickable show crumb on season page", async ({ page }) => {
     await mockAdminApi(page);
-    await page.goto(`/admin/trr-shows/${SHOW_ID}/seasons/${SEASON_NUMBER}`);
+    await page.goto(`/shows/${SHOW_ID}/s${SEASON_NUMBER}`);
     await waitForAdminReady(page);
 
     const breadcrumbNav = page.getByRole("navigation", { name: "Breadcrumb" });
@@ -21,6 +21,6 @@ test.describe("admin breadcrumbs", () => {
     await expect(breadcrumbNav.getByText(`Season ${SEASON_NUMBER}`)).toBeVisible();
 
     const showLink = breadcrumbNav.getByRole("link", { name: SHOW_NAME });
-    await expect(showLink).toHaveAttribute("href", `/admin/trr-shows/${SHOW_SLUG}`);
+    await expect(showLink).toHaveAttribute("href", `/shows/${SHOW_SLUG}`);
   });
 });

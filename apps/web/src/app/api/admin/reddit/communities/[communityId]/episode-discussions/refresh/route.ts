@@ -13,6 +13,7 @@ import {
 import { resolveEpisodeDiscussionRules } from "@/lib/server/admin/reddit-episode-rules";
 import {
   getEpisodesBySeasonId,
+  getEpisodesByShowAndSeason,
   getSeasonById,
   getSeasonsByShowId,
   getShowById,
@@ -45,6 +46,11 @@ interface SyncCandidateResult {
   status: SyncCandidateStatus;
   reason_code: SyncCandidateReasonCode;
   reason: string;
+}
+
+interface EpisodeAirDateSourceRow {
+  episode_number: unknown;
+  air_date: string | null;
 }
 
 const parseSortModes = (input: string | null): RedditListingSort[] => {
@@ -127,11 +133,55 @@ const normalizeAirDateKey = (value: string | null | undefined): string | null =>
   return formatDateKeyInTimeZone(trimmed, EPISODE_SYNC_TIME_ZONE);
 };
 
+const normalizeEpisodeNumber = (value: unknown): number | null => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return null;
+  const normalized = Math.floor(parsed);
+  if (normalized <= 0) return null;
+  return normalized;
+};
+
+const mergeEpisodeAirDateRows = (
+  primaryRows: EpisodeAirDateSourceRow[],
+  fallbackRows: EpisodeAirDateSourceRow[],
+): EpisodeAirDateSourceRow[] => {
+  const byEpisodeNumber = new Map<number, EpisodeAirDateSourceRow>();
+
+  const push = (row: EpisodeAirDateSourceRow) => {
+    const normalizedEpisodeNumber = normalizeEpisodeNumber(row.episode_number);
+    if (!normalizedEpisodeNumber) return;
+    const existing = byEpisodeNumber.get(normalizedEpisodeNumber);
+    if (!existing) {
+      byEpisodeNumber.set(normalizedEpisodeNumber, row);
+      return;
+    }
+    const existingHasAirDate = normalizeAirDateKey(existing.air_date) !== null;
+    const nextHasAirDate = normalizeAirDateKey(row.air_date) !== null;
+    if (!existingHasAirDate && nextHasAirDate) {
+      byEpisodeNumber.set(normalizedEpisodeNumber, row);
+    }
+  };
+
+  for (const row of primaryRows) push(row);
+  for (const row of fallbackRows) push(row);
+
+  return [...byEpisodeNumber.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map((entry) => entry[1]);
+};
+
 const evaluateEpisodeSyncEligibility = (input: {
   author: string | null;
   title: string;
   postedAt: string | null;
   episodeAirDateKey: string | null;
+  episodeNumber: number | null;
+  seasonNumber: number;
 }): { eligible: boolean; reason: string; reasonCode: SyncCandidateReasonCode } => {
   if ((input.author ?? "").trim().toLowerCase() !== "automoderator") {
     return {
@@ -151,7 +201,10 @@ const evaluateEpisodeSyncEligibility = (input: {
     if (!input.episodeAirDateKey) {
       return {
         eligible: false,
-        reason: "No episode air date found for parsed episode number.",
+        reason:
+          input.episodeNumber !== null
+            ? `No episode air date found for parsed episode number ${input.episodeNumber} in season ${input.seasonNumber}.`
+            : `No episode air date found for parsed episode number in season ${input.seasonNumber}.`,
         reasonCode: "missing_episode_air_date",
       };
     }
@@ -281,6 +334,40 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "No season resolved" }, { status: 404 });
     }
 
+    const seasonEpisodesBySeasonId = await getEpisodesBySeasonId(resolvedSeason.id, {
+      limit: 500,
+      offset: 0,
+    });
+    const seasonEpisodesByShowAndSeason = await getEpisodesByShowAndSeason(
+      showId,
+      resolvedSeason.season_number,
+      {
+        limit: 500,
+        offset: 0,
+      },
+    );
+    const seasonEpisodesRaw = mergeEpisodeAirDateRows(
+      seasonEpisodesBySeasonId,
+      seasonEpisodesByShowAndSeason,
+    );
+    const seasonEpisodes = seasonEpisodesRaw
+      .map((episode) => {
+        const episodeNumber = normalizeEpisodeNumber(episode.episode_number);
+        if (!episodeNumber) return null;
+        return {
+          episode_number: episodeNumber,
+          air_date: episode.air_date ?? null,
+        };
+      })
+      .filter(
+        (
+          episode,
+        ): episode is {
+          episode_number: number;
+          air_date: string | null;
+        } => episode !== null,
+      );
+
     const resolvedRules = resolveEpisodeDiscussionRules({
       subreddit: community.subreddit,
       showName: show.name,
@@ -295,6 +382,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       showName: show.name,
       showAliases: show.alternative_names,
       seasonNumber: resolvedSeason.season_number,
+      seasonEpisodes,
       episodeTitlePatterns: resolvedRules.effectiveEpisodeTitlePatterns,
       episodeRequiredFlares: resolvedRules.effectiveRequiredFlares,
       isShowFocused: community.is_show_focused,
@@ -310,13 +398,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const episodeAirDateByNumber = new Map<number, string>();
     if (syncRequested) {
-      const episodes = await getEpisodesBySeasonId(resolvedSeason.id, { limit: 500, offset: 0 });
-      for (const episode of episodes) {
-        if (!Number.isFinite(episode.episode_number)) continue;
+      for (const episode of seasonEpisodesRaw) {
+        const normalizedEpisodeNumber = normalizeEpisodeNumber(episode.episode_number);
+        if (!normalizedEpisodeNumber) continue;
         const airDateKey = normalizeAirDateKey(episode.air_date);
         if (!airDateKey) continue;
-        if (!episodeAirDateByNumber.has(episode.episode_number)) {
-          episodeAirDateByNumber.set(episode.episode_number, airDateKey);
+        if (!episodeAirDateByNumber.has(normalizedEpisodeNumber)) {
+          episodeAirDateByNumber.set(normalizedEpisodeNumber, airDateKey);
         }
       }
     }
@@ -327,12 +415,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     let syncSkippedIneligibleCount = 0;
     if (syncRequested) {
       for (const candidate of discovery.candidates) {
-        const episodeAirDateKey = episodeAirDateByNumber.get(candidate.episode_number) ?? null;
+        const candidateEpisodeNumber = normalizeEpisodeNumber(candidate.episode_number);
+        const episodeAirDateKey = candidateEpisodeNumber
+          ? (episodeAirDateByNumber.get(candidateEpisodeNumber) ?? null)
+          : null;
         const evaluation = evaluateEpisodeSyncEligibility({
           author: candidate.author,
           title: candidate.title,
           postedAt: candidate.posted_at,
           episodeAirDateKey,
+          episodeNumber: candidateEpisodeNumber,
+          seasonNumber: resolvedSeason.season_number,
         });
         if (!evaluation.eligible) {
           syncSkippedIneligibleCount += 1;
@@ -350,6 +443,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             trrShowId: community.trr_show_id,
             trrShowName: community.trr_show_name,
             trrSeasonId: resolvedSeason.id,
+            sourceKind: "episode_discussion",
             redditPostId: candidate.reddit_post_id,
             title: candidate.title,
             url: candidate.url,
@@ -390,7 +484,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       show_id: showId,
       season_id: resolvedSeason.id,
       season_number: resolvedSeason.season_number,
+      season_episode_count: seasonEpisodes.length,
       subreddit: community.subreddit,
+      period_window_start:
+        parsedPeriodStart.value ?? discovery.filters_applied.period_start ?? null,
+      period_window_end:
+        parsedPeriodEnd.value ?? discovery.filters_applied.period_end ?? null,
       successful_sorts: discovery.successful_sorts,
       failed_sorts: discovery.failed_sorts,
       rate_limited_sorts: discovery.rate_limited_sorts,
@@ -416,6 +515,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         successful_sorts: discovery.successful_sorts,
         failed_sorts: discovery.failed_sorts,
         rate_limited_sorts: discovery.rate_limited_sorts,
+        expected_episode_count: discovery.expected_episode_count,
+        expected_episode_numbers: discovery.expected_episode_numbers,
+        coverage_found_episode_count: discovery.coverage_found_episode_count,
+        coverage_expected_slots: discovery.coverage_expected_slots,
+        coverage_found_slots: discovery.coverage_found_slots,
+        coverage_missing_slots: discovery.coverage_missing_slots,
+        discovery_source_summary: discovery.discovery_source_summary,
         season_context: {
           season_id: resolvedSeason.id,
           season_number: resolvedSeason.season_number,

@@ -1,15 +1,33 @@
 "use client";
 
-import { useParams, usePathname, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
-import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
-import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import RedditSourcesManager, { type RedditCommunityContext } from "@/components/admin/reddit-sources-manager";
-import type { AdminBreadcrumbItem } from "@/lib/admin/admin-breadcrumbs";
+import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
+import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
+import { buildSeasonAdminUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const DEFAULT_BACK_HREF = "/admin/social-media";
+const SEASON_TABS: Array<{ tab: SeasonAdminTab; label: string }> = [
+  { tab: "overview", label: "Overview" },
+  { tab: "episodes", label: "Seasons & Episodes" },
+  { tab: "assets", label: "Assets" },
+  { tab: "videos", label: "Videos" },
+  { tab: "fandom", label: "Fandom" },
+  { tab: "cast", label: "Cast" },
+  { tab: "surveys", label: "Surveys" },
+  { tab: "social", label: "Social Media" },
+];
+const SOCIAL_TABS: Array<{ view: SocialAnalyticsViewSlug; label: string }> = [
+  { view: "bravo", label: "BRAVO ANALYTICS" },
+  { view: "sentiment", label: "SENTIMENT ANALYSIS" },
+  { view: "hashtags", label: "HASHTAGS ANALYSIS" },
+  { view: "advanced", label: "ADVANCED ANALYTICS" },
+  { view: "reddit", label: "REDDIT ANALYTICS" },
+];
 
 const resolveBackHref = (raw: string | null): string => {
   if (!raw) return DEFAULT_BACK_HREF;
@@ -17,58 +35,50 @@ const resolveBackHref = (raw: string | null): string => {
   return raw;
 };
 
-const isRedditFocusedHref = (href: string): boolean => {
-  const [pathPart, queryPart] = href.split("?");
-  if (pathPart.includes("/reddit")) return true;
-  const query = new URLSearchParams(queryPart ?? "");
-  return query.get("social_platform") === "reddit" || query.get("social_view") === "reddit";
-};
-
 export default function RedditCommunityViewPage() {
   const { user, checking, hasAccess } = useAdminGuard();
   const params = useParams<{ communityId: string }>();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const communityId = typeof params.communityId === "string" ? params.communityId : "";
   const backHref = resolveBackHref(searchParams.get("return_to"));
   const [communityContext, setCommunityContext] = useState<RedditCommunityContext | null>(null);
-  const currentCommunityHref = useMemo(() => {
-    const queryString = searchParams.toString();
-    return queryString ? `${pathname}?${queryString}` : pathname;
-  }, [pathname, searchParams]);
+  const showSlug = communityContext?.showSlug ?? null;
+  const seasonNumber = communityContext?.seasonNumber ?? null;
+  const showName = communityContext?.showFullName ?? communityContext?.showLabel ?? "Show";
+  const hasSeasonContext =
+    Boolean(showSlug) && typeof seasonNumber === "number" && Number.isFinite(seasonNumber);
+  const showHref = showSlug ? buildShowAdminUrl({ showSlug }) : "/shows";
+  const seasonHref =
+    hasSeasonContext && showSlug
+      ? buildSeasonAdminUrl({
+          showSlug,
+          seasonNumber,
+        })
+      : showHref;
+  const redditHref =
+    hasSeasonContext && showSlug
+      ? buildSeasonAdminUrl({
+          showSlug,
+          seasonNumber,
+          tab: "social",
+          socialView: "reddit",
+        })
+      : backHref;
+  const effectiveBackHref = showSlug ? showHref : backHref;
   const breadcrumbItems = useMemo(() => {
-    const communityLabel = communityContext?.communityLabel ?? "Community";
-    const items: AdminBreadcrumbItem[] = [{ label: "Admin", href: "/admin" }];
-    const showLabel = communityContext?.showLabel;
-    const showSlug = communityContext?.showSlug;
-    const seasonNumber = communityContext?.seasonNumber;
-    const seasonLabel = communityContext?.seasonLabel ?? (seasonNumber ? `S${seasonNumber}` : undefined);
-    const hasShowSeasonContext = Boolean(showLabel && showSlug && seasonNumber);
-    const seasonHref = hasShowSeasonContext
-      ? `/admin/trr-shows/${showSlug}/seasons/${seasonNumber}`
-      : "/admin/trr-shows";
-    const socialHref = hasShowSeasonContext ? `${seasonHref}?tab=social` : backHref;
-    const redditHref = isRedditFocusedHref(backHref) ? backHref : socialHref;
-
-    if (showLabel) {
-      items.push({
-        label: showLabel,
-        href: showSlug ? `/admin/trr-shows/${showSlug}` : "/admin/trr-shows",
-      });
-    }
-    if (seasonLabel) {
-      items.push({
-        label: seasonLabel,
-        href: seasonHref,
-      });
-    }
-    items.push({ label: "Social Analytics", href: socialHref });
-    items.push({ label: "Reddit", href: redditHref });
-    items.push({ label: communityLabel, href: currentCommunityHref });
-    return items;
-  }, [backHref, communityContext, currentCommunityHref]);
-  const pageTitle = communityContext?.communityLabel ?? "Reddit Community View";
+    return buildSeasonSocialBreadcrumb(showName, seasonNumber ?? "", {
+      showHref,
+      seasonHref,
+      socialHref: redditHref,
+      subTabLabel: "Reddit Analytics",
+      subTabHref: redditHref,
+    });
+  }, [redditHref, seasonHref, seasonNumber, showHref, showName]);
+  const pageTitle =
+    hasSeasonContext && typeof seasonNumber === "number"
+      ? `${showName} · Season ${seasonNumber}`
+      : showName;
 
   if (checking) {
     return (
@@ -106,23 +116,79 @@ export default function RedditCommunityViewPage() {
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <AdminGlobalHeader bodyClassName="px-6 py-6">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
-            <div>
-              <AdminBreadcrumbs
-                items={breadcrumbItems}
-                className="mb-1"
-              />
-              <h1 className="text-2xl font-bold text-zinc-900">{pageTitle}</h1>
-            </div>
-            <a
-              href={backHref}
-              className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-            >
-              Back
-            </a>
+        <SocialAdminPageHeader
+          breadcrumbs={breadcrumbItems}
+          title={pageTitle}
+          backHref={effectiveBackHref}
+          backLabel="Back"
+          bodyClassName="px-6 py-6"
+        />
+
+        <div className="border-b border-zinc-200 bg-white">
+          <div className="mx-auto max-w-6xl px-6">
+            <nav className="flex flex-wrap gap-2 py-4" aria-label="Season tabs">
+              {SEASON_TABS.map((tab) => {
+                const href =
+                  hasSeasonContext && showSlug
+                    ? buildSeasonAdminUrl({
+                        showSlug,
+                        seasonNumber: seasonNumber!,
+                        tab: tab.tab,
+                      })
+                    : null;
+                const isActive = tab.tab === "social";
+                const classes = `rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                  isActive
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                }`;
+                if (!href) {
+                  return (
+                    <span key={tab.tab} className={classes}>
+                      {tab.label}
+                    </span>
+                  );
+                }
+                return (
+                  <a key={tab.tab} href={href} className={classes}>
+                    {tab.label}
+                  </a>
+                );
+              })}
+            </nav>
+            <nav className="flex flex-wrap gap-2 pb-4" aria-label="Social analytics tabs">
+              {SOCIAL_TABS.map((tab) => {
+                const href =
+                  hasSeasonContext && showSlug
+                    ? buildSeasonAdminUrl({
+                        showSlug,
+                        seasonNumber: seasonNumber!,
+                        tab: "social",
+                        socialView: tab.view,
+                      })
+                    : null;
+                const isActive = tab.view === "reddit";
+                const classes = `rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                  isActive
+                    ? "border-zinc-800 bg-zinc-800 text-white"
+                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                }`;
+                if (!href) {
+                  return (
+                    <span key={tab.view} className={classes}>
+                      {tab.label}
+                    </span>
+                  );
+                }
+                return (
+                  <a key={tab.view} href={href} className={classes}>
+                    {tab.label}
+                  </a>
+                );
+              })}
+            </nav>
           </div>
-        </AdminGlobalHeader>
+        </div>
 
         <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
@@ -13,7 +14,7 @@ type Platform = "instagram" | "tiktok" | "twitter" | "youtube";
 export type PlatformTab = "overview" | Platform;
 type Scope = "bravo" | "creator" | "community";
 type SyncStrategy = "incremental" | "full_refresh";
-type WeeklyMetric = "posts" | "comments";
+type WeeklyMetric = "posts" | "comments" | "completeness";
 type BenchmarkCompareMode = "previous" | "trailing";
 export type SocialAnalyticsView = "bravo" | "sentiment" | "hashtags" | "advanced" | "reddit";
 type WeeklyPlatformRow = NonNullable<AnalyticsResponse["weekly_platform_posts"]>[number];
@@ -168,6 +169,8 @@ type AnalyticsResponse = {
     label: string;
     start: string;
     end: string;
+    week_type?: "preseason" | "episode" | "bye" | "postseason";
+    episode_number?: number | null;
     post_volume: number;
     comment_volume: number;
     engagement: number;
@@ -182,6 +185,8 @@ type AnalyticsResponse = {
     label: string;
     start: string;
     end: string;
+    week_type?: "preseason" | "episode" | "bye" | "postseason";
+    episode_number?: number | null;
     posts: {
       instagram: number;
       youtube: number;
@@ -210,6 +215,8 @@ type AnalyticsResponse = {
     label: string;
     start: string;
     end: string;
+    week_type?: "preseason" | "episode" | "bye" | "postseason";
+    episode_number?: number | null;
     engagement: {
       instagram: number;
       youtube: number;
@@ -224,6 +231,8 @@ type AnalyticsResponse = {
     label: string;
     start: string;
     end: string;
+    week_type?: "preseason" | "episode" | "bye" | "postseason";
+    episode_number?: number | null;
     days: Array<{
       day_index: number;
       date_local: string;
@@ -239,8 +248,15 @@ type AnalyticsResponse = {
         tiktok: number;
         twitter: number;
       };
+      reported_comments?: {
+        instagram: number;
+        youtube: number;
+        tiktok: number;
+        twitter: number;
+      };
       total_posts: number;
       total_comments: number;
+      total_reported_comments?: number;
     }>;
   }>;
   weekly_flags?: Array<{
@@ -362,6 +378,72 @@ type CommentsCoverageResponse = {
   >;
 };
 
+type MirrorCoverageResponse = {
+  up_to_date: boolean;
+  needs_mirror_count: number;
+  mirrored_count: number;
+  failed_count: number;
+  partial_count: number;
+  pending_count: number;
+  posts_scanned: number;
+  by_platform?: Record<
+    string,
+    {
+      up_to_date: boolean;
+      needs_mirror_count: number;
+      mirrored_count: number;
+      failed_count: number;
+      partial_count: number;
+      pending_count: number;
+      posts_scanned: number;
+    }
+  >;
+};
+
+type CommentRefreshPolicy = "balanced" | "missing_only";
+
+type WeekDetailPost = {
+  source_id?: string;
+  text?: string;
+  likes?: number;
+  hashtags?: string[];
+  mentions?: string[];
+  profile_tags?: string[];
+  collaborators?: string[];
+  comments_count?: number;
+  replies_count?: number;
+  total_comments_available?: number;
+};
+
+type WeekDetailResponse = {
+  platforms?: Partial<
+    Record<
+      Platform,
+      {
+        posts?: WeekDetailPost[];
+      }
+    >
+  >;
+};
+
+type HashtagUsageByPlatform = Record<Platform, number>;
+type HashtagTagCountsByPlatform = Record<Platform, Record<string, number>>;
+
+type WeekDetailHashtagUsage = {
+  totalTokens: number;
+  uniqueTokens: number;
+  tagCounts: Record<string, number>;
+  byPlatform: HashtagUsageByPlatform;
+  tagCountsByPlatform: HashtagTagCountsByPlatform;
+};
+
+type MissingCommentTargets = {
+  platforms: Platform[];
+  sourceIdsByPlatform: Partial<Record<Platform, string[]>>;
+  staleAnchorsCount: number;
+  overflowPlatforms: Platform[];
+};
+
 interface SeasonSocialAnalyticsSectionProps {
   showId: string;
   showSlug?: string;
@@ -393,8 +475,32 @@ const PLATFORM_TABS: { key: PlatformTab; label: string }[] = [
 const SOCIAL_PLATFORM_QUERY_KEY = "social_platform";
 const SOCIAL_DENSITY_QUERY_KEY = "social_density";
 const SOCIAL_ALERTS_QUERY_KEY = "social_alerts";
+const SOCIAL_TABLE_METRICS_QUERY_KEY = "social_metrics";
+const SOCIAL_METRIC_MODE_QUERY_KEY = "social_metric_mode";
+type SocialTableMetric = "posts" | "likes" | "comments" | "hashtags" | "mentions" | "tags";
+type SocialMetricMode = "total" | "saved";
+type WeekDetailTokenTriplet = {
+  hashtags: number;
+  mentions: number;
+  tags: number;
+};
+type WeekDetailTokenCounts = {
+  total: WeekDetailTokenTriplet;
+  byPlatform: Record<Platform, WeekDetailTokenTriplet>;
+};
+const SOCIAL_TABLE_METRIC_OPTIONS: Array<{ key: SocialTableMetric; label: string }> = [
+  { key: "posts", label: "Posts" },
+  { key: "likes", label: "Likes" },
+  { key: "comments", label: "Comments" },
+  { key: "hashtags", label: "Hashtags" },
+  { key: "mentions", label: "Mentions" },
+  { key: "tags", label: "Tags" },
+];
+const SOCIAL_TABLE_METRIC_KEYS = SOCIAL_TABLE_METRIC_OPTIONS.map((item) => item.key);
+const SOCIAL_TABLE_DETAIL_METRICS = new Set<SocialTableMetric>(["hashtags", "mentions", "tags"]);
 type SocialDensity = "compact" | "comfortable";
 const HASHTAG_REGEX = /(^|\s)#([a-z0-9_]+)/gi;
+const MENTION_REGEX = /(^|\s)@([a-z0-9_.]+)/gi;
 const HASHTAG_PLATFORMS: Platform[] = ["instagram", "tiktok", "twitter", "youtube"];
 
 const isPlatformTab = (value: string | null | undefined): value is PlatformTab => {
@@ -409,10 +515,17 @@ const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "
 const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
 const COMMENT_SYNC_MAX_PASSES = 8;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
+const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
+  process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
+  process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
+const WEEK_SYNC_ACTION_LABEL = SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Sync + Mirror" : "Sync Metrics";
 const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter"];
 const STALE_RUN_THRESHOLD_DEFAULT_MINUTES = 45;
+const MAX_COMMENT_ANCHOR_SOURCE_IDS_PER_PLATFORM = 5000;
+const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
+const formatInteger = (value: number | null | undefined): string => INTEGER_FORMATTER.format(Number(value ?? 0));
 const SOCIAL_TIME_ZONE = "America/New_York";
 const DATE_TOKEN_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -539,6 +652,18 @@ const formatDateOnly = (value: string | null | undefined): string => {
   return date.toLocaleDateString("en-US", DATE_ONLY_DISPLAY_OPTIONS);
 };
 
+const formatDateShort = (value: string | null | undefined): string => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("en-US", {
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+    timeZone: SOCIAL_TIME_ZONE,
+  });
+};
+
 const formatDayScopeLabel = (value: string): string => {
   if (!value) return "Specific Day";
   const parsed = parseDateToken(value);
@@ -614,8 +739,10 @@ const buildIsoDayRange = (dayLocal: string): { dateStart: string; dateEnd: strin
 };
 
 type CoverageSummary = {
+  postsPct: number | null;
   postsPctLabel: string | null;
   postsUpToDate: boolean;
+  commentsPct: number | null;
   commentsPctLabel: string | null;
   commentsUpToDate: boolean;
   progressPctLabel: string | null;
@@ -631,11 +758,6 @@ const toNonNegative = (value: number | null | undefined): number => {
 
 const isCoveragePctUpToDate = (value: number | null): boolean =>
   typeof value === "number" && value >= 99.95;
-
-const formatProgressMetricValue = (pctLabel: string | null, upToDate: boolean): string => {
-  if (upToDate) return "Up-to-Date";
-  return pctLabel ?? "-";
-};
 
 const buildCoverageSummary = ({
   postsSaved,
@@ -669,8 +791,10 @@ const buildCoverageSummary = ({
   const commentsUpToDate = isCoveragePctUpToDate(commentsPctRaw);
   const progressUpToDate = isCoveragePctUpToDate(progressPctRaw);
   return {
+    postsPct: postsPctRaw,
     postsPctLabel: postsPctRaw == null ? null : `${postsPctRaw.toFixed(1)}%`,
     postsUpToDate,
+    commentsPct: commentsPctRaw,
     commentsPctLabel: commentsPctRaw == null ? null : `${commentsPctRaw.toFixed(1)}%`,
     commentsUpToDate,
     progressPctLabel: progressPctRaw == null ? null : `${progressPctRaw.toFixed(1)}%`,
@@ -703,15 +827,32 @@ const getTotalCoverage = (week: WeeklyPlatformRow): CoverageSummary => {
   });
 };
 
+const getReportedCommentsForWeekPost = (platform: Platform, post: WeekDetailPost): number => {
+  if (platform === "twitter") {
+    return Number(post.replies_count ?? post.comments_count ?? 0);
+  }
+  return Number(post.comments_count ?? 0);
+};
+
+const formatMirrorCoverageLabel = (readyCount: number, scannedCount: number): string => {
+  const safeScanned = Math.max(0, Number(scannedCount) || 0);
+  const safeReady = Math.max(0, Math.min(safeScanned, Number(readyCount) || 0));
+  const pct = safeScanned > 0 ? (safeReady / safeScanned) * 100 : 100;
+  return `${safeReady.toLocaleString()}/${safeScanned.toLocaleString()} (${pct.toFixed(1)}%)`;
+};
+
 const REQUEST_TIMEOUT_MS = {
   analytics: 22_000,
   runs: 15_000,
   targets: 12_000,
   jobs: 15_000,
   commentsCoverage: 35_000,
+  mirrorCoverage: 35_000,
+  weekDetail: 35_000,
   workerHealth: 12_000,
 } as const;
 const ANALYTICS_POLL_REFRESH_MS = 30_000;
+const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 10_000;
 const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 
 export const POLL_FAILURES_BEFORE_RETRY_BANNER = 2;
@@ -910,7 +1051,21 @@ const getMonthDayLabel = (dateLocal: string): string => {
   return `${month} ${day}`;
 };
 
-const getHeatmapToneClass = (value: number, maxValue: number): string => {
+const getHeatmapToneClass = ({
+  value,
+  maxValue,
+  metric,
+}: {
+  value: number;
+  maxValue: number;
+  metric: WeeklyMetric;
+}): string => {
+  if (metric === "completeness") {
+    if (value < 0) return "bg-zinc-200 text-zinc-500";
+    if (value >= 0.95) return "bg-emerald-700 text-white";
+    if (value >= 0.7) return "bg-amber-500 text-white";
+    return "bg-red-600 text-white";
+  }
   if (value <= 0 || maxValue <= 0) {
     return "bg-zinc-200 text-zinc-500";
   }
@@ -949,9 +1104,68 @@ const getWeeklyFlagToneClass = (severity: "info" | "warn"): string => {
   return "border-zinc-300 bg-zinc-100 text-zinc-700";
 };
 
-const getHeatmapTileSizeClass = (density: SocialDensity): string => {
-  if (density === "comfortable") return "h-11 w-11 sm:h-12 sm:w-12 text-[10px]";
-  return "h-9 w-9 sm:h-10 sm:w-10 text-[9px]";
+const getWeekEpisodeLabel = (
+  weekRow: NonNullable<AnalyticsResponse["weekly_daily_activity"]>[number],
+  seasonNumber: number,
+): string | null => {
+  if (weekRow.week_type === "bye") return "BYE WEEK";
+  if (weekRow.week_type === "episode" && weekRow.episode_number === 1) return "PREMIERE WEEK";
+  if (typeof weekRow.episode_number === "number" && Number.isFinite(weekRow.episode_number)) {
+    return `S${seasonNumber} E${weekRow.episode_number}`;
+  }
+  return null;
+};
+
+const getHeatmapWeekSectionLabel = (
+  weekRow: NonNullable<AnalyticsResponse["weekly_daily_activity"]>[number],
+): string => {
+  if (weekRow.week_type === "preseason" || weekRow.week_index === 0) return "Pre-Season";
+  if (weekRow.week_type === "bye") return `Week ${weekRow.week_index}`;
+  if (typeof weekRow.label === "string" && weekRow.label.trim().length > 0) return weekRow.label.trim();
+  return `Week ${weekRow.week_index}`;
+};
+
+const getWeeklyTableEpisodePrimaryLabel = (
+  weekRow: WeeklyPlatformRow,
+  seasonNumber: number,
+): string => {
+  if (weekRow.week_type === "preseason") return "Episode 0";
+  if (weekRow.week_type === "postseason") return "Post-Season";
+  if (weekRow.week_type === "bye") return "Bye Week";
+  if (weekRow.week_type === "episode" && typeof weekRow.episode_number === "number" && Number.isFinite(weekRow.episode_number)) {
+    return `S${seasonNumber}.E${weekRow.episode_number}`;
+  }
+  return `Episode ${weekRow.week_index}`;
+};
+
+const getWeeklyTableEpisodeSecondaryLabel = (weekRow: WeeklyPlatformRow): string => {
+  if (weekRow.week_type === "preseason") return "Pre-Season";
+  if (weekRow.week_type === "bye") return weekRow.label || `Week ${weekRow.week_index}`;
+  return `Week ${weekRow.week_index}`;
+};
+
+const formatMetricCountLabel = (
+  value: number | null | undefined,
+  singularLabel: string,
+  pluralLabel?: string,
+): string => {
+  const safeValue = Number(value ?? 0);
+  const token = safeValue === 1 ? singularLabel : (pluralLabel ?? `${singularLabel}s`);
+  return `${formatInteger(safeValue)} ${token}`;
+};
+
+const getWeeklyDayCompleteness = (
+  day: NonNullable<AnalyticsResponse["weekly_daily_activity"]>[number]["days"][number],
+  platform: Platform | null,
+): number => {
+  const postsSaved = platform ? Number(day.posts?.[platform] ?? 0) : Number(day.total_posts ?? 0);
+  const commentsSaved = platform ? Number(day.comments?.[platform] ?? 0) : Number(day.total_comments ?? 0);
+  const reportedComments = platform
+    ? Number(day.reported_comments?.[platform] ?? 0)
+    : Number(day.total_reported_comments ?? 0);
+  const denominator = postsSaved + reportedComments;
+  if (denominator <= 0) return -1;
+  return Math.min(1, Math.max(0, (postsSaved + commentsSaved) / denominator));
 };
 
 const getWeeklyDayValue = (
@@ -960,11 +1174,12 @@ const getWeeklyDayValue = (
   platform: Platform | null,
 ): number => {
   if (metric === "posts") {
-    if (!platform) return Number(day.total_posts ?? 0);
-    return Number(day.posts?.[platform] ?? 0);
+    return platform ? Number(day.posts?.[platform] ?? 0) : Number(day.total_posts ?? 0);
   }
-  if (!platform) return Number(day.total_comments ?? 0);
-  return Number(day.comments?.[platform] ?? 0);
+  if (metric === "comments") {
+    return platform ? Number(day.comments?.[platform] ?? 0) : Number(day.total_comments ?? 0);
+  }
+  return getWeeklyDayCompleteness(day, platform);
 };
 
 const normalizeHashtag = (value: string | null | undefined): string | null => {
@@ -988,6 +1203,181 @@ const extractHashtags = (text: string | null | undefined): string[] => {
     match = HASHTAG_REGEX.exec(source);
   }
   return tags;
+};
+
+const normalizeMention = (value: string | null | undefined): string | null => {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+  if (!normalized) return null;
+  if (!/^[a-z0-9_.]+$/.test(normalized)) return null;
+  return `@${normalized}`;
+};
+
+const extractMentions = (text: string | null | undefined): string[] => {
+  const source = String(text ?? "");
+  const mentions: string[] = [];
+  MENTION_REGEX.lastIndex = 0;
+  let match = MENTION_REGEX.exec(source);
+  while (match) {
+    const normalized = normalizeMention(match[2]);
+    if (normalized) mentions.push(normalized);
+    match = MENTION_REGEX.exec(source);
+  }
+  return mentions;
+};
+
+const normalizeSocialTableMetrics = (
+  value: string | null | undefined,
+): SocialTableMetric[] => {
+  if (!value) return SOCIAL_TABLE_METRIC_KEYS;
+  if (value.trim().toLowerCase() === "none") return [];
+  const provided = new Set(
+    String(value)
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter((item): item is SocialTableMetric => SOCIAL_TABLE_METRIC_KEYS.includes(item as SocialTableMetric)),
+  );
+  const ordered = SOCIAL_TABLE_METRIC_KEYS.filter((key) => provided.has(key));
+  return ordered.length > 0 ? ordered : SOCIAL_TABLE_METRIC_KEYS;
+};
+
+const serializeSocialTableMetrics = (metrics: SocialTableMetric[]): string | null => {
+  const selected = new Set(metrics);
+  const ordered = SOCIAL_TABLE_METRIC_KEYS.filter((key) => selected.has(key));
+  if (ordered.length === 0) {
+    return "none";
+  }
+  if (ordered.length === SOCIAL_TABLE_METRIC_KEYS.length) {
+    return null;
+  }
+  return ordered.join(",");
+};
+
+const normalizeSocialMetricMode = (value: string | null | undefined): SocialMetricMode =>
+  String(value ?? "").trim().toLowerCase() === "saved" ? "saved" : "total";
+
+const createEmptyWeekDetailTokenTriplet = (): WeekDetailTokenTriplet => ({
+  hashtags: 0,
+  mentions: 0,
+  tags: 0,
+});
+
+const createEmptyHashtagUsageByPlatform = (): HashtagUsageByPlatform => ({
+  instagram: 0,
+  youtube: 0,
+  tiktok: 0,
+  twitter: 0,
+});
+
+const createEmptyHashtagTagCountsByPlatform = (): HashtagTagCountsByPlatform => ({
+  instagram: {},
+  youtube: {},
+  tiktok: {},
+  twitter: {},
+});
+
+const createEmptyWeekDetailTokenCounts = (): WeekDetailTokenCounts => ({
+  total: createEmptyWeekDetailTokenTriplet(),
+  byPlatform: {
+    instagram: createEmptyWeekDetailTokenTriplet(),
+    youtube: createEmptyWeekDetailTokenTriplet(),
+    tiktok: createEmptyWeekDetailTokenTriplet(),
+    twitter: createEmptyWeekDetailTokenTriplet(),
+  },
+});
+
+const deriveWeekDetailTokenCounts = (detail: WeekDetailResponse): WeekDetailTokenCounts => {
+  const counts = createEmptyWeekDetailTokenCounts();
+  const hashtags = new Set<string>();
+  const mentions = new Set<string>();
+  const tags = new Set<string>();
+  for (const platform of PLATFORM_ORDER) {
+    const platformHashtags = new Set<string>();
+    const platformMentions = new Set<string>();
+    const platformTags = new Set<string>();
+    const posts = detail.platforms?.[platform]?.posts ?? [];
+    for (const post of posts) {
+      const postHashtags = Array.isArray(post.hashtags) && post.hashtags.length > 0
+        ? post.hashtags
+        : extractHashtags(post.text);
+      for (const hashtag of postHashtags) {
+        const normalized = normalizeHashtag(hashtag);
+        if (normalized) {
+          hashtags.add(normalized);
+          platformHashtags.add(normalized);
+        }
+      }
+
+      const postMentions = Array.isArray(post.mentions) && post.mentions.length > 0
+        ? post.mentions
+        : extractMentions(post.text);
+      for (const mention of postMentions) {
+        const normalized = normalizeMention(mention);
+        if (normalized) {
+          mentions.add(normalized);
+          platformMentions.add(normalized);
+        }
+      }
+
+      for (const tagged of post.profile_tags ?? []) {
+        const normalized = normalizeMention(tagged);
+        if (normalized) {
+          tags.add(normalized);
+          platformTags.add(normalized);
+        }
+      }
+      for (const collaborator of post.collaborators ?? []) {
+        const normalized = normalizeMention(collaborator);
+        if (normalized) {
+          tags.add(normalized);
+          platformTags.add(normalized);
+        }
+      }
+    }
+    counts.byPlatform[platform] = {
+      hashtags: platformHashtags.size,
+      mentions: platformMentions.size,
+      tags: platformTags.size,
+    };
+  }
+  counts.total = {
+    hashtags: hashtags.size,
+    mentions: mentions.size,
+    tags: tags.size,
+  };
+  return counts;
+};
+
+const createEmptyWeekDetailHashtagUsage = (): WeekDetailHashtagUsage => ({
+  totalTokens: 0,
+  uniqueTokens: 0,
+  tagCounts: {},
+  byPlatform: createEmptyHashtagUsageByPlatform(),
+  tagCountsByPlatform: createEmptyHashtagTagCountsByPlatform(),
+});
+
+const deriveWeekDetailHashtagUsage = (detail: WeekDetailResponse): WeekDetailHashtagUsage => {
+  const usage = createEmptyWeekDetailHashtagUsage();
+
+  for (const platform of PLATFORM_ORDER) {
+    const posts = detail.platforms?.[platform]?.posts ?? [];
+    for (const post of posts) {
+      const postHashtags = extractHashtags(post.text);
+      for (const hashtag of postHashtags) {
+        const normalized = normalizeHashtag(hashtag);
+        if (!normalized) continue;
+        usage.totalTokens += 1;
+        usage.byPlatform[platform] += 1;
+        usage.tagCounts[normalized] = (usage.tagCounts[normalized] ?? 0) + 1;
+        usage.tagCountsByPlatform[platform][normalized] = (usage.tagCountsByPlatform[platform][normalized] ?? 0) + 1;
+      }
+    }
+  }
+
+  usage.uniqueTokens = Object.keys(usage.tagCounts).length;
+  return usage;
 };
 
 const getJobStageLabel = (job: SocialJob): string =>
@@ -1057,30 +1447,6 @@ const formatJobActivitySummary = (activity: Record<string, unknown> | null): str
   return segments.join(" · ");
 };
 
-const truncateIdentifier = (value: string, prefix = 8, suffix = 4): string => {
-  if (value.length <= prefix + suffix + 1) return value;
-  return `${value.slice(0, prefix)}…${value.slice(-suffix)}`;
-};
-
-const copyTextToClipboard = async (value: string): Promise<boolean> => {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return true;
-  }
-  if (typeof document === "undefined") return false;
-  const textArea = document.createElement("textarea");
-  textArea.value = value;
-  textArea.setAttribute("readonly", "true");
-  textArea.style.position = "absolute";
-  textArea.style.left = "-9999px";
-  document.body.appendChild(textArea);
-  textArea.select();
-  textArea.setSelectionRange(0, value.length);
-  const copied = document.execCommand("copy");
-  document.body.removeChild(textArea);
-  return copied;
-};
-
 export default function SeasonSocialAnalyticsSection({
   showId,
   showSlug,
@@ -1095,9 +1461,9 @@ export default function SeasonSocialAnalyticsSection({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [scope, setScope] = useState<Scope>("bravo");
+  const scope: Scope = "bravo";
   const [uncontrolledPlatformTab, setUncontrolledPlatformTab] = useState<PlatformTab>("overview");
-  const [socialDensity, setSocialDensity] = useState<SocialDensity>("compact");
+  const [socialDensity, setSocialDensity] = useState<SocialDensity>("comfortable");
   const [socialAlertsEnabled, setSocialAlertsEnabled] = useState(true);
   const isPlatformTabControlled = typeof controlledPlatformTab !== "undefined";
   const tabFromQuery = useMemo<PlatformTab>(() => {
@@ -1106,16 +1472,38 @@ export default function SeasonSocialAnalyticsSection({
   }, [searchParams]);
   const densityFromQuery = useMemo<SocialDensity>(() => {
     const value = searchParams.get(SOCIAL_DENSITY_QUERY_KEY);
-    return value === "comfortable" ? "comfortable" : "compact";
+    return value === "compact" ? "compact" : "comfortable";
   }, [searchParams]);
   const alertsFromQuery = useMemo<boolean>(() => {
     const value = searchParams.get(SOCIAL_ALERTS_QUERY_KEY);
     return value !== "off";
   }, [searchParams]);
+  const selectedTableMetrics = useMemo<SocialTableMetric[]>(
+    () => normalizeSocialTableMetrics(searchParams.get(SOCIAL_TABLE_METRICS_QUERY_KEY)),
+    [searchParams],
+  );
+  const socialMetricMode = useMemo<SocialMetricMode>(
+    () => normalizeSocialMetricMode(searchParams.get(SOCIAL_METRIC_MODE_QUERY_KEY)),
+    [searchParams],
+  );
+  const socialMetricModeQueryValue = socialMetricMode === "total" ? null : socialMetricMode;
+  const selectedTableMetricSet = useMemo(() => new Set(selectedTableMetrics), [selectedTableMetrics]);
+  const socialTableMetricsQueryValue = useMemo(
+    () => serializeSocialTableMetrics(selectedTableMetrics),
+    [selectedTableMetrics],
+  );
+  const needsWeekDetailTokenMetrics = useMemo(
+    () => selectedTableMetrics.some((metric) => SOCIAL_TABLE_DETAIL_METRICS.has(metric)),
+    [selectedTableMetrics],
+  );
+  const needsWeekDetailHashtagAnalytics = analyticsView === "hashtags";
   const platformTab = controlledPlatformTab ?? uncontrolledPlatformTab;
   const platformFilter = useMemo(() => platformFilterFromTab(platformTab), [platformTab]);
-  const [weekFilter, setWeekFilter] = useState<number | "all">("all");
+  const [weekFilter] = useState<number | "all">("all");
+  const [weeklyRunWeek, setWeeklyRunWeek] = useState<number | null>(null);
+  const [weeklyRunPlatform, setWeeklyRunPlatform] = useState<"all" | Platform>("all");
   const [dayFilter, setDayFilter] = useState<string>("");
+  const [dailyRunPlatform, setDailyRunPlatform] = useState<"all" | Platform>("all");
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [targets, setTargets] = useState<SocialTarget[]>([]);
   const [runs, setRuns] = useState<SocialRun[]>([]);
@@ -1141,14 +1529,24 @@ export default function SeasonSocialAnalyticsSection({
   const [workerHealthError, setWorkerHealthError] = useState<string | null>(null);
   const [staleThresholdMinutes] = useState<number>(STALE_RUN_THRESHOLD_DEFAULT_MINUTES);
   const [ingestMessage, setIngestMessage] = useState<string | null>(null);
+  const [syncCommentsCoveragePreview, setSyncCommentsCoveragePreview] = useState<CommentsCoverageResponse | null>(null);
+  const [syncMirrorCoveragePreview, setSyncMirrorCoveragePreview] = useState<MirrorCoverageResponse | null>(null);
   const [runningIngest, setRunningIngest] = useState(false);
   const [cancellingRun, setCancellingRun] = useState(false);
   const [syncStrategy, setSyncStrategy] = useState<SyncStrategy>("incremental");
   const [weeklyMetric, setWeeklyMetric] = useState<WeeklyMetric>("posts");
   const [benchmarkCompareMode, setBenchmarkCompareMode] = useState<BenchmarkCompareMode>("previous");
+  const [weekDetailTokenCountsByWeek, setWeekDetailTokenCountsByWeek] = useState<
+    Record<number, WeekDetailTokenCounts>
+  >({});
+  const [weekDetailHashtagUsageByWeek, setWeekDetailHashtagUsageByWeek] = useState<
+    Record<number, WeekDetailHashtagUsage>
+  >({});
+  const [weekDetailTokenCountsLoadingWeeks, setWeekDetailTokenCountsLoadingWeeks] = useState<Set<number>>(
+    new Set(),
+  );
   const [ingestingWeek, setIngestingWeek] = useState<number | null>(null);
   const [ingestingDay, setIngestingDay] = useState<string | null>(null);
-  const [ingestingPlatform, setIngestingPlatform] = useState<string | null>(null);
   const [activeRunRequest, setActiveRunRequest] = useState<{
     week: number | null;
     day: string | null;
@@ -1160,7 +1558,6 @@ export default function SeasonSocialAnalyticsSection({
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [elapsedTick, setElapsedTick] = useState(0);
-  const [seasonIdCopyNotice, setSeasonIdCopyNotice] = useState<string | null>(null);
   const [pollingStatus, setPollingStatus] = useState<"idle" | "retrying" | "recovered">("idle");
   const [sectionLastSuccessAt, setSectionLastSuccessAt] = useState<{
     analytics: Date | null;
@@ -1178,6 +1575,8 @@ export default function SeasonSocialAnalyticsSection({
     week: number | null;
     day: string | null;
     platform: "all" | Platform;
+    ingestMode: "posts_only" | "posts_and_comments" | "comments_only";
+    rowMissingOnly: boolean;
     dateStart?: string;
     dateEnd?: string;
     pass: number;
@@ -1187,9 +1586,9 @@ export default function SeasonSocialAnalyticsSection({
     enabled: boolean;
   } | null>(null);
   const lastAnalyticsPollAtRef = useRef(0);
-  const seasonIdCopyTimerRef = useRef<number | null>(null);
   const ingestPanelRef = useRef<HTMLElement | null>(null);
   const runSeasonIngestButtonRef = useRef<HTMLButtonElement | null>(null);
+  const weekDetailTokenRequestsRef = useRef<Set<string>>(new Set());
   const inFlightRef = useRef<{
     analyticsByKey: Map<string, Promise<AnalyticsResponse>>;
     runsByKey: Map<string, Promise<SocialRun[]>>;
@@ -1287,6 +1686,33 @@ export default function SeasonSocialAnalyticsSection({
     [pathname, router, searchParams],
   );
 
+  const toggleSocialTableMetric = useCallback(
+    (metric: SocialTableMetric) => {
+      const currentlySelected = selectedTableMetricSet.has(metric);
+      const nextMetrics = currentlySelected
+        ? selectedTableMetrics.filter((item) => item !== metric)
+        : [...selectedTableMetrics, metric];
+      const serialized = serializeSocialTableMetrics(nextMetrics);
+      setSocialPreferenceInUrl(SOCIAL_TABLE_METRICS_QUERY_KEY, serialized);
+    },
+    [selectedTableMetricSet, selectedTableMetrics, setSocialPreferenceInUrl],
+  );
+
+  const toggleAllSocialTableMetrics = useCallback(() => {
+    if (selectedTableMetrics.length === SOCIAL_TABLE_METRIC_KEYS.length) {
+      setSocialPreferenceInUrl(SOCIAL_TABLE_METRICS_QUERY_KEY, "none");
+      return;
+    }
+    setSocialPreferenceInUrl(SOCIAL_TABLE_METRICS_QUERY_KEY, null);
+  }, [selectedTableMetrics.length, setSocialPreferenceInUrl]);
+
+  const setSocialMetricMode = useCallback(
+    (nextMode: SocialMetricMode) => {
+      setSocialPreferenceInUrl(SOCIAL_METRIC_MODE_QUERY_KEY, nextMode === "total" ? null : nextMode);
+    },
+    [setSocialPreferenceInUrl],
+  );
+
   const buildWeekDetailHref = useCallback(
     (weekIndex: number, dayLocal?: string) => {
       const weekLinkQuery = new URLSearchParams({
@@ -1299,11 +1725,17 @@ export default function SeasonSocialAnalyticsSection({
       if (analyticsView !== "bravo") {
         weekLinkQuery.set("social_view", analyticsView);
       }
-      if (socialDensity !== "compact") {
+      if (socialDensity !== "comfortable") {
         weekLinkQuery.set(SOCIAL_DENSITY_QUERY_KEY, socialDensity);
       }
       if (!socialAlertsEnabled) {
         weekLinkQuery.set(SOCIAL_ALERTS_QUERY_KEY, "off");
+      }
+      if (socialTableMetricsQueryValue) {
+        weekLinkQuery.set(SOCIAL_TABLE_METRICS_QUERY_KEY, socialTableMetricsQueryValue);
+      }
+      if (socialMetricModeQueryValue) {
+        weekLinkQuery.set(SOCIAL_METRIC_MODE_QUERY_KEY, socialMetricModeQueryValue);
       }
       if (dayLocal) {
         weekLinkQuery.set("day", dayLocal);
@@ -1315,7 +1747,18 @@ export default function SeasonSocialAnalyticsSection({
         query: weekLinkQuery,
       });
     },
-    [analyticsView, platformTab, scope, seasonId, seasonNumber, showRouteSlug, socialAlertsEnabled, socialDensity],
+    [
+      analyticsView,
+      platformTab,
+      scope,
+      seasonId,
+      seasonNumber,
+      showRouteSlug,
+      socialAlertsEnabled,
+      socialDensity,
+      socialMetricModeQueryValue,
+      socialTableMetricsQueryValue,
+    ],
   );
 
   useEffect(() => {
@@ -1330,6 +1773,13 @@ export default function SeasonSocialAnalyticsSection({
   useEffect(() => {
     setSocialAlertsEnabled(alertsFromQuery);
   }, [alertsFromQuery]);
+
+  useEffect(() => {
+    setWeekDetailTokenCountsByWeek({});
+    setWeekDetailHashtagUsageByWeek({});
+    setWeekDetailTokenCountsLoadingWeeks(new Set());
+    weekDetailTokenRequestsRef.current.clear();
+  }, [seasonId, scope, platformFilter]);
 
   useEffect(() => {
     if (analyticsView === "reddit") return;
@@ -1694,6 +2144,157 @@ export default function SeasonSocialAnalyticsSection({
     [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId],
   );
 
+  const fetchMirrorCoverage = useCallback(
+    async (scopeWindow: {
+      platform: "all" | Platform;
+      dateStart?: string;
+      dateEnd?: string;
+      sourceScope: Scope;
+    }) => {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      params.set("season_id", seasonId);
+      params.set("source_scope", scopeWindow.sourceScope);
+      params.set("timezone", SOCIAL_TIME_ZONE);
+      if (scopeWindow.platform !== "all") {
+        params.set("platforms", scopeWindow.platform);
+      }
+      if (scopeWindow.dateStart) params.set("date_start", scopeWindow.dateStart);
+      if (scopeWindow.dateEnd) params.set("date_end", scopeWindow.dateEnd);
+      const response = await fetchAdminWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/mirror-coverage?${params.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.mirrorCoverage,
+        "Mirror coverage request timed out",
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to load mirror coverage"));
+      }
+      return await parseResponseJson<MirrorCoverageResponse>(response, "Failed to load mirror coverage");
+    },
+    [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId],
+  );
+
+  const requeueMirrorJobs = useCallback(
+    async (scopeWindow: {
+      platforms: Platform[];
+      sourceScope: Scope;
+      dateStart?: string;
+      dateEnd?: string;
+    }): Promise<{ queuedJobs: number; failed: number }> => {
+      if (scopeWindow.platforms.length === 0) {
+        return { queuedJobs: 0, failed: 0 };
+      }
+      const headers = await getAuthHeaders();
+      let queuedJobs = 0;
+      let failed = 0;
+      for (const platform of scopeWindow.platforms) {
+        const params = new URLSearchParams({
+          season_id: seasonId,
+          platform,
+          source_scope: scopeWindow.sourceScope,
+          failed_only: "false",
+        });
+        if (scopeWindow.dateStart) params.set("date_start", scopeWindow.dateStart);
+        if (scopeWindow.dateEnd) params.set("date_end", scopeWindow.dateEnd);
+        const response = await fetchAdminWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/mirror/requeue?${params.toString()}`,
+          {
+            method: "POST",
+            headers,
+          },
+          REQUEST_TIMEOUT_MS.mirrorCoverage,
+          "Mirror requeue request timed out",
+        );
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response, `Failed to requeue mirror jobs for ${platform}`));
+        }
+        const payload = (await response.json().catch(() => ({}))) as {
+          queued_jobs?: unknown;
+          failed?: unknown;
+        };
+        queuedJobs += Number(payload.queued_jobs ?? 0) || 0;
+        failed += Number(payload.failed ?? 0) || 0;
+      }
+      return { queuedJobs, failed };
+    },
+    [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId],
+  );
+
+  const fetchWeekDetail = useCallback(
+    async (scopeWindow: {
+      weekIndex: number;
+      platform: "all" | Platform;
+      sourceScope: Scope;
+    }) => {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      params.set("season_id", seasonId);
+      params.set("source_scope", scopeWindow.sourceScope);
+      params.set("timezone", SOCIAL_TIME_ZONE);
+      params.set("max_comments_per_post", "0");
+      if (scopeWindow.platform !== "all") {
+        params.set("platforms", scopeWindow.platform);
+      }
+      const response = await fetchAdminWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/week/${scopeWindow.weekIndex}?${params.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.weekDetail,
+        "Week detail request timed out",
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to load week detail"));
+      }
+      return await parseResponseJson<WeekDetailResponse>(response, "Failed to load week detail");
+    },
+    [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId],
+  );
+
+  const buildMissingCommentTargets = useCallback(
+    async (scopeWindow: {
+      weekIndex: number;
+      platform: "all" | Platform;
+      sourceScope: Scope;
+    }): Promise<MissingCommentTargets> => {
+      const detail = await fetchWeekDetail(scopeWindow);
+      const sourceIdsByPlatform: Partial<Record<Platform, string[]>> = {};
+      const stalePlatforms = new Set<Platform>();
+      const overflowPlatforms = new Set<Platform>();
+      let staleAnchorsCount = 0;
+
+      for (const platform of PLATFORM_ORDER) {
+        const posts = detail.platforms?.[platform]?.posts ?? [];
+        const staleSourceIds = new Set<string>();
+        for (const post of posts) {
+          const sourceId = String(post?.source_id ?? "").trim();
+          if (!sourceId) continue;
+          const reportedComments = getReportedCommentsForWeekPost(platform, post);
+          const savedComments = Number(post?.total_comments_available ?? 0);
+          if (reportedComments > savedComments) {
+            staleSourceIds.add(sourceId);
+          }
+        }
+
+        if (staleSourceIds.size === 0) continue;
+        stalePlatforms.add(platform);
+        staleAnchorsCount += staleSourceIds.size;
+        if (staleSourceIds.size > MAX_COMMENT_ANCHOR_SOURCE_IDS_PER_PLATFORM) {
+          overflowPlatforms.add(platform);
+          continue;
+        }
+        sourceIdsByPlatform[platform] = [...staleSourceIds].sort();
+      }
+
+      return {
+        platforms: [...stalePlatforms],
+        sourceIdsByPlatform,
+        staleAnchorsCount,
+        overflowPlatforms: [...overflowPlatforms],
+      };
+    },
+    [fetchWeekDetail],
+  );
+
   const refreshAll = useCallback(async () => {
     if (inFlightRef.current.refreshAll) {
       return inFlightRef.current.refreshAll;
@@ -1886,6 +2487,27 @@ export default function SeasonSocialAnalyticsSection({
     return map;
   }, [analytics]);
 
+  const weekLabelByIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const week of analytics?.weekly ?? []) {
+      if (!Number.isFinite(week.week_index)) continue;
+      map.set(week.week_index, week.label ?? formatWeekScopeLabel(week.week_index));
+    }
+    for (const week of analytics?.weekly_platform_posts ?? []) {
+      if (!Number.isFinite(week.week_index) || map.has(week.week_index)) continue;
+      map.set(week.week_index, week.label ?? formatWeekScopeLabel(week.week_index));
+    }
+    return map;
+  }, [analytics]);
+
+  const resolveWeekScopeLabel = useCallback(
+    (week: number | "all" | null): string => {
+      if (week === "all" || week === null) return "All Weeks";
+      return weekLabelByIndex.get(week) ?? formatWeekScopeLabel(week);
+    },
+    [weekLabelByIndex],
+  );
+
   const runOptionLabelById = useMemo(() => {
     const labels = new Map<string, string>();
     for (const run of runs) {
@@ -1934,7 +2556,9 @@ export default function SeasonSocialAnalyticsSection({
     const fallbackDay = activeRunRequest?.day ?? null;
     const fallbackWeek = activeRunRequest?.week ?? (weekFilter === "all" ? null : weekFilter);
     const fallbackPlatform = activeRunRequest?.platform ?? platformFilter;
-    const fallbackWeekLabel = fallbackDay ? formatDayScopeLabel(fallbackDay) : formatWeekScopeLabel(fallbackWeek);
+    const fallbackWeekLabel = fallbackDay
+      ? formatDayScopeLabel(fallbackDay)
+      : resolveWeekScopeLabel(fallbackWeek);
     const fallbackPlatformLabel = formatPlatformScopeLabel(fallbackPlatform);
 
     if (!selectedRunId || runScopedJobs.length === 0) {
@@ -2012,7 +2636,16 @@ export default function SeasonSocialAnalyticsSection({
       weekLabel,
       platformLabel,
     };
-  }, [activeRunRequest, platformFilter, runScopedJobs, selectedRun, selectedRunId, weekFilter, weeklyWindowLookup]);
+  }, [
+    activeRunRequest,
+    platformFilter,
+    resolveWeekScopeLabel,
+    runScopedJobs,
+    selectedRun,
+    selectedRunId,
+    weekFilter,
+    weeklyWindowLookup,
+  ]);
 
   const liveRunLogs = useMemo(() => {
     if (!selectedRunId) return [];
@@ -2063,7 +2696,6 @@ export default function SeasonSocialAnalyticsSection({
       setRunningIngest(false);
       setIngestingWeek(null);
       setIngestingDay(null);
-      setIngestingPlatform(null);
       setActiveRunRequest(null);
       setActiveRunId(null);
       setIngestStartedAt(null);
@@ -2104,23 +2736,76 @@ export default function SeasonSocialAnalyticsSection({
           dateEnd: session.dateEnd,
           sourceScope: scope,
         });
+        const mirrorCoverage = SOCIAL_FULL_SYNC_MIRROR_ENABLED
+          ? await fetchMirrorCoverage({
+              platform: session.platform,
+              dateStart: session.dateStart,
+              dateEnd: session.dateEnd,
+              sourceScope: scope,
+            })
+          : {
+              up_to_date: true,
+              needs_mirror_count: 0,
+              mirrored_count: 0,
+              failed_count: 0,
+              partial_count: 0,
+              pending_count: 0,
+              posts_scanned: 0,
+            };
         if (cancelled) return;
+        setSyncCommentsCoveragePreview(coverage);
+        setSyncMirrorCoveragePreview(SOCIAL_FULL_SYNC_MIRROR_ENABLED ? mirrorCoverage : null);
         const coverageSaved = Number(coverage.total_saved_comments ?? 0);
         const coverageReported = Number(coverage.total_reported_comments ?? 0);
         const coveragePct = coverageReported > 0 ? Math.max(0, Math.min(100, (coverageSaved / coverageReported) * 100)) : 100;
         const coverageLabel = `${coverageSaved.toLocaleString()}/${coverageReported.toLocaleString()} (${coveragePct.toFixed(1)}%)`;
-        if (coverage.up_to_date) {
-          finalizeRun(`${terminalMessage} · Coverage ${coverageLabel} · Up-to-Date.`);
+        const mirrorTotal = Number(mirrorCoverage.posts_scanned ?? 0);
+        const mirrorNeeds = Number(mirrorCoverage.needs_mirror_count ?? 0);
+        const mirrorReady = Math.max(0, mirrorTotal - mirrorNeeds);
+        const mirrorLabel = formatMirrorCoverageLabel(mirrorReady, mirrorTotal);
+        const strictRunSuccess = activeRun.status === "completed" && failedJobs === 0;
+        const mirrorIsReady = !SOCIAL_FULL_SYNC_MIRROR_ENABLED || mirrorCoverage.up_to_date;
+        if (coverage.up_to_date && mirrorIsReady && strictRunSuccess) {
+          const mirrorToken = SOCIAL_FULL_SYNC_MIRROR_ENABLED ? ` · Mirror ${mirrorLabel}` : "";
+          finalizeRun(`${terminalMessage} · Coverage ${coverageLabel}${mirrorToken} · Up-to-Date.`);
           return;
         }
 
         const elapsedMs = Date.now() - session.startedAtMs;
         const nextPass = session.pass + 1;
         if (nextPass > session.maxPasses || elapsedMs >= session.maxDurationMs) {
-          finalizeRun(
-            `${terminalMessage} · Coverage ${coverageLabel} · Stalled (guardrail reached after ${session.pass}/${session.maxPasses} passes).`,
-          );
+          if (SOCIAL_FULL_SYNC_MIRROR_ENABLED) {
+            finalizeRun(
+              `${terminalMessage} · Coverage ${coverageLabel} · Mirror ${mirrorLabel} · Incomplete (guardrail reached after ${session.pass}/${session.maxPasses} passes; pending=${mirrorCoverage.pending_count ?? 0}, failed=${mirrorCoverage.failed_count ?? 0}).`,
+            );
+          } else {
+            finalizeRun(
+              `${terminalMessage} · Coverage ${coverageLabel} · Stalled (guardrail reached after ${session.pass}/${session.maxPasses} passes).`,
+            );
+          }
           return;
+        }
+
+        const staleCommentPlatforms = Object.entries(coverage.by_platform ?? {})
+          .filter(([, value]) => !value.up_to_date)
+          .map(([platform]) => platform)
+          .filter((platform): platform is Platform => PLATFORM_ORDER.includes(platform as Platform));
+        const staleMirrorPlatforms = Object.entries(mirrorCoverage.by_platform ?? {})
+          .filter(([, value]) => !value.up_to_date || Number(value.needs_mirror_count ?? 0) > 0)
+          .map(([platform]) => platform)
+          .filter((platform): platform is Platform => PLATFORM_ORDER.includes(platform as Platform));
+        const mergedStalePlatforms = Array.from(new Set([...staleCommentPlatforms, ...staleMirrorPlatforms]));
+        if (SOCIAL_FULL_SYNC_MIRROR_ENABLED && staleMirrorPlatforms.length > 0) {
+          const requeueResult = await requeueMirrorJobs({
+            platforms: staleMirrorPlatforms,
+            sourceScope: scope,
+            dateStart: session.dateStart,
+            dateEnd: session.dateEnd,
+          });
+          if (cancelled) return;
+          setIngestMessage(
+            `${terminalMessage} · Coverage ${coverageLabel} · Mirror ${mirrorLabel} · Requeued ${requeueResult.queuedJobs} mirror job(s) for ${staleMirrorPlatforms.length} platform(s).`,
+          );
         }
 
         const headers = await getAuthHeaders();
@@ -2132,8 +2817,10 @@ export default function SeasonSocialAnalyticsSection({
           max_comments_per_post: number;
           max_replies_per_post: number;
           fetch_replies: boolean;
-          ingest_mode: "comments_only";
+          ingest_mode: "posts_only" | "posts_and_comments" | "comments_only";
           sync_strategy: "incremental";
+          comment_refresh_policy?: CommentRefreshPolicy;
+          comment_anchor_source_ids?: Partial<Record<Platform, string[]>>;
           allow_inline_dev_fallback: boolean;
           date_start?: string;
           date_end?: string;
@@ -2143,18 +2830,42 @@ export default function SeasonSocialAnalyticsSection({
           max_comments_per_post: 100000,
           max_replies_per_post: 100000,
           fetch_replies: true,
-          ingest_mode: "comments_only",
+          ingest_mode: session.ingestMode,
           sync_strategy: "incremental",
           allow_inline_dev_fallback: true,
         };
-        if (session.platform !== "all") {
-          payload.platforms = [session.platform];
+        const nextPlatforms = mergedStalePlatforms.length > 0
+          ? mergedStalePlatforms
+          : session.platform !== "all"
+            ? [session.platform]
+            : null;
+        if (nextPlatforms && nextPlatforms.length > 0) {
+          payload.platforms = nextPlatforms;
+        }
+        if (session.rowMissingOnly && session.ingestMode === "comments_only" && session.week !== null && !session.day) {
+          const missingTargets = await buildMissingCommentTargets({
+            weekIndex: session.week,
+            platform: session.platform,
+            sourceScope: scope,
+          });
+          if (cancelled) return;
+          if (missingTargets.platforms.length === 0 || missingTargets.staleAnchorsCount <= 0) {
+            finalizeRun(`${terminalMessage} · Coverage ${coverageLabel} · Up-to-Date.`);
+            return;
+          }
+          payload.platforms = missingTargets.platforms;
+          payload.comment_refresh_policy = "missing_only";
+          if (Object.keys(missingTargets.sourceIdsByPlatform).length > 0) {
+            payload.comment_anchor_source_ids = missingTargets.sourceIdsByPlatform;
+          }
         }
         if (session.dateStart) payload.date_start = session.dateStart;
         if (session.dateEnd) payload.date_end = session.dateEnd;
 
         setIngestMessage(
-          `${terminalMessage} · Coverage ${coverageLabel} · Auto-continuing pass ${nextPass}/${session.maxPasses}...`,
+          SOCIAL_FULL_SYNC_MIRROR_ENABLED
+            ? `${terminalMessage} · Coverage ${coverageLabel} · Mirror ${mirrorLabel} · Auto-continuing pass ${nextPass}/${session.maxPasses}...`
+            : `${terminalMessage} · Coverage ${coverageLabel} · Auto-continuing pass ${nextPass}/${session.maxPasses}...`,
         );
         const response = await fetchAdminWithAuth(
           `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest?season_id=${encodeURIComponent(seasonId)}`,
@@ -2186,7 +2897,11 @@ export default function SeasonSocialAnalyticsSection({
         setSelectedRunId(runId);
         setJobs([]);
         const jobCount = Number(result.queued_or_started_jobs ?? 0);
-        setIngestMessage(`Pass ${nextPass}/${session.maxPasses} queued · run ${runId.slice(0, 8)} · ${jobCount} jobs · Coverage ${coverageLabel}.`);
+        setIngestMessage(
+          SOCIAL_FULL_SYNC_MIRROR_ENABLED
+            ? `Pass ${nextPass}/${session.maxPasses} queued · run ${runId.slice(0, 8)} · ${jobCount} jobs · Coverage ${coverageLabel} · Mirror ${mirrorLabel}.`
+            : `Pass ${nextPass}/${session.maxPasses} queued · run ${runId.slice(0, 8)} · ${jobCount} jobs · Coverage ${coverageLabel}.`,
+        );
         await fetchJobs(runId);
         await fetchRuns();
         await fetchRunSummaries();
@@ -2204,10 +2919,13 @@ export default function SeasonSocialAnalyticsSection({
     activeRun,
     activeRunId,
     fetchAnalytics,
+    buildMissingCommentTargets,
     fetchCommentsCoverage,
+    fetchMirrorCoverage,
     fetchJobs,
     fetchRunSummaries,
     fetchRuns,
+    requeueMirrorJobs,
     getAuthHeaders,
     ingestStartedAt,
     runningIngest,
@@ -2287,9 +3005,10 @@ export default function SeasonSocialAnalyticsSection({
         }));
         setWorkerHealthError(workerHealthError);
 
-        if (runAndJobsSucceeded && !runningIngest) {
+        if (runAndJobsSucceeded) {
           const now = Date.now();
-          if (now - lastAnalyticsPollAtRef.current >= ANALYTICS_POLL_REFRESH_MS) {
+          const refreshInterval = runningIngest ? ANALYTICS_POLL_REFRESH_ACTIVE_MS : ANALYTICS_POLL_REFRESH_MS;
+          if (now - lastAnalyticsPollAtRef.current >= refreshInterval) {
             lastAnalyticsPollAtRef.current = now;
             void fetchAnalytics()
               .then(() => {
@@ -2375,11 +3094,12 @@ export default function SeasonSocialAnalyticsSection({
       setRunningIngest(false);
       setIngestingWeek(null);
       setIngestingDay(null);
-      setIngestingPlatform(null);
       setActiveRunRequest(null);
       setSelectedRunId(activeRunId);
       setActiveRunId(null);
       setIngestStartedAt(null);
+      setSyncCommentsCoveragePreview(null);
+      setSyncMirrorCoveragePreview(null);
       autoSyncSessionRef.current = null;
       await fetchJobs(activeRunId);
       await fetchAnalytics();
@@ -2397,10 +3117,13 @@ export default function SeasonSocialAnalyticsSection({
     day?: string;
     platform?: "all" | Platform;
     ingestMode?: "posts_only" | "posts_and_comments" | "comments_only";
+    rowMissingOnly?: boolean;
   }) => {
     setRunningIngest(true);
     setError(null);
     setIngestMessage(null);
+    setSyncCommentsCoveragePreview(null);
+    setSyncMirrorCoveragePreview(null);
     setJobs([]);
     setSelectedRunId(null);
     setActiveRunId(null);
@@ -2410,9 +3133,13 @@ export default function SeasonSocialAnalyticsSection({
     const effectiveDay = override?.day?.trim() ? override.day.trim() : null;
     const effectiveWeek = effectiveDay ? null : (override?.week ?? (weekFilter === "all" ? null : weekFilter));
     const effectiveIngestMode = override?.ingestMode ?? "posts_and_comments";
+    const runRowMissingOnly =
+      Boolean(override?.rowMissingOnly) &&
+      effectiveIngestMode === "comments_only" &&
+      effectiveWeek !== null &&
+      !effectiveDay;
     setIngestingWeek(effectiveWeek);
     setIngestingDay(effectiveDay);
-    setIngestingPlatform(effectivePlatform);
     setActiveRunRequest({ week: effectiveWeek, day: effectiveDay, platform: effectivePlatform });
 
     try {
@@ -2426,6 +3153,8 @@ export default function SeasonSocialAnalyticsSection({
         fetch_replies: boolean;
         ingest_mode: "posts_only" | "posts_and_comments" | "comments_only";
         sync_strategy: SyncStrategy;
+        comment_refresh_policy?: CommentRefreshPolicy;
+        comment_anchor_source_ids?: Partial<Record<Platform, string[]>>;
         allow_inline_dev_fallback: boolean;
         date_start?: string;
         date_end?: string;
@@ -2439,6 +3168,15 @@ export default function SeasonSocialAnalyticsSection({
         sync_strategy: syncStrategy,
         allow_inline_dev_fallback: true,
       }
+      const label = effectiveDay
+        ? formatDayScopeLabel(effectiveDay)
+        : effectiveWeek !== null
+          ? resolveWeekScopeLabel(effectiveWeek)
+          : "Full Season";
+      const platformLabel = effectivePlatform === "all" ? "all platforms" : (PLATFORM_LABELS[effectivePlatform] ?? effectivePlatform);
+      const modeLabel = syncStrategy === "full_refresh" ? "Full Refresh" : "Incremental";
+      let targetedPlatformLabel = platformLabel;
+      let rowMissingTargets: MissingCommentTargets | null = null;
 
       if (effectivePlatform !== "all") {
         payload.platforms = [effectivePlatform];
@@ -2462,13 +3200,33 @@ export default function SeasonSocialAnalyticsSection({
         }
       }
 
-      const label = effectiveDay
-        ? formatDayScopeLabel(effectiveDay)
-        : effectiveWeek !== null
-          ? (effectiveWeek === 0 ? "Pre-Season" : `Week ${effectiveWeek}`)
-          : "Full Season";
-      const platformLabel = effectivePlatform === "all" ? "all platforms" : (PLATFORM_LABELS[effectivePlatform] ?? effectivePlatform);
-      const modeLabel = syncStrategy === "full_refresh" ? "Full Refresh" : "Incremental";
+      if (runRowMissingOnly) {
+        rowMissingTargets = await buildMissingCommentTargets({
+          weekIndex: effectiveWeek,
+          platform: effectivePlatform,
+          sourceScope: scope,
+        });
+        if (rowMissingTargets.platforms.length === 0 || rowMissingTargets.staleAnchorsCount <= 0) {
+          setIngestMessage(`${label} · ${platformLabel} · Comments already Up-to-Date.`);
+          setRunningIngest(false);
+          setIngestingWeek(null);
+          setIngestingDay(null);
+          setActiveRunRequest(null);
+          setActiveRunId(null);
+          setIngestStartedAt(null);
+          autoSyncSessionRef.current = null;
+          return;
+        }
+        payload.platforms = rowMissingTargets.platforms;
+        payload.comment_refresh_policy = "missing_only";
+        if (Object.keys(rowMissingTargets.sourceIdsByPlatform).length > 0) {
+          payload.comment_anchor_source_ids = rowMissingTargets.sourceIdsByPlatform;
+        }
+        targetedPlatformLabel =
+          rowMissingTargets.platforms.length === 1
+            ? (PLATFORM_LABELS[rowMissingTargets.platforms[0]] ?? rowMissingTargets.platforms[0])
+            : `${rowMissingTargets.platforms.length} targeted platforms`;
+      }
       setIngestMessage(`Starting ${label} · ${platformLabel} · ${modeLabel}...`);
 
       const response = await fetchAdminWithAuth(
@@ -2506,6 +3264,8 @@ export default function SeasonSocialAnalyticsSection({
         week: effectiveWeek,
         day: effectiveDay,
         platform: effectivePlatform,
+        ingestMode: effectiveIngestMode,
+        rowMissingOnly: runRowMissingOnly,
         dateStart: payload.date_start,
         dateEnd: payload.date_end,
         pass: 1,
@@ -2524,10 +3284,10 @@ export default function SeasonSocialAnalyticsSection({
       const jobCount = result.queued_or_started_jobs ?? 0;
       if (autoContinueEnabled) {
         setIngestMessage(
-          `Pass 1/${COMMENT_SYNC_MAX_PASSES} · ${label} · ${platformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`,
+          `Pass 1/${COMMENT_SYNC_MAX_PASSES} · ${label} · ${targetedPlatformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`,
         );
       } else {
-        setIngestMessage(`${label} · ${platformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
+        setIngestMessage(`${label} · ${targetedPlatformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
       }
 
       // Immediately fetch jobs to pick up the newly created running jobs
@@ -2544,11 +3304,12 @@ export default function SeasonSocialAnalyticsSection({
       setCancellingRun(false);
       setIngestingWeek(null);
       setIngestingDay(null);
-      setIngestingPlatform(null);
       setActiveRunRequest(null);
       setSelectedRunId(null);
       setActiveRunId(null);
       setIngestStartedAt(null);
+      setSyncCommentsCoveragePreview(null);
+      setSyncMirrorCoveragePreview(null);
       autoSyncSessionRef.current = null;
     }
   }, [
@@ -2557,7 +3318,9 @@ export default function SeasonSocialAnalyticsSection({
     fetchRunSummaries,
     fetchRuns,
     getAuthHeaders,
+    buildMissingCommentTargets,
     platformFilter,
+    resolveWeekScopeLabel,
     scope,
     seasonId,
     seasonNumber,
@@ -2605,6 +3368,125 @@ export default function SeasonSocialAnalyticsSection({
     () => [...(analytics?.weekly_platform_posts ?? [])].sort((a, b) => a.week_index - b.week_index),
     [analytics],
   );
+  const weeklyPlatformEngagementByWeek = useMemo(() => {
+    const map = new Map<number, NonNullable<AnalyticsResponse["weekly_platform_engagement"]>[number]>();
+    for (const row of analytics?.weekly_platform_engagement ?? []) {
+      map.set(row.week_index, row);
+    }
+    return map;
+  }, [analytics]);
+
+  useEffect(() => {
+    const activeWeeks = new Set(weeklyPlatformRows.map((row) => row.week_index));
+    setWeekDetailTokenCountsByWeek((current) => {
+      const nextEntries = Object.entries(current).filter(([week]) => activeWeeks.has(Number(week)));
+      if (nextEntries.length === Object.keys(current).length) return current;
+      return Object.fromEntries(nextEntries) as Record<number, WeekDetailTokenCounts>;
+    });
+    setWeekDetailHashtagUsageByWeek((current) => {
+      const nextEntries = Object.entries(current).filter(([week]) => activeWeeks.has(Number(week)));
+      if (nextEntries.length === Object.keys(current).length) return current;
+      return Object.fromEntries(nextEntries) as Record<number, WeekDetailHashtagUsage>;
+    });
+    setWeekDetailTokenCountsLoadingWeeks((current) => {
+      const next = new Set([...current].filter((week) => activeWeeks.has(week)));
+      if (next.size === current.size) return current;
+      return next;
+    });
+  }, [weeklyPlatformRows]);
+
+  useEffect(() => {
+    const requiresTokenMetrics = needsWeekDetailTokenMetrics && (analyticsView === "bravo" || analyticsView === "advanced");
+    if (!requiresTokenMetrics && !needsWeekDetailHashtagAnalytics) return;
+    if (weeklyPlatformRows.length === 0) return;
+
+    const missingWeeks = weeklyPlatformRows
+      .map((row) => row.week_index)
+      .filter(
+        (weekIndex) =>
+          !(weekIndex in weekDetailTokenCountsByWeek) && !weekDetailTokenCountsLoadingWeeks.has(weekIndex),
+      );
+
+    for (const weekIndex of missingWeeks) {
+      const requestKey = `${seasonId}:${scope}:${platformFilter}:${weekIndex}`;
+      if (weekDetailTokenRequestsRef.current.has(requestKey)) {
+        continue;
+      }
+      weekDetailTokenRequestsRef.current.add(requestKey);
+      setWeekDetailTokenCountsLoadingWeeks((current) => {
+        const next = new Set(current);
+        next.add(weekIndex);
+        return next;
+      });
+
+      void (async () => {
+        try {
+          const detail = await fetchWeekDetail({
+            weekIndex,
+            platform: platformFilter,
+            sourceScope: scope,
+          });
+          if (requiresTokenMetrics) {
+            const counts = deriveWeekDetailTokenCounts(detail);
+            setWeekDetailTokenCountsByWeek((current) => ({
+              ...current,
+              [weekIndex]: counts,
+            }));
+          }
+          if (needsWeekDetailHashtagAnalytics) {
+            const hashtagUsage = deriveWeekDetailHashtagUsage(detail);
+            setWeekDetailHashtagUsageByWeek((current) => ({
+              ...current,
+              [weekIndex]: hashtagUsage,
+            }));
+          }
+        } catch {
+          if (requiresTokenMetrics) {
+            setWeekDetailTokenCountsByWeek((current) => ({
+              ...current,
+              [weekIndex]: createEmptyWeekDetailTokenCounts(),
+            }));
+          }
+          if (needsWeekDetailHashtagAnalytics) {
+            setWeekDetailHashtagUsageByWeek((current) => ({
+              ...current,
+              [weekIndex]: createEmptyWeekDetailHashtagUsage(),
+            }));
+          }
+        } finally {
+          weekDetailTokenRequestsRef.current.delete(requestKey);
+          setWeekDetailTokenCountsLoadingWeeks((current) => {
+            const next = new Set(current);
+            next.delete(weekIndex);
+            return next;
+          });
+        }
+      })();
+    }
+  }, [
+    analyticsView,
+    fetchWeekDetail,
+    needsWeekDetailHashtagAnalytics,
+    needsWeekDetailTokenMetrics,
+    platformFilter,
+    scope,
+    seasonId,
+    setWeekDetailHashtagUsageByWeek,
+    weekDetailTokenCountsByWeek,
+    weekDetailTokenCountsLoadingWeeks,
+    weeklyPlatformRows,
+  ]);
+
+  useEffect(() => {
+    const availableWeeks = (analytics?.weekly ?? []).map((row) => row.week_index);
+    if (availableWeeks.length === 0) {
+      if (weeklyRunWeek !== null) setWeeklyRunWeek(null);
+      return;
+    }
+    if (weeklyRunWeek == null || !availableWeeks.includes(weeklyRunWeek)) {
+      setWeeklyRunWeek(availableWeeks[0]);
+    }
+  }, [analytics, weeklyRunWeek]);
   const { sectionErrorItems, staleFallbackItems } = useMemo(() => {
     const labels: Record<keyof typeof sectionErrors, string> = {
       analytics: "Analytics",
@@ -2645,20 +3527,27 @@ export default function SeasonSocialAnalyticsSection({
     );
     return Math.max(0, ...values);
   }, [heatmapPlatform, weeklyDailyActivityRows, weeklyMetric]);
-  const weeklyHeatmapTotals = useMemo(() => {
+  const weeklyHeatmapPostTotals = useMemo(() => {
     const totals = new Map<number, number>();
     for (const weekRow of weeklyDailyActivityRows) {
-      const total = weekRow.days.reduce(
-        (sum, day) => sum + getWeeklyDayValue(day, weeklyMetric, heatmapPlatform),
-        0,
-      );
+      const total = weekRow.days.reduce((sum, day) => sum + getWeeklyDayValue(day, "posts", heatmapPlatform), 0);
       totals.set(weekRow.week_index, total);
     }
     return totals;
-  }, [heatmapPlatform, weeklyDailyActivityRows, weeklyMetric]);
+  }, [heatmapPlatform, weeklyDailyActivityRows]);
+  const weeklyHeatmapCommentTotals = useMemo(() => {
+    const totals = new Map<number, number>();
+    for (const weekRow of weeklyDailyActivityRows) {
+      const total = weekRow.days.reduce((sum, day) => sum + getWeeklyDayValue(day, "comments", heatmapPlatform), 0);
+      totals.set(weekRow.week_index, total);
+    }
+    return totals;
+  }, [heatmapPlatform, weeklyDailyActivityRows]);
   const weeklyFlagsByWeek = useMemo(() => {
     const grouped = new Map<number, Array<NonNullable<AnalyticsResponse["weekly_flags"]>[number]>>();
+    const hiddenCodes = new Set(["drop", "comment_gap"]);
     for (const flag of analytics?.weekly_flags ?? []) {
+      if (hiddenCodes.has(flag.code)) continue;
       const current = grouped.get(flag.week_index) ?? [];
       current.push(flag);
       grouped.set(flag.week_index, current);
@@ -2666,7 +3555,6 @@ export default function SeasonSocialAnalyticsSection({
     return grouped;
   }, [analytics]);
   const dataQuality = analytics?.summary.data_quality;
-  const heatmapTileSizeClass = useMemo(() => getHeatmapTileSizeClass(socialDensity), [socialDensity]);
   const runHealth = useMemo(() => {
     if (runSummaries.length === 0) {
       return {
@@ -2721,7 +3609,7 @@ export default function SeasonSocialAnalyticsSection({
     return `Worker health check failed: ${workerHealthError}`;
   }, [workerHealthError]);
   const ingestActionsBlockedReason = workerHealthWarning
-    ? `${workerHealthWarning} Run Week and Sync Comments are disabled until workers recover.`
+    ? `${workerHealthWarning} Run Week and ${WEEK_SYNC_ACTION_LABEL} are disabled until workers recover.`
     : null;
   const staleRuns = useMemo<StaleRunState[]>(() => {
     const thresholdMs = staleThresholdMinutes * 60_000;
@@ -2876,10 +3764,6 @@ export default function SeasonSocialAnalyticsSection({
       .sort((a, b) => b.timestampMs - a.timestampMs)
       .slice(0, 5);
   }, [runScopedJobs]);
-  const commentGapFlagCount = useMemo(
-    () => (analytics?.weekly_flags ?? []).filter((flag) => flag.code === "comment_gap").length,
-    [analytics],
-  );
   const benchmarkSummary = useMemo(() => {
     const benchmark = analytics?.benchmark;
     if (!benchmark) {
@@ -2910,47 +3794,101 @@ export default function SeasonSocialAnalyticsSection({
     if (platformTab === "overview") return HASHTAG_PLATFORMS;
     return [platformTab];
   }, [platformTab]);
-  const configuredHashtagSections = useMemo(() => {
-    return hashtagPlatformsInScope
-      .map((platform) => {
-        const tags = new Set<string>();
-        for (const target of targets) {
-          if (target.platform !== platform) continue;
-          for (const rawTag of target.hashtags ?? []) {
-            const normalized = normalizeHashtag(rawTag);
-            if (normalized) tags.add(normalized);
-          }
-        }
+  const hashtagPlatformScope = useMemo(() => new Set<Platform>(hashtagPlatformsInScope), [hashtagPlatformsInScope]);
+  const hashtagWeeklyUsage = useMemo(() => {
+    return weeklyPlatformRows.map((week) => {
+      const usage = weekDetailHashtagUsageByWeek[week.week_index];
+      if (!usage) {
         return {
-          platform,
-          tags: Array.from(tags).sort((a, b) => a.localeCompare(b)),
+          weekIndex: week.week_index,
+          label: week.label ?? formatWeekScopeLabel(week.week_index),
+          totalTokens: 0,
+          uniqueTokens: 0,
         };
-      })
-      .filter((section) => section.tags.length > 0);
-  }, [hashtagPlatformsInScope, targets]);
-  const observedHashtagCounts = useMemo(() => {
+      }
+      const scopedTags = new Set<string>();
+      let totalTokens = 0;
+      for (const platform of HASHTAG_PLATFORMS) {
+        if (!hashtagPlatformScope.has(platform)) continue;
+        totalTokens += Number(usage.byPlatform[platform] ?? 0);
+        for (const tag of Object.keys(usage.tagCountsByPlatform[platform] ?? {})) {
+          scopedTags.add(tag);
+        }
+      }
+      return {
+        weekIndex: week.week_index,
+        label: week.label ?? formatWeekScopeLabel(week.week_index),
+        totalTokens,
+        uniqueTokens: scopedTags.size,
+      };
+    });
+  }, [hashtagPlatformScope, weekDetailHashtagUsageByWeek, weeklyPlatformRows]);
+  const hashtagSeasonCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    const increment = (tag: string) => counts.set(tag, (counts.get(tag) ?? 0) + 1);
-    const includePlatform = new Set<string>(hashtagPlatformsInScope);
-    for (const item of analytics?.leaderboards.bravo_content ?? []) {
-      if (!includePlatform.has(item.platform)) continue;
-      for (const tag of extractHashtags(item.text)) increment(tag);
-    }
-    for (const item of analytics?.leaderboards.viewer_discussion ?? []) {
-      if (!includePlatform.has(item.platform)) continue;
-      for (const tag of extractHashtags(item.text)) increment(tag);
+    for (const week of weeklyPlatformRows) {
+      const usage = weekDetailHashtagUsageByWeek[week.week_index];
+      if (!usage) continue;
+      for (const platform of HASHTAG_PLATFORMS) {
+        if (!hashtagPlatformScope.has(platform)) continue;
+        for (const [tag, count] of Object.entries(usage.tagCountsByPlatform[platform] ?? {})) {
+          counts.set(tag, (counts.get(tag) ?? 0) + Number(count));
+        }
+      }
     }
     return Array.from(counts.entries())
       .map(([tag, count]) => ({ tag, count }))
       .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-  }, [analytics, hashtagPlatformsInScope]);
+  }, [hashtagPlatformScope, weekDetailHashtagUsageByWeek, weeklyPlatformRows]);
+  const hashtagPlatformUsage = useMemo(() => {
+    const totals = createEmptyHashtagUsageByPlatform();
+    for (const week of weeklyPlatformRows) {
+      const usage = weekDetailHashtagUsageByWeek[week.week_index];
+      if (!usage) continue;
+      for (const platform of HASHTAG_PLATFORMS) {
+        if (!hashtagPlatformScope.has(platform)) continue;
+        totals[platform] += Number(usage.byPlatform[platform] ?? 0);
+      }
+    }
+    return HASHTAG_PLATFORMS
+      .filter((platform) => hashtagPlatformScope.has(platform))
+      .map((platform) => ({
+        platform,
+        label: PLATFORM_LABELS[platform] ?? platform,
+        count: totals[platform],
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  }, [hashtagPlatformScope, weekDetailHashtagUsageByWeek, weeklyPlatformRows]);
+  const hashtagTotalTokens = useMemo(
+    () => hashtagSeasonCounts.reduce((sum, item) => sum + item.count, 0),
+    [hashtagSeasonCounts],
+  );
+  const hashtagTopTag = hashtagSeasonCounts[0] ?? null;
+  const hashtagPeakWeek = useMemo(() => {
+    if (hashtagWeeklyUsage.length === 0) return null;
+    return [...hashtagWeeklyUsage].sort((a, b) => b.totalTokens - a.totalTokens || a.weekIndex - b.weekIndex)[0];
+  }, [hashtagWeeklyUsage]);
+  const hashtagMaxWeeklyTokens = useMemo(
+    () => Math.max(0, ...hashtagWeeklyUsage.map((item) => item.totalTokens)),
+    [hashtagWeeklyUsage],
+  );
+  const hashtagMaxPlatformTokens = useMemo(
+    () => Math.max(0, ...hashtagPlatformUsage.map((item) => item.count)),
+    [hashtagPlatformUsage],
+  );
+  const hashtagUsageLoading = useMemo(() => {
+    if (!needsWeekDetailHashtagAnalytics) return false;
+    return weeklyPlatformRows.some(
+      (row) =>
+        !(row.week_index in weekDetailHashtagUsageByWeek) && weekDetailTokenCountsLoadingWeeks.has(row.week_index),
+    );
+  }, [needsWeekDetailHashtagAnalytics, weekDetailHashtagUsageByWeek, weekDetailTokenCountsLoadingWeeks, weeklyPlatformRows]);
+  const hashtagUniqueCount = hashtagSeasonCounts.length;
   const isBravoView = analyticsView === "bravo";
   const isSentimentView = analyticsView === "sentiment";
-  const isHashtagsView = analyticsView === "hashtags";
+  const isHashtagsView = needsWeekDetailHashtagAnalytics;
   const isAdvancedView = analyticsView === "advanced";
   const isRedditView = analyticsView === "reddit";
   const selectedRunLabel = selectedRunId ? (runOptionLabelById.get(selectedRunId) ?? null) : null;
-  const truncatedSeasonId = useMemo(() => truncateIdentifier(seasonId), [seasonId]);
   const selectLatestRun = useCallback(() => {
     if (!runs.length) return;
     const preferredRun = runs.find((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? runs[0];
@@ -2963,30 +3901,6 @@ export default function SeasonSocialAnalyticsSection({
       runSeasonIngestButtonRef.current?.focus();
     });
   }, []);
-  const copySeasonId = useCallback(async () => {
-    try {
-      const copied = await copyTextToClipboard(seasonId);
-      setSeasonIdCopyNotice(copied ? "Copied" : "Copy failed");
-    } catch {
-      setSeasonIdCopyNotice("Copy failed");
-    }
-  }, [seasonId]);
-
-  useEffect(() => {
-    if (!seasonIdCopyNotice) return;
-    if (seasonIdCopyTimerRef.current !== null) {
-      window.clearTimeout(seasonIdCopyTimerRef.current);
-    }
-    seasonIdCopyTimerRef.current = window.setTimeout(() => {
-      setSeasonIdCopyNotice(null);
-      seasonIdCopyTimerRef.current = null;
-    }, 1800);
-    return () => {
-      if (seasonIdCopyTimerRef.current !== null) {
-        window.clearTimeout(seasonIdCopyTimerRef.current);
-      }
-    };
-  }, [seasonIdCopyNotice]);
 
   const ingestExportPanel = (
     <article
@@ -2996,7 +3910,7 @@ export default function SeasonSocialAnalyticsSection({
       className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
     >
       <h4 className="mb-4 text-lg font-semibold text-zinc-900">Ingest + Export</h4>
-      <div className="space-y-2 text-sm text-zinc-600">
+      <div className="space-y-3 text-sm text-zinc-600">
         <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
           Sync Mode
           <select
@@ -3009,34 +3923,122 @@ export default function SeasonSocialAnalyticsSection({
             <option value="full_refresh">Full Refresh</option>
           </select>
         </label>
-        <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-          Specific Day
-          <input
-            type="date"
-            value={dayFilter}
-            onChange={(event) => setDayFilter(event.target.value)}
-            disabled={runningIngest}
-            className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => {
-            if (!dayFilter) {
-              setError("Choose a day before running a day-specific ingest.");
-              return;
-            }
-            void runIngest({ day: dayFilter, platform: "all" });
-          }}
-          disabled={runningIngest || !dayFilter}
-          className={`w-full rounded-lg border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-            runningIngest && ingestingDay
-              ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
-              : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
-          }`}
-        >
-          {runningIngest && ingestingDay ? `Running ${formatDayScopeLabel(ingestingDay)}...` : "Run Specific Day (All Platforms)"}
-        </button>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Weekly Run</p>
+          <div className="mt-2 grid gap-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+              Week
+              <select
+                value={weeklyRunWeek == null ? "" : String(weeklyRunWeek)}
+                onChange={(event) => {
+                  const rawValue = event.target.value;
+                  if (!rawValue) {
+                    setWeeklyRunWeek(null);
+                    return;
+                  }
+                  const parsed = Number.parseInt(rawValue, 10);
+                  setWeeklyRunWeek(Number.isFinite(parsed) ? parsed : null);
+                }}
+                disabled={runningIngest}
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">Select a week</option>
+                {(analytics?.weekly ?? []).map((week) => (
+                  <option key={`ingest-week-${week.week_index}`} value={week.week_index}>
+                    {week.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+              Platform
+              <select
+                value={weeklyRunPlatform}
+                onChange={(event) => setWeeklyRunPlatform(event.target.value as "all" | Platform)}
+                disabled={runningIngest}
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="all">All Platforms</option>
+                {PLATFORM_ORDER.map((platform) => (
+                  <option key={`weekly-platform-${platform}`} value={platform}>
+                    {PLATFORM_LABELS[platform]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                if (weeklyRunWeek == null) {
+                  setError("Choose a week before running a week ingest.");
+                  return;
+                }
+                void runIngest({ week: weeklyRunWeek, platform: weeklyRunPlatform });
+              }}
+              disabled={runningIngest || weeklyRunWeek == null}
+              className={`w-full rounded-lg border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                runningIngest && ingestingWeek === weeklyRunWeek
+                  ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
+                  : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+              }`}
+            >
+              {runningIngest && ingestingWeek === weeklyRunWeek
+                ? `Running ${resolveWeekScopeLabel(weeklyRunWeek)}...`
+                : "Run Selected Week"}
+            </button>
+          </div>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Daily Run</p>
+          <div className="mt-2 grid gap-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+              Day
+              <input
+                type="date"
+                value={dayFilter}
+                onChange={(event) => setDayFilter(event.target.value)}
+                disabled={runningIngest}
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+              Platform
+              <select
+                value={dailyRunPlatform}
+                onChange={(event) => setDailyRunPlatform(event.target.value as "all" | Platform)}
+                disabled={runningIngest}
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="all">All Platforms</option>
+                {PLATFORM_ORDER.map((platform) => (
+                  <option key={`daily-platform-${platform}`} value={platform}>
+                    {PLATFORM_LABELS[platform]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                if (!dayFilter) {
+                  setError("Choose a day before running a day-specific ingest.");
+                  return;
+                }
+                void runIngest({ day: dayFilter, platform: dailyRunPlatform });
+              }}
+              disabled={runningIngest || !dayFilter}
+              className={`w-full rounded-lg border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                runningIngest && ingestingDay === dayFilter
+                  ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
+                  : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+              }`}
+            >
+              {runningIngest && ingestingDay === dayFilter
+                ? `Running ${formatDayScopeLabel(dayFilter)}...`
+                : "Run Selected Day"}
+            </button>
+          </div>
+        </div>
         <button
           ref={runSeasonIngestButtonRef}
           type="button"
@@ -3046,46 +4048,6 @@ export default function SeasonSocialAnalyticsSection({
         >
           {runningIngest ? "Running Ingest..." : "Run Season Ingest (All)"}
         </button>
-        <div className="grid grid-cols-2 gap-2">
-          {(["instagram", "youtube", "tiktok", "twitter"] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => runIngest({ platform: p })}
-              disabled={runningIngest}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                runningIngest && ingestingPlatform === p
-                  ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
-                  : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
-              }`}
-            >
-              {runningIngest && ingestingPlatform === p ? `${PLATFORM_LABELS[p]}...` : PLATFORM_LABELS[p]}
-            </button>
-          ))}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {(["instagram", "youtube", "tiktok", "twitter"] as const).map((p) => (
-            <button
-              key={`day-${p}`}
-              type="button"
-              onClick={() => {
-                if (!dayFilter) {
-                  setError("Choose a day before running a day-specific ingest.");
-                  return;
-                }
-                void runIngest({ day: dayFilter, platform: p });
-              }}
-              disabled={runningIngest || !dayFilter}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                runningIngest && ingestingPlatform === p && Boolean(ingestingDay)
-                  ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
-                  : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
-              }`}
-            >
-              {runningIngest && ingestingPlatform === p && Boolean(ingestingDay) ? `${PLATFORM_LABELS[p]} Day...` : `${PLATFORM_LABELS[p]} Day`}
-            </button>
-          ))}
-        </div>
         {activeRunId && hasRunningJobs && (
           <button
             type="button"
@@ -3159,231 +4121,166 @@ export default function SeasonSocialAnalyticsSection({
 
   return (
     <div className="space-y-6">
-      <section
-        aria-label="Season social analytics controls"
-        className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm sm:p-6"
-      >
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-          <div className="min-w-0 space-y-4">
-            <header className="space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white">
-                  Season Social Analytics
+      {!isRedditView && (
+        <>
+          <section
+            aria-label="Season social analytics controls"
+            className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm sm:p-6"
+          >
+            <div className="space-y-4">
+              <header className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white">
+                    Season Social Analytics
+                  </p>
+                  <p
+                    className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                      hasRunningJobs ? "bg-zinc-300 text-zinc-800" : "bg-zinc-100 text-zinc-600"
+                    }`}
+                  >
+                    {hasRunningJobs ? "Run Active" : "Idle"}
+                  </p>
+                </div>
+                <h3 className="text-2xl font-bold leading-tight text-zinc-900 sm:text-[28px]">
+                  {showName} · Season {seasonNumber}
+                </h3>
+                <p className="max-w-2xl text-sm text-zinc-500">
+                  Bravo-owned social analytics with viewer sentiment and weekly rollups.
                 </p>
-                <p
-                  className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
-                    hasRunningJobs ? "bg-zinc-300 text-zinc-800" : "bg-zinc-100 text-zinc-600"
-                  }`}
-                >
-                  {hasRunningJobs ? "Run Active" : "Idle"}
-                </p>
-              </div>
-              <h3 className="text-2xl font-bold leading-tight text-zinc-900 sm:text-[28px]">
-                {showName} · Season {seasonNumber}
-              </h3>
-              <p className="max-w-2xl text-sm text-zinc-500">
-                Bravo-owned social analytics with viewer sentiment and weekly rollups.
-              </p>
-            </header>
+                <dl className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-zinc-700">
+                  <div className="flex items-center gap-2">
+                    <dt className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Last Updated</dt>
+                    <dd className="font-medium text-zinc-800">{formatDateTimeFromDate(lastUpdated)}</dd>
+                  </div>
+                  {analytics?.window?.start && analytics?.window?.end && (
+                    <div className="flex items-center gap-2">
+                      <dt className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Window</dt>
+                      <dd className="font-medium text-zinc-800">
+                        {formatDateTime(analytics.window.start)} to {formatDateTime(analytics.window.end)}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </header>
 
-            <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-zinc-100 shadow-sm sm:p-5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-300">Current Run</p>
-              {selectedRunLabel ? (
-                <p className="mt-2 break-words text-sm font-medium leading-relaxed text-zinc-100">{selectedRunLabel}</p>
-              ) : (
-                <div className="mt-2 space-y-3">
-                  <p className="text-sm font-medium text-zinc-100">No run selected.</p>
-                  <p className="text-xs text-zinc-300">Pick the latest run or jump to ingest controls to start one.</p>
-                  <div className="flex flex-wrap gap-2">
-                    {runs.length > 0 && (
+              {!hidePlatformTabs && (
+                <nav className="flex gap-1 rounded-xl border border-zinc-200 bg-zinc-100/70 p-1" aria-label="Social platform tabs">
+                  {PLATFORM_TABS.map((tab) => {
+                    const isActive = platformTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => {
+                          setPlatformTabAndUrl(tab.key);
+                        }}
+                      className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 ${
+                          isActive
+                            ? "bg-white text-zinc-900 shadow-sm"
+                            : "text-zinc-600 hover:bg-white/80 hover:text-zinc-900"
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <SocialPlatformTabIcon tab={tab.key} />
+                          <span>{tab.label}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </nav>
+              )}
+
+              <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-zinc-100 shadow-sm sm:p-5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-300">Current Run</p>
+                <label className="mt-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-300">
+                  Run
+                  <select
+                    value={selectedRunId ?? ""}
+                    onChange={(event) => {
+                      const nextRunId = event.target.value || null;
+                      setSelectedRunId(nextRunId);
+                      setSectionErrors((current) => ({ ...current, jobs: null }));
+                    }}
+                    disabled={runningIngest}
+                    className="mt-1 block w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-100 focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="">No Run Selected</option>
+                    {runs.map((run) => (
+                      <option key={run.id} value={run.id}>
+                        {runOptionLabelById.get(run.id) ??
+                          `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {selectedRunLabel ? (
+                  <p className="mt-2 break-words text-sm font-medium leading-relaxed text-zinc-100">{selectedRunLabel}</p>
+                ) : (
+                  <div className="mt-2 space-y-3">
+                    <p className="text-sm font-medium text-zinc-100">No run selected.</p>
+                    <p className="text-xs text-zinc-300">Pick the latest run or jump to ingest controls to start one.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {runs.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={selectLatestRun}
+                          disabled={runningIngest}
+                          className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Select Latest Run
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={selectLatestRun}
-                        disabled={runningIngest}
-                        className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={focusIngestControls}
+                        className="rounded-lg border border-zinc-500 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-700"
                       >
-                        Select Latest Run
+                        Start New Ingest
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={focusIngestControls}
-                      className="rounded-lg border border-zinc-500 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-700"
-                    >
-                      Start New Ingest
-                    </button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </article>
-          </div>
-
-          <aside className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Season Details</p>
-            <dl className="mt-3 space-y-2">
-              <div className="rounded-lg bg-zinc-50 px-3 py-2">
-                <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Season ID</dt>
-                <dd className="mt-1 flex items-center gap-2">
-                  <span className="font-mono text-sm font-medium text-zinc-800" title={seasonId}>
-                    {truncatedSeasonId}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void copySeasonId();
-                    }}
-                    className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-700 transition hover:bg-zinc-100"
-                  >
-                    Copy
-                  </button>
-                  <span
-                    role="status"
-                    aria-live="polite"
-                    aria-atomic="true"
-                    className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500"
-                  >
-                    {seasonIdCopyNotice}
-                  </span>
-                </dd>
-              </div>
-              <div className="rounded-lg bg-zinc-50 px-3 py-2">
-                <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Last Updated</dt>
-                <dd className="mt-1 text-sm font-medium text-zinc-800">{formatDateTimeFromDate(lastUpdated)}</dd>
-              </div>
-              {analytics?.window?.start && analytics?.window?.end && (
-                <div className="rounded-lg bg-zinc-50 px-3 py-2">
-                  <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Window</dt>
-                  <dd className="mt-1 text-sm font-medium text-zinc-800">
-                    {formatDateTime(analytics.window.start)} to {formatDateTime(analytics.window.end)}
-                  </dd>
-                </div>
-              )}
-            </dl>
-          </aside>
-        </div>
-
-        {!hidePlatformTabs && (
-          <nav className="mt-4 flex gap-1 rounded-xl border border-zinc-200 bg-zinc-100/70 p-1" aria-label="Social platform tabs">
-            {PLATFORM_TABS.map((tab) => {
-              const isActive = platformTab === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => {
-                    setPlatformTabAndUrl(tab.key);
-                  }}
-                  className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 ${
-                    isActive
-                      ? "bg-white text-zinc-900 shadow-sm"
-                      : "text-zinc-600 hover:bg-white/80 hover:text-zinc-900"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </nav>
-        )}
-
-        <div aria-label="Social analytics filters" className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Filters</p>
-          <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-              Scope
-              <select
-                value={scope}
-                onChange={(event) => setScope(event.target.value as Scope)}
-                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
-              >
-                <option value="bravo">Bravo</option>
-              </select>
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-              Week
-              <select
-                value={weekFilter}
-                onChange={(event) => {
-                  const nextValue = event.target.value;
-                  if (nextValue === "all") {
-                    setWeekFilter("all");
-                    return;
-                  }
-                  const parsed = Number.parseInt(nextValue, 10);
-                  setWeekFilter(Number.isFinite(parsed) ? parsed : "all");
-                }}
-                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
-              >
-                <option value="all">All Weeks</option>
-                {(analytics?.weekly ?? []).map((week) => (
-                  <option key={week.week_index} value={week.week_index}>
-                    {week.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-              Run
-              <select
-                value={selectedRunId ?? ""}
-                onChange={(event) => {
-                  const nextRunId = event.target.value || null;
-                  setSelectedRunId(nextRunId);
-                  setSectionErrors((current) => ({ ...current, jobs: null }));
-                }}
-                disabled={runningIngest}
-                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <option value="">No Run Selected</option>
-                {runs.map((run) => (
-                  <option key={run.id} value={run.id}>
-                    {runOptionLabelById.get(run.id) ??
-                      `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-
-        {(pollingStatus !== "idle" || staleFallbackItems.length > 0 || sectionErrorItems.length > 0) && (
-          <div className="mt-4 space-y-2">
-            {pollingStatus === "retrying" && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                Live updates temporarily unavailable. Retrying...
-              </div>
-            )}
-            {pollingStatus === "recovered" && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                Live updates connection restored.
-              </div>
-            )}
-            {staleFallbackItems.length > 0 && (
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-                Showing last successful social data while live refresh retries.
-              </div>
-            )}
-            {sectionErrorItems.map((item) => (
-              <div key={item.key} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                <span className="font-semibold">{item.label}:</span> {item.message}
-                {item.staleAt && (
-                  <p className="mt-1 text-xs font-medium text-amber-800">
-                    Showing last successful data from {formatDateTimeFromDate(item.staleAt)}.
-                  </p>
                 )}
+              </article>
+            </div>
+
+            {(pollingStatus !== "idle" || staleFallbackItems.length > 0 || sectionErrorItems.length > 0) && (
+              <div className="mt-4 space-y-2">
+                {pollingStatus === "retrying" && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    Live updates temporarily unavailable. Retrying...
+                  </div>
+                )}
+                {pollingStatus === "recovered" && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                    Live updates connection restored.
+                  </div>
+                )}
+                {staleFallbackItems.length > 0 && (
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+                    Showing last successful social data while live refresh retries.
+                  </div>
+                )}
+                {sectionErrorItems.map((item) => (
+                  <div key={item.key} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    <span className="font-semibold">{item.label}:</span> {item.message}
+                    {item.staleAt && (
+                      <p className="mt-1 text-xs font-medium text-amber-800">
+                        Showing last successful data from {formatDateTimeFromDate(item.staleAt)}.
+                      </p>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            )}
+          </section>
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
 
-      {ingestMessage && !error && (() => {
+          {ingestMessage && !error && (() => {
         const activeJobs = runScopedJobs;
         const totalJobs = activeJobs.length;
         const completedJobs = activeJobs.filter((j) => j.status === "completed");
@@ -3402,6 +4299,10 @@ export default function SeasonSocialAnalyticsSection({
 
         const postsStageJobs = activeJobs.filter((j) => getStage(j) === "posts");
         const commentsStageJobs = activeJobs.filter((j) => getStage(j) === "comments");
+        const mirrorStageJobs = activeJobs.filter((j) => {
+          const stage = getStage(j);
+          return stage === "media_mirror" || stage === "mirror";
+        });
 
         const stageProgress = (stageJobs: SocialJob[], label: string) => {
           if (stageJobs.length === 0) return null;
@@ -3411,7 +4312,11 @@ export default function SeasonSocialAnalyticsSection({
           return { label, total: stageJobs.length, done, pct, items, jobs: stageJobs };
         };
 
-        const stages = [stageProgress(postsStageJobs, "Posts"), stageProgress(commentsStageJobs, "Comments")].filter(Boolean) as
+        const stages = [
+          stageProgress(postsStageJobs, "Posts"),
+          stageProgress(commentsStageJobs, "Comments"),
+          stageProgress(mirrorStageJobs, "Mirror"),
+        ].filter(Boolean) as
           NonNullable<ReturnType<typeof stageProgress>>[];
 
         // Per-platform completion stats for summary
@@ -3487,6 +4392,39 @@ export default function SeasonSocialAnalyticsSection({
                 </div>
               </div>
             )}
+
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+              {workerHealth?.queueEnabled === true ? (
+                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                  Workers: {workerHealth.healthyWorkers ?? 0} healthy{workerHealth.reason ? ` (${workerHealth.reason})` : ""}
+                </span>
+              ) : (
+                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">Workers: queue disabled</span>
+              )}
+              {syncCommentsCoveragePreview && (
+                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                  Comments:{" "}
+                  {`${formatInteger(Number(syncCommentsCoveragePreview.total_saved_comments ?? 0))}/${formatInteger(
+                    Number(syncCommentsCoveragePreview.total_reported_comments ?? 0),
+                  )}`}
+                </span>
+              )}
+              {SOCIAL_FULL_SYNC_MIRROR_ENABLED && syncMirrorCoveragePreview && (
+                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                  Mirror:{" "}
+                  {formatMirrorCoverageLabel(
+                    Math.max(
+                      0,
+                      Number(syncMirrorCoveragePreview.posts_scanned ?? 0) -
+                        Number(syncMirrorCoveragePreview.needs_mirror_count ?? 0),
+                    ),
+                    Number(syncMirrorCoveragePreview.posts_scanned ?? 0),
+                  )}{" "}
+                  · pending {formatInteger(Number(syncMirrorCoveragePreview.pending_count ?? 0))} · failed{" "}
+                  {formatInteger(Number(syncMirrorCoveragePreview.failed_count ?? 0))}
+                </span>
+              )}
+            </div>
 
             {/* Per-stage progress */}
             {runningIngest && stages.length > 0 && (
@@ -3605,7 +4543,9 @@ export default function SeasonSocialAnalyticsSection({
             )}
           </div>
         );
-      })()}
+          })()}
+        </>
+      )}
 
       {isRedditView ? (
         <RedditSourcesManager
@@ -3682,18 +4622,18 @@ export default function SeasonSocialAnalyticsSection({
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Content Volume</p>
-              <p className="mt-2 text-3xl font-bold text-zinc-900">{analytics?.summary.total_posts ?? 0}</p>
+              <p className="mt-2 text-3xl font-bold text-zinc-900">{formatInteger(analytics?.summary.total_posts)}</p>
               <p className="mt-1 text-xs text-zinc-500">Bravo posts/videos captured</p>
             </article>
             <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Viewer Comments</p>
-              <p className="mt-2 text-3xl font-bold text-zinc-900">{analytics?.summary.total_comments ?? 0}</p>
+              <p className="mt-2 text-3xl font-bold text-zinc-900">{formatInteger(analytics?.summary.total_comments)}</p>
               <p className="mt-1 text-xs text-zinc-500">Comment/reply records persisted</p>
             </article>
             <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Engagement</p>
               <p className="mt-2 text-3xl font-bold text-zinc-900">
-                {(analytics?.summary.total_engagement ?? 0).toLocaleString()}
+                {formatInteger(analytics?.summary.total_engagement)}
               </p>
               <p className="mt-1 text-xs text-zinc-500">Cross-platform interactions</p>
             </article>
@@ -3715,8 +4655,9 @@ export default function SeasonSocialAnalyticsSection({
           )}
 
           {isBravoView && (
-            <section className="grid gap-6 xl:grid-cols-3">
-            <article className="xl:col-span-2 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <section className="space-y-6">
+              {ingestExportPanel}
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-lg font-semibold text-zinc-900">Weekly Trend</h4>
@@ -3749,6 +4690,17 @@ export default function SeasonSocialAnalyticsSection({
                   >
                     Comment Count
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setWeeklyMetric("completeness")}
+                    className={`rounded px-2.5 py-1 transition ${
+                      weeklyMetric === "completeness"
+                        ? "bg-white text-zinc-900 shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700"
+                    }`}
+                  >
+                    Completeness
+                  </button>
                 </div>
               </div>
               <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -3757,7 +4709,7 @@ export default function SeasonSocialAnalyticsSection({
                     type="button"
                     onClick={() => {
                       setSocialDensity("compact");
-                      setSocialPreferenceInUrl(SOCIAL_DENSITY_QUERY_KEY, null);
+                      setSocialPreferenceInUrl(SOCIAL_DENSITY_QUERY_KEY, "compact");
                     }}
                     className={`rounded px-2.5 py-1 transition ${
                       socialDensity === "compact"
@@ -3771,7 +4723,7 @@ export default function SeasonSocialAnalyticsSection({
                     type="button"
                     onClick={() => {
                       setSocialDensity("comfortable");
-                      setSocialPreferenceInUrl(SOCIAL_DENSITY_QUERY_KEY, "comfortable");
+                      setSocialPreferenceInUrl(SOCIAL_DENSITY_QUERY_KEY, null);
                     }}
                     className={`rounded px-2.5 py-1 transition ${
                       socialDensity === "comfortable"
@@ -3814,27 +4766,12 @@ export default function SeasonSocialAnalyticsSection({
                   </p>
                 </div>
               </div>
-              {commentGapFlagCount > 0 && (
-                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  Comment capture gaps detected in {commentGapFlagCount} week
-                  {commentGapFlagCount === 1 ? "" : "s"}.
-                  {" "}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void runIngest({ ingestMode: "comments_only" });
-                    }}
-                    disabled={runningIngest}
-                    className="font-semibold underline disabled:opacity-60"
-                  >
-                    Run comments-only backfill
-                  </button>
-                  .
-                </div>
-              )}
               <div className="space-y-3">
                 {weeklyDailyActivityRows.map((weekRow) => {
-                  const weekTotal = weeklyHeatmapTotals.get(weekRow.week_index) ?? 0;
+                  const weekPostTotal = weeklyHeatmapPostTotals.get(weekRow.week_index) ?? 0;
+                  const weekCommentTotal = weeklyHeatmapCommentTotals.get(weekRow.week_index) ?? 0;
+                  const weekEpisodeLabel = getWeekEpisodeLabel(weekRow, seasonNumber);
+                  const heatmapWeekSectionLabel = getHeatmapWeekSectionLabel(weekRow);
                   const weekFlags = socialAlertsEnabled ? (weeklyFlagsByWeek.get(weekRow.week_index) ?? []) : [];
                   return (
                     <div
@@ -3844,7 +4781,14 @@ export default function SeasonSocialAnalyticsSection({
                     >
                       <div className="flex items-center justify-between text-xs text-zinc-500">
                         <span className="flex flex-col gap-1">
-                          <span>{weekRow.label}</span>
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span>{heatmapWeekSectionLabel}</span>
+                            {weekEpisodeLabel && (
+                              <span className="rounded-full border border-zinc-300 bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-700">
+                                {weekEpisodeLabel}
+                              </span>
+                            )}
+                          </span>
                           <span className="text-[10px] uppercase tracking-[0.08em] text-zinc-400">
                             {formatDateOnly(weekRow.start)} to {formatDateOnly(weekRow.end)}
                           </span>
@@ -3855,7 +4799,6 @@ export default function SeasonSocialAnalyticsSection({
                                   key={`${weekRow.week_index}-${flag.code}`}
                                   type="button"
                                   onClick={() => {
-                                    setWeekFilter(weekRow.week_index);
                                     router.replace(buildWeekDetailHref(weekRow.week_index) as Route, { scroll: false });
                                   }}
                                   className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getWeeklyFlagToneClass(flag.severity)}`}
@@ -3867,23 +4810,34 @@ export default function SeasonSocialAnalyticsSection({
                             </span>
                           )}
                         </span>
-                        <span>
+                        <span className="flex flex-col items-end text-right leading-tight">
                           <span data-testid={`weekly-heatmap-total-${weekRow.week_index}`}>
-                            {weekTotal.toLocaleString()} {weeklyMetric}
+                            {formatInteger(weekPostTotal)} posts
+                          </span>
+                          <span data-testid={`weekly-heatmap-comments-total-${weekRow.week_index}`}>
+                            {formatInteger(weekCommentTotal)} comments
                           </span>
                         </span>
                       </div>
                       <div className="overflow-x-auto rounded-lg border border-zinc-100 bg-zinc-50 p-2">
-                        <div className="inline-grid grid-cols-7 gap-1.5">
+                        <div
+                          className={socialDensity === "comfortable" ? "grid grid-cols-7 gap-1.5" : "inline-grid grid-cols-7 gap-1.5"}
+                        >
                         {weekRow.days.map((day) => {
                           const value = getWeeklyDayValue(day, weeklyMetric, heatmapPlatform);
+                          const displayLabel =
+                            weeklyMetric === "completeness"
+                              ? value < 0
+                                ? "N/A"
+                                : `${(value * 100).toFixed(1)}%`
+                              : formatInteger(value);
                           const monthDay = getMonthDayLabel(day.date_local);
                           const [monthLabel, dayLabel] = monthDay.split(" ");
                           return (
                             <div
                               key={`${weekRow.week_index}-${day.day_index}`}
                               data-testid={`weekly-heatmap-day-${weekRow.week_index}-${day.day_index}`}
-                              title={`${day.date_local} · ${value.toLocaleString()} ${weeklyMetric}`}
+                              title={`${day.date_local} · ${displayLabel} ${weeklyMetric}`}
                             >
                               <button
                                 type="button"
@@ -3892,8 +4846,8 @@ export default function SeasonSocialAnalyticsSection({
                                     scroll: false,
                                   });
                                 }}
-                                aria-label={`${weekRow.label} ${day.date_local} ${value.toLocaleString()} ${weeklyMetric}`}
-                                className={`flex ${heatmapTileSizeClass} flex-col items-center justify-center rounded px-1 font-semibold tabular-nums ${getHeatmapToneClass(value, weeklyHeatmapMaxValue)}`}
+                                aria-label={`${weekRow.label} ${day.date_local} ${displayLabel} ${weeklyMetric}`}
+                                className={`flex ${socialDensity === "comfortable" ? "h-12 w-full text-[10px]" : "h-9 w-9 sm:h-10 sm:w-10 text-[9px]"} flex-col items-center justify-center rounded px-1 font-semibold tabular-nums ${getHeatmapToneClass({ value, maxValue: weeklyHeatmapMaxValue, metric: weeklyMetric })}`}
                               >
                                 <span className="sr-only">{monthDay}</span>
                                 <span className="leading-none">{monthLabel}</span>
@@ -3909,15 +4863,14 @@ export default function SeasonSocialAnalyticsSection({
                 })}
                 {(analytics?.weekly?.length ?? 0) > 0 && weeklyDailyActivityRows.length === 0 && (
                   <p data-testid="weekly-heatmap-unavailable" className="text-sm text-zinc-500">
-                    Daily schedule unavailable for selected filters.
+                    Daily schedule unavailable for the current view.
                   </p>
                 )}
                 {(analytics?.weekly?.length ?? 0) === 0 && (
-                  <p className="text-sm text-zinc-500">No weekly data for selected filters.</p>
+                  <p className="text-sm text-zinc-500">No weekly data for the current view.</p>
                 )}
               </div>
-            </article>
-            {ingestExportPanel}
+              </article>
             </section>
           )}
 
@@ -4088,9 +5041,65 @@ export default function SeasonSocialAnalyticsSection({
 
           {(isBravoView || isAdvancedView) && (
             <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h4 className="text-lg font-semibold text-zinc-900">Weekly Bravo Post Count Table</h4>
-              <span className="text-xs uppercase tracking-[0.2em] text-zinc-400">Trailer to Finale</span>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 className="text-lg font-semibold text-zinc-900">Weekly Bravo Post Count Table</h4>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <button
+                  type="button"
+                  onClick={toggleAllSocialTableMetrics}
+                  className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                >
+                  {selectedTableMetrics.length === SOCIAL_TABLE_METRIC_KEYS.length ? "Deselect all" : "Select All"}
+                </button>
+                <div className="flex flex-wrap items-center justify-end gap-1.5" data-testid="weekly-bravo-metric-filter">
+                  {SOCIAL_TABLE_METRIC_OPTIONS.map((option) => {
+                    const isSelected = selectedTableMetricSet.has(option.key);
+                    return (
+                      <button
+                        key={`table-metric-${option.key}`}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => toggleSocialTableMetric(option.key)}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] transition ${
+                          isSelected
+                            ? "border-zinc-800 bg-zinc-800 text-white"
+                            : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold">
+                  <button
+                    type="button"
+                    aria-pressed={socialMetricMode === "total"}
+                    onClick={() => setSocialMetricMode("total")}
+                    className={`rounded-full px-2.5 py-1 transition ${
+                      socialMetricMode === "total"
+                        ? "bg-zinc-900 text-white"
+                        : "text-zinc-600 hover:bg-white hover:text-zinc-900"
+                    }`}
+                  >
+                    Total
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={socialMetricMode === "saved"}
+                    onClick={() => setSocialMetricMode("saved")}
+                    className={`rounded-full px-2.5 py-1 transition ${
+                      socialMetricMode === "saved"
+                        ? "bg-zinc-900 text-white"
+                        : "text-zinc-600 hover:bg-white hover:text-zinc-900"
+                    }`}
+                  >
+                    Saved
+                  </button>
+                </div>
+              </div>
             </div>
             {(ingestActionsBlockedReason || workerHealthUnavailableWarning || staleRuns.length > 0) && (
               <div className="mb-4 space-y-2">
@@ -4125,7 +5134,7 @@ export default function SeasonSocialAnalyticsSection({
               <table className="min-w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-zinc-200 bg-zinc-50 text-left text-xs uppercase tracking-[0.12em] text-zinc-500">
-                    <th className="px-3 py-2 font-semibold">Week</th>
+                    <th className="px-3 py-2 font-semibold">Episode</th>
                     <th className="px-3 py-2 font-semibold">Window</th>
                     <th className="px-3 py-2 font-semibold">Instagram</th>
                     <th className="px-3 py-2 font-semibold">YouTube</th>
@@ -4139,6 +5148,13 @@ export default function SeasonSocialAnalyticsSection({
                 <tbody>
                   {weeklyPlatformRows.map((week) => {
                     const totalCoverage = getTotalCoverage(week);
+                    const engagementWeek = weeklyPlatformEngagementByWeek.get(week.week_index);
+                    const weeklyEngagementTotal = Number(engagementWeek?.total_engagement ?? 0);
+                    const detailTokenCounts = weekDetailTokenCountsByWeek[week.week_index];
+                    const detailTokenCountsLoading =
+                      needsWeekDetailTokenMetrics &&
+                      !detailTokenCounts &&
+                      weekDetailTokenCountsLoadingWeeks.has(week.week_index);
                     const weekLinkQuery = new URLSearchParams({
                       source_scope: scope,
                       season_id: seasonId,
@@ -4149,18 +5165,117 @@ export default function SeasonSocialAnalyticsSection({
                     if (analyticsView !== "bravo") {
                       weekLinkQuery.set("social_view", analyticsView);
                     }
-                    const postsProgressValue = formatProgressMetricValue(
-                      totalCoverage.postsPctLabel,
-                      totalCoverage.postsUpToDate,
+                    if (socialTableMetricsQueryValue) {
+                      weekLinkQuery.set(SOCIAL_TABLE_METRICS_QUERY_KEY, socialTableMetricsQueryValue);
+                    }
+                    if (socialMetricModeQueryValue) {
+                      weekLinkQuery.set(SOCIAL_METRIC_MODE_QUERY_KEY, socialMetricModeQueryValue);
+                    }
+                    const weekSecondaryLabel = getWeeklyTableEpisodeSecondaryLabel(week);
+                    const totalCommentsValue =
+                      socialMetricMode === "saved"
+                        ? week.total_comments
+                        : (week.total_reported_comments ?? week.total_comments);
+                    const buildMetricTokens = ({
+                      postsValue,
+                      likesValue,
+                      commentsValue,
+                      tokenCounts,
+                    }: {
+                      postsValue: number | null | undefined;
+                      likesValue: number | null | undefined;
+                      commentsValue: number | null | undefined;
+                      tokenCounts: WeekDetailTokenTriplet | null;
+                    }): string[] => selectedTableMetrics.map((metric) => {
+                      if (metric === "posts") {
+                        return formatMetricCountLabel(postsValue, "post");
+                      }
+                      if (metric === "likes") {
+                        return formatMetricCountLabel(likesValue, "like");
+                      }
+                      if (metric === "comments") {
+                        return formatMetricCountLabel(commentsValue, "comment");
+                      }
+                      if (!tokenCounts) {
+                        return `-- ${metric}`;
+                      }
+                      if (metric === "hashtags") {
+                        return formatMetricCountLabel(tokenCounts.hashtags, "hashtag");
+                      }
+                      if (metric === "mentions") {
+                        return formatMetricCountLabel(tokenCounts.mentions, "mention");
+                      }
+                      return formatMetricCountLabel(tokenCounts.tags, "tag");
+                    });
+                    const totalMetricTokens = buildMetricTokens({
+                      postsValue: week.total_posts,
+                      likesValue: weeklyEngagementTotal,
+                      commentsValue: totalCommentsValue,
+                      tokenCounts: detailTokenCounts?.total ?? null,
+                    });
+                    const selectedMetricProgressValues = selectedTableMetrics
+                      .map((metric): number | null => {
+                        if (metric === "posts") return totalCoverage.postsPct;
+                        if (metric === "comments") return totalCoverage.commentsPct;
+                        if (metric === "likes") {
+                          if (week.total_posts <= 0 && weeklyEngagementTotal <= 0) return null;
+                          return engagementWeek?.has_data === false ? 0 : 100;
+                        }
+                        if (!detailTokenCounts) {
+                          return detailTokenCountsLoading ? null : week.total_posts > 0 ? 0 : null;
+                        }
+                        return week.total_posts > 0 ? 100 : null;
+                      })
+                      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+                    const selectedMetricProgressPct = selectedMetricProgressValues.length > 0
+                      ? Math.min(
+                          100,
+                          selectedMetricProgressValues.reduce((sum, value) => sum + value, 0) / selectedMetricProgressValues.length,
+                        )
+                      : null;
+                    const totalProgressValue = detailTokenCountsLoading
+                      ? "--"
+                      : selectedMetricProgressPct == null
+                        ? "-"
+                        : `${selectedMetricProgressPct.toFixed(1)}%`;
+                    const inferredTotalReportedComments = PLATFORM_ORDER.reduce(
+                      (sum, platform) => sum + Number(week.reported_comments?.[platform] ?? 0),
+                      0,
                     );
-                    const commentsProgressValue = formatProgressMetricValue(
-                      totalCoverage.commentsPctLabel,
-                      totalCoverage.commentsUpToDate,
+                    const totalReportedCommentsForMissing = Number(
+                      week.total_reported_comments ?? inferredTotalReportedComments,
                     );
-                    const totalProgressValue = formatProgressMetricValue(
-                      totalCoverage.progressPctLabel,
-                      totalCoverage.progressUpToDate,
+                    const missingCommentsCount = Math.max(
+                      0,
+                      totalReportedCommentsForMissing - Number(week.total_comments ?? 0),
                     );
+                    const missingMetricTokens = selectedTableMetrics
+                      .map((metric): string => {
+                        if (metric === "posts") {
+                          const missingPostsCount = totalCoverage.postsUpToDate ? 0 : Number(week.total_posts ?? 0);
+                          return formatMetricCountLabel(missingPostsCount, "post");
+                        }
+                        if (metric === "likes") {
+                          const missingLikesCount = engagementWeek?.has_data === false ? weeklyEngagementTotal : 0;
+                          return formatMetricCountLabel(missingLikesCount, "like");
+                        }
+                        if (metric === "comments") {
+                          return formatMetricCountLabel(missingCommentsCount, "comment");
+                        }
+                        if (metric === "hashtags") {
+                          return "-- hashtags";
+                        }
+                        if (metric === "mentions") {
+                          return "-- mentions";
+                        }
+                        return "-- tags";
+                      });
+                    const shouldShowMissingMetrics =
+                      !detailTokenCountsLoading &&
+                      typeof selectedMetricProgressPct === "number" &&
+                      Number.isFinite(selectedMetricProgressPct) &&
+                      !isCoveragePctUpToDate(selectedMetricProgressPct) &&
+                      missingMetricTokens.length > 0;
                     return (
                       <tr key={`table-week-${week.week_index}`} className="border-b border-zinc-100 text-zinc-700">
                         <td className="px-3 py-2 align-top font-semibold">
@@ -4170,26 +5285,45 @@ export default function SeasonSocialAnalyticsSection({
                               seasonNumber,
                               weekIndex: week.week_index,
                               query: weekLinkQuery,
-                            }) as "/admin/trr-shows"}
+                            }) as Route}
                             className="text-blue-600 hover:text-blue-800 hover:underline"
                           >
-                            {week.label ?? (week.week_index === 0 ? "Pre-Season" : `Week ${week.week_index}`)}
+                            <span className="flex flex-col gap-0.5 leading-tight">
+                              <span>{getWeeklyTableEpisodePrimaryLabel(week, seasonNumber)}</span>
+                              <span className="text-xs font-normal text-zinc-500">{weekSecondaryLabel}</span>
+                            </span>
                           </Link>
                         </td>
                         <td className="px-3 py-2 align-top text-xs text-zinc-500">
-                          {formatDateTime(week.start)} to {formatDateTime(week.end)}
+                          {formatDateShort(week.start)} - {formatDateShort(week.end)}
                         </td>
                         {PLATFORM_ORDER.map((platform) => {
                           const coverage = getPlatformCoverage(week, platform);
+                          const platformTokenCounts = detailTokenCounts?.byPlatform?.[platform] ?? null;
+                          const platformCommentsValue =
+                            socialMetricMode === "saved"
+                              ? week.comments?.[platform]
+                              : (week.reported_comments?.[platform] ?? week.comments?.[platform]);
+                          const platformMetricTokens = buildMetricTokens({
+                            postsValue: week.posts?.[platform],
+                            likesValue: engagementWeek?.engagement?.[platform],
+                            commentsValue: platformCommentsValue,
+                            tokenCounts: platformTokenCounts,
+                          });
                           return (
                             <td key={`${week.week_index}-${platform}`} className="px-3 py-2 align-top">
                               <div className="flex flex-col gap-0.5 leading-tight">
-                                <div>{week.posts[platform]}</div>
-                                <div className="text-xs text-zinc-400">{week.comments?.[platform] ?? 0} comments</div>
+                                <div className="text-[11px] text-zinc-600" data-testid={`weekly-platform-metrics-${platform}-${week.week_index}`}>
+                                  {platformMetricTokens.length > 0 ? (
+                                    platformMetricTokens.map((token, index) => (
+                                      <div key={`${platform}-${week.week_index}-metric-${index}`}>{token}</div>
+                                    ))
+                                  ) : (
+                                    <div className="text-zinc-400">No metrics selected</div>
+                                  )}
+                                </div>
                                 {coverage.upToDate ? (
                                   <div className="text-[11px] text-emerald-700 whitespace-nowrap">Up-to-Date</div>
-                                ) : coverage.commentsPctLabel ? (
-                                  <div className="text-[11px] text-zinc-500 whitespace-nowrap">{coverage.commentsPctLabel} saved to DB</div>
                                 ) : null}
                               </div>
                             </td>
@@ -4197,26 +5331,33 @@ export default function SeasonSocialAnalyticsSection({
                         })}
                         <td className="px-3 py-2 align-top font-semibold text-zinc-900">
                           <div className="flex flex-col gap-0.5 leading-tight">
-                            <div>{week.total_posts}</div>
-                            <div className="text-xs font-normal text-zinc-400">{week.total_comments ?? 0} comments</div>
+                            <div className="text-[11px] font-normal text-zinc-600" data-testid={`weekly-total-metrics-${week.week_index}`}>
+                              {totalMetricTokens.length > 0 ? (
+                                totalMetricTokens.map((token, index) => (
+                                  <div key={`total-${week.week_index}-metric-${index}`}>{token}</div>
+                                ))
+                              ) : (
+                                <div className="text-zinc-400">No metrics selected</div>
+                              )}
+                            </div>
                             {totalCoverage.upToDate ? (
                               <div className="text-[11px] font-normal text-emerald-700 whitespace-nowrap">Up-to-Date</div>
-                            ) : totalCoverage.commentsPctLabel ? (
-                              <div className="text-[11px] font-normal text-zinc-500 whitespace-nowrap">{totalCoverage.commentsPctLabel} saved to DB</div>
                             ) : null}
                           </div>
                         </td>
                         <td className="px-3 py-2 align-top">
                           <div className="flex flex-col gap-0.5 text-xs leading-tight text-zinc-700">
                             <span className="whitespace-nowrap">
-                              <span className="font-semibold">Posts:</span> {postsProgressValue}
+                              <span className="font-semibold">Total Progress:</span>{" "}
+                              <span data-testid={`weekly-total-progress-${week.week_index}`}>{totalProgressValue}</span>
                             </span>
-                            <span className="whitespace-nowrap">
-                              <span className="font-semibold">Comments:</span> {commentsProgressValue}
-                            </span>
-                            <span className="whitespace-nowrap">
-                              <span className="font-semibold">Total:</span> {totalProgressValue}
-                            </span>
+                            {shouldShowMissingMetrics ? (
+                              <div className="mt-1 text-[11px] text-zinc-600" data-testid={`weekly-missing-metrics-${week.week_index}`}>
+                                {missingMetricTokens.map((token, index) => (
+                                  <div key={`missing-${week.week_index}-${index}`}>{token}</div>
+                                ))}
+                              </div>
+                            ) : null}
                           </div>
                         </td>
                         <td className="px-3 py-2 align-top">
@@ -4233,16 +5374,14 @@ export default function SeasonSocialAnalyticsSection({
                             >
                               {runningIngest && ingestingWeek === week.week_index ? "Ingesting..." : "Run Week"}
                             </button>
-                            {totalCoverage.postsUpToDate ? (
-                              <button
-                                type="button"
-                                onClick={() => runIngest({ week: week.week_index, ingestMode: "comments_only" })}
-                                disabled={runningIngest || Boolean(ingestActionsBlockedReason)}
-                                className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Sync Comments
-                              </button>
-                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => runIngest({ week: week.week_index, ingestMode: "posts_and_comments" })}
+                              disabled={runningIngest || Boolean(ingestActionsBlockedReason)}
+                              className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {WEEK_SYNC_ACTION_LABEL}
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -4275,10 +5414,10 @@ export default function SeasonSocialAnalyticsSection({
                     >
                       <div className="flex items-center justify-between text-sm font-semibold text-zinc-900">
                         <span>{label}</span>
-                        <span>{platform.engagement.toLocaleString()} engagement</span>
+                        <span>{formatInteger(platform.engagement)} engagement</span>
                       </div>
                       <p className="mt-1 text-xs text-zinc-500">
-                        {platform.posts} posts · {platform.comments} comments · P {platform.sentiment.positive} / N {platform.sentiment.neutral} / Neg {platform.sentiment.negative}
+                        {formatInteger(platform.posts)} posts · {formatInteger(platform.comments)} comments · P {formatInteger(platform.sentiment.positive)} / N {formatInteger(platform.sentiment.neutral)} / Neg {formatInteger(platform.sentiment.negative)}
                       </p>
                     </div>
                   );
@@ -4352,7 +5491,7 @@ export default function SeasonSocialAnalyticsSection({
                               <span className="font-semibold text-zinc-900">
                                 {PLATFORM_LABELS[item.platform] ?? item.platform}
                               </span>
-                              <span className="text-xs text-zinc-500">{item.engagement.toLocaleString()} engagement</span>
+                              <span className="text-xs text-zinc-500">{formatInteger(item.engagement)} engagement</span>
                             </div>
                             <p className="mt-1 text-sm text-zinc-700 line-clamp-2">{item.text || item.source_id}</p>
                           </div>
@@ -4408,52 +5547,164 @@ export default function SeasonSocialAnalyticsSection({
 
           {isHashtagsView && (
             <section className="grid gap-6 xl:grid-cols-2">
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Configured Hashtags</h4>
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm xl:col-span-2">
+                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Hashtag Insights</h4>
                 <p className="-mt-1 mb-4 text-xs text-zinc-500">
-                  {platformTab === "overview"
-                    ? "Grouped by platform from configured social targets."
-                    : `Configured hashtags for ${PLATFORM_LABELS[platformTab] ?? platformTab}.`}
+                  Season-wide hashtag usage across social posts in the selected platform scope.
                 </p>
-                {configuredHashtagSections.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No configured hashtags found for the selected platform scope.</p>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Total Uses</p>
+                    <p className="mt-1 text-lg font-semibold text-zinc-900" data-testid="hashtag-insights-total-uses">
+                      {formatInteger(hashtagTotalTokens)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Unique Hashtags</p>
+                    <p className="mt-1 text-lg font-semibold text-zinc-900" data-testid="hashtag-insights-unique-tags">
+                      {formatInteger(hashtagUniqueCount)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Top Hashtag</p>
+                    <p className="mt-1 text-lg font-semibold text-zinc-900" data-testid="hashtag-insights-top-tag">
+                      {hashtagTopTag ? `#${hashtagTopTag.tag}` : "-"}
+                    </p>
+                    <p className="text-xs text-zinc-600">
+                      {hashtagTopTag ? `${formatInteger(hashtagTopTag.count)} uses` : "No hashtag activity yet"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Peak Week</p>
+                    <p className="mt-1 text-lg font-semibold text-zinc-900" data-testid="hashtag-insights-peak-week">
+                      {hashtagPeakWeek && hashtagPeakWeek.totalTokens > 0 ? hashtagPeakWeek.label : "-"}
+                    </p>
+                    <p className="text-xs text-zinc-600">
+                      {hashtagPeakWeek && hashtagPeakWeek.totalTokens > 0
+                        ? `${formatInteger(hashtagPeakWeek.totalTokens)} uses`
+                        : "No hashtag activity yet"}
+                    </p>
+                  </div>
+                </div>
+              </article>
+
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Hashtags</h4>
+                <p className="-mt-1 mb-4 text-xs text-zinc-500">
+                  Top hashtag usage with total seasonal share.
+                </p>
+                {hashtagUsageLoading ? (
+                  <p className="text-sm text-zinc-500">Loading hashtag analytics...</p>
+                ) : hashtagSeasonCounts.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No hashtags found in season social posts for this scope.</p>
                 ) : (
-                  <div className="space-y-3">
-                    {configuredHashtagSections.map((section) => (
-                      <div key={section.platform} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-600">
-                          {PLATFORM_LABELS[section.platform] ?? section.platform}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {section.tags.map((tag) => (
-                            <span key={`${section.platform}-${tag}`} className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700">
-                              #{tag}
+                  <ul className="space-y-2">
+                    {hashtagSeasonCounts.slice(0, 30).map((item, index) => {
+                      const sharePct = hashtagTotalTokens > 0 ? (item.count / hashtagTotalTokens) * 100 : 0;
+                      return (
+                        <li
+                          key={item.tag}
+                          data-testid={`hashtag-leaderboard-row-${index}`}
+                          className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
+                        >
+                          <div className="mb-1 flex items-center justify-between gap-3">
+                            <span className="font-semibold text-zinc-800">#{item.tag}</span>
+                            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                              {formatInteger(item.count)} use{item.count === 1 ? "" : "s"}
                             </span>
-                          ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 rounded-full bg-zinc-200">
+                              <div
+                                className="h-1.5 rounded-full bg-zinc-700"
+                                style={{ width: `${Math.min(100, Math.max(0, sharePct))}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-zinc-500">{sharePct.toFixed(1)}%</span>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </article>
+
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Weekly Hashtag Usage</h4>
+                <p className="-mt-1 mb-4 text-xs text-zinc-500">
+                  Total hashtag tokens used per week across season social posts.
+                </p>
+                {hashtagUsageLoading ? (
+                  <p className="text-sm text-zinc-500">Loading hashtag analytics...</p>
+                ) : hashtagWeeklyUsage.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No weekly hashtag data available.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {hashtagWeeklyUsage.map((item) => {
+                      const widthPct =
+                        hashtagMaxWeeklyTokens > 0 ? (item.totalTokens / hashtagMaxWeeklyTokens) * 100 : 0;
+                      return (
+                        <div
+                          key={`hashtag-week-${item.weekIndex}`}
+                          data-testid={`hashtag-weekly-usage-row-${item.weekIndex}`}
+                          className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
+                        >
+                          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                            <span className="font-semibold text-zinc-800">{item.label}</span>
+                            <span className="text-xs text-zinc-500">
+                              {formatInteger(item.totalTokens)} uses · {formatInteger(item.uniqueTokens)} unique
+                            </span>
+                          </div>
+                          <div className="h-2 rounded-full bg-zinc-200">
+                            <div
+                              className="h-2 rounded-full bg-zinc-700"
+                              style={{ width: `${Math.min(100, Math.max(0, widthPct))}%` }}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </article>
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Observed Hashtags</h4>
+
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm xl:col-span-2">
+                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Platform Hashtag Distribution</h4>
                 <p className="-mt-1 mb-4 text-xs text-zinc-500">
-                  Extracted from leaderboard text in the selected platform scope.
+                  Share of hashtag usage by platform for the selected scope.
                 </p>
-                {observedHashtagCounts.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No observed hashtags found in current leaderboard content.</p>
+                {hashtagUsageLoading ? (
+                  <p className="text-sm text-zinc-500">Loading hashtag analytics...</p>
+                ) : hashtagPlatformUsage.length === 0 || hashtagTotalTokens === 0 ? (
+                  <p className="text-sm text-zinc-500">No platform hashtag distribution available.</p>
                 ) : (
-                  <ul className="space-y-2">
-                    {observedHashtagCounts.slice(0, 30).map((item) => (
-                      <li key={item.tag} className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm">
-                        <span className="font-semibold text-zinc-800">#{item.tag}</span>
-                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                          {item.count} mention{item.count === 1 ? "" : "s"}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="space-y-2">
+                    {hashtagPlatformUsage.map((item) => {
+                      const widthPct =
+                        hashtagMaxPlatformTokens > 0 ? (item.count / hashtagMaxPlatformTokens) * 100 : 0;
+                      const sharePct = hashtagTotalTokens > 0 ? (item.count / hashtagTotalTokens) * 100 : 0;
+                      return (
+                        <div
+                          key={`hashtag-platform-${item.platform}`}
+                          data-testid={`hashtag-platform-usage-row-${item.platform}`}
+                          className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
+                        >
+                          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                            <span className="font-semibold text-zinc-800">{item.label}</span>
+                            <span className="text-xs text-zinc-500">
+                              {formatInteger(item.count)} uses · {sharePct.toFixed(1)}%
+                            </span>
+                          </div>
+                          <div className="h-2 rounded-full bg-zinc-200">
+                            <div
+                              className="h-2 rounded-full bg-zinc-700"
+                              style={{ width: `${Math.min(100, Math.max(0, widthPct))}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </article>
             </section>

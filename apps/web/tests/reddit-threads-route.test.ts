@@ -104,7 +104,12 @@ describe("/api/admin/reddit/threads route", () => {
 
     expect(response.status).toBe(201);
     expect(payload.thread?.id).toBe("thread-1");
-    expect(createRedditThreadMock).toHaveBeenCalled();
+    expect(createRedditThreadMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        sourceKind: "manual",
+      }),
+    );
   });
 
   it("returns 400 when POST IDs are invalid UUIDs", async () => {

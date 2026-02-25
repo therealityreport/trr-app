@@ -29,6 +29,13 @@ export type PersonAdminTab =
   | "credits"
   | "fandom";
 
+export type SocialAnalyticsViewSlug =
+  | "bravo"
+  | "reddit"
+  | "hashtags"
+  | "sentiment"
+  | "advanced";
+
 type RouteSource = "path" | "query" | "default";
 
 export type ParsedShowRouteState = {
@@ -48,12 +55,15 @@ export type ParsedPersonRouteState = {
   source: RouteSource;
 };
 
+const SHOWS_ROOT_PATH = "/shows";
+
 const SHOW_TAB_BY_PATH_SEGMENT: Record<string, ShowAdminTab> = {
   overview: "details",
   details: "details",
   settings: "settings",
   seasons: "seasons",
   assets: "assets",
+  media: "assets",
   news: "news",
   cast: "cast",
   surveys: "surveys",
@@ -89,6 +99,7 @@ const SEASON_TAB_BY_PATH_SEGMENT: Record<string, SeasonAdminTab> = {
   details: "overview",
   episodes: "episodes",
   assets: "assets",
+  media: "assets",
   videos: "videos",
   fandom: "fandom",
   cast: "cast",
@@ -135,6 +146,15 @@ const PERSON_TAB_BY_QUERY_ALIAS: Record<string, PersonAdminTab> = {
   fandom: "fandom",
 };
 
+const SOCIAL_ANALYTICS_VIEW_SLUG_ALIASES: Record<string, SocialAnalyticsViewSlug> = {
+  bravo: "bravo",
+  reddit: "reddit",
+  hashtags: "hashtags",
+  hashtag: "hashtags",
+  sentiment: "sentiment",
+  advanced: "advanced",
+};
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -157,46 +177,77 @@ const toSegments = (pathname: string): string[] => {
     });
 };
 
-const getShowBaseSegments = (pathname: string): string[] | null => {
+const isSeasonToken = (value: string): boolean => /^s[0-9]{1,3}$/i.test(value);
+
+const getShowPathContext = (pathname: string): { route: "admin" | "shows"; slugIndex: number; segments: string[] } | null => {
   const segments = toSegments(pathname);
+
+  if (segments.length >= 2 && normalizeSegment(segments[0]) === "shows") {
+    return { route: "shows", slugIndex: 1, segments };
+  }
+
   const showIndex = segments.findIndex(
-    (segment, idx) => segment === "trr-shows" && idx > 0 && segments[idx - 1] === "admin"
+    (segment, idx) => normalizeSegment(segment) === "trr-shows" && idx > 0 && normalizeSegment(segments[idx - 1]) === "admin",
   );
   if (showIndex < 0) return null;
-  const showSlugIndex = showIndex + 1;
-  if (showSlugIndex >= segments.length) return null;
-  return segments.slice(showSlugIndex + 1);
+
+  return { route: "admin", slugIndex: showIndex + 1, segments };
+};
+
+const getShowBaseSegments = (pathname: string): string[] | null => {
+  const context = getShowPathContext(pathname);
+  if (!context) return null;
+  if (context.slugIndex >= context.segments.length) return null;
+
+  const base = context.segments.slice(context.slugIndex + 1);
+  if (base.length > 0 && isSeasonToken(normalizeSegment(base[0]))) {
+    return null;
+  }
+  return base;
 };
 
 const getSeasonBaseSegments = (pathname: string): string[] | null => {
-  const showSegments = getShowBaseSegments(pathname);
-  if (!showSegments || showSegments.length < 2) return null;
-  if (normalizeSegment(showSegments[0]) !== "seasons") return null;
-  return showSegments.slice(2);
+  const context = getShowPathContext(pathname);
+  if (!context) return null;
+  if (context.slugIndex >= context.segments.length) return null;
+
+  const afterShow = context.segments.slice(context.slugIndex + 1);
+  if (afterShow.length === 0) return null;
+
+  const first = normalizeSegment(afterShow[0]);
+  if (context.route === "admin" || first === "seasons") {
+    if (afterShow.length < 2) return null;
+    if (normalizeSegment(afterShow[0]) !== "seasons") return null;
+    return afterShow.slice(2);
+  }
+
+  if (isSeasonToken(first)) {
+    return afterShow.slice(1);
+  }
+
+  return null;
 };
 
 const getPersonBaseSegments = (pathname: string): string[] | null => {
-  const segments = toSegments(pathname);
-  const showIndex = segments.findIndex(
-    (segment, idx) => segment === "trr-shows" && idx > 0 && segments[idx - 1] === "admin"
-  );
-  if (showIndex < 0) return null;
+  const context = getShowPathContext(pathname);
+  if (!context) return null;
+  if (context.slugIndex >= context.segments.length) return null;
 
-  const showSlugIndex = showIndex + 1;
-  if (showSlugIndex >= segments.length) return null;
-
-  if (normalizeSegment(segments[showSlugIndex]) === "people") {
-    if (showSlugIndex + 1 >= segments.length) return null;
-    return segments.slice(showSlugIndex + 2);
+  const afterShow = context.segments.slice(context.slugIndex + 1);
+  if (afterShow.length >= 2 && normalizeSegment(afterShow[0]) === "people") {
+    return afterShow.slice(2);
   }
 
-  if (normalizeSegment(segments[showSlugIndex + 1]) !== "people") {
-    return null;
+  // Legacy /admin/trr-shows/people/:personId shape.
+  if (
+    context.route === "admin" &&
+    normalizeSegment(context.segments[context.slugIndex]) === "people"
+  ) {
+    if (context.slugIndex + 1 >= context.segments.length) return null;
+    return context.segments.slice(context.slugIndex + 2);
   }
-  if (showSlugIndex + 2 >= segments.length) {
-    return null;
-  }
-  return segments.slice(showSlugIndex + 3);
+
+  return null;
 };
 
 const appendQuery = (path: string, query?: URLSearchParams): string => {
@@ -204,6 +255,37 @@ const appendQuery = (path: string, query?: URLSearchParams): string => {
   const queryString = query.toString();
   return queryString ? `${path}?${queryString}` : path;
 };
+
+const normalizeSocialAnalyticsViewSlug = (value: string | null | undefined): SocialAnalyticsViewSlug | null => {
+  const normalized = normalizeSegment(value);
+  if (!normalized) return null;
+  return SOCIAL_ANALYTICS_VIEW_SLUG_ALIASES[normalized] ?? null;
+};
+
+const buildCanonicalQuery = (query: URLSearchParams | undefined, opts?: { removeSocialView?: boolean }): URLSearchParams => {
+  const next = new URLSearchParams(query?.toString() ?? "");
+  next.delete("tab");
+  next.delete("scope");
+  next.delete("assets");
+  if (opts?.removeSocialView) {
+    next.delete("social_view");
+  }
+  return next;
+};
+
+export function parseSocialAnalyticsViewFromPath(pathname: string): SocialAnalyticsViewSlug | null {
+  const showSegments = getShowBaseSegments(pathname);
+  if (showSegments && normalizeSegment(showSegments[0]) === "social") {
+    return normalizeSocialAnalyticsViewSlug(showSegments[1]);
+  }
+
+  const seasonSegments = getSeasonBaseSegments(pathname);
+  if (seasonSegments && normalizeSegment(seasonSegments[0]) === "social") {
+    return normalizeSocialAnalyticsViewSlug(seasonSegments[1]);
+  }
+
+  return null;
+}
 
 export function cleanLegacyRoutingQuery(searchParams: URLSearchParams): URLSearchParams {
   const next = new URLSearchParams(searchParams.toString());
@@ -222,7 +304,7 @@ export function cleanLegacyPersonRoutingQuery(searchParams: URLSearchParams): UR
 
 export function parseShowRouteState(
   pathname: string,
-  searchParams: URLSearchParams
+  searchParams: URLSearchParams,
 ): ParsedShowRouteState {
   const showSegments = getShowBaseSegments(pathname);
   if (showSegments && showSegments.length > 0) {
@@ -232,7 +314,7 @@ export function parseShowRouteState(
       let assetsSubTab: ShowAssetsSubTab = "images";
       if (first === "media-videos") assetsSubTab = "videos";
       if (first === "media-brand") assetsSubTab = "brand";
-      if (first === "assets") {
+      if (first === "assets" || first === "media") {
         const second = normalizeSegment(showSegments[1]);
         assetsSubTab = SHOW_ASSETS_SUBTAB_BY_SEGMENT[second] ?? "images";
       }
@@ -266,13 +348,13 @@ export function parseShowRouteState(
 
 export function parseSeasonRouteState(
   pathname: string,
-  searchParams: URLSearchParams
+  searchParams: URLSearchParams,
 ): ParsedSeasonRouteState {
   const seasonSegments = getSeasonBaseSegments(pathname);
   if (seasonSegments) {
     const first = normalizeSegment(seasonSegments[0]);
     if (first) {
-      if (first === "assets") {
+      if (first === "assets" || first === "media") {
         const second = normalizeSegment(seasonSegments[1]);
         return {
           tab: "assets",
@@ -315,7 +397,7 @@ export function parseSeasonRouteState(
 
 export function parsePersonRouteState(
   pathname: string,
-  searchParams: URLSearchParams
+  searchParams: URLSearchParams,
 ): ParsedPersonRouteState {
   const personSegments = getPersonBaseSegments(pathname);
   if (personSegments && personSegments.length > 0) {
@@ -360,25 +442,33 @@ export function buildShowAdminUrl(input: {
   tab?: ShowAdminTab;
   assetsSubTab?: ShowAssetsSubTab;
   query?: URLSearchParams;
+  socialView?: SocialAnalyticsViewSlug;
 }): string {
   const slug = encodeURIComponent(input.showSlug.trim());
   const tab = input.tab ?? "details";
   const assetsSubTab = input.assetsSubTab ?? "images";
-  const base = `/admin/trr-shows/${slug}`;
+  const base = `${SHOWS_ROOT_PATH}/${slug}`;
 
   if (tab === "details") {
-    return appendQuery(base, input.query);
+    return appendQuery(base, buildCanonicalQuery(input.query));
   }
+
   if (tab === "assets") {
-    if (assetsSubTab === "videos") {
-      return appendQuery(`${base}/media-videos`, input.query);
+    const nextQuery = buildCanonicalQuery(input.query);
+    if (assetsSubTab !== "images") {
+      nextQuery.set("assets", assetsSubTab);
     }
-    if (assetsSubTab === "brand") {
-      return appendQuery(`${base}/media-brand`, input.query);
-    }
-    return appendQuery(`${base}/media-gallery`, input.query);
+    return appendQuery(`${base}/media`, nextQuery);
   }
-  return appendQuery(`${base}/${tab}`, input.query);
+
+  if (tab === "social") {
+    const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+    const socialView =
+      input.socialView ?? normalizeSocialAnalyticsViewSlug(input.query?.get("social_view")) ?? "bravo";
+    return appendQuery(`${base}/social/${socialView}`, nextQuery);
+  }
+
+  return appendQuery(`${base}/${tab}`, buildCanonicalQuery(input.query));
 }
 
 export function buildPersonAdminUrl(input: {
@@ -400,25 +490,34 @@ export function buildSeasonAdminUrl(input: {
   tab?: SeasonAdminTab;
   assetsSubTab?: SeasonAssetsSubTab;
   query?: URLSearchParams;
+  socialView?: SocialAnalyticsViewSlug;
 }): string {
   const slug = encodeURIComponent(input.showSlug.trim());
   const season = encodeURIComponent(String(input.seasonNumber));
   const tab = input.tab ?? "overview";
   const assetsSubTab = input.assetsSubTab ?? "media";
-  const base = `/admin/trr-shows/${slug}/seasons/${season}`;
-  const nextQuery = new URLSearchParams(input.query?.toString() ?? "");
+  const base = `${SHOWS_ROOT_PATH}/${slug}/s${season}`;
+
   if (tab === "overview") {
-    nextQuery.delete("tab");
-    nextQuery.delete("assets");
-    return appendQuery(base, nextQuery);
+    return appendQuery(base, buildCanonicalQuery(input.query));
   }
-  nextQuery.set("tab", tab);
+
   if (tab === "assets") {
-    nextQuery.set("assets", assetsSubTab);
-  } else {
-    nextQuery.delete("assets");
+    const nextQuery = buildCanonicalQuery(input.query);
+    if (assetsSubTab !== "media") {
+      nextQuery.set("assets", assetsSubTab);
+    }
+    return appendQuery(`${base}/media`, nextQuery);
   }
-  return appendQuery(base, nextQuery);
+
+  if (tab === "social") {
+    const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+    const socialView =
+      input.socialView ?? normalizeSocialAnalyticsViewSlug(input.query?.get("social_view")) ?? "bravo";
+    return appendQuery(`${base}/social/${socialView}`, nextQuery);
+  }
+
+  return appendQuery(`${base}/${tab}`, buildCanonicalQuery(input.query));
 }
 
 export function buildSeasonSocialWeekUrl(input: {
@@ -430,6 +529,6 @@ export function buildSeasonSocialWeekUrl(input: {
   const slug = encodeURIComponent(input.showSlug.trim());
   const season = encodeURIComponent(String(input.seasonNumber));
   const week = encodeURIComponent(String(input.weekIndex));
-  const base = `/admin/trr-shows/${slug}/seasons/${season}/social/week/${week}`;
+  const base = `${SHOWS_ROOT_PATH}/${slug}/s${season}/social/week/${week}`;
   return appendQuery(base, input.query);
 }

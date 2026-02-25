@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
@@ -134,8 +136,16 @@ const csvEscape = (value: string): string => {
 };
 
 export default function AdminNetworksPage() {
+  const pathname = usePathname();
   const { user, checking, hasAccess } = useAdminGuard();
   const userIdentity = user?.email ?? user?.uid ?? null;
+  const isProductionCompaniesPage = pathname === "/admin/production-companies";
+  const isLegacyNetworksPage = pathname === "/admin/networks";
+  const activeBrandsTab = isProductionCompaniesPage ? "production-companies" : "networks-streaming";
+  const pageTitle = isProductionCompaniesPage ? "Production Companies" : "Network & Streaming Services";
+  const pageDescription = isProductionCompaniesPage
+    ? "Production company coverage and sync health from the full Supabase show inventory."
+    : "Coverage and sync health across network and streaming brand dimensions from the full Supabase show inventory.";
 
   const [summary, setSummary] = useState<NetworksStreamingSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
@@ -144,6 +154,7 @@ export default function AdminNetworksPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<NetworksStreamingSyncResult | null>(null);
+  const [showCompletionProgress, setShowCompletionProgress] = useState(false);
   const [showUnresolved, setShowUnresolved] = useState(false);
   const [refreshExternalSources, setRefreshExternalSources] = useState(false);
 
@@ -152,7 +163,17 @@ export default function AdminNetworksPage() {
   const [overridesLoading, setOverridesLoading] = useState(false);
   const [overridesError, setOverridesError] = useState<string | null>(null);
   const [savingOverrideKey, setSavingOverrideKey] = useState<string | null>(null);
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>(isProductionCompaniesPage ? "production" : "all");
+
+  useEffect(() => {
+    if (isProductionCompaniesPage) {
+      setTypeFilter("production");
+      return;
+    }
+    if (isLegacyNetworksPage) {
+      setTypeFilter("all");
+    }
+  }, [isLegacyNetworksPage, isProductionCompaniesPage]);
 
   const fetchWithAuth = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
@@ -162,8 +183,11 @@ export default function AdminNetworksPage() {
     [user],
   );
 
-  const loadNetworksStreamingSummary = useCallback(async () => {
-    setSummaryLoading(true);
+  const loadNetworksStreamingSummary = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setSummaryLoading(true);
+    }
     setSummaryError(null);
     try {
       const response = await fetchWithAuth("/api/admin/networks-streaming/summary", {
@@ -182,7 +206,9 @@ export default function AdminNetworksPage() {
       setSummaryError(message);
       setSummary(null);
     } finally {
-      setSummaryLoading(false);
+      if (!silent) {
+        setSummaryLoading(false);
+      }
     }
   }, [fetchWithAuth]);
 
@@ -222,6 +248,17 @@ export default function AdminNetworksPage() {
     }
   }, [checking, hasAccess, loadNetworksStreamingSummary, loadOverrides, userIdentity]);
 
+  useEffect(() => {
+    if (!syncing || checking || !userIdentity || !hasAccess) return;
+
+    const pollSummary = () => {
+      void loadNetworksStreamingSummary({ silent: true });
+    };
+    pollSummary();
+    const intervalId = window.setInterval(pollSummary, 3500);
+    return () => window.clearInterval(intervalId);
+  }, [checking, hasAccess, loadNetworksStreamingSummary, syncing, userIdentity]);
+
   const onSyncNetworksStreaming = useCallback(
     async (options?: {
       unresolvedOnly?: boolean;
@@ -230,6 +267,7 @@ export default function AdminNetworksPage() {
       entityKeys?: string[];
     }) => {
       const unresolvedOnly = Boolean(options?.unresolvedOnly);
+      setShowCompletionProgress(true);
       setSyncing(true);
       setSyncError(null);
       if (!unresolvedOnly) {
@@ -271,10 +309,23 @@ export default function AdminNetworksPage() {
         setSyncError(message);
       } finally {
         setSyncing(false);
+        setShowCompletionProgress(false);
       }
     },
     [fetchWithAuth, loadNetworksStreamingSummary, loadOverrides, refreshExternalSources],
   );
+
+  const onRefreshSummary = useCallback(() => {
+    const refreshSummary = async () => {
+      setShowCompletionProgress(true);
+      try {
+        await loadNetworksStreamingSummary();
+      } finally {
+        setShowCompletionProgress(false);
+      }
+    };
+    void refreshSummary();
+  }, [loadNetworksStreamingSummary]);
 
   const unresolvedRows = useMemo(() => {
     if (syncResult?.unresolved_logos && syncResult.unresolved_logos.length > 0) {
@@ -459,7 +510,7 @@ export default function AdminNetworksPage() {
     const href = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = href;
-    a.download = "networks-streaming-unresolved.csv";
+    a.download = "brands-unresolved.csv";
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -471,7 +522,7 @@ export default function AdminNetworksPage() {
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
         <div className="text-center">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
-          <p className="text-sm text-zinc-600">Preparing networks dashboard...</p>
+          <p className="text-sm text-zinc-600">Preparing brands dashboard...</p>
         </div>
       </div>
     );
@@ -487,11 +538,10 @@ export default function AdminNetworksPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Networks & Streaming", "/admin/networks")} className="mb-1" />
-              <h1 className="break-words text-3xl font-bold text-zinc-900">Networks &amp; Streaming</h1>
-              <p className="break-words text-sm text-zinc-500">
-                Coverage and sync health across network/streaming/production dimensions from the full Supabase show inventory.
-              </p>
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Brands", "/admin/brands")} className="mb-1" />
+              <h1 className="break-words text-3xl font-bold text-zinc-900">{pageTitle}</h1>
+              <p className="break-words text-sm text-zinc-500">{pageDescription}</p>
+              <BrandsTabs activeTab={activeBrandsTab} className="mt-4" />
             </div>
             <div className="flex flex-wrap gap-3">
               <Link
@@ -538,12 +588,26 @@ export default function AdminNetworksPage() {
                       {completionStats.gatePassed ? "100% Ready" : "Manual Fixes Required"}
                     </span>
                   </div>
-                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-zinc-200">
-                    <div className="h-full bg-zinc-900" style={{ width: `${Math.min(100, completionStats.percent)}%` }} />
-                  </div>
-                  <p className="mt-2 text-xs text-zinc-700">
-                    Resolved {completionStats.resolved} / {completionStats.total} ({completionStats.percent.toFixed(2)}%)
-                  </p>
+                  {showCompletionProgress ? (
+                    <>
+                      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-zinc-200">
+                        <div
+                          data-testid="completion-gate-progress-bar"
+                          className={`h-full bg-zinc-900 transition-[width] duration-500 ${
+                            syncing || summaryLoading ? "animate-pulse" : ""
+                          }`}
+                          style={{ width: `${Math.min(100, completionStats.percent)}%` }}
+                        />
+                      </div>
+                      <p className="mt-2 text-xs text-zinc-700">
+                        Resolved {completionStats.resolved} / {completionStats.total} ({completionStats.percent.toFixed(2)}%)
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-xs text-zinc-700">
+                      Progress bar appears after a manual Refresh or Sync run.
+                    </p>
+                  )}
                 </div>
                 <p className="text-xs text-zinc-600">
                   Production logos are optional and tracked separately as backlog.
@@ -552,7 +616,7 @@ export default function AdminNetworksPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void loadNetworksStreamingSummary()}
+                  onClick={onRefreshSummary}
                   disabled={summaryLoading || syncing}
                   className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -564,7 +628,7 @@ export default function AdminNetworksPage() {
                   disabled={syncing}
                   className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-500"
                 >
-                  {syncing ? "Syncing..." : "Sync/Mirror Networks & Streaming"}
+                  {syncing ? "Syncing..." : "Sync/Mirror Brands"}
                 </button>
                 <button
                   type="button"
@@ -664,39 +728,43 @@ export default function AdminNetworksPage() {
 
             <div className="mt-4 overflow-x-auto">
               <div className="mb-3 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTypeFilter("all")}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                    typeFilter === "all"
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
-                  }`}
-                >
-                  Both
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTypeFilter("network")}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                    typeFilter === "network"
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
-                  }`}
-                >
-                  Network
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTypeFilter("streaming")}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                    typeFilter === "streaming"
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
-                  }`}
-                >
-                  Streaming Services
-                </button>
+                {!isProductionCompaniesPage ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setTypeFilter("all")}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        typeFilter === "all"
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTypeFilter("network")}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        typeFilter === "network"
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      Network
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTypeFilter("streaming")}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        typeFilter === "streaming"
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      Streaming Services
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setTypeFilter("production")}
@@ -706,14 +774,14 @@ export default function AdminNetworksPage() {
                       : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
                   }`}
                 >
-                  Production
+                  Production Companies
                 </button>
               </div>
               <table className="min-w-full divide-y divide-zinc-200 text-sm">
                 <thead className="bg-zinc-50">
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold text-zinc-700">Type</th>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Network / Streaming / Production</th>
+                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Brand</th>
                     <th className="px-3 py-2 text-right font-semibold text-zinc-700">Available Shows</th>
                     <th className="px-3 py-2 text-right font-semibold text-zinc-700">Added Shows</th>
                     <th className="px-3 py-2 text-left font-semibold text-zinc-700">Logo</th>
@@ -726,7 +794,7 @@ export default function AdminNetworksPage() {
                   {summaryLoading ? (
                     <tr>
                       <td colSpan={8} className="px-3 py-8 text-center text-zinc-500">
-                        Loading networks and streaming summary...
+                        Loading brands summary...
                       </td>
                     </tr>
                   ) : null}
@@ -753,7 +821,7 @@ export default function AdminNetworksPage() {
                             </td>
                             <td className="max-w-[300px] px-3 py-2 font-medium text-zinc-900 [overflow-wrap:anywhere]">
                               <Link
-                                href={`/admin/networks/${row.type}/${toEntitySlug(row.name)}`}
+                                href={`/admin/networks-and-streaming/${row.type}/${toEntitySlug(row.name)}`}
                                 className="text-zinc-900 underline-offset-2 hover:underline"
                               >
                                 {row.name}

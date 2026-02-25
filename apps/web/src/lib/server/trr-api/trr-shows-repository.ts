@@ -415,16 +415,32 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
            )
          ) AS slug
        FROM core.shows AS s
-       WHERE lower(
-         trim(
-           both '-' FROM regexp_replace(
-             regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
-             '[^a-z0-9]+',
-             '-',
-             'gi'
+       WHERE (
+         lower(
+           trim(
+             both '-' FROM regexp_replace(
+               regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
+               '[^a-z0-9]+',
+               '-',
+               'gi'
+             )
            )
+         ) = $1
+         OR EXISTS (
+           SELECT 1
+           FROM unnest(COALESCE(s.alternative_names, ARRAY[]::text[])) AS alt(name)
+           WHERE lower(
+             trim(
+               both '-' FROM regexp_replace(
+                 regexp_replace(COALESCE(alt.name, ''), '&', ' and ', 'gi'),
+                 '[^a-z0-9]+',
+                 '-',
+                 'gi'
+               )
+             )
+           ) = $1
          )
-       ) = $1
+       )
        ORDER BY s.id ASC`,
       [baseSlug]
     );

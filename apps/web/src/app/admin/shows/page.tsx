@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -33,21 +34,15 @@ function CastGrid({ season }: { season: SeasonAssets }) {
       {season.cast.map((member) => (
         <div key={member.name} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:shadow-md">
           <div className="relative mb-3 aspect-square overflow-hidden rounded-xl bg-zinc-50">
-            <Image
-              src={member.image}
-              alt={member.name}
-              fill
-              sizes="200px"
-              className="object-cover"
-            />
+            <Image src={member.image} alt={member.name} fill sizes="200px" className="object-cover" />
           </div>
           <p className="text-base font-semibold text-zinc-900">{member.name}</p>
-          {member.role && <p className="text-sm text-zinc-500">{member.role}</p>}
-          {member.status && (
+          {member.role ? <p className="text-sm text-zinc-500">{member.role}</p> : null}
+          {member.status ? (
             <span className="mt-2 inline-flex rounded-full border border-zinc-200 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-zinc-600">
               {member.status}
             </span>
-          )}
+          ) : null}
         </div>
       ))}
     </div>
@@ -70,7 +65,7 @@ export default function AdminShowsPage() {
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-600">Loading admin access…</p>
+        <p className="text-sm text-zinc-600">Loading admin access...</p>
       </div>
     );
   }
@@ -85,9 +80,10 @@ export default function AdminShowsPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-5">
           <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows Assets", "/admin/shows")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Brands", "/admin/brands")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">{activeShow.title}</h1>
               <p className="text-sm text-zinc-500">{activeShow.logline}</p>
+              <BrandsTabs activeTab="shows" className="mt-4" />
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <select
@@ -127,13 +123,13 @@ export default function AdminShowsPage() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.4em] text-zinc-400">{activeShow.network}</p>
                   <h2 className="text-2xl font-bold text-zinc-900">{activeSeason.label}</h2>
-                  {activeSeason.description && <p className="mt-1 text-sm text-zinc-600">{activeSeason.description}</p>}
+                  {activeSeason.description ? <p className="mt-1 text-sm text-zinc-600">{activeSeason.description}</p> : null}
                 </div>
-                {activeSeason.showIcon && (
+                {activeSeason.showIcon ? (
                   <div className="relative h-16 w-16">
                     <Image src={activeSeason.showIcon} alt={`${activeShow.shortTitle} icon`} fill sizes="64px" className="object-contain" />
                   </div>
-                )}
+                ) : null}
               </div>
               <div className="mt-6 flex flex-wrap gap-4">
                 <ColorBadge label="Primary" value={activeSeason.colors.primary} />
@@ -144,9 +140,10 @@ export default function AdminShowsPage() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-semibold text-zinc-900">Notes</h3>
               <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-zinc-600">
-                {activeSeason.notes?.map((note) => <li key={note}>{note}</li>) ?? (
-                  <li>No season notes yet. Add color references or brand guidelines here.</li>
-                )}
+                {(activeSeason.notes ?? []).map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+                {activeSeason.notes?.length ? null : <li>No season notes yet. Add color references or brand guidelines here.</li>}
               </ul>
             </div>
           </section>

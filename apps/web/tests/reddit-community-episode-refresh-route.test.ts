@@ -8,6 +8,7 @@ const {
   getSeasonByIdMock,
   getSeasonsByShowIdMock,
   getEpisodesBySeasonIdMock,
+  getEpisodesByShowAndSeasonMock,
   createRedditThreadMock,
   discoverEpisodeDiscussionThreadsMock,
 } = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const {
   getSeasonByIdMock: vi.fn(),
   getSeasonsByShowIdMock: vi.fn(),
   getEpisodesBySeasonIdMock: vi.fn(),
+  getEpisodesByShowAndSeasonMock: vi.fn(),
   createRedditThreadMock: vi.fn(),
   discoverEpisodeDiscussionThreadsMock: vi.fn(),
 }));
@@ -35,6 +37,7 @@ vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getSeasonById: getSeasonByIdMock,
   getSeasonsByShowId: getSeasonsByShowIdMock,
   getEpisodesBySeasonId: getEpisodesBySeasonIdMock,
+  getEpisodesByShowAndSeason: getEpisodesByShowAndSeasonMock,
 }));
 
 vi.mock("@/lib/server/admin/reddit-discovery-service", () => ({
@@ -63,6 +66,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     getSeasonByIdMock.mockReset();
     getSeasonsByShowIdMock.mockReset();
     getEpisodesBySeasonIdMock.mockReset();
+    getEpisodesByShowAndSeasonMock.mockReset();
     createRedditThreadMock.mockReset();
     discoverEpisodeDiscussionThreadsMock.mockReset();
 
@@ -100,6 +104,16 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       {
         id: "ep-1",
         season_id: SEASON_ID,
+        episode_number: 4,
+        air_date: "2026-02-24",
+      },
+    ]);
+    getEpisodesByShowAndSeasonMock.mockResolvedValue([
+      {
+        id: "ep-1",
+        season_id: SEASON_ID,
+        show_id: SHOW_ID,
+        season_number: 6,
         episode_number: 4,
         air_date: "2026-02-24",
       },
@@ -156,6 +170,21 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
           total_upvotes: 120,
         },
       ],
+      expected_episode_count: 1,
+      expected_episode_numbers: [4],
+      coverage_found_episode_count: 1,
+      coverage_expected_slots: 3,
+      coverage_found_slots: 1,
+      coverage_missing_slots: [
+        { episode_number: 4, discussion_type: "post" },
+        { episode_number: 4, discussion_type: "weekly" },
+      ],
+      discovery_source_summary: {
+        listing_count: 65,
+        search_count: 2,
+        search_pages_fetched: 5,
+        gap_fill_queries_run: 1,
+      },
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
@@ -184,6 +213,21 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     expect(payload.meta?.successful_sorts).toEqual(["new"]);
     expect(payload.meta?.failed_sorts).toEqual([]);
     expect(payload.meta?.rate_limited_sorts).toEqual([]);
+    expect(payload.meta?.expected_episode_count).toBe(1);
+    expect(payload.meta?.expected_episode_numbers).toEqual([4]);
+    expect(payload.meta?.coverage_found_episode_count).toBe(1);
+    expect(payload.meta?.coverage_expected_slots).toBe(3);
+    expect(payload.meta?.coverage_found_slots).toBe(1);
+    expect(payload.meta?.coverage_missing_slots).toEqual([
+      { episode_number: 4, discussion_type: "post" },
+      { episode_number: 4, discussion_type: "weekly" },
+    ]);
+    expect(payload.meta?.discovery_source_summary).toEqual({
+      listing_count: 65,
+      search_count: 2,
+      search_pages_fetched: 5,
+      gap_fill_queries_run: 1,
+    });
     expect(payload.meta?.effective_episode_title_patterns).toEqual([
       "Live Episode Discussion",
       "Post Episode Discussion",
@@ -198,6 +242,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
           "Weekly Episode Discussion",
         ],
         episodeRequiredFlares: ["Salt Lake City"],
+        seasonEpisodes: [{ episode_number: 4, air_date: "2026-02-24" }],
       }),
     );
     expect(getSeasonsByShowIdMock).toHaveBeenCalledWith(
@@ -205,6 +250,15 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       expect.objectContaining({
         includeEpisodeSignal: true,
       }),
+    );
+    expect(getEpisodesBySeasonIdMock).toHaveBeenCalledWith(
+      SEASON_ID,
+      expect.objectContaining({ limit: 500, offset: 0 }),
+    );
+    expect(getEpisodesByShowAndSeasonMock).toHaveBeenCalledWith(
+      SHOW_ID,
+      6,
+      expect.objectContaining({ limit: 500, offset: 0 }),
     );
     expect(createRedditThreadMock).not.toHaveBeenCalled();
   });
@@ -489,9 +543,75 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       expect.objectContaining({
         communityId: COMMUNITY_ID,
         trrSeasonId: SEASON_ID,
+        sourceKind: "episode_discussion",
         redditPostId: "eligible-post",
       }),
     );
+  });
+
+  it("sync=true resolves episode air dates when season episode_number values are numeric strings", async () => {
+    discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
+      subreddit: "BravoRealHousewives",
+      fetched_at: "2026-02-24T12:00:00.000Z",
+      sources_fetched: ["new"],
+      successful_sorts: ["new"],
+      failed_sorts: [],
+      rate_limited_sorts: [],
+      candidates: [
+        {
+          reddit_post_id: "eligible-post",
+          title:
+            "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/eligible-post/test/",
+          permalink: "/r/BravoRealHousewives/comments/eligible-post/test/",
+          author: "AutoModerator",
+          score: 120,
+          num_comments: 55,
+          posted_at: "2026-02-24T23:20:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 1,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      filters_applied: {
+        season_number: 6,
+        title_patterns: ["Live Episode Discussion"],
+        required_flares: ["Salt Lake City"],
+        show_focused: false,
+        period_start: null,
+        period_end: null,
+      },
+    });
+    getEpisodesBySeasonIdMock.mockResolvedValueOnce([
+      {
+        id: "ep-1",
+        season_id: SEASON_ID,
+        episode_number: "1",
+        air_date: "2026-02-24",
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?sync=true`,
+      { method: "GET" },
+    );
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.sync_auto_saved_count).toBe(1);
+    expect(payload.meta?.sync_candidate_results).toEqual([
+      expect.objectContaining({
+        reddit_post_id: "eligible-post",
+        status: "auto_saved",
+        reason_code: "auto_saved_success",
+      }),
+    ]);
+    expect(createRedditThreadMock).toHaveBeenCalledTimes(1);
   });
 
   it("sync=true tracks cross-community conflicts without failing", async () => {

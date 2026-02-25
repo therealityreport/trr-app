@@ -113,7 +113,12 @@ function isStaticPath(pathname: string): boolean {
 }
 
 function isAdminUiPath(pathname: string): boolean {
-  return pathname === "/admin" || pathname.startsWith("/admin/");
+  return (
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname === "/shows" ||
+    pathname.startsWith("/shows/")
+  );
 }
 
 function isAdminApiPath(pathname: string): boolean {

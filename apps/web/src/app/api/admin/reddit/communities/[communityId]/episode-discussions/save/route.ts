@@ -254,6 +254,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           trrShowId: community.trr_show_id,
           trrShowName: community.trr_show_name,
           trrSeasonId: typeof seasonId === "string" ? seasonId : null,
+          sourceKind: "episode_discussion",
           redditPostId: thread.reddit_post_id,
           title: thread.title,
           url: thread.url,

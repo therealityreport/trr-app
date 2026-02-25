@@ -2,6 +2,290 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-25) — Reddit community shell parity + dedicated UX alignment
+
+- February 25, 2026: implemented dedicated Reddit community page parity with season Reddit Analytics shell, dedicated community UX simplification, and episode-discussion source labeling display in `TRR-APP`.
+  - primary_skill: `orchestrate-plan-execution`
+  - supporting_skills: `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+  - mcp_tools_used:
+    - primary: `functions.exec_command`
+    - fallback: `functions.apply_patch`
+  - delegation_map:
+    - role: `Design Context Owner`
+      scope: `map season Reddit Analytics shell parity requirements to dedicated community route`
+      deliverable: `breadcrumb/title/back/tabs parity contract plus community-body-only content boundaries`
+      verification_command: `pnpm -C apps/web exec vitest run tests/reddit-community-view-page.test.tsx`
+      status: `completed`
+    - role: `UI Implementer`
+      scope: `community route + manager rendering updates for dedicated mode`
+      deliverable: `season shell parity, dedicated heading/actions cleanup, all-period episode refresh controls, assigned threads collapsible, EPISODE DISCUSSION badge mapping`
+      verification_command: `pnpm -C apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-view-page.test.tsx`
+      status: `completed`
+    - role: `API Integration Owner`
+      scope: `episode-discussion source provenance write-path verification and migration application`
+      deliverable: `episode refresh/save/manual-thread write path sourceKind assertions covered and migration 029 applied in local DB`
+      verification_command: `pnpm -C apps/web run db:migrate`
+      status: `completed`
+    - role: `QA Owner`
+      scope: `regression coverage updates across route/page/manager surfaces`
+      deliverable: `updated tests for dedicated shell, controls, and source-kind behavior with passing targeted suite`
+      verification_command: `pnpm -C apps/web exec vitest run tests/reddit-community-view-page.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts tests/reddit-threads-route.test.ts tests/reddit-communities-route.test.ts`
+      status: `completed`
+  - risk_class: `code_first`
+  - files_changed:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/reddit/communities/[communityId]/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-view-page.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-refresh-route.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-save-route.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-threads-route.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - validation_evidence:
+    - `pnpm -C apps/web run db:migrate` (pass; applied `029_add_source_kind_to_admin_reddit_threads.sql` in local environment)
+    - `pnpm -C apps/web exec vitest run tests/reddit-community-view-page.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-episode-refresh-route.test.ts tests/reddit-community-episode-save-route.test.ts tests/reddit-threads-route.test.ts tests/reddit-communities-route.test.ts` (pass, `6 files / 58 tests`)
+    - `pnpm -C apps/web run lint` (pass)
+    - `pnpm -C apps/web exec next build --webpack` (pass)
+  - downstream_repos_impacted:
+    - `TRR-Backend`: `no`
+    - `screenalytics`: `no`
+    - `TRR-APP`: `yes`
+  - default_skill_chain_applied: `true`
+  - default_skill_chain_used:
+    - `orchestrate-plan-execution`
+    - `senior-fullstack`
+    - `senior-backend`
+    - `senior-qa`
+    - `code-reviewer`
+  - default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-25) — Show/season slug canonicalization loop fix + social hashtags normalization
+
+- February 25, 2026: fixed admin show/season URL canonicalization to prevent RHOSLC slug flip loops and preserve canonical social hashtags paths.
+  - primary_skill: `orchestrate-plan-execution`
+  - supporting_skills: `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+  - mcp_tools_used:
+    - primary: `functions.exec_command`
+    - fallback: `functions.apply_patch`
+  - delegation_map:
+    - role: `Design Context Owner`
+      scope: `identify slug canonicalization conflict between season route effects`
+      deliverable: `single alias-first canonicalization policy for season admin routes`
+      verification_command: `pnpm -C apps/web exec vitest run tests/season-route-canonicalization-wiring.test.ts`
+      status: `completed`
+    - role: `UI Implementer`
+      scope: `season page route normalization effect consolidation`
+      deliverable: `removed dual competing effects and replaced with one showSlugForRouting-based canonical effect`
+      verification_command: `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx'`
+      status: `completed`
+    - role: `API Integration Owner`
+      scope: `ensure route-only changes do not alter backend contracts`
+      deliverable: `no backend/schema/API contract changes; query preservation maintained client-side`
+      verification_command: `rg -n \"buildSeasonAdminUrl|cleanLegacyRoutingQuery\" apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+      status: `completed`
+    - role: `QA Owner`
+      scope: `lock canonical route expectations and regression checks`
+      deliverable: `route builder assertions for short-slug cast/social-hashtags + new season canonicalization wiring test`
+      verification_command: `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts tests/season-tab-alias-redirect.test.ts tests/season-route-canonicalization-wiring.test.ts`
+      status: `completed`
+  - risk_class: `code_first`
+  - files_changed:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-admin-routes.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-route-canonicalization-wiring.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - validation_evidence:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-admin-routes.test.ts tests/season-tab-alias-redirect.test.ts tests/season-route-canonicalization-wiring.test.ts` (pass, `3 files / 17 tests`)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'tests/show-admin-routes.test.ts' 'tests/season-route-canonicalization-wiring.test.ts'` (pass)
+  - downstream_repos_impacted:
+    - `TRR-Backend`: `no`
+    - `screenalytics`: `no`
+    - `TRR-APP`: `yes`
+  - default_skill_chain_applied: `true`
+  - default_skill_chain_used:
+    - `orchestrate-plan-execution`
+    - `senior-fullstack`
+    - `senior-frontend`
+    - `senior-qa`
+    - `code-reviewer`
+  - default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-25) — Brands IA split + UI Design System NYT occurrence scanner
+
+- February 25, 2026: implemented admin Brands information architecture updates and added an authenticated NYT occurrence scanner tab in UI Design System.
+  - primary_skill: `senior-frontend`
+  - supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+  - mcp_tools_used:
+    - primary: `functions.exec_command`
+    - fallback: `functions.apply_patch`
+  - delegation_map:
+    - role: `Design Context Owner`
+      scope: `translate requested URL/tabs rename into concrete admin IA and route map`
+      deliverable: `Brands entrypoint + tab set: networks/streaming, production companies, shows, publications/news, other`
+      verification_command: `pnpm -C apps/web exec next build --webpack`
+      status: `completed`
+    - role: `UI Implementer`
+      scope: `admin navigation/breadcrumb/routes and design-system tab implementation`
+      deliverable: `new Brands routes/components, updated network detail links, and NYT Occurrences UI tab`
+      verification_command: `pnpm -C apps/web run lint`
+      status: `completed`
+    - role: `API Integration Owner`
+      scope: `server-side codebase scanning endpoint for NYT occurrences`
+      deliverable: `new admin-authenticated route /api/admin/design-system/nyt-occurrences with file/line/match payload`
+      verification_command: `pnpm -C apps/web exec next build --webpack`
+      status: `completed`
+    - role: `QA Owner`
+      scope: `navigation/tab/breadcrumb regression coverage updates`
+      deliverable: `updated admin route/navigation tests and passing targeted suite`
+      verification_command: `pnpm -C apps/web exec vitest run tests/admin-navigation.test.ts tests/admin-global-header.test.tsx tests/admin-breadcrumbs-component.test.tsx tests/admin-network-detail-page-auth.test.tsx tests/admin-network-detail-page.test.tsx tests/admin-networks-page-auth.test.tsx tests/admin-fonts-tabs.test.ts`
+      status: `completed`
+  - risk_class: `code_first`
+  - files_changed:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-navigation.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/AdminSideMenu.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-breadcrumbs.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/BrandsTabs.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/brands/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks-and-streaming/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks-and-streaming/[entityType]/[entitySlug]/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/production-companies/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/news/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/other/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/shows/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/[entityType]/[entitySlug]/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/tab-routing.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/page.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/NYTOccurrencesTab.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/design-system/nyt-occurrences/route.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-fonts-tabs.test.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-breadcrumbs-component.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-network-detail-page-auth.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-network-detail-page.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-networks-page-auth.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/e2e/admin-global-header-menu.spec.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - validation_evidence:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-navigation.test.ts tests/admin-global-header.test.tsx tests/admin-breadcrumbs-component.test.tsx tests/admin-network-detail-page-auth.test.tsx tests/admin-network-detail-page.test.tsx tests/admin-networks-page-auth.test.tsx tests/admin-fonts-tabs.test.ts` (pass, `7 files / 21 tests`)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+  - downstream_repos_impacted:
+    - `TRR-Backend`: `no`
+    - `screenalytics`: `no`
+    - `TRR-APP`: `yes`
+  - default_skill_chain_applied: `true`
+  - default_skill_chain_used:
+    - `orchestrate-plan-execution`
+    - `senior-fullstack`
+    - `senior-frontend`
+    - `senior-qa`
+    - `code-reviewer`
+  - default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-25) — BYE week propagation + social label consistency (with backend week-window fix)
+
+- February 25, 2026: aligned app consumers to backend BYE-week/final-window semantics and completed Reddit/social UI regression coverage.
+  - primary_skill: `senior-fullstack`
+  - supporting_skills: `senior-frontend`, `senior-qa`
+  - mcp_tools_used:
+    - primary: `functions.exec_command`
+    - fallback: `functions.apply_patch`
+  - scope:
+    - consume backend BYE labels across social analytics and Reddit period selectors.
+    - ensure scope labels resolve to backend week labels where available.
+    - preserve existing behavior while adding diagnostics context in Reddit episode refresh logs.
+  - files_changed:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - behavior updates:
+    - backend-provided BYE labels are now preserved in:
+      - weekly trend/table surfaces
+      - week detail label assertions
+      - Reddit period options
+    - active/inferred scope week labels in `SeasonSocialAnalyticsSection` now use backend labels first via index->label map.
+    - fixed TypeScript-safe event handlers in Reddit manager for community-level discover action.
+  - validation_evidence:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass; existing warnings remain in large pre-existing component state variables)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx tests/week-social-thumbnails.test.tsx` (pass, `3 files / 74 tests`)
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+  - downstream_repos_impacted:
+    - `TRR-Backend`: `yes` (source-of-truth week-window model update consumed)
+    - `screenalytics`: `no`
+    - `TRR-APP`: `yes`
+
+## Latest Update (2026-02-25) — Reddit season UI simplification + community card restructure
+
+- February 25, 2026: implemented Reddit-only season social UI simplification and community card restructure in `TRR-APP` only (no backend/schema/API changes).
+  - primary_skill: `senior-frontend`
+  - supporting_skills: `senior-qa`, `code-reviewer`
+  - mcp_tools_used:
+    - primary: `functions.exec_command`
+    - fallback: `functions.apply_patch`
+  - delegation_map:
+    - role: `Design Context Owner`
+      scope: `translate requested Reddit landing/community UX targets into component-level acceptance criteria`
+      deliverable: `Reddit season tab removes analytics chrome and uses cards-only communities layout`
+      verification_command: `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-view-page.test.tsx`
+      status: `completed`
+    - role: `UI Implementer`
+      scope: `season analytics container + reddit sources manager UI behavior changes`
+      deliverable: `Reddit-only shell removal, season cards-only list, dedicated community header actions, community-type badge derivation`
+      verification_command: `pnpm -C apps/web run lint`
+      status: `completed`
+    - role: `API Integration Owner`
+      scope: `ensure no TRR-Backend/screenalytics contract drift`
+      deliverable: `no API payload/route contract changes; existing endpoints reused`
+      verification_command: `rg -n \"fetchWithTimeout|/api/admin/reddit/communities\" apps/web/src/components/admin/reddit-sources-manager.tsx`
+      status: `completed`
+    - role: `QA Owner`
+      scope: `update and validate Reddit/season UI tests for new UX contract`
+      deliverable: `updated assertions for removed Reddit shell chrome, season cards layout, dedicated community header actions`
+      verification_command: `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-view-page.test.tsx`
+      status: `completed`
+  - risk_class: `medium` (admin UI behavior changes on Reddit season/community surfaces; no API contract changes)
+  - files_changed:
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+    - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - validation_evidence:
+    - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-view-page.test.tsx` (pass, `3 files / 69 tests`)
+    - `pnpm -C apps/web run lint` (pass with existing warnings in `apps/web/src/components/admin/season-social-analytics-section.tsx` for missing `resolveWeekScopeLabel` hook deps)
+  - downstream_repos_impacted:
+    - `TRR-Backend`: `no`
+    - `screenalytics`: `no`
+    - `TRR-APP`: `yes`
+  - default_skill_chain_applied: `true`
+  - default_skill_chain_used:
+    - `orchestrate-plan-execution`
+    - `senior-fullstack`
+    - `senior-frontend`
+    - `senior-qa`
+    - `code-reviewer`
+  - default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-25) — Default skill chain policy enforcement
+
+- Updated `AGENTS.md` to enforce the default non-trivial implementation chain:
+  1. `skillforge`
+  2. `write-plan-codex`
+  3. `senior-fullstack`
+  4. `senior-backend` or `senior-frontend` (frontend-first; backend tie-break for contract/schema/pipeline semantics)
+  5. `senior-qa`
+  6. `code-reviewer`
+- Added mandatory exceptions, additive-domain-skill rule (including Figma specialization), and handoff compliance keys:
+  - `default_skill_chain_applied`
+  - `default_skill_chain_used`
+  - `default_skill_chain_exception_reason`
+- Validation: workspace `rg` checks for default chain section, ordered steps, trigger scope, and key presence passed.
+
+
 ## Latest Update (2026-02-24) — Networks UI release deployment + lockfile rebaseline
 
 - February 24, 2026: Isolated and deployed the `/admin/networks` completion-policy UI updates from a clean release branch.
@@ -7629,3 +7913,964 @@ Continuation (same session, 2026-02-24) — Media/gallery frontend regression ga
   - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-gallery-broken-toggle.test.ts tests/show-gallery-pagination.test.ts tests/season-gallery-pagination.test.ts tests/show-gallery-batch-preflight.test.ts tests/season-gallery-batch-preflight.test.ts tests/show-gallery-section-visibility.test.ts tests/gallery-fallback-telemetry.test.ts` (pass, `7/7` files)
 - Backend stage-3 dependency remains active:
   - label `trr.gallery.repair.stage3.20260224-204848` is `healthy/running` with checkpoint `error=0` at latest monitor sample.
+
+Continuation (same session, 2026-02-25) — Reddit episode discussion refresh full-season recovery (RHOSLC S6 historical coverage).
+- primary_skill: `senior-fullstack`
+- supporting_skills: `senior-backend`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `episode refresh failure mode and coverage contract hardening`
+    deliverable: `bounded listing+search retrieval with coverage diagnostics contract`
+    verification_command: `rg -n "expected_episode_count|coverage_found_slots|discovery_source_summary|makeSearchUrl|t=all" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-discovery-service.ts /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `episode panel diagnostics rendering for coverage/source summary + zero-state clarity`
+    deliverable: `Community View episode panel shows X/Y coverage and listing/search diagnostics; zero-result refresh shows actionable diagnostics`
+    verification_command: `rg -n "Episodes matched|Listings:|No episode discussion candidates found" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `refresh route season-episode context`
+    deliverable: `route now always resolves and passes season episode context into discovery (not only sync path)`
+    verification_command: `rg -n "getEpisodesBySeasonId\(|seasonEpisodes" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `service/route/component regression coverage`
+    deliverable: `added tests for top=t=all, archive search recovery, expected-episode restriction, route meta diagnostics, and UI diagnostics rendering`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-community-episode-refresh-route.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `code_first`
+- default_skill_chain_applied: `false`
+- default_skill_chain_used: `write-plan-codex -> senior-fullstack -> senior-backend -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `Skillforge phase was skipped because this continuation executed an already locked, user-approved implementation plan in an active thread.`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-discovery-service.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-refresh-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-community-episode-refresh-route.test.ts tests/reddit-sources-manager.test.tsx` (pass, `49 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run test:ci` (pass, `198 files / 821 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+- behavior summary:
+  - Episode discovery now uses `top?t=all` and bounded subreddit search (`/search.json`) for historical recovery when season episodes are known.
+  - Refresh route always passes season episode context and returns additive coverage/source diagnostics (`expected_episode_*`, `coverage_*`, `discovery_source_summary`).
+  - Community View Episode Discussions now surfaces coverage and retrieval diagnostics, including actionable zero-result messaging after refresh.
+
+Continuation (same session, 2026-02-25) — Row-level Sync Comments missing-only targeting (frontend wiring).
+- primary_skill: `senior-frontend`
+- supporting_skills: `skillforge`, `write-plan-codex`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `skillforge -> write-plan-codex -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- downstream_repos_impacted:
+  - `TRR-Backend`: yes (additive ingest contract consumed)
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- behavior summary:
+  - Added row-only missing-target mode for weekly `Sync Comments` button (`rowMissingOnly` flag) so non-row ingest paths remain unchanged.
+  - Implemented week-detail preflight (`/social/analytics/week/{weekIndex}`) to compute stale anchors where `reported_comments > total_comments_available`, with per-platform dedupe and cap (`5000`) fallback.
+  - Row `comments_only` ingest now sends additive backend fields:
+    - `comment_refresh_policy: "missing_only"`
+    - `comment_anchor_source_ids` narrowed to stale source IDs
+    - `platforms` narrowed to only stale platforms
+  - If no stale anchors are found, ingest is not queued and UI surfaces `Comments already Up-to-Date.`.
+  - Auto-continue now recomputes stale anchors per pass for row missing-only sessions before requeueing.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx -t "Sync Comments"` (pass, `3 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+
+Continuation (same session, 2026-02-25) — Reddit episode auto-sync missing airdate remediation.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `diagnose why sync candidates were marked missing_episode_air_date across RHOSLC S6`
+    deliverable: `identified runtime type gap in episode_number normalization before airdate lookup`
+    verification_command: `rg -n "normalizeEpisodeNumber|episodeAirDateByNumber|missing_episode_air_date" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `no UI surface changes required for this bugfix`
+    deliverable: `n/a`
+    verification_command: `echo "no-op"`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `route-side episode number parsing for sync and season episode context`
+    deliverable: `refresh route now accepts numeric-string episode numbers and maps them to airdates`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-episode-refresh-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression coverage for string episode_number path`
+    deliverable: `new test proving sync succeeds when season episode_number is a string`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-episode-refresh-route.test.ts`
+    status: `completed`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-episode-refresh-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-episode-refresh-route.test.ts` (pass, `14 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with pre-existing warning in `/src/components/admin/season-social-analytics-section.tsx`)
+- behavior summary:
+  - Root cause: refresh sync logic assumed runtime numeric `episode_number` values and silently skipped non-number values when building `episodeAirDateByNumber`.
+  - Fix: added `normalizeEpisodeNumber` and used it for season episode normalization, sync airdate map construction, and candidate lookup.
+  - Result: auto-sync no longer drops valid candidates into `missing_episode_air_date` when episode numbers are returned as numeric strings.
+
+Continuation (same session, 2026-02-25) — Season social analytics UI simplification + ingest controls + heatmap completeness.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- downstream_repos_impacted:
+  - `TRR-Backend`: yes (additive analytics payload consumed)
+  - `screenalytics`: no code changes
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- behavior summary:
+  - Removed header filter card (`Scope`, `Week`, `Run`) and removed Season Details/Season ID copy UI.
+  - Reordered header so platform tabs are the first control row; moved `Run` selector into the `Current Run` card.
+  - Kept `Last Updated` and `Window` directly under the season title.
+  - Added comma formatting across key social analytics counts (summary cards, weekly totals, table/platform metrics).
+  - Upgraded `Ingest + Export` controls with explicit:
+    - `Weekly Run`: week selector + platform selector + run action
+    - `Daily Run`: day selector + platform selector + run action
+  - Heatmap upgrades:
+    - added `Completeness` metric (`(saved_posts + saved_comments)/(saved_posts + reported_comments)`; denominator `0` => N/A)
+    - added color thresholds for completeness (>=95% green, 70-94.9% amber, <70% red, N/A gray)
+    - added episode/season tags (`PREMIERE WEEK`, `BYE WEEK`, `S# E#`)
+    - added comments totals beneath posts totals for each week
+    - made `Comfortable` mode distribute day tiles evenly across the container width
+    - removed `drop` and `comment_gap` pills from weekly flags.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (pass, `51 passed`)
+
+Continuation (same session, 2026-02-25) — Season-scoped episode airdate source guarantee for Reddit refresh.
+- primary_skill: `senior-frontend`
+- supporting_skills: `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `confirm refresh uses Admin season episode context`
+    deliverable: `verified season page passes season context and refresh now hard-falls back to prop seasonId`
+    verification_command: `rg -n "seasonId=|requestedSeasonId|season_id" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `season context wiring fallback in refresh query construction`
+    deliverable: `refresh params now use episodeSeasonId ?? seasonId`
+    verification_command: `nl -ba /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx | sed -n '1650,1672p'`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `route-level mapping against episode airdates`
+    deliverable: `sync normalization for episode numbers remains in place for airdates map`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-episode-refresh-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `refresh query regression coverage`
+    deliverable: `added test asserting season_id is included when seasonId context is provided`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx -t "includes season_id for episode refresh requests when seasonId context is provided"`
+    status: `completed`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-episode-refresh-route.test.ts` (pass, `14 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx -t "includes season_id for episode refresh requests when seasonId context is provided"` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/components/admin/reddit-sources-manager.tsx' 'tests/reddit-sources-manager.test.tsx' 'src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts' 'tests/reddit-community-episode-refresh-route.test.ts'` (pass)
+- behavior summary:
+  - Refresh requests now always include `season_id` from season-page context (`episodeSeasonId` selector value, with `seasonId` prop fallback).
+  - Reddit episode sync now deterministically reads episode airdates from the selected Admin season episode dataset.
+
+Continuation (same session, 2026-02-25) — Final test reconciliation for social analytics UI simplification rollout.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- behavior summary:
+  - Updated failing assertions to match implemented UI semantics for BYE-week/episode labels in weekly links.
+  - Removed brittle `Week 1` global text assertion and anchored row checks to `S6.E#` weekly link labels.
+  - Adjusted social-metrics query-param test flow to rerender after URL updates so mocked `useSearchParams` state is reflected in rendered metrics.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (pass, `52 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+
+Continuation (same session, 2026-02-25) — Weekly heatmap period wrapping + BYE week section labeling.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior summary:
+  - Long period sections (notably `Pre-Season`) now render heatmap days in 7-column rows in both Compact and Comfortable modes.
+  - BYE heatmap sections now display the week section label as `Week {week_index}` and retain `BYE WEEK` as the metadata badge.
+  - BYE week summaries continue to show period date range plus posts/comments totals in their own section row.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (pass, `57 passed`)
+
+Continuation (same session, 2026-02-26) — Bravo layout order: Ingest + Export above Weekly Trend.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior summary:
+  - In bravo view, `Ingest + Export` now renders in its own row above `Weekly Trend` (no same-row split layout).
+  - Added assertion coverage that heading order is `Ingest + Export` before `Weekly Trend`.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (pass, `57 passed`)
+
+Continuation (same session, 2026-02-25) — Bravo weekly social table metric controls + social header parity.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `translate approved plan into exact Bravo weekly table + social-header acceptance deltas`
+    deliverable: `mapped table metric, episode label, date format, and shared header requirements into TRR-APP UI contracts`
+    verification_command: `rg -n "social_metrics|Episode|formatDateDotted|SocialAdminPageHeader|buildSeasonSocialBreadcrumb" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SocialAdminPageHeader.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/reddit/communities/[communityId]/page.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `weekly Bravo table + route header composition`
+    deliverable: `added URL-backed metrics filter, progress metric line, episode-first row labels, dotted window dates, and shared social page header component wired into both target routes`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `frontend-only analytics payload usage`
+    deliverable: `extended week-detail post typing and derived metric counting without backend contract mutation`
+    verification_command: `rg -n "type WeekDetailPost|deriveWeekDetailTokenCounts|weekly_platform_engagement" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression + behavior coverage for new table/header semantics`
+    deliverable: `expanded season-social tests for metric URL persistence, week-detail conditional fetch behavior, and loading fallback; maintained reddit community page header/back-link coverage`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run test -- tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx`
+    status: `completed`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SocialAdminPageHeader.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/reddit/communities/[communityId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-view-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Weekly Bravo Post Count table now supports URL-backed metric selection (`social_metrics`) for `posts, likes, comments, hashtags, mentions, tags` with default-all behavior.
+  - Platform and total columns no longer show saved-percentage copy; `PROGRESS` retains coverage lines and now includes a selected-metrics summary line.
+  - Episode column now renders episode-first labels (`S{season}.E{episode}` + week label), and weekly window cells now use `M.D.YYYY to M.D.YYYY` format.
+  - Hashtag/mention/tag counts are derived from week-detail post metadata and fetched only when those metrics are selected; loading state shows `--` placeholders.
+  - Introduced shared `SocialAdminPageHeader` and wired it into both season social-tab view and reddit community page so top header structure is consistent aside from breadcrumbs/title context.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx` (pass, `2 files / 58 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run test -- tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx` (pass; repo script runs full suite in this workspace)
+
+Continuation (same session, 2026-02-26) — Weekly table metric-line placement + single total progress refinement.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Moved selected metric summary lines into each platform column (`Instagram/YouTube/TikTok/Twitter/X`) and `Total` column, each on its own dedicated line.
+  - `PROGRESS` column now shows a single `Total Progress` percentage for each week.
+  - Total progress is computed as the average completion across selected metrics (`posts`, `likes`, `comments`, `hashtags`, `mentions`, `tags`) with detail-metric loading fallback to `--`.
+  - Week-detail token counting now tracks both per-platform and total hashtag/mention/tag counts so platform cells can render metric lines accurately.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx` (pass, `2 files / 60 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+
+Continuation (same session, 2026-02-25) — Admin route canonicalization to `/shows/...` + social selector flow.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `translate approved canonical route/breadcrumb contract into app routing behavior`
+    deliverable: `validated canonical `/shows` contract, `s:season` tokens, social network path shape, and no-season social breadcrumb rule`
+    verification_command: `rg -n "parseSocialAnalyticsViewFromPath|buildSeasonSocialRoute|buildShowSocialRoute|s:season" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-admin-routes.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `wire selector flow, route wrappers, canonical links, and redirects`
+    deliverable: `admin social selector opens canonical `/shows/:nickname/social/bravo`; show-level social resolves latest eligible season route`
+    verification_command: `rg -n "Open Bravo Analytics|buildShowSocialRoute|buildSeasonSocialRoute" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/page.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `ensure alias nickname resolution and legacy compatibility`
+    deliverable: `alternative-name alias matching in show slug resolution with canonical fallback preserved`
+    verification_command: `rg -n "alternative_names|resolveShowSlug|resolvePreferredShowRouteSlug" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/trr-shows-repository.ts /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-route-slug.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `route/breadcrumb/middleware and social manager regression coverage`
+    deliverable: `updated assertions for canonical `/shows` links and stabilized community settings test timing`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-admin-routes.test.ts tests/admin-breadcrumbs.test.ts tests/admin-breadcrumbs-component.test.tsx tests/admin-navigation.test.ts tests/admin-recent-shows.test.ts tests/admin-global-header.test.tsx tests/admin-host-middleware.test.ts tests/reddit-community-view-page.test.tsx tests/show-section-redirect-page.test.ts tests/season-tab-alias-redirect.test.ts tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-episode-refresh-route.test.ts tests/reddit-discovery-service.test.ts tests/week-social-thumbnails.test.tsx`
+    status: `completed`
+- risk_class: `high` (admin route contract + canonical URL migration on guarded surfaces)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-admin-routes.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/shows/[showId]/seasons/[seasonNumber]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/next.config.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-route-slug.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/covered-shows-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-breadcrumbs.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/proxy.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-navigation.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-recent-shows.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/AdminSideMenu.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SocialAdminPageHeader.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-admin-routes.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-breadcrumbs.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-host-middleware.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-navigation.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-global-header.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Canonical admin show/season/social URLs are emitted as `/shows/...` with support for compact season token `s:season` and network segment routing.
+  - Legacy `/admin/trr-shows/...` routes remain compatible via parser/rewrite handling while canonical builders and generated links now target `/shows/...`.
+  - `/admin/social-media` now behaves as covered-shows selector and routes into canonical show social flow (`/shows/:nickname/social/bravo`).
+  - Show-level social routes auto-resolve to latest eligible season (`/shows/:nickname/s:season/social/:network`).
+  - Social breadcrumbs are normalized to `Admin / Shows / {Show} / Social Media / {Network} Analytics` without season crumb; `/admin/social-media` remains `Admin / Social Analytics`.
+  - Admin host enforcement now treats `/shows/...` as admin UI path.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-admin-routes.test.ts tests/admin-breadcrumbs.test.ts tests/admin-breadcrumbs-component.test.tsx tests/admin-navigation.test.ts tests/admin-recent-shows.test.ts tests/admin-global-header.test.tsx tests/admin-host-middleware.test.ts tests/reddit-community-view-page.test.tsx tests/show-section-redirect-page.test.ts tests/season-tab-alias-redirect.test.ts tests/season-social-analytics-section.test.tsx tests/reddit-sources-manager.test.tsx tests/reddit-community-episode-refresh-route.test.ts tests/reddit-discovery-service.test.ts tests/week-social-thumbnails.test.tsx` (pass, `15 files / 174 tests`)
+
+Continuation (same session, 2026-02-25) — RHOSLC weekly analytics UX revision (Total/Saved mode + Sync Metrics + postseason labels).
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `align weekly-table semantics with approved RHOSLC revision`
+    deliverable: `confirmed line-per-metric rendering, aggregate-only progress, and episode/week/date display expectations`
+    verification_command: `rg -n "Select All|Deselect all|social_metric_mode|Sync Metrics|Total Progress|Episode 0|Post-Season|formatDateShort" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `weekly social table controls and row action behavior`
+    deliverable: `wired Total/Saved mode, select-all toggle, line-separated metric rows, and row-level Sync Metrics ingest mode`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `preserve existing backend contract usage for ingest + weekly payloads`
+    deliverable: `frontend continues using additive week metadata including postseason; Sync Metrics dispatches posts_and_comments`
+    verification_command: `rg -n "postseason|ingest_mode|posts_and_comments" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression coverage for revised weekly table behavior`
+    deliverable: `expanded/updated test coverage for Total/Saved URL persistence, select-all toggles, postseason labels, and Sync Metrics payload`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx`
+    status: `completed`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: yes (paired with backend additive week/parser changes)
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- behavior_summary:
+  - Weekly table now supports both `social_metrics` and `social_metric_mode` URL-backed controls.
+  - Added `Select All` / `Deselect all` metrics toggle and `Total` / `Saved` mode pills.
+  - Platform and total columns render selected metrics one per line; `PROGRESS` remains a single aggregate `Total Progress: X%`.
+  - Row action text is `Sync Metrics` and dispatches `ingest_mode="posts_and_comments"`.
+  - Episode/window presentation now includes `Episode 0` (Pre-Season), `Post-Season` week rows, and `M/D/YY - M/D/YY` date windows.
+  - Removed the `Trailer to Finale` copy from the weekly table section.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web run lint` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx` (pass, `2 files / 63 tests`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web run test -- tests/season-social-analytics-section.test.tsx tests/reddit-community-view-page.test.tsx` (fails because repo test script runs broad suite; unrelated baseline failures in `tests/admin-global-header.test.tsx` and `tests/admin-network-detail-page-auth.test.tsx` expecting stale nav label `Networks & Streaming`)
+
+Continuation (same session, 2026-02-25) — Remove `/admin/shows` and canonicalize entry URLs to `/shows`.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `route-level UX requirement to remove `/admin/shows` and prefer `/shows``
+    deliverable: `defined safe canonicalization scope to avoid breaking person routes`
+    verification_command: `rg -n "redirects\(|/admin/shows|/admin/trr-shows" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/next.config.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `remove page and update show links to canonical path`
+    deliverable: `deleted /admin/shows page; updated brands and admin links to /shows`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `ensure no backend/api contract changes`
+    deliverable: `UI routing-only change; API paths unchanged`
+    verification_command: `rg -n "api/admin/shows" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression checks for updated links/navigation`
+    deliverable: `updated network-detail link assertion to /shows and reran affected tests`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-network-detail-page-auth.test.tsx tests/admin-navigation.test.ts tests/admin-global-header.test.tsx`
+    status: `completed`
+- risk_class: `medium` (admin routing entrypoint change)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/shows/page.tsx` (deleted)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/next.config.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/BrandsTabs.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/bravo-content/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/[entityType]/[entitySlug]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-network-detail-page-auth.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Removed the `/admin/shows` page route.
+  - Added redirects from `/admin/shows` -> `/shows` and `/admin/trr-shows` -> `/shows`.
+  - Updated direct UI links that opened old show paths to now open `/shows/...`.
+  - Kept deeper `/admin/trr-shows/...` routes in place to avoid breaking legacy person pages.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-network-detail-page-auth.test.tsx tests/admin-navigation.test.ts tests/admin-global-header.test.tsx` (pass)
+
+Continuation (same session, 2026-02-25) — `/admin/networks` runtime verification during backend Cloud Run env repair.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `senior-devops`, `senior-frontend`, `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - secondary: `mcp__playwright__*`, `mcp__chrome-devtools__*`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `admin networks sync runtime UX`
+    deliverable: `validated route loads and sync control is accessible in local admin host context`
+    verification_command: `Playwright navigate + snapshot on http://admin.localhost:3000/admin/networks`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `runtime behavior observation`
+    deliverable: `triggered Sync/Mirror action and observed local-session auth warning state`
+    verification_command: `Playwright click on "Sync/Mirror Networks & Streaming"`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `backend sync execution linkage`
+    deliverable: `validated backend run-state outcomes via admin.network_streaming_sync_runs after trigger window`
+    verification_command: `PYTHONPATH=. python - <<'PY' ... query sync_runs ... PY`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `post-change operational verification`
+    deliverable: `clean Cloud Run log window and terminal sync statuses confirmed`
+    verification_command: `gcloud logging read ... timestamp>=2026-02-25T05:53:44Z ...`
+    status: `completed`
+- risk_class: `code_first` (ops/runtime verification only)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- runtime_summary:
+  - `/admin/networks` page is reachable on local admin host and sync action can be triggered.
+  - Local session still showed `Not authenticated` warning text for app-side admin API calls during this verification context.
+  - Backend sync runs in the same window reached terminal `stopped` status with resumable cursor progression, and no post-window step-failed traceback signatures were found.
+- validation_evidence:
+  - Playwright page snapshot and click events on `http://admin.localhost:3000/admin/networks`
+  - backend run-state query outputs:
+    - `network-streaming-20260225T055437Z -> stopped`
+    - `network-streaming-20260225T060040Z -> stopped`
+  - log-window checks after `2026-02-25T05:53:44Z`:
+    - no `admin sync step failed`
+    - no `/app/scripts/sync/` traceback entries
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes` (handoff/runtime verification only)
+
+Continuation (same session, 2026-02-25) — `/admin/networks` progress bar visibility + live sync responsiveness.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `completion/progress UX behavior on admin brands page`
+    deliverable: `defined acceptance criteria: hide progress bar until manual action and make active sync updates visible`
+    verification_command: `rg -n "Completion Gate|completion-gate-progress-bar|showCompletionProgress|setInterval" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `admin networks page state + render logic`
+    deliverable: `added manual-gated progress visibility and in-flight summary polling while sync runs`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-networks-page-auth.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `preserve existing admin sync/summary contract usage`
+    deliverable: `no API contract changes; existing /summary and /sync endpoints unchanged`
+    verification_command: `rg -n "api/admin/networks-streaming/(summary|sync)" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression coverage for visibility and polling behavior`
+    deliverable: `updated and added tests for hidden-on-load bar, reveal-on-refresh, and live polling activation`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-networks-page-auth.test.tsx`
+    status: `completed`
+- risk_class: `medium` (admin UI behavior update)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-networks-page-auth.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Completion Gate progress bar no longer renders automatically on page load.
+  - Progress bar is shown only after a user-triggered `Refresh` or any sync action.
+  - During active sync (`syncing=true`), the page now polls summary data every 3.5s and applies smooth width transitions so progress is visibly responsive.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-networks-page-auth.test.tsx` (pass, `1 file / 4 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+
+Continuation (same session, 2026-02-25) — `/admin/networks` progress bar refresh animation polish.
+- primary_skill: `senior-frontend`
+- supporting_skills: `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`, `mcp__playwright__*`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `manual refresh progress UX`
+    deliverable: `confirmed stale-feel issue occurred during refresh-loading window`
+    verification_command: `Playwright snapshot + refresh click on http://admin.localhost:3000/admin/networks`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `completion gate progress element`
+    deliverable: `extended active animation trigger to include refresh-loading state`
+    verification_command: `rg -n "syncing \|\| summaryLoading|completion-gate-progress-bar" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `admin summary/sync API contract`
+    deliverable: `no contract changes`
+    verification_command: `rg -n "api/admin/networks-streaming/(summary|sync)" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression coverage`
+    deliverable: `added explicit test for pulse animation during pending refresh request`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-networks-page-auth.test.tsx`
+    status: `completed`
+- risk_class: `low` (UI-only class toggle)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-networks-page-auth.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Progress bar remains hidden on page load until user initiates `Refresh` or sync.
+  - While manual refresh is loading, the bar now pulses (`animate-pulse`) so the UI reads as active instead of static.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-networks-page-auth.test.tsx` (pass, `1 file / 5 tests`)
+  - Playwright check: hidden on initial load; visible only after `Refresh` click.
+
+Continuation (same session, 2026-02-25) — `/admin/networks` progress bar auto-hide after run completion.
+- primary_skill: `senior-frontend`
+- supporting_skills: `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.apply_patch`
+  - secondary: `functions.exec_command`, `mcp__playwright__*`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `progress lifecycle expectations`
+    deliverable: `bar must not persist after refresh/sync completes`
+    verification_command: `Playwright run_code on /admin/networks (before/during/after refresh count)`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `manual progress visibility lifecycle`
+    deliverable: `setShowCompletionProgress(false) after refresh/sync completion`
+    verification_command: `rg -n "setShowCompletionProgress\(false\)|onRefreshSummary|onSyncNetworksStreaming" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `admin sync/summary API usage`
+    deliverable: `no API surface changes`
+    verification_command: `rg -n "api/admin/networks-streaming/(summary|sync)" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `behavior regression`
+    deliverable: `tests updated for auto-hide completion behavior and passing`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-networks-page-auth.test.tsx`
+    status: `completed`
+- risk_class: `low` (UI-state lifecycle only)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-networks-page-auth.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Completion bar appears only during user-triggered refresh/sync work and now auto-hides once the run settles.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-networks-page-auth.test.tsx` (pass, `1 file / 5 tests`)
+  - Playwright check result: `{ before: 0, during: 1, after: 0 }` on `/admin/networks` refresh flow.
+
+Continuation (same session, 2026-02-25) — Progress column missing-metrics breakdown under Total Progress.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `apply requested progress-cell delta without altering table metric columns`
+    deliverable: `defined new missing-metrics block under Total Progress and hide conditions for up-to-date rows`
+    verification_command: `rg -n "weekly-missing-metrics|Total Progress" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `render missing per-metric totals below Total Progress`
+    deliverable: `added line-by-line missing-metrics block in PROGRESS column; hidden for up-to-date/empty-progress rows`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `maintain existing analytics contract usage`
+    deliverable: `missing counts derived from existing weekly payload fields only (no contract changes)`
+    verification_command: `rg -n "total_reported_comments|total_comments|weekly_platform_engagement" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `coverage for missing block visibility and values`
+    deliverable: `updated weekly-table test assertions for missing lines on incomplete week and absence on up-to-date week`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+- risk_class: `code_first`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: no
+  - `screenalytics`: no
+  - `TRR-APP`: yes
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- behavior_summary:
+  - Added missing-metrics lines directly below `Total Progress` in the `PROGRESS` column for incomplete weeks.
+  - Missing lines render one per selected metric (posts, likes, comments, hashtags, mentions, tags).
+  - Missing lines are hidden when the selected metrics are up-to-date (or when progress is not computable for an empty row).
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx` (pass, `1 file / 60 tests`)
+
+Continuation (same session, 2026-02-25) — social analytics density default + platform tab icons.
+- primary_skill: `senior-frontend`
+- supporting_skills: `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.apply_patch`
+  - secondary: `functions.exec_command`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `social analytics controls ergonomics`
+    deliverable: `set Comfortable as default density baseline and iconized platform tabs`
+    verification_command: `rg -n "socialDensity|SOCIAL_DENSITY_QUERY_KEY|SocialPlatformTabIcon" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/show-tabs/ShowSocialTab.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `season + show social tab controls`
+    deliverable: `added reusable platform icon component and wired tabs to include icons`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/show-social-subnav-wiring.test.ts`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `social analytics routes/query compatibility`
+    deliverable: `kept query param compatibility; compact still expressible via social_density=compact`
+    verification_command: `rg -n "social_density=compact|SOCIAL_DENSITY_QUERY_KEY" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression coverage`
+    deliverable: `updated density-toggle expectations for new default and verified passing test suites`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/show-social-subnav-wiring.test.ts`
+    status: `completed`
+- risk_class: `low` (UI control defaults + visual icon additions)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SocialPlatformTabIcon.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/show-tabs/ShowSocialTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Default density is now `Comfortable`.
+  - URL preference encoding now treats `Comfortable` as default (no `social_density` param) and uses `social_density=compact` when Compact is selected.
+  - Platform tabs now render icons for Overview, Instagram, TikTok, Twitter/X, and YouTube.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/show-social-subnav-wiring.test.ts` (pass, `2 files / 63 tests`)
+
+Continuation (same session, 2026-02-25) — Hashtag Analytics refactor to season post-based usage + charts.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `hashtags analytics intent and scope`
+    deliverable: `removed configured/leaderboard hashtag logic and anchored analytics to season post week-detail payloads`
+    verification_command: `rg -n "Hashtag Insights|Weekly Hashtag Usage|Platform Hashtag Distribution|const hashtagSeasonCounts" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `hashtags analytics UI and data derivation`
+    deliverable: `renamed Observed Hashtags -> Hashtags, added insights + weekly trend + platform distribution + share leaderboard, token-count semantics from post hashtags/text`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `existing social analytics week-detail contract`
+    deliverable: `reused existing /social/analytics/week/{weekIndex} endpoint; no backend contract or query changes`
+    verification_command: `rg -n "fetchWeekDetail\(|/social/analytics/week/" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression + new hashtag behavior coverage`
+    deliverable: `updated hashtag-view test assertions for post-based totals, platform scoping, and week-detail fetch in hashtags view`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+- risk_class: `medium` (UI behavior/data-source refactor in admin analytics)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Hashtag Analytics now uses season social post week-detail payloads instead of configured targets and leaderboard snippets.
+  - Removed configured hashtags panel from this view and renamed observed list to `Hashtags`.
+  - Added new analytics cards: `Hashtag Insights`, `Weekly Hashtag Usage`, and `Platform Hashtag Distribution`.
+  - Implemented token-count semantics (every hashtag token occurrence counts), with share percentages and platform-scope filtering.
+  - Week-detail fetching now runs in hashtags view even when table metrics are limited to posts/likes/comments.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (pass, `1 file / 61 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec next build --webpack` (pass)
+
+Continuation (same session, 2026-02-25) — Week/Season Full Sync + Mirror orchestration + proxy routes.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `week + season social admin convergence UX and strict completion messaging`
+    deliverable: `feature-flagged Full Sync + Mirror labels, state transitions, and guardrail outcomes`
+    verification_command: `rg -n "SOCIAL_FULL_SYNC_MIRROR_ENABLED|WEEK_SYNC_ACTION_LABEL|Mirror" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `week page + season panel convergence loop`
+    deliverable: `dual coverage (comments + mirror), strict success gate, stale mirror requeue, and mirror backlog visibility`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/week-social-thumbnails.test.tsx tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `new admin proxy routes + backend passthrough validation`
+    deliverable: `added mirror coverage and mirror requeue proxy routes with UUID + season + ISO datetime validation`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/social-mirror-coverage-route.test.ts tests/social-mirror-requeue-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression and route validation coverage`
+    deliverable: `updated week behavior regression + added route tests, all targeted suites passing`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/week-social-thumbnails.test.tsx tests/season-social-analytics-section.test.tsx tests/social-mirror-coverage-route.test.ts tests/social-mirror-requeue-route.test.ts`
+    status: `completed`
+- risk_class: `medium` (admin ingest orchestration + proxy behavior)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/mirror-coverage/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/mirror/requeue/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-mirror-coverage-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-mirror-requeue-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+- behavior_summary:
+  - Week action now supports feature-flagged `Full Sync + Mirror` workflow (`posts_and_comments` + mirror convergence) while preserving legacy short-circuit behavior when flag is disabled.
+  - Season auto-continue now supports strict completion on both comments and mirror coverage (flag-gated), mirror stale-platform requeue, and pass-to-pass platform narrowing.
+  - Added mirror backlog + worker health visibility in ingest status panel.
+  - Added new app proxy routes for mirror coverage and mirror requeue, with admin/identifier/date validation.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/week-social-thumbnails.test.tsx tests/season-social-analytics-section.test.tsx tests/social-mirror-coverage-route.test.ts tests/social-mirror-requeue-route.test.ts` (pass, `4 files / 73 tests`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx' 'src/components/admin/season-social-analytics-section.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/mirror-coverage/route.ts' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/mirror/requeue/route.ts'` (pass)
+
+Continuation (same session, 2026-02-25) — Hashtag source narrowed to post captions only.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.apply_patch`
+  - fallback: `functions.exec_command`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `hashtag source-of-truth`
+    deliverable: `aligned hashtag analytics counting to caption text extraction only`
+    verification_command: `rg -n "const postHashtags = extractHashtags\(post\.text\)" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `season hashtag aggregation`
+    deliverable: `removed reliance on structured hashtag arrays for hashtags analytics aggregation`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `week-detail contract compatibility`
+    deliverable: `kept existing payload contract untouched; consumer logic now reads caption text only`
+    verification_command: `rg -n "deriveWeekDetailHashtagUsage|extractHashtags\(post\.text\)" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `fixture and behavior verification`
+    deliverable: `updated hashtag test fixture captions to carry expected hashtags under caption-only logic`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx`
+    status: `completed`
+- risk_class: `low` (small analytics derivation refinement)
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Hashtag analytics now derives hashtags exclusively from each post caption/text (`post.text`).
+  - Structured `post.hashtags` arrays are no longer used for this specific analytics aggregate.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/season-social-analytics-section.test.tsx` (pass, `1 file / 61 tests`)

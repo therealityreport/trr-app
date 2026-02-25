@@ -9,7 +9,8 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import AdminModal from "@/components/admin/AdminModal";
-import { buildSeasonBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
+import { buildSeasonBreadcrumb, buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
@@ -95,9 +96,11 @@ import {
   buildShowAdminUrl,
   buildSeasonAdminUrl,
   cleanLegacyRoutingQuery,
+  parseSocialAnalyticsViewFromPath,
   parseSeasonRouteState,
 } from "@/lib/admin/show-admin-routes";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
+import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import {
   parseSeasonCastRouteState,
   writeShowCastRouteState,
@@ -119,6 +122,7 @@ interface TrrShow {
   name: string;
   slug: string;
   canonical_slug: string;
+  alternative_names?: string[];
   imdb_id: string | null;
   tmdb_id: number | null;
 }
@@ -1196,12 +1200,13 @@ export default function SeasonDetailPage() {
   const castSearchQueryDeferred = useDeferredValue(castSearchQuery.trim().toLowerCase());
 
   const showSlugForRouting = useMemo(() => {
-    const canonical = show?.canonical_slug?.trim();
-    if (canonical) return canonical;
-    const base = show?.slug?.trim();
-    if (base) return base;
-    return showRouteParam.trim();
-  }, [show?.canonical_slug, show?.slug, showRouteParam]);
+    return resolvePreferredShowRouteSlug({
+      alternativeNames: show?.alternative_names,
+      canonicalSlug: show?.canonical_slug,
+      slug: show?.slug,
+      fallback: showRouteParam,
+    });
+  }, [show?.alternative_names, show?.canonical_slug, show?.slug, showRouteParam]);
 
   useEffect(() => {
     if (!show?.name || !showSlugForRouting) return;
@@ -1283,9 +1288,11 @@ export default function SeasonDetailPage() {
   ]);
 
   const socialAnalyticsView = useMemo<SocialAnalyticsView>(() => {
-    const value = searchParams.get("social_view");
-    return isSocialAnalyticsView(value) ? value : "bravo";
-  }, [searchParams]);
+    const queryValue = searchParams.get("social_view");
+    if (isSocialAnalyticsView(queryValue)) return queryValue;
+    const pathValue = parseSocialAnalyticsViewFromPath(pathname);
+    return isSocialAnalyticsView(pathValue) ? pathValue : "bravo";
+  }, [pathname, searchParams]);
 
   const setSocialAnalyticsView = useCallback(
     (view: SocialAnalyticsView) => {
@@ -1414,57 +1421,46 @@ export default function SeasonDetailPage() {
   ]);
 
   useEffect(() => {
-    const canonicalSlug = show?.canonical_slug?.trim() || show?.slug?.trim();
-    if (!canonicalSlug) return;
+    if (!showSlugForRouting) return;
 
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
-    const canonicalUrl = buildSeasonAdminUrl({
-      showSlug: canonicalSlug,
-      seasonNumber,
-      tab: seasonRouteState.tab,
-      assetsSubTab: seasonRouteState.assetsSubTab,
-      query: preservedQuery,
-    });
-    const currentQuery = searchParams.toString();
-    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
-    if (currentUrl === canonicalUrl) return;
-    router.replace(canonicalUrl as Route, { scroll: false });
-  }, [
-    pathname,
-    router,
-    searchParams,
-    seasonNumber,
-    seasonRouteState.assetsSubTab,
-    seasonRouteState.tab,
-    show?.canonical_slug,
-    show?.slug,
-  ]);
-
-  useEffect(() => {
-    const routeSlug = showRouteParam.trim();
-    if (!routeSlug) return;
-    if (!Number.isFinite(seasonNumber)) return;
-
-    const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+    if (seasonRouteState.tab === "social") {
+      if (socialAnalyticsView === "bravo") {
+        preservedQuery.delete("social_view");
+      } else {
+        preservedQuery.set("social_view", socialAnalyticsView);
+      }
+    }
     const canonicalRouteUrl = buildSeasonAdminUrl({
-      showSlug: routeSlug,
+      showSlug: showSlugForRouting,
       seasonNumber,
       tab: seasonRouteState.tab,
       assetsSubTab: seasonRouteState.assetsSubTab,
       query: preservedQuery,
+      socialView: seasonRouteState.tab === "social" ? socialAnalyticsView : undefined,
     });
-    const currentQuery = searchParams.toString();
-    const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
-    if (currentUrl === canonicalRouteUrl) return;
+    const currentHasLegacyRoutingQuery =
+      searchParams.has("tab") || searchParams.has("assets");
+    const canonicalPath = canonicalRouteUrl.split("?")[0] ?? canonicalRouteUrl;
+    const currentPath = pathname;
+    const pathMismatch = currentPath !== canonicalPath;
+    if (!pathMismatch && !currentHasLegacyRoutingQuery) return;
+
+    const currentCleanedQuery = preservedQuery.toString();
+    const canonicalQuery = canonicalRouteUrl.includes("?")
+      ? (canonicalRouteUrl.split("?")[1] ?? "")
+      : "";
+    if (!pathMismatch && currentCleanedQuery === canonicalQuery) return;
     router.replace(canonicalRouteUrl as Route, { scroll: false });
   }, [
     pathname,
     router,
     searchParams,
     seasonNumber,
+    showSlugForRouting,
+    socialAnalyticsView,
     seasonRouteState.assetsSubTab,
     seasonRouteState.tab,
-    showRouteParam,
   ]);
   const fetchShowCastForBrand = useCallback(async () => {
     if (!showId) return;
@@ -4631,7 +4627,7 @@ export default function SeasonDetailPage() {
         <div className="text-center">
           <p className="text-lg font-semibold text-zinc-900">Admin access required</p>
           <Link
-            href="/admin/trr-shows"
+            href="/shows"
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
             ← Back to Shows
@@ -4658,7 +4654,7 @@ export default function SeasonDetailPage() {
         <div className="text-center">
           <p className="text-lg font-semibold text-red-600">{slugResolutionError}</p>
           <Link
-            href="/admin/trr-shows"
+            href="/shows"
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
             ← Back to Shows
@@ -4687,7 +4683,7 @@ export default function SeasonDetailPage() {
             {error || "Season not found"}
           </p>
           <Link
-            href={buildShowAdminUrl({ showSlug: showSlugForRouting }) as "/admin/trr-shows"}
+            href={buildShowAdminUrl({ showSlug: showSlugForRouting }) as Route}
             className="mt-4 inline-block text-sm text-zinc-600 hover:text-zinc-900"
           >
             ← Back to Show
@@ -4697,64 +4693,94 @@ export default function SeasonDetailPage() {
     );
   }
 
+  const socialViewBreadcrumbLabel = `${socialAnalyticsView.charAt(0).toUpperCase()}${socialAnalyticsView.slice(1)} Analytics`;
+
+  const socialTabHref = buildSeasonAdminUrl({
+    showSlug: showSlugForRouting,
+    seasonNumber: season.season_number,
+    tab: "social",
+    socialView: socialAnalyticsView,
+  });
+  const socialHeaderBreadcrumbItems = buildSeasonSocialBreadcrumb(show.name, season.season_number, {
+    showHref: buildShowAdminUrl({ showSlug: showSlugForRouting }),
+    seasonHref: buildSeasonAdminUrl({
+      showSlug: showSlugForRouting,
+      seasonNumber: season.season_number,
+    }),
+    socialHref: socialTabHref,
+    subTabLabel: socialViewBreadcrumbLabel,
+    subTabHref: socialTabHref,
+  });
+  const socialHeaderTitle = `${show.name} · Season ${season.season_number}`;
+
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
-        <AdminGlobalHeader bodyClassName="px-6 py-5">
-          <div className="mx-auto max-w-6xl">
-            <div className="mb-4">
-              <Link
-                href={buildShowAdminUrl({ showSlug: showSlugForRouting }) as "/admin/trr-shows"}
-                className="text-sm text-zinc-500 hover:text-zinc-900"
-              >
-                ← Back to Show
-              </Link>
-            </div>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <AdminBreadcrumbs
-                  items={buildSeasonBreadcrumb(show.name, season.season_number, {
-                    showHref: buildShowAdminUrl({ showSlug: showSlugForRouting }),
-                    seasonHref: buildSeasonAdminUrl({
-                      showSlug: showSlugForRouting,
-                      seasonNumber: season.season_number,
-                    }),
-                  })}
-                  className="mb-1"
-                />
-                <h1 className="text-3xl font-bold text-zinc-900">
-                  {show.name} · Season {season.season_number}
-                </h1>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span
-                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                      seasonEligibleForMedia
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-amber-200 bg-amber-50 text-amber-700"
-                    }`}
-                  >
-                    {seasonEligibleForMedia ? "Eligible Season" : "Placeholder Season"}
-                  </span>
-                  <span className="text-xs text-zinc-500">{seasonEligibilityReason}</span>
-                </div>
-                {season.overview && (
-                  <p className="mt-2 text-sm text-zinc-600 max-w-3xl">
-                    {season.overview}
-                  </p>
-                )}
+        {activeTab === "social" ? (
+          <SocialAdminPageHeader
+            breadcrumbs={socialHeaderBreadcrumbItems}
+            title={socialHeaderTitle}
+            backHref={buildShowAdminUrl({ showSlug: showSlugForRouting })}
+            backLabel="Back"
+            bodyClassName="px-6 py-6"
+          />
+        ) : (
+          <AdminGlobalHeader bodyClassName="px-6 py-5">
+            <div className="mx-auto max-w-6xl">
+              <div className="mb-4">
+                <Link
+                  href={buildShowAdminUrl({ showSlug: showSlugForRouting }) as Route}
+                  className="text-sm text-zinc-500 hover:text-zinc-900"
+                >
+                  ← Back to Show
+                </Link>
               </div>
-              <div className="flex items-center gap-2">
-                {show.tmdb_id && (
-                  <TmdbLinkIcon
-                    showTmdbId={show.tmdb_id}
-                    seasonNumber={season.season_number}
-                    type="season"
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <AdminBreadcrumbs
+                    items={buildSeasonBreadcrumb(show.name, season.season_number, {
+                      showHref: buildShowAdminUrl({ showSlug: showSlugForRouting }),
+                      seasonHref: buildSeasonAdminUrl({
+                        showSlug: showSlugForRouting,
+                        seasonNumber: season.season_number,
+                      }),
+                    })}
+                    className="mb-1"
                   />
-                )}
+                  <h1 className="text-3xl font-bold text-zinc-900">
+                    {show.name} · Season {season.season_number}
+                  </h1>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                        seasonEligibleForMedia
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700"
+                      }`}
+                    >
+                      {seasonEligibleForMedia ? "Eligible Season" : "Placeholder Season"}
+                    </span>
+                    <span className="text-xs text-zinc-500">{seasonEligibilityReason}</span>
+                  </div>
+                  {season.overview && (
+                    <p className="mt-2 text-sm text-zinc-600 max-w-3xl">
+                      {season.overview}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {show.tmdb_id && (
+                    <TmdbLinkIcon
+                      showTmdbId={show.tmdb_id}
+                      seasonNumber={season.season_number}
+                      type="season"
+                    />
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </AdminGlobalHeader>
+          </AdminGlobalHeader>
+        )}
 
         <div className="border-b border-zinc-200 bg-white">
           <div className="mx-auto max-w-6xl px-6">

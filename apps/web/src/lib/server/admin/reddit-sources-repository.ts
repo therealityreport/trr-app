@@ -37,6 +37,7 @@ export interface RedditThreadRow {
   trr_show_id: string;
   trr_show_name: string;
   trr_season_id: string | null;
+  source_kind: RedditThreadSourceKind;
   reddit_post_id: string;
   title: string;
   url: string;
@@ -99,11 +100,14 @@ export interface ListRedditThreadsOptions {
   includeGlobalThreadsForSeason?: boolean;
 }
 
+export type RedditThreadSourceKind = "manual" | "episode_discussion";
+
 export interface CreateRedditThreadInput {
   communityId: string;
   trrShowId: string;
   trrShowName: string;
   trrSeasonId?: string | null;
+  sourceKind?: RedditThreadSourceKind;
   redditPostId: string;
   title: string;
   url: string;
@@ -120,6 +124,7 @@ export interface UpdateRedditThreadInput {
   trrShowId?: string;
   trrShowName?: string;
   trrSeasonId?: string | null;
+  sourceKind?: RedditThreadSourceKind;
   title?: string;
   url?: string;
   permalink?: string | null;
@@ -583,9 +588,10 @@ export async function createRedditThread(
         num_comments,
         posted_at,
         notes,
+        source_kind,
         created_by_firebase_uid
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::text, $15
       )
       ON CONFLICT (trr_show_id, reddit_post_id)
       DO UPDATE SET
@@ -599,7 +605,11 @@ export async function createRedditThread(
         score = EXCLUDED.score,
         num_comments = EXCLUDED.num_comments,
         posted_at = EXCLUDED.posted_at,
-        notes = EXCLUDED.notes
+        notes = EXCLUDED.notes,
+        source_kind = CASE
+          WHEN $16::boolean THEN EXCLUDED.source_kind
+          ELSE ${THREADS_TABLE}.source_kind
+        END
       WHERE ${THREADS_TABLE}.community_id = EXCLUDED.community_id
       RETURNING *`,
       [
@@ -616,7 +626,9 @@ export async function createRedditThread(
         toNumberOrZero(input.numComments ?? 0),
         input.postedAt ?? null,
         input.notes ?? null,
+        input.sourceKind ?? "manual",
         authContext.firebaseUid,
+        input.sourceKind !== undefined,
       ],
     );
     const row = result.rows[0];
@@ -664,6 +676,10 @@ export async function updateRedditThread(
     if (input.trrSeasonId !== undefined) {
       sets.push(`trr_season_id = $${idx++}`);
       values.push(input.trrSeasonId);
+    }
+    if (input.sourceKind !== undefined) {
+      sets.push(`source_kind = $${idx++}`);
+      values.push(input.sourceKind);
     }
     if (input.title !== undefined) {
       sets.push(`title = $${idx++}`);

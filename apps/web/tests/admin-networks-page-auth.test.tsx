@@ -39,6 +39,7 @@ describe("Admin networks page auth + sync UI", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("loads via shared auth helper and renders unresolved sync details", async () => {
@@ -151,18 +152,19 @@ describe("Admin networks page auth + sync UI", () => {
       expect(mocks.fetchAdminWithAuth).toHaveBeenCalled();
       expect(screen.getByText("Bravo")).toBeInTheDocument();
     });
+    expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
     const breadcrumbNav = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(breadcrumbNav).toBeInTheDocument();
     expect(within(breadcrumbNav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
-    expect(within(breadcrumbNav).getByText("Networks & Streaming")).toBeInTheDocument();
+    expect(within(breadcrumbNav).getByText("Brands")).toBeInTheDocument();
 
     expect(screen.getByRole("link", { name: "Bravo" })).toHaveAttribute(
       "href",
-      "/admin/networks/network/bravo",
+      "/admin/networks-and-streaming/network/bravo",
     );
     expect(screen.getByRole("link", { name: "Peacock Premium" })).toHaveAttribute(
       "href",
-      "/admin/networks/streaming/peacock-premium",
+      "/admin/networks-and-streaming/streaming/peacock-premium",
     );
 
     const summaryCall = mocks.fetchAdminWithAuth.mock.calls.find((call: unknown[]) =>
@@ -171,10 +173,13 @@ describe("Admin networks page auth + sync UI", () => {
     expect(summaryCall).toBeTruthy();
     expect(screen.getByText(/Missing B\/W Variants: 2/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Sync/Mirror Networks & Streaming" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sync/Mirror Brands" }));
 
     await waitFor(() => {
       expect(screen.getByText("Sync complete")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
     });
 
     const syncCall = mocks.fetchAdminWithAuth.mock.calls.find((call: unknown[]) =>
@@ -234,8 +239,202 @@ describe("Admin networks page auth + sync UI", () => {
     expect(screen.getAllByText("Bravo").length).toBeGreaterThan(0);
     expect(screen.queryByText("Peacock Premium")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Both" }));
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
     expect(screen.getByText("Peacock Premium")).toBeInTheDocument();
+  });
+
+  it("starts live summary polling while sync is active", async () => {
+    let resolveSync: ((response: Response) => void) | null = null;
+    const pendingSync = new Promise<Response>((resolve) => {
+      resolveSync = resolve;
+    });
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/admin/networks-streaming/summary")) {
+        return jsonResponse({
+          totals: { total_available_shows: 2, total_added_shows: 2 },
+          rows: [
+            {
+              type: "network",
+              name: "Bravo",
+              available_show_count: 2,
+              added_show_count: 2,
+              hosted_logo_url: "https://cdn.example.com/bravo.png",
+              hosted_logo_black_url: null,
+              hosted_logo_white_url: null,
+              wikidata_id: "Q123",
+              wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+              resolution_status: "manual_required",
+              resolution_reason: "missing_bw_variants",
+              last_attempt_at: "2026-02-19T00:00:00Z",
+              has_logo: true,
+              has_bw_variants: false,
+              has_links: true,
+            },
+          ],
+          generated_at: "2026-02-19T00:00:00.000Z",
+        });
+      }
+      if (url.includes("/api/admin/networks-streaming/overrides")) {
+        return jsonResponse([]);
+      }
+      if (url.endsWith("/api/admin/networks-streaming/sync")) {
+        return pendingSync;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<AdminNetworksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bravo")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
+
+    const initialSummaryCalls = mocks.fetchAdminWithAuth.mock.calls.filter((call: unknown[]) =>
+      String(call[0]).endsWith("/api/admin/networks-streaming/summary"),
+    ).length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync/Mirror Brands" }));
+
+    await waitFor(() => {
+      const summaryCalls = mocks.fetchAdminWithAuth.mock.calls.filter((call: unknown[]) =>
+        String(call[0]).endsWith("/api/admin/networks-streaming/summary"),
+      ).length;
+      expect(summaryCalls).toBeGreaterThan(initialSummaryCalls);
+    });
+    expect(screen.getByTestId("completion-gate-progress-bar")).toBeInTheDocument();
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 3500);
+
+    resolveSync?.(
+      jsonResponse({
+        run_id: "network-streaming-20260225T020000Z",
+        status: "completed",
+        resume_cursor: null,
+        entities_synced: 1,
+        providers_synced: 1,
+        links_enriched: 1,
+        logos_mirrored: 1,
+        variants_black_mirrored: 0,
+        variants_white_mirrored: 0,
+        completion_total: 1,
+        completion_resolved: 1,
+        completion_unresolved: 0,
+        completion_unresolved_total: 0,
+        completion_unresolved_network: 0,
+        completion_unresolved_streaming: 0,
+        completion_unresolved_production: 0,
+        production_missing_logos: 0,
+        production_missing_bw_variants: 0,
+        completion_percent: 100,
+        completion_gate_passed: true,
+        missing_columns: [],
+        unresolved_logos_count: 0,
+        unresolved_logos_truncated: false,
+        unresolved_logos: [],
+        failures: 0,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Sync complete")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows active progress animation while manual refresh is loading", async () => {
+    let resolveRefreshSummary: ((response: Response) => void) | null = null;
+    const pendingRefreshSummary = new Promise<Response>((resolve) => {
+      resolveRefreshSummary = resolve;
+    });
+    let summaryCallCount = 0;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/admin/networks-streaming/summary")) {
+        summaryCallCount += 1;
+        if (summaryCallCount === 2) {
+          return pendingRefreshSummary;
+        }
+        return jsonResponse({
+          totals: { total_available_shows: 2, total_added_shows: 2 },
+          rows: [
+            {
+              type: "network",
+              name: "Bravo",
+              available_show_count: 2,
+              added_show_count: 2,
+              hosted_logo_url: "https://cdn.example.com/bravo.png",
+              hosted_logo_black_url: null,
+              hosted_logo_white_url: null,
+              wikidata_id: "Q123",
+              wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+              resolution_status: "manual_required",
+              resolution_reason: "missing_bw_variants",
+              last_attempt_at: "2026-02-19T00:00:00Z",
+              has_logo: true,
+              has_bw_variants: false,
+              has_links: true,
+            },
+          ],
+          generated_at: "2026-02-19T00:00:00.000Z",
+        });
+      }
+      if (url.includes("/api/admin/networks-streaming/overrides")) {
+        return jsonResponse([]);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<AdminNetworksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bravo")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refreshing..." })).toBeDisabled();
+      expect(screen.getByTestId("completion-gate-progress-bar")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("completion-gate-progress-bar").className).toContain("animate-pulse");
+
+    resolveRefreshSummary?.(
+      jsonResponse({
+        totals: { total_available_shows: 2, total_added_shows: 2 },
+        rows: [
+          {
+            type: "network",
+            name: "Bravo",
+            available_show_count: 2,
+            added_show_count: 2,
+            hosted_logo_url: "https://cdn.example.com/bravo.png",
+            hosted_logo_black_url: "https://cdn.example.com/bravo-black.png",
+            hosted_logo_white_url: "https://cdn.example.com/bravo-white.png",
+            wikidata_id: "Q123",
+            wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+            resolution_status: "resolved",
+            resolution_reason: null,
+            last_attempt_at: "2026-02-19T00:00:00Z",
+            has_logo: true,
+            has_bw_variants: true,
+            has_links: true,
+          },
+        ],
+        generated_at: "2026-02-19T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+    });
+    expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
   });
 
   it("keeps the page in loading/recovery state while auth fetch is in-flight and then recovers", async () => {
@@ -257,7 +456,7 @@ describe("Admin networks page auth + sync UI", () => {
 
     render(<AdminNetworksPage />);
 
-    expect(screen.getByText("Loading networks and streaming summary...")).toBeInTheDocument();
+    expect(screen.getByText("Loading brands summary...")).toBeInTheDocument();
     expect(screen.queryByText("Not authenticated")).not.toBeInTheDocument();
 
     resolveSummary?.(
@@ -270,7 +469,7 @@ describe("Admin networks page auth + sync UI", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Available Shows:\s*1/)).toBeInTheDocument();
-      expect(screen.queryByText("Loading networks and streaming summary...")).not.toBeInTheDocument();
+      expect(screen.queryByText("Loading brands summary...")).not.toBeInTheDocument();
     });
     expect(screen.queryByText("Not authenticated")).not.toBeInTheDocument();
   });

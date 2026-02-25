@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import type { Route } from "next";
 
 interface SeasonTabAliasPageProps {
   params: Promise<{ showId: string; showSection: string; seasonTab: string }>;
@@ -59,7 +60,8 @@ export default async function SeasonTabAliasPage({ params, searchParams }: Seaso
   const query = new URLSearchParams(serializeSearchParams(resolvedSearchParams));
   query.set("tab", canonicalTab);
   const queryString = query.toString();
+  const destination = `/shows/${showId}/s${seasonNumber}${queryString ? `?${queryString}` : ""}`;
   redirect(
-    `/admin/trr-shows/${showId}/seasons/${seasonNumber}${queryString ? `?${queryString}` : ""}`,
+    destination as Route,
   );
 }

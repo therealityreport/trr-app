@@ -190,6 +190,7 @@ export async function POST(request: NextRequest) {
       trrShowId: body.trr_show_id,
       trrShowName: community.trr_show_name,
       trrSeasonId: typeof body.trr_season_id === "string" ? body.trr_season_id : null,
+      sourceKind: "manual",
       redditPostId: body.reddit_post_id.trim(),
       title: body.title.trim(),
       url: normalizeUrl(body.url),

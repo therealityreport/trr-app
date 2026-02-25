@@ -7,6 +7,7 @@ export type AdminNavItem = {
   description: string;
   badge: string;
   hasShowsSubmenu?: boolean;
+  activeMatchPrefixes?: readonly string[];
 };
 
 export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
@@ -20,7 +21,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   {
     key: "trr-shows",
     title: "Shows",
-    href: "/admin/trr-shows",
+    href: "/shows",
     description: "Browse the TRR metadata database. View shows, seasons, cast, and create linked surveys.",
     badge: "API",
     hasShowsSubmenu: true,
@@ -48,10 +49,19 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   },
   {
     key: "networks-streaming",
-    title: "Networks & Streaming",
-    href: "/admin/networks",
-    description: "View network/provider coverage counts and run sync/mirror enrichment workflows.",
+    title: "Brands",
+    href: "/admin/brands",
+    description: "Manage brand coverage across networks, streaming services, production companies, and publications.",
     badge: "Data",
+    activeMatchPrefixes: [
+      "/admin/brands",
+      "/admin/networks-and-streaming",
+      "/admin/production-companies",
+      "/admin/news",
+      "/admin/other",
+      "/admin/shows",
+      "/admin/networks",
+    ],
   },
   {
     key: "users",

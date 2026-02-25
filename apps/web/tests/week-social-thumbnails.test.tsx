@@ -126,6 +126,16 @@ const weekPayload = {
   },
 };
 
+const byeWeekPayload = {
+  ...weekPayload,
+  week: {
+    ...weekPayload.week,
+    label: "BYE WEEK (Jan 15-Jan 22)",
+    week_type: "bye",
+    episode_number: null,
+  },
+};
+
 describe("WeekDetailPage thumbnails", () => {
   beforeEach(() => {
     mockParams.showId = "7782652f-783a-488b-8860-41b97de32e75";
@@ -188,6 +198,27 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("14s")).toBeInTheDocument();
     expect(screen.getByText("@tagged_user")).toBeInTheDocument();
     expect(screen.getByText("@collab_user")).toBeInTheDocument();
+  });
+
+  it("renders BYE WEEK label from backend week detail payload", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => byeWeekPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("BYE WEEK (Jan 15-Jan 22)").length).toBeGreaterThan(0);
+    });
   });
 
   it("applies day and social platform query prefilters and can clear day filter", async () => {

@@ -20,9 +20,19 @@ const FOCUSABLE_SELECTORS = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
-const isActivePath = (pathname: string, href: string): boolean => {
+const isActivePath = (
+  pathname: string,
+  href: string,
+  activeMatchPrefixes?: readonly string[],
+): boolean => {
   if (href === "/admin") return pathname === "/admin";
-  return pathname === href || pathname.startsWith(`${href}/`);
+  if (pathname === href || pathname.startsWith(`${href}/`)) {
+    return true;
+  }
+  if (!activeMatchPrefixes || activeMatchPrefixes.length === 0) {
+    return false;
+  }
+  return activeMatchPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 };
 
 const cx = (...classes: Array<string | false | null | undefined>): string => classes.filter(Boolean).join(" ");
@@ -143,7 +153,7 @@ export default function AdminSideMenu({ isOpen, pathname, navItems, recentShows,
           <div className="flex-1 overflow-y-auto px-3 py-4">
             <ul className="space-y-1" role="list">
               {navItems.map((item) => {
-                const active = isActivePath(pathname, item.href);
+                const active = isActivePath(pathname, item.href, item.activeMatchPrefixes);
 
                 if (!item.hasShowsSubmenu) {
                   return (
@@ -216,7 +226,7 @@ export default function AdminSideMenu({ isOpen, pathname, navItems, recentShows,
                       )}
 
                       <Link
-                        href={showItem?.href ?? "/admin/trr-shows"}
+                        href={showItem?.href ?? "/shows"}
                         onClick={onClose}
                         className="mt-2 block rounded-md px-2 py-1.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
                       >

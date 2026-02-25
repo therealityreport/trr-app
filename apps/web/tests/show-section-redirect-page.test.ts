@@ -49,6 +49,6 @@ describe("show section redirect route", () => {
           showSection: "season-4",
         }),
       })
-    ).rejects.toThrow("REDIRECT:/admin/trr-shows/7f528757-5017-4599-8252-c02f0d0736cf/seasons/4");
+    ).rejects.toThrow("REDIRECT:/shows/7f528757-5017-4599-8252-c02f0d0736cf/s4");
   });
 });

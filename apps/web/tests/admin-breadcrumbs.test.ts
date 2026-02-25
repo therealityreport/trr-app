@@ -24,82 +24,80 @@ describe("admin-breadcrumb helpers", () => {
   it("builds season week breadcrumbs", () => {
     expect(
       buildSeasonWeekBreadcrumb("RHOSLC", 5, "Week 2", {
-        showHref: "/admin/trr-shows/rhoslc",
-        seasonHref: "/admin/trr-shows/rhoslc/seasons/5",
-        weekHref: "/admin/trr-shows/rhoslc/seasons/5/social/week/2",
+        showHref: "/shows/rhoslc",
+        seasonHref: "/shows/rhoslc/s5",
+        weekHref: "/shows/rhoslc/s5/social/week/2",
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/admin/trr-shows" },
-      { label: "RHOSLC", href: "/admin/trr-shows/rhoslc" },
-      { label: "Season 5", href: "/admin/trr-shows/rhoslc/seasons/5" },
-      { label: "Week 2", href: "/admin/trr-shows/rhoslc/seasons/5/social/week/2" },
+      { label: "Shows", href: "/shows" },
+      { label: "RHOSLC", href: "/shows/rhoslc" },
+      { label: "Season 5", href: "/shows/rhoslc/s5" },
+      { label: "Week 2", href: "/shows/rhoslc/s5/social/week/2" },
     ]);
 
     expect(
       buildSeasonWeekBreadcrumb("RHOSLC", 5, "Week 2", {
-        showHref: "/admin/trr-shows/rhoslc",
-        seasonHref: "/admin/trr-shows/rhoslc/seasons/5",
-        socialHref: "/admin/trr-shows/rhoslc/seasons/5?tab=social",
-        subTabLabel: "Reddit",
-        subTabHref: "/admin/trr-shows/rhoslc/seasons/5?tab=social&social_platform=reddit",
-        weekHref: "/admin/trr-shows/rhoslc/seasons/5/social/week/2?social_platform=reddit",
+        showHref: "/shows/rhoslc",
+        seasonHref: "/shows/rhoslc/s5",
+        socialHref: "/shows/rhoslc/s5/social/reddit",
+        subTabLabel: "Reddit Analytics",
+        subTabHref: "/shows/rhoslc/s5/social/reddit",
+        weekHref: "/shows/rhoslc/s5/social/week/2?social_platform=reddit",
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/admin/trr-shows" },
-      { label: "RHOSLC", href: "/admin/trr-shows/rhoslc" },
-      { label: "Season 5", href: "/admin/trr-shows/rhoslc/seasons/5" },
-      { label: "Social Analytics", href: "/admin/trr-shows/rhoslc/seasons/5?tab=social" },
-      { label: "Reddit", href: "/admin/trr-shows/rhoslc/seasons/5?tab=social&social_platform=reddit" },
-      { label: "Week 2", href: "/admin/trr-shows/rhoslc/seasons/5/social/week/2?social_platform=reddit" },
+      { label: "Shows", href: "/shows" },
+      { label: "RHOSLC", href: "/shows/rhoslc" },
+      { label: "Social Media", href: "/shows/rhoslc/s5/social/reddit" },
+      { label: "Reddit Analytics", href: "/shows/rhoslc/s5/social/reddit" },
+      { label: "Week 2", href: "/shows/rhoslc/s5/social/week/2?social_platform=reddit" },
     ]);
   });
 
   it("builds season social breadcrumbs", () => {
     expect(
       buildSeasonSocialBreadcrumb("RHOSLC", 5, {
-        showHref: "/admin/trr-shows/rhoslc",
-        seasonHref: "/admin/trr-shows/rhoslc/seasons/5",
-        socialHref: "/admin/trr-shows/rhoslc/seasons/5?tab=social",
-        subTabLabel: "Reddit",
-        subTabHref: "/admin/trr-shows/rhoslc/seasons/5?tab=social&social_platform=reddit",
+        showHref: "/shows/rhoslc",
+        seasonHref: "/shows/rhoslc/s5",
+        socialHref: "/shows/rhoslc/s5/social/reddit",
+        subTabLabel: "Reddit Analytics",
+        subTabHref: "/shows/rhoslc/s5/social/reddit",
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/admin/trr-shows" },
-      { label: "RHOSLC", href: "/admin/trr-shows/rhoslc" },
-      { label: "Season 5", href: "/admin/trr-shows/rhoslc/seasons/5" },
-      { label: "Social Analytics", href: "/admin/trr-shows/rhoslc/seasons/5?tab=social" },
-      { label: "Reddit", href: "/admin/trr-shows/rhoslc/seasons/5?tab=social&social_platform=reddit" },
+      { label: "Shows", href: "/shows" },
+      { label: "RHOSLC", href: "/shows/rhoslc" },
+      { label: "Social Media", href: "/shows/rhoslc/s5/social/reddit" },
+      { label: "Reddit Analytics", href: "/shows/rhoslc/s5/social/reddit" },
     ]);
   });
 
   it("builds person breadcrumbs with and without show context", () => {
     expect(
       buildPersonBreadcrumb("Monica Garcia", {
-        personHref: "/admin/trr-shows/the-real-housewives-of-salt-lake-city/people/monica-garcia",
+        personHref: "/shows/the-real-housewives-of-salt-lake-city/people/monica-garcia",
         showName: "The Real Housewives of Salt Lake City",
-        showHref: "/admin/trr-shows/the-real-housewives-of-salt-lake-city",
+        showHref: "/shows/the-real-housewives-of-salt-lake-city",
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/admin/trr-shows" },
+      { label: "Shows", href: "/shows" },
       {
         label: "The Real Housewives of Salt Lake City",
-        href: "/admin/trr-shows/the-real-housewives-of-salt-lake-city",
+        href: "/shows/the-real-housewives-of-salt-lake-city",
       },
-      { label: "Monica Garcia", href: "/admin/trr-shows/the-real-housewives-of-salt-lake-city/people/monica-garcia" },
+      { label: "Monica Garcia", href: "/shows/the-real-housewives-of-salt-lake-city/people/monica-garcia" },
     ]);
 
     expect(
       buildPersonBreadcrumb("Meredith Marks", {
-        personHref: "/admin/trr-shows/people/meredith-marks",
+        personHref: "/shows/people/meredith-marks",
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/admin/trr-shows" },
-      { label: "Meredith Marks", href: "/admin/trr-shows/people/meredith-marks" },
+      { label: "Shows", href: "/shows" },
+      { label: "Meredith Marks", href: "/shows/people/meredith-marks" },
     ]);
   });
 
