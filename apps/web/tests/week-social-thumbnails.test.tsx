@@ -412,7 +412,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Sync All Comments" }));
+    const syncButton = await screen.findByRole("button", { name: /Sync .*Comments/i });
+    fireEvent.click(syncButton);
 
     await waitFor(() => {
       expect(
@@ -474,7 +475,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Sync All Comments" }));
+    const syncButton = await screen.findByRole("button", { name: /Sync .*Comments/i });
+    fireEvent.click(syncButton);
 
     await waitFor(() => {
       expect(screen.getByText(/already up to date/i)).toBeInTheDocument();
