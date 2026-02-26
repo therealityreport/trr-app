@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/server/auth";
 import { getAssetsByShowSeason } from "@/lib/server/trr-api/trr-shows-repository";
 
 export const dynamic = "force-dynamic";
+const FULL_FETCH_LIMIT = 5000;
 
 interface RouteParams {
   params: Promise<{ showId: string; seasonNumber: string }>;
@@ -39,23 +40,33 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const parsedOffset = parseInt(searchParams.get("offset") ?? "0", 10);
     const limit = Number.isFinite(parsedLimit) ? parsedLimit : 200;
     const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
+    const full =
+      searchParams.get("full") === "1" ||
+      searchParams.get("full")?.toLowerCase() === "true";
     const sources = (searchParams.get("sources") ?? "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean);
 
-    const assets = await getAssetsByShowSeason(showId, seasonNum, {
-      limit,
-      offset,
+    const requestLimit = full ? FULL_FETCH_LIMIT + 1 : limit;
+    const requestOffset = full ? 0 : offset;
+    const rawAssets = await getAssetsByShowSeason(showId, seasonNum, {
+      limit: requestLimit,
+      offset: requestOffset,
       sources,
+      full,
     });
+    const truncated = full && rawAssets.length > FULL_FETCH_LIMIT;
+    const assets = truncated ? rawAssets.slice(0, FULL_FETCH_LIMIT) : rawAssets;
 
     return NextResponse.json({
       assets,
       pagination: {
-        limit,
-        offset,
+        limit: full ? FULL_FETCH_LIMIT : limit,
+        offset: requestOffset,
         count: assets.length,
+        truncated,
+        full,
       },
     });
   } catch (error) {

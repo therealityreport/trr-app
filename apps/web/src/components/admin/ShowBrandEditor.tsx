@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import ImagePaletteLab from "@/components/admin/color-lab/ImagePaletteLab";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 
 // ============================================================================
@@ -31,6 +32,7 @@ interface CastAsset {
   instagram?: string;
   status?: CastStatus;
   trrPersonId?: string;
+  sourceUrl?: string;
 }
 
 interface BrandShowRecord {
@@ -62,6 +64,14 @@ interface BrandMediaAssetLike {
   kind: string;
   hosted_url: string;
   source?: string | null;
+  source_url?: string | null;
+  width?: number | null;
+  height?: number | null;
+  context_section?: string | null;
+  context_type?: string | null;
+  person_name?: string | null;
+  people_count?: number | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface TrrSeasonLike {
@@ -80,6 +90,8 @@ export interface TrrCastMemberLike {
   photo_url: string | null;
   cover_photo_url: string | null;
 }
+
+type DefaultMediaPickerKind = "poster" | "backdrop" | "logo";
 
 // ============================================================================
 // Helpers
@@ -107,6 +119,108 @@ const defaultSeasonColors = (): SeasonColors => ({
 
 const normalizeAssetKind = (value: string | null | undefined): string =>
   (value ?? "").trim().toLowerCase();
+
+const normalizeToken = (value: string | null | undefined): string =>
+  (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+const parseMetadataRecord = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== "object") return {};
+  return value as Record<string, unknown>;
+};
+
+const parsePeopleNames = (asset: BrandMediaAssetLike): string[] => {
+  const metadata = parseMetadataRecord(asset.metadata);
+  const raw = metadata.people_names;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter(Boolean);
+};
+
+const isOfficialSeasonAnnouncementAsset = (asset: BrandMediaAssetLike): boolean => {
+  const metadata = parseMetadataRecord(asset.metadata);
+  const combined = [
+    asset.context_section,
+    asset.context_type,
+    typeof metadata.context_section === "string" ? metadata.context_section : null,
+    typeof metadata.context_type === "string" ? metadata.context_type : null,
+    typeof metadata.source_page_title === "string" ? metadata.source_page_title : null,
+    typeof metadata.fandom_section_tag === "string" ? metadata.fandom_section_tag : null,
+    typeof metadata.fandom_section_label === "string" ? metadata.fandom_section_label : null,
+  ]
+    .map((value) => normalizeToken(value))
+    .filter(Boolean)
+    .join(" ");
+  return combined.includes("official season announcement");
+};
+
+const hasTextOverlaySignal = (asset: BrandMediaAssetLike): boolean | null => {
+  const metadata = parseMetadataRecord(asset.metadata);
+  const candidates = [
+    metadata.has_text_overlay,
+    metadata.hasTextOverlay,
+    metadata.text_overlay_detected,
+    metadata.textOverlayDetected,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "boolean") return candidate;
+  }
+  return null;
+};
+
+const scoreDefaultCandidate = (
+  asset: BrandMediaAssetLike,
+  expectedKind: "poster" | "backdrop" | "logo"
+): number => {
+  const width = typeof asset.width === "number" ? asset.width : 0;
+  const height = typeof asset.height === "number" ? asset.height : 0;
+  const pixels = width > 0 && height > 0 ? width * height : 0;
+  const orientationScore =
+    expectedKind === "logo"
+      ? 1
+      : expectedKind === "poster"
+        ? height > width
+          ? 2
+          : 0
+        : width >= height
+          ? 2
+          : 0;
+  const hasTextOverlay = hasTextOverlaySignal(asset);
+  const noTextScore = hasTextOverlay === false ? 2 : hasTextOverlay === true ? 0 : 1;
+  return orientationScore * 1_000_000_000 + noTextScore * 10_000_000 + pixels;
+};
+
+const pickRecommendedDefaultAsset = (
+  assets: BrandMediaAssetLike[],
+  expectedKind: "poster" | "backdrop" | "logo"
+): BrandMediaAssetLike | null => {
+  if (assets.length === 0) return null;
+  const sorted = [...assets].sort((a, b) => {
+    const scoreDelta = scoreDefaultCandidate(b, expectedKind) - scoreDefaultCandidate(a, expectedKind);
+    if (scoreDelta !== 0) return scoreDelta;
+    return a.id.localeCompare(b.id);
+  });
+  return sorted[0] ?? null;
+};
+
+const toAssetSourceUrl = (asset: BrandMediaAssetLike): string | null => {
+  const metadata = parseMetadataRecord(asset.metadata);
+  const candidates = [
+    typeof metadata.source_page_url === "string" ? metadata.source_page_url : null,
+    asset.source_url ?? null,
+    typeof metadata.page_url === "string" ? metadata.page_url : null,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+};
 
 function ColorField({
   label,
@@ -184,6 +298,17 @@ function CastMemberEditor({
               />
             </label>
 
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Source URL</span>
+              <input
+                type="text"
+                value={value.sourceUrl ?? ""}
+                onChange={(e) => onChange({ ...value, sourceUrl: e.target.value || undefined })}
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-400 focus:outline-none"
+                placeholder="https://..."
+              />
+            </label>
+
             <label className="block">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Instagram</span>
               <input
@@ -236,11 +361,13 @@ function CastMemberEditor({
 
 function BrandSeasonEditor({
   showKey,
+  trrShowId,
   season,
   trrCast,
   onSeasonSaved,
 }: {
   showKey: string;
+  trrShowId: string;
   season: BrandSeasonRecord;
   trrCast: TrrCastMemberLike[];
   onSeasonSaved: (next: BrandSeasonRecord) => void;
@@ -248,6 +375,8 @@ function BrandSeasonEditor({
   const [label, setLabel] = useState(season.label);
   const [colors, setColors] = useState<SeasonColors>(season.colors ?? defaultSeasonColors());
   const [castMembers, setCastMembers] = useState<CastAsset[]>(season.cast_members ?? []);
+  const [officialAnnouncementAssets, setOfficialAnnouncementAssets] = useState<BrandMediaAssetLike[]>([]);
+  const [officialAssetsLoading, setOfficialAssetsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -263,6 +392,44 @@ function BrandSeasonEditor({
     (input: RequestInfo | URL, init?: RequestInit) => fetchAdminWithAuth(input, init),
     [],
   );
+
+  const fetchOfficialAnnouncementAssets = useCallback(async () => {
+    setOfficialAssetsLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchWithAuth(
+        `/api/admin/trr-api/shows/${trrShowId}/seasons/${season.season_number}/assets?full=1`,
+        { headers }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          (data as { error?: string }).error ||
+            `Failed to load season assets (HTTP ${response.status})`
+        );
+      }
+      const assetsRaw = (data as { assets?: unknown }).assets;
+      const assets = Array.isArray(assetsRaw)
+        ? (assetsRaw as BrandMediaAssetLike[]).filter(
+            (asset) =>
+              asset &&
+              typeof asset.id === "string" &&
+              typeof asset.hosted_url === "string" &&
+              isOfficialSeasonAnnouncementAsset(asset)
+          )
+        : [];
+      setOfficialAnnouncementAssets(assets);
+    } catch (err) {
+      console.warn("Failed to load official season announcement assets:", err);
+      setOfficialAnnouncementAssets([]);
+    } finally {
+      setOfficialAssetsLoading(false);
+    }
+  }, [fetchWithAuth, getAuthHeaders, season.season_number, trrShowId]);
+
+  useEffect(() => {
+    void fetchOfficialAnnouncementAssets();
+  }, [fetchOfficialAnnouncementAssets]);
 
   const seedFromTrrCast = () => {
     const deduped = new Map<string, CastAsset>();
@@ -280,6 +447,40 @@ function BrandSeasonEditor({
       });
     }
     setCastMembers(Array.from(deduped.values()));
+  };
+
+  const seedFromOfficialAnnouncement = () => {
+    const deduped = new Map<string, CastAsset>();
+    for (const asset of officialAnnouncementAssets) {
+      const metadataPeople = parsePeopleNames(asset);
+      const names = [
+        typeof asset.person_name === "string" ? asset.person_name.trim() : "",
+        ...metadataPeople,
+      ].filter(Boolean);
+      const uniqueNames = Array.from(new Set(names));
+      const peopleCount =
+        typeof asset.people_count === "number" && Number.isFinite(asset.people_count)
+          ? asset.people_count
+          : uniqueNames.length;
+      if (peopleCount !== 1 || uniqueNames.length === 0) continue;
+      const name = uniqueNames[0]!;
+      const personId =
+        typeof parseMetadataRecord(asset.metadata).person_id === "string"
+          ? (parseMetadataRecord(asset.metadata).person_id as string)
+          : undefined;
+      const key = (personId ?? name).toLowerCase();
+      if (deduped.has(key)) continue;
+      deduped.set(key, {
+        name,
+        image: asset.hosted_url,
+        status: "main",
+        trrPersonId: personId,
+        sourceUrl: toAssetSourceUrl(asset) ?? undefined,
+      });
+    }
+    if (deduped.size > 0) {
+      setCastMembers(Array.from(deduped.values()));
+    }
   };
 
   const saveSeason = async () => {
@@ -316,6 +517,14 @@ function BrandSeasonEditor({
           <h3 className="text-xl font-bold text-zinc-900">Season {season.season_number}</h3>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={seedFromOfficialAnnouncement}
+            disabled={officialAssetsLoading || officialAnnouncementAssets.length === 0}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+          >
+            {officialAssetsLoading ? "Loading Announcement…" : "Seed from Official Announcement"}
+          </button>
           <button
             type="button"
             onClick={seedFromTrrCast}
@@ -372,6 +581,19 @@ function BrandSeasonEditor({
               />
             </div>
           </div>
+
+          <ImagePaletteLab
+            title={`Season ${season.season_number} Palette Lab`}
+            defaultShowId={trrShowId}
+            defaultSeasonNumber={season.season_number}
+            onApplyPalette={(nextColors) =>
+              setColors((prev) => ({
+                primary: nextColors[0] ?? prev.primary,
+                accent: nextColors[1] ?? prev.accent,
+                neutral: nextColors[2] ?? prev.neutral,
+              }))
+            }
+          />
         </div>
 
         <div>
@@ -379,6 +601,11 @@ function BrandSeasonEditor({
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Cast Portraits</p>
               <p className="text-sm text-zinc-600">{castMembers.length} member{castMembers.length === 1 ? "" : "s"}</p>
+              {officialAnnouncementAssets.length > 0 && (
+                <p className="text-xs text-zinc-500">
+                  Official announcement portraits detected: {officialAnnouncementAssets.length}
+                </p>
+              )}
             </div>
             <button
               type="button"
@@ -407,7 +634,31 @@ function BrandSeasonEditor({
             ))}
             {castMembers.length === 0 && (
               <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-6 text-center text-sm text-zinc-500">
-                No cast portraits yet. Seed from TRR Cast or add members manually.
+                No cast portraits yet. Seed from Official Announcement, Seed from TRR Cast, or add members manually.
+              </div>
+            )}
+            {castMembers.length > 0 && (
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                <p className="font-semibold text-zinc-700">Official Source URLs</p>
+                <div className="mt-2 space-y-1">
+                  {Array.from(
+                    new Set(
+                      castMembers
+                        .map((member) => member.sourceUrl?.trim())
+                        .filter((value): value is string => Boolean(value))
+                    )
+                  ).map((sourceUrl) => (
+                    <a
+                      key={sourceUrl}
+                      href={sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block break-all underline"
+                    >
+                      {sourceUrl}
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -451,6 +702,7 @@ export default function ShowBrandEditor({
   const [defaultPosterAssetId, setDefaultPosterAssetId] = useState("");
   const [defaultBackdropAssetId, setDefaultBackdropAssetId] = useState("");
   const [defaultLogoAssetId, setDefaultLogoAssetId] = useState("");
+  const [defaultMediaPickerKind, setDefaultMediaPickerKind] = useState<DefaultMediaPickerKind | null>(null);
   const [showMediaAssets, setShowMediaAssets] = useState<BrandMediaAssetLike[]>([]);
   const [showMediaLoading, setShowMediaLoading] = useState(false);
 
@@ -469,7 +721,7 @@ export default function ShowBrandEditor({
     setShowMediaLoading(true);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetchWithAuth(`/api/admin/trr-api/shows/${trrShowId}/assets`, {
+      const response = await fetchWithAuth(`/api/admin/trr-api/shows/${trrShowId}/assets?full=1`, {
         headers,
       });
       const data = await response.json().catch(() => ({}));
@@ -597,12 +849,64 @@ export default function ShowBrandEditor({
       ),
     [showMediaAssets]
   );
+  const recommendedPosterAsset = useMemo(
+    () => pickRecommendedDefaultAsset(showPosterAssets, "poster"),
+    [showPosterAssets]
+  );
+  const recommendedBackdropAsset = useMemo(
+    () => pickRecommendedDefaultAsset(showBackdropAssets, "backdrop"),
+    [showBackdropAssets]
+  );
+  const recommendedLogoAsset = useMemo(
+    () => pickRecommendedDefaultAsset(showLogoAssets, "logo"),
+    [showLogoAssets]
+  );
+  const mediaPickerAssets = useMemo(() => {
+    if (defaultMediaPickerKind === "poster") return showPosterAssets;
+    if (defaultMediaPickerKind === "backdrop") return showBackdropAssets;
+    if (defaultMediaPickerKind === "logo") return showLogoAssets;
+    return [];
+  }, [defaultMediaPickerKind, showBackdropAssets, showLogoAssets, showPosterAssets]);
+  const selectedDefaultAssetId =
+    defaultMediaPickerKind === "poster"
+      ? defaultPosterAssetId
+      : defaultMediaPickerKind === "backdrop"
+        ? defaultBackdropAssetId
+        : defaultMediaPickerKind === "logo"
+          ? defaultLogoAssetId
+          : "";
+  const recommendedDefaultAssetId =
+    defaultMediaPickerKind === "poster"
+      ? (recommendedPosterAsset?.id ?? "")
+      : defaultMediaPickerKind === "backdrop"
+        ? (recommendedBackdropAsset?.id ?? "")
+        : defaultMediaPickerKind === "logo"
+          ? (recommendedLogoAsset?.id ?? "")
+          : "";
 
   useEffect(() => {
     if (availableSeasonNumbers.length > 0) {
       setNewSeasonNumber((prev) => (availableSeasonNumbers.includes(prev) ? prev : availableSeasonNumbers[0]));
     }
   }, [availableSeasonNumbers]);
+
+  useEffect(() => {
+    if (!defaultPosterAssetId && recommendedPosterAsset?.id) {
+      setDefaultPosterAssetId(recommendedPosterAsset.id);
+    }
+  }, [defaultPosterAssetId, recommendedPosterAsset?.id]);
+
+  useEffect(() => {
+    if (!defaultBackdropAssetId && recommendedBackdropAsset?.id) {
+      setDefaultBackdropAssetId(recommendedBackdropAsset.id);
+    }
+  }, [defaultBackdropAssetId, recommendedBackdropAsset?.id]);
+
+  useEffect(() => {
+    if (!defaultLogoAssetId && recommendedLogoAsset?.id) {
+      setDefaultLogoAssetId(recommendedLogoAsset.id);
+    }
+  }, [defaultLogoAssetId, recommendedLogoAsset?.id]);
 
   const createBrandProfile = async () => {
     setCreating(true);
@@ -728,6 +1032,21 @@ export default function ShowBrandEditor({
     setSeasons((prev) => prev.map((s) => (s.id === next.id ? next : s)));
   };
 
+  const openDefaultMediaPicker = (kind: DefaultMediaPickerKind) => {
+    setDefaultMediaPickerKind(kind);
+  };
+
+  const closeDefaultMediaPicker = () => {
+    setDefaultMediaPickerKind(null);
+  };
+
+  const selectDefaultMediaAsset = (assetId: string) => {
+    if (defaultMediaPickerKind === "poster") setDefaultPosterAssetId(assetId);
+    if (defaultMediaPickerKind === "backdrop") setDefaultBackdropAssetId(assetId);
+    if (defaultMediaPickerKind === "logo") setDefaultLogoAssetId(assetId);
+    setDefaultMediaPickerKind(null);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -801,7 +1120,88 @@ export default function ShowBrandEditor({
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+            Default Media
+          </p>
+          <p className="mt-1 text-sm text-zinc-600">
+            Choose brand defaults from imported show media.
+          </p>
+          <div className="mt-3 grid gap-4 lg:grid-cols-3">
+            <div className="rounded-lg border border-zinc-200 bg-white p-3">
+              <p className="text-sm font-semibold text-zinc-700">Default Poster</p>
+              <button
+                type="button"
+                onClick={() => openDefaultMediaPicker("poster")}
+                className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
+                disabled={showMediaLoading || showPosterAssets.length === 0}
+              >
+                {defaultPosterAssetId ? "Change Poster" : "Choose Poster"}
+              </button>
+              {defaultPosterAssetId && showAssetUrlById.get(defaultPosterAssetId) && (
+                <img
+                  src={showAssetUrlById.get(defaultPosterAssetId)!}
+                  alt="Default poster"
+                  className="mt-2 h-24 w-full rounded object-cover"
+                />
+              )}
+              <p className="mt-2 text-xs text-zinc-500">
+                Recommended: {recommendedPosterAsset ? recommendedPosterAsset.id : "None"}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-zinc-200 bg-white p-3">
+              <p className="text-sm font-semibold text-zinc-700">Default Backdrop</p>
+              <button
+                type="button"
+                onClick={() => openDefaultMediaPicker("backdrop")}
+                className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
+                disabled={showMediaLoading || showBackdropAssets.length === 0}
+              >
+                {defaultBackdropAssetId ? "Change Backdrop" : "Choose Backdrop"}
+              </button>
+              {defaultBackdropAssetId && showAssetUrlById.get(defaultBackdropAssetId) && (
+                <img
+                  src={showAssetUrlById.get(defaultBackdropAssetId)!}
+                  alt="Default backdrop"
+                  className="mt-2 h-24 w-full rounded object-cover"
+                />
+              )}
+              <p className="mt-2 text-xs text-zinc-500">
+                Recommended: {recommendedBackdropAsset ? recommendedBackdropAsset.id : "None"}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-zinc-200 bg-white p-3">
+              <p className="text-sm font-semibold text-zinc-700">Default Logo</p>
+              <button
+                type="button"
+                onClick={() => openDefaultMediaPicker("logo")}
+                className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
+                disabled={showMediaLoading || showLogoAssets.length === 0}
+              >
+                {defaultLogoAssetId ? "Change Logo" : "Choose Logo"}
+              </button>
+              {defaultLogoAssetId && showAssetUrlById.get(defaultLogoAssetId) && (
+                <img
+                  src={showAssetUrlById.get(defaultLogoAssetId)!}
+                  alt="Default logo"
+                  className="mt-2 h-24 w-full rounded object-contain bg-zinc-100"
+                />
+              )}
+              <p className="mt-2 text-xs text-zinc-500">
+                Recommended: {recommendedLogoAsset ? recommendedLogoAsset.id : "None"}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-zinc-500">
+            {showMediaLoading
+              ? "Loading show media..."
+              : `${showPosterAssets.length} posters, ${showBackdropAssets.length} backdrops, ${showLogoAssets.length} logos available.`}
+          </p>
+        </div>
+
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Palette</p>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -855,6 +1255,21 @@ export default function ShowBrandEditor({
           </div>
         </div>
 
+        <div className="mt-6">
+          <ImagePaletteLab
+            title="Brand Image Palette Lab"
+            defaultShowId={trrShowId}
+            onApplyPalette={(nextColors) =>
+              setPalette((prev) => ({
+                primary: nextColors[0] ?? prev.primary,
+                accent: nextColors[1] ?? prev.accent,
+                dark: nextColors[2] ?? prev.dark,
+                light: nextColors[3] ?? prev.light,
+              }))
+            }
+          />
+        </div>
+
         <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Asset URLs</p>
           <div className="mt-3 grid gap-4 lg:grid-cols-3">
@@ -890,79 +1305,72 @@ export default function ShowBrandEditor({
             </label>
           </div>
         </div>
-
-        <div className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-            Default Media
-          </p>
-          <p className="mt-1 text-sm text-zinc-600">
-            Choose brand defaults from imported show media.
-          </p>
-          <div className="mt-3 grid gap-4 lg:grid-cols-3">
-            <label className="block">
-              <span className="mb-1 block text-sm font-semibold text-zinc-700">
-                Default Poster
-              </span>
-              <select
-                value={defaultPosterAssetId}
-                onChange={(e) => setDefaultPosterAssetId(e.target.value)}
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
-                disabled={showMediaLoading}
-              >
-                <option value="">None</option>
-                {showPosterAssets.map((asset, index) => (
-                  <option key={`poster-${asset.id}`} value={asset.id}>
-                    {`Poster ${index + 1}${asset.source ? ` (${asset.source})` : ""}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="mb-1 block text-sm font-semibold text-zinc-700">
-                Default Backdrop
-              </span>
-              <select
-                value={defaultBackdropAssetId}
-                onChange={(e) => setDefaultBackdropAssetId(e.target.value)}
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
-                disabled={showMediaLoading}
-              >
-                <option value="">None</option>
-                {showBackdropAssets.map((asset, index) => (
-                  <option key={`backdrop-${asset.id}`} value={asset.id}>
-                    {`Backdrop ${index + 1}${asset.source ? ` (${asset.source})` : ""}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="mb-1 block text-sm font-semibold text-zinc-700">
-                Default Logo
-              </span>
-              <select
-                value={defaultLogoAssetId}
-                onChange={(e) => setDefaultLogoAssetId(e.target.value)}
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
-                disabled={showMediaLoading}
-              >
-                <option value="">None</option>
-                {showLogoAssets.map((asset, index) => (
-                  <option key={`logo-${asset.id}`} value={asset.id}>
-                    {`Logo ${index + 1}${asset.source ? ` (${asset.source})` : ""}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <p className="mt-3 text-xs text-zinc-500">
-            {showMediaLoading
-              ? "Loading show media..."
-              : `${showPosterAssets.length} posters, ${showBackdropAssets.length} backdrops, ${showLogoAssets.length} logos available.`}
-          </p>
-        </div>
       </section>
+
+      {defaultMediaPickerKind && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={closeDefaultMediaPicker}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">
+                  Default Media Picker
+                </p>
+                <h3 className="text-lg font-bold text-zinc-900">
+                  Select {defaultMediaPickerKind === "poster" ? "Poster" : defaultMediaPickerKind === "backdrop" ? "Backdrop" : "Logo"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeDefaultMediaPicker}
+                className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-auto p-5">
+              {mediaPickerAssets.length === 0 ? (
+                <p className="text-sm text-zinc-600">No assets available for this default.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+                  {mediaPickerAssets.map((asset) => (
+                    <button
+                      key={asset.id}
+                      type="button"
+                      onClick={() => selectDefaultMediaAsset(asset.id)}
+                      className={`rounded-lg border p-2 text-left transition ${
+                        selectedDefaultAssetId === asset.id
+                          ? "border-zinc-900 bg-zinc-100"
+                          : "border-zinc-200 bg-white hover:bg-zinc-50"
+                      }`}
+                    >
+                      <img
+                        src={asset.hosted_url}
+                        alt={`${defaultMediaPickerKind} candidate`}
+                        className={`h-28 w-full rounded ${
+                          defaultMediaPickerKind === "logo" ? "object-contain bg-zinc-100" : "object-cover"
+                        }`}
+                      />
+                      <p className="mt-2 truncate text-xs font-semibold text-zinc-700">{asset.id}</p>
+                      <p className="truncate text-xs text-zinc-500">{asset.source ?? "unknown"}</p>
+                      {recommendedDefaultAssetId === asset.id && (
+                        <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
+                          Recommended
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -1023,6 +1431,7 @@ export default function ShowBrandEditor({
             <BrandSeasonEditor
               key={season.id}
               showKey={showRecord.key}
+              trrShowId={trrShowId}
               season={season}
               trrCast={trrCast}
               onSeasonSaved={handleSeasonSaved}

@@ -117,4 +117,33 @@ describe("networks-streaming overrides proxy routes", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("https://backend.example.com/api/v1/admin/shows/networks-streaming/overrides/123");
     expect(fetchMock.mock.calls[1][0]).toBe("https://backend.example.com/api/v1/admin/shows/networks-streaming/overrides/123");
   });
+
+  it("returns stable error codes for override auth and backend configuration failures", async () => {
+    getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/shows/networks-streaming/overrides");
+
+    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const noAuthResponse = await GET(new NextRequest("http://localhost/api/admin/networks-streaming/overrides"));
+    expect(noAuthResponse.status).toBe(500);
+    await expect(noAuthResponse.json()).resolves.toMatchObject({
+      error_code: "backend_override_unavailable",
+    });
+
+    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "Not authenticated" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const upstreamAuthFailResponse = await GET(
+      new NextRequest("http://localhost/api/admin/networks-streaming/overrides"),
+    );
+    expect(upstreamAuthFailResponse.status).toBe(403);
+    await expect(upstreamAuthFailResponse.json()).resolves.toMatchObject({
+      error_code: "not_authenticated_for_overrides",
+      error: "Not authenticated",
+    });
+  });
 });

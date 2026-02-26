@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/admin/networks-and-streaming/network/bravo",
+  usePathname: () => "/brands/networks-and-streaming/network/bravo",
   useParams: () => mocks.params,
   useRouter: () => mocks.router,
 }));
@@ -128,7 +128,7 @@ describe("admin network detail page", () => {
 
     const breadcrumbNav = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(breadcrumbNav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
-    expect(within(breadcrumbNav).getByRole("link", { name: "Brands" })).toHaveAttribute("href", "/admin/brands");
+    expect(within(breadcrumbNav).getByRole("link", { name: "Brands" })).toHaveAttribute("href", "/brands");
     expect(screen.getByText("Saved Logos")).toBeInTheDocument();
     expect(screen.getByText("Saved Info / URLs")).toBeInTheDocument();
     expect(screen.getByText("Added Shows")).toBeInTheDocument();
@@ -256,7 +256,7 @@ describe("admin network detail page", () => {
     render(<AdminNetworkStreamingDetailPage />);
 
     await waitFor(() => {
-      expect(mocks.replace).toHaveBeenCalledWith("/admin/networks-and-streaming/network/bravo-tv");
+      expect(mocks.replace).toHaveBeenCalledWith("/brands/networks-and-streaming/network/bravo-tv");
     });
   });
 

@@ -26,6 +26,13 @@ describe("show-admin-routes", () => {
         new URLSearchParams()
       )
     ).toMatchObject({ tab: "assets", assetsSubTab: "videos", source: "path" });
+
+    expect(
+      parseShowRouteState(
+        "/shows/the-real-housewives-of-salt-lake-city/media/images",
+        new URLSearchParams()
+      )
+    ).toMatchObject({ tab: "assets", assetsSubTab: "images", source: "path" });
   });
 
   it("falls back to legacy show query params", () => {
@@ -57,7 +64,7 @@ describe("show-admin-routes", () => {
         tab: "assets",
         assetsSubTab: "brand",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media?assets=brand");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media/brand");
 
     expect(
       buildShowAdminUrl({
@@ -65,14 +72,14 @@ describe("show-admin-routes", () => {
         tab: "assets",
         assetsSubTab: "videos",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media?assets=videos");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media/videos");
 
     expect(
       buildShowAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
         tab: "assets",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media");
+    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media/images");
 
     expect(
       buildShowAdminUrl({

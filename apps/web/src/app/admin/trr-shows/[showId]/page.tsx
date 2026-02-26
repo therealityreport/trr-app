@@ -30,6 +30,11 @@ import { ImageScrapeDrawer, type EntityContext } from "@/components/admin/ImageS
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import { ShowTabsNav } from "@/components/admin/show-tabs/ShowTabsNav";
 import { ShowAssetsImageSections } from "@/components/admin/show-tabs/ShowAssetsImageSections";
+import {
+  ShowBrandLogosSection,
+  type ShowLogoVariant,
+} from "@/components/admin/show-tabs/ShowBrandLogosSection";
+import { ShowFeaturedMediaSelectors } from "@/components/admin/show-tabs/ShowFeaturedMediaSelectors";
 import { resolveGalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import { shouldIncludeCastMemberForSeasonFilter } from "@/lib/admin/cast-role-filtering";
 import {
@@ -65,6 +70,10 @@ import {
 } from "@/lib/admin/show-admin-routes";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
+import {
+  resolveFeaturedLogoPayload,
+  resolveFeaturedShowLogoAssetId,
+} from "@/lib/admin/show-logo-featured";
 import {
   parseShowCastRouteState,
   writeShowCastRouteState,
@@ -125,9 +134,6 @@ import {
   adminMutation,
   fetchWithTimeout,
 } from "@/lib/admin/admin-fetch";
-import {
-  fetchAllPaginatedGalleryRowsWithMeta,
-} from "@/lib/admin/paginated-gallery-fetch";
 import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -153,6 +159,7 @@ interface TrrShow {
   imdb_rating_value: number | null;
   primary_poster_image_id?: string | null;
   primary_backdrop_image_id?: string | null;
+  primary_logo_image_id?: string | null;
   logo_url?: string | null;
   streaming_providers?: string[] | null;
   watch_providers?: string[] | null;
@@ -519,6 +526,7 @@ const DEFAULT_BATCH_JOB_OPERATIONS: BatchJobOperation[] = ["count"];
 const SHOW_GALLERY_ALLOWED_SECTIONS: AssetSectionKey[] = [
   "cast_photos",
   "profile_pictures",
+  "banners",
   "posters",
   "backdrops",
 ];
@@ -531,9 +539,67 @@ const DEFAULT_BATCH_JOB_CONTENT_SECTIONS: AssetSectionKey[] = [
 const buildShowGalleryVisibleDefaults = (): ShowGalleryVisibleBySection => ({
   backdrops: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
   posters: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
+  banners: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
   profile_pictures: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
   cast_photos: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
 });
+
+const SHOW_ASSET_SUB_TABS: Array<{ id: "images" | "videos" | "brand"; label: string }> = [
+  { id: "images", label: "Images" },
+  { id: "videos", label: "Videos" },
+  { id: "brand", label: "Brand" },
+];
+
+const TRUSTED_SHOW_LOGO_SOURCE_HOSTS = new Set([
+  "upload.wikimedia.org",
+  "wikipedia.org",
+  "en.wikipedia.org",
+  "imdb.com",
+  "www.imdb.com",
+  "m.media-amazon.com",
+  "media-amazon.com",
+  "image.tmdb.org",
+]);
+
+const TRUSTED_SHOW_LOGO_SOURCES = new Set(["imdb", "tmdb"]);
+
+const extractHostname = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase();
+    return host || null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveShowLogoIdentityKey = (asset: SeasonAsset): string => {
+  const candidates = [asset.source_url, asset.original_url, asset.hosted_url];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const trimmed = candidate.trim().toLowerCase();
+    if (trimmed) return trimmed;
+  }
+  return `${asset.origin_table ?? "unknown"}:${asset.id}`;
+};
+
+const isTrustedShowBrandLogoAsset = (asset: SeasonAsset): boolean => {
+  if (asset.type !== "show") return false;
+  if ((asset.kind ?? "").toLowerCase().trim() !== "logo") return false;
+
+  const sourceToken = (asset.source ?? "").trim().toLowerCase();
+  if (TRUSTED_SHOW_LOGO_SOURCES.has(sourceToken)) return true;
+
+  const sourceHost = extractHostname(asset.source_url);
+  if (sourceHost && TRUSTED_SHOW_LOGO_SOURCE_HOSTS.has(sourceHost)) return true;
+
+  const originalHost = extractHostname(asset.original_url);
+  if (originalHost && TRUSTED_SHOW_LOGO_SOURCE_HOSTS.has(originalHost)) return true;
+
+  return false;
+};
 
 const ENTITY_LINK_GROUP_LABELS: Record<EntityLinkGroup, string> = {
   official: "Official",
@@ -612,8 +678,6 @@ const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
 const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
 const GALLERY_ASSET_LOAD_TIMEOUT_MS = 60_000;
-const GALLERY_ASSET_PAGE_SIZE = 500;
-const GALLERY_ASSET_MAX_PAGES = 30;
 const ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const CAST_INCREMENTAL_INITIAL_LIMIT = 48;
@@ -691,6 +755,21 @@ const SEASON_PAGE_TABS = [
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const looksLikeUuid = (value: string) => UUID_RE.test(value);
+
+const isLikelyMirroredAssetUrl = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return (
+      host.includes("cloudfront.net") ||
+      host.includes("amazonaws.com") ||
+      host.includes("s3.") ||
+      host.includes("therealityreport")
+    );
+  } catch {
+    return false;
+  }
+};
 
 const normalizeEntityLinkStatus = (value: unknown): EntityLinkStatus => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -1637,6 +1716,8 @@ export default function TrrShowDetailPage() {
 
   // Gallery state
   const [galleryAssets, setGalleryAssets] = useState<SeasonAsset[]>([]);
+  const [featuredLogoSavingAssetId, setFeaturedLogoSavingAssetId] = useState<string | null>(null);
+  const [featuredLogoVariant, setFeaturedLogoVariant] = useState<ShowLogoVariant>("color");
   const [galleryVisibleBySection, setGalleryVisibleBySection] = useState<ShowGalleryVisibleBySection>(
     () => buildShowGalleryVisibleDefaults()
   );
@@ -1664,6 +1745,11 @@ export default function TrrShowDetailPage() {
     fallbackRecoveredCount: 0,
     allCandidatesFailedCount: 0,
     totalImageAttempts: 0,
+  });
+  const [galleryMirrorTelemetry, setGalleryMirrorTelemetry] = useState({
+    mirroredCount: 0,
+    totalCount: 0,
+    mirroredRatio: 0,
   });
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [textOverlayDetectError, setTextOverlayDetectError] = useState<string | null>(null);
@@ -6725,12 +6811,18 @@ export default function TrrShowDetailPage() {
       includeOther: false,
     });
 
-    const sectionKeys: AssetSectionKey[] = ["backdrops", "posters", "profile_pictures", "cast_photos"];
+    const sectionKeys: AssetSectionKey[] = [
+      "backdrops",
+      "banners",
+      "posters",
+      "profile_pictures",
+      "cast_photos",
+    ];
     const hasMoreBySection: Partial<Record<AssetSectionKey, boolean>> = {};
     for (const sectionKey of sectionKeys) {
       const visibleLimit =
         galleryVisibleBySection[sectionKey] ?? SHOW_GALLERY_SECTION_INITIAL_VISIBLE;
-      const sectionAssets = grouped[sectionKey];
+      const sectionAssets = grouped[sectionKey] ?? [];
       hasMoreBySection[sectionKey] = sectionAssets.length > visibleLimit;
       grouped[sectionKey] = sectionAssets.slice(0, visibleLimit);
     }
@@ -6746,15 +6838,67 @@ export default function TrrShowDetailPage() {
     showGalleryAllowedSectionSet,
   ]);
 
-  const brandLogoAssets = useMemo(
+  const brandLogoAssets = useMemo(() => {
+    // Keep show-brand logos limited to canonical logo sources (Wikipedia + IMDb/TMDb).
+    const trusted = galleryAssets.filter((asset) => isTrustedShowBrandLogoAsset(asset));
+    const sorted = [...trusted].sort((a, b) => {
+      if (a.origin_table === b.origin_table) return 0;
+      if (a.origin_table === "show_images") return -1;
+      if (b.origin_table === "show_images") return 1;
+      return 0;
+    });
+    const deduped: SeasonAsset[] = [];
+    const seenIdentityKeys = new Set<string>();
+    for (const asset of sorted) {
+      const key = resolveShowLogoIdentityKey(asset);
+      if (seenIdentityKeys.has(key)) continue;
+      seenIdentityKeys.add(key);
+      deduped.push(asset);
+    }
+    return deduped;
+  }, [galleryAssets]);
+
+  const featuredShowLogoAssetId = useMemo(
+    () => resolveFeaturedShowLogoAssetId(brandLogoAssets, show?.primary_logo_image_id),
+    [brandLogoAssets, show?.primary_logo_image_id]
+  );
+
+  const featuredShowLogoAsset = useMemo(
+    () => brandLogoAssets.find((asset) => asset.id === featuredShowLogoAssetId) ?? null,
+    [brandLogoAssets, featuredShowLogoAssetId]
+  );
+
+  const featuredHeaderLogoUrl = useMemo(() => {
+    if (!featuredShowLogoAsset) return show?.logo_url ?? null;
+    const colorUrl = getAssetDisplayUrl(featuredShowLogoAsset);
+    if (featuredLogoVariant === "black") {
+      return featuredShowLogoAsset.logo_black_url ?? colorUrl ?? show?.logo_url ?? null;
+    }
+    if (featuredLogoVariant === "white") {
+      return featuredShowLogoAsset.logo_white_url ?? colorUrl ?? show?.logo_url ?? null;
+    }
+    return colorUrl ?? show?.logo_url ?? null;
+  }, [featuredLogoVariant, featuredShowLogoAsset, show?.logo_url]);
+
+  const featuredPosterCandidates = useMemo(
     () =>
       galleryAssets.filter(
-        (asset) =>
-          asset.type === "show" &&
-          (asset.kind ?? "").toLowerCase().trim() === "logo"
+        (asset) => asset.origin_table === "show_images" && getFeaturedShowImageKind(asset) === "poster"
       ),
     [galleryAssets]
   );
+
+  const featuredBackdropCandidates = useMemo(
+    () =>
+      galleryAssets.filter(
+        (asset) => asset.origin_table === "show_images" && getFeaturedShowImageKind(asset) === "backdrop"
+      ),
+    [galleryAssets]
+  );
+
+  useEffect(() => {
+    setFeaturedLogoVariant("color");
+  }, [featuredShowLogoAssetId]);
 
   const increaseGallerySectionVisible = useCallback((section: AssetSectionKey) => {
     setGalleryVisibleBySection((prev) => ({
@@ -7302,6 +7446,11 @@ export default function TrrShowDetailPage() {
         allCandidatesFailedCount: 0,
         totalImageAttempts: 0,
       });
+      setGalleryMirrorTelemetry({
+        mirroredCount: 0,
+        totalCount: 0,
+        mirroredRatio: 0,
+      });
       try {
         const headers = await getAuthHeaders();
         const sourcesParam = advancedFilters.sources.length
@@ -7320,7 +7469,23 @@ export default function TrrShowDetailPage() {
           return out;
         };
 
-        const fetchAssetRows = async (url: string): Promise<SeasonAsset[]> => {
+        const computeMirrorTelemetry = (rows: SeasonAsset[]) => {
+          const totalCount = rows.length;
+          const mirroredCount = rows.filter((asset) => {
+            const candidates = getSeasonAssetCardUrlCandidates(asset);
+            const preferredUrl = firstImageUrlCandidate(candidates) ?? asset.hosted_url ?? null;
+            return isLikelyMirroredAssetUrl(preferredUrl);
+          }).length;
+          return {
+            mirroredCount,
+            totalCount,
+            mirroredRatio: totalCount > 0 ? mirroredCount / totalCount : 0,
+          };
+        };
+
+        const fetchAssetRows = async (
+          url: string
+        ): Promise<{ rows: SeasonAsset[]; truncated: boolean }> => {
           let res: Response;
           try {
             res = await fetchWithTimeout(url, { headers }, GALLERY_ASSET_LOAD_TIMEOUT_MS);
@@ -7334,32 +7499,27 @@ export default function TrrShowDetailPage() {
             }
             throw error;
           }
-          if (!res.ok) return [];
+          if (!res.ok) return { rows: [], truncated: false };
           const data = await res.json().catch(() => ({}));
           const assets = (data as { assets?: unknown }).assets;
-          return Array.isArray(assets) ? (assets as SeasonAsset[]) : [];
+          const pagination = (data as { pagination?: { truncated?: unknown } }).pagination;
+          const truncated = Boolean(pagination?.truncated);
+          return {
+            rows: Array.isArray(assets) ? (assets as SeasonAsset[]) : [],
+            truncated,
+          };
         };
 
-        const fetchAllAssetRows = async (
-          baseUrl: string
-        ): Promise<{ rows: SeasonAsset[]; truncated: boolean }> =>
-          fetchAllPaginatedGalleryRowsWithMeta({
-            pageSize: GALLERY_ASSET_PAGE_SIZE,
-            maxPages: GALLERY_ASSET_MAX_PAGES,
-            fetchPage: (offset, limit) =>
-              fetchAssetRows(`${baseUrl}?limit=${limit}&offset=${offset}${sourcesParam}`),
-          }).then((result) => ({ rows: result.rows, truncated: result.truncated }));
-
         const fetchShowAssets = async (): Promise<{ rows: SeasonAsset[]; truncated: boolean }> =>
-          fetchAllAssetRows(`/api/admin/trr-api/shows/${showId}/assets`);
+          fetchAssetRows(`/api/admin/trr-api/shows/${showId}/assets?full=1${sourcesParam}`);
 
         if (seasonNumber === "all") {
           // Fetch show-level assets once + season assets for all seasons.
           const [showAssets, ...seasonResults] = await Promise.all([
             fetchShowAssets(),
             ...visibleSeasons.map(async (season) => {
-              return fetchAllAssetRows(
-                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets`
+              return fetchAssetRows(
+                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets?full=1${sourcesParam}`
               );
             }),
           ]);
@@ -7376,10 +7536,13 @@ export default function TrrShowDetailPage() {
               ? `Showing first ${dedupedAssets.length} assets due to pagination cap. Narrow filters to refine.`
               : null
           );
+          setGalleryMirrorTelemetry(computeMirrorTelemetry(dedupedAssets));
         } else {
           const [showAssets, seasonAssets] = await Promise.all([
             fetchShowAssets(),
-            fetchAllAssetRows(`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets`),
+            fetchAssetRows(
+              `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?full=1${sourcesParam}`
+            ),
           ]);
           const dedupedAssets = dedupe([...(showAssets?.rows ?? []), ...(seasonAssets?.rows ?? [])]);
           const isTruncated = Boolean(showAssets?.truncated || seasonAssets?.truncated);
@@ -7389,12 +7552,81 @@ export default function TrrShowDetailPage() {
               ? `Showing first ${dedupedAssets.length} assets due to pagination cap. Narrow filters to refine.`
               : null
           );
+          setGalleryMirrorTelemetry(computeMirrorTelemetry(dedupedAssets));
         }
       } finally {
         setGalleryLoading(false);
       }
     },
     [showId, visibleSeasons, getAuthHeaders, advancedFilters.sources]
+  );
+
+  const setFeaturedShowLogo = useCallback(
+    async (asset: SeasonAsset) => {
+      if (!showId) return;
+      const payload = resolveFeaturedLogoPayload(asset);
+      if (!payload) {
+        throw new Error("Featured logo can only be set from show_images or media_assets logo rows.");
+      }
+
+      const selectedShowImageId = "show_image_id" in payload ? payload.show_image_id : null;
+      const selectedMediaAssetId = "media_asset_id" in payload ? payload.media_asset_id : null;
+      const featuredAssetId = selectedShowImageId ?? selectedMediaAssetId;
+      setFeaturedLogoSavingAssetId(featuredAssetId);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/logos/featured`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+          SETTINGS_MUTATION_TIMEOUT_MS
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message =
+            (data as { error?: string; detail?: string }).error ||
+            (data as { detail?: string }).detail ||
+            `Failed to set featured logo (HTTP ${response.status})`;
+          throw new Error(message);
+        }
+
+        setGalleryAssets((prev) =>
+          prev.map((candidate) => {
+            if ((candidate.kind ?? "").trim().toLowerCase() !== "logo") return candidate;
+            if (candidate.origin_table !== "media_assets") return candidate;
+            return {
+              ...candidate,
+              logo_link_is_primary:
+                selectedMediaAssetId != null &&
+                (candidate.media_asset_id ?? candidate.id) === selectedMediaAssetId,
+            };
+          })
+        );
+        setShow((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            primary_logo_image_id: selectedShowImageId ?? null,
+          };
+        });
+
+        await Promise.all([fetchShow(), loadGalleryAssets(selectedGallerySeason)]);
+      } finally {
+        setFeaturedLogoSavingAssetId(null);
+      }
+    },
+    [fetchShow, getAuthHeaders, loadGalleryAssets, selectedGallerySeason, showId]
+  );
+
+  const selectFeaturedLogoVariant = useCallback(
+    (asset: SeasonAsset, variant: ShowLogoVariant) => {
+      if (asset.id !== featuredShowLogoAssetId) return;
+      setFeaturedLogoVariant(variant);
+    },
+    [featuredShowLogoAssetId]
   );
 
   const toggleBatchJobOperation = useCallback((operation: BatchJobOperation) => {
@@ -9269,6 +9501,9 @@ export default function TrrShowDetailPage() {
   const lightboxFeaturedKind = assetLightbox
     ? getFeaturedShowImageKind(assetLightbox.asset)
     : null;
+  const lightboxFeaturedLogoPayload = assetLightbox
+    ? resolveFeaturedLogoPayload(assetLightbox.asset)
+    : null;
   const canSetFeaturedPoster =
     Boolean(assetLightbox) &&
     assetLightbox?.asset.origin_table === "show_images" &&
@@ -9277,6 +9512,7 @@ export default function TrrShowDetailPage() {
     Boolean(assetLightbox) &&
     assetLightbox?.asset.origin_table === "show_images" &&
     lightboxFeaturedKind === "backdrop";
+  const canSetFeaturedLogo = Boolean(assetLightbox && lightboxFeaturedLogoPayload);
   const featuredPosterDisabledReason = !assetLightbox
     ? "No image selected."
     : assetLightbox.asset.origin_table !== "show_images"
@@ -9291,6 +9527,11 @@ export default function TrrShowDetailPage() {
       : lightboxFeaturedKind !== "backdrop"
         ? "Only show-image backdrop assets can be set as featured backdrop."
         : undefined;
+  const featuredLogoDisabledReason = !assetLightbox
+    ? "No image selected."
+    : !lightboxFeaturedLogoPayload
+      ? "Featured logo can only be set from show_images or media_assets logo rows."
+      : undefined;
   const isFeaturedPoster = Boolean(
     assetLightbox &&
       canSetFeaturedPoster &&
@@ -9302,6 +9543,11 @@ export default function TrrShowDetailPage() {
       canSetFeaturedBackdrop &&
       show?.primary_backdrop_image_id &&
       show.primary_backdrop_image_id === assetLightbox.asset.id
+  );
+  const isFeaturedLogo = Boolean(
+    assetLightbox &&
+      featuredShowLogoAssetId &&
+      featuredShowLogoAssetId === assetLightbox.asset.id
   );
 
   if (checking) {
@@ -9699,7 +9945,7 @@ export default function TrrShowDetailPage() {
               <div>
                 <NetworkNameOrLogo network={primaryNetwork} fallbackLabel={networkLabel} />
                 <div className="mt-2 flex items-center gap-3">
-                  <ShowNameOrLogo name={show.name} logoUrl={show.logo_url} />
+                  <ShowNameOrLogo name={show.name} logoUrl={featuredHeaderLogoUrl} />
                   {/* TMDb and IMDb links */}
                   <div className="flex items-center gap-2">
                     <TmdbLinkIcon tmdbId={show.tmdb_id} type="show" />
@@ -9987,6 +10233,24 @@ export default function TrrShowDetailPage() {
                   ))}
                 </nav>
               )}
+              {activeTab === "assets" && (
+                <nav className="mt-3 flex flex-wrap gap-2">
+                  {SHOW_ASSET_SUB_TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setAssetsSubTab(tab.id)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                        assetsView === tab.id
+                          ? "border-zinc-800 bg-zinc-800 text-white"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </nav>
+              )}
             </div>
           </div>
         </AdminGlobalHeader>
@@ -10042,41 +10306,7 @@ export default function TrrShowDetailPage() {
                 <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
                 </div>
 
-                <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
-                  <button
-                    type="button"
-                    onClick={() => setAssetsSubTab("images")}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                      assetsView === "images"
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700"
-                    }`}
-                  >
-                    Images
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAssetsSubTab("videos")}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                      assetsView === "videos"
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700"
-                    }`}
-                  >
-                    Videos
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAssetsSubTab("brand")}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                      assetsView === "brand"
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700"
-                    }`}
-                  >
-                    Brand
-                  </button>
-                </div>
+                <div />
               </div>
 
               {assetsView === "images" ? (
@@ -10234,7 +10464,9 @@ export default function TrrShowDetailPage() {
                   <p className="mb-4 text-xs text-zinc-500">
                     Fallback diagnostics: {galleryFallbackTelemetry.fallbackRecoveredCount} recovered,{" "}
                     {galleryFallbackTelemetry.allCandidatesFailedCount} failed,{" "}
-                    {galleryFallbackTelemetry.totalImageAttempts} attempted.
+                    {galleryFallbackTelemetry.totalImageAttempts} attempted. Mirrored URL usage:{" "}
+                    {galleryMirrorTelemetry.mirroredCount}/{galleryMirrorTelemetry.totalCount} (
+                    {Math.round(galleryMirrorTelemetry.mirroredRatio * 100)}%).
                   </p>
 
                   {galleryLoading ? (
@@ -10249,13 +10481,16 @@ export default function TrrShowDetailPage() {
                     <div className="space-y-8">
                       <ShowAssetsImageSections
                         backdrops={gallerySectionAssets.backdrops}
+                        banners={gallerySectionAssets.banners}
                         posters={gallerySectionAssets.posters}
                         featuredBackdropImageId={show.primary_backdrop_image_id}
                         featuredPosterImageId={show.primary_poster_image_id}
                         autoAdvanceMode={galleryAutoAdvanceMode}
                         hasMoreBackdrops={Boolean(gallerySectionAssets.hasMoreBySection.backdrops)}
+                        hasMoreBanners={Boolean(gallerySectionAssets.hasMoreBySection.banners)}
                         hasMorePosters={Boolean(gallerySectionAssets.hasMoreBySection.posters)}
                         onLoadMoreBackdrops={() => increaseGallerySectionVisible("backdrops")}
+                        onLoadMoreBanners={() => increaseGallerySectionVisible("banners")}
                         onLoadMorePosters={() => increaseGallerySectionVisible("posters")}
                         onOpenAssetLightbox={openAssetLightbox}
                         renderGalleryImage={({ asset, alt, sizes, className }) => (
@@ -10427,31 +10662,36 @@ export default function TrrShowDetailPage() {
               ) : (
                 <div className="space-y-6">
                   <section>
+                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Featured Images</h4>
+                    <ShowFeaturedMediaSelectors
+                      posterAssets={featuredPosterCandidates}
+                      backdropAssets={featuredBackdropCandidates}
+                      featuredPosterImageId={show.primary_poster_image_id}
+                      featuredBackdropImageId={show.primary_backdrop_image_id}
+                      getAssetDisplayUrl={getAssetDisplayUrl}
+                      onSetFeaturedPoster={(showImageId) => {
+                        void setFeaturedShowImage("poster", showImageId);
+                      }}
+                      onSetFeaturedBackdrop={(showImageId) => {
+                        void setFeaturedShowImage("backdrop", showImageId);
+                      }}
+                    />
+                  </section>
+
+                  <section>
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Logos</h4>
-                    {brandLogoAssets.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No show logos found.</p>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                        {brandLogoAssets.map((asset, i) => (
-                          <button
-                            key={asset.id}
-                            onClick={(e) =>
-                              openAssetLightbox(asset, i, brandLogoAssets, e.currentTarget)
-                            }
-                            className="relative aspect-[2/1] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <GalleryImage
-                              src={getAssetDisplayUrl(asset)}
-                              srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
-                              diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
-                              alt={asset.caption || "Show logo"}
-                              sizes="250px"
-                              className="object-contain"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    <ShowBrandLogosSection
+                      logoAssets={brandLogoAssets}
+                      featuredLogoAssetId={featuredShowLogoAssetId}
+                      featuredLogoSavingAssetId={featuredLogoSavingAssetId}
+                      selectedFeaturedLogoVariant={featuredLogoVariant}
+                      getAssetDisplayUrl={getAssetDisplayUrl}
+                      onOpenAssetLightbox={openAssetLightbox}
+                      onSelectFeaturedLogoVariant={selectFeaturedLogoVariant}
+                      onSetFeaturedLogo={(asset) => {
+                        void setFeaturedShowLogo(asset);
+                      }}
+                    />
                   </section>
 
                   <ShowBrandEditor
@@ -12126,6 +12366,7 @@ export default function TrrShowDetailPage() {
                   : "Delete is only available for imported media assets.",
               featuredPoster: canSetFeaturedPoster ? undefined : featuredPosterDisabledReason,
               featuredBackdrop: canSetFeaturedBackdrop ? undefined : featuredBackdropDisabledReason,
+              featuredLogo: canSetFeaturedLogo ? undefined : featuredLogoDisabledReason,
             }}
             onRefresh={() => refreshGalleryAssetPipeline(assetLightbox.asset)}
             onToggleStar={(starred) => toggleStarGalleryAsset(assetLightbox.asset, starred)}
@@ -12148,6 +12389,12 @@ export default function TrrShowDetailPage() {
             }
             isFeaturedPoster={isFeaturedPoster}
             isFeaturedBackdrop={isFeaturedBackdrop}
+            onSetFeaturedLogo={
+              canSetFeaturedLogo && assetLightbox
+                ? () => setFeaturedShowLogo(assetLightbox.asset)
+                : undefined
+            }
+            isFeaturedLogo={isFeaturedLogo}
             onUpdateContentType={(contentType) =>
               updateGalleryAssetContentType(assetLightbox.asset, contentType)
             }

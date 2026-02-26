@@ -160,11 +160,11 @@ describe("Admin networks page auth + sync UI", () => {
 
     expect(screen.getByRole("link", { name: "Bravo" })).toHaveAttribute(
       "href",
-      "/admin/networks-and-streaming/network/bravo",
+      "/brands/networks-and-streaming/network/bravo",
     );
     expect(screen.getByRole("link", { name: "Peacock Premium" })).toHaveAttribute(
       "href",
-      "/admin/networks-and-streaming/streaming/peacock-premium",
+      "/brands/networks-and-streaming/streaming/peacock-premium",
     );
 
     const summaryCall = mocks.fetchAdminWithAuth.mock.calls.find((call: unknown[]) =>
@@ -472,6 +472,62 @@ describe("Admin networks page auth + sync UI", () => {
       expect(screen.queryByText("Loading brands summary...")).not.toBeInTheDocument();
     });
     expect(screen.queryByText("Not authenticated")).not.toBeInTheDocument();
+  });
+
+  it("keeps summary rows visible and switches overrides to read-only when override auth fails", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/admin/networks-streaming/summary")) {
+        return jsonResponse({
+          totals: { total_available_shows: 1, total_added_shows: 1 },
+          rows: [
+            {
+              type: "network",
+              name: "Bravo",
+              available_show_count: 1,
+              added_show_count: 1,
+              hosted_logo_url: null,
+              hosted_logo_black_url: null,
+              hosted_logo_white_url: null,
+              wikidata_id: null,
+              wikipedia_url: null,
+              resolution_status: "manual_required",
+              resolution_reason: "missing_logo",
+              last_attempt_at: "2026-02-19T00:00:00Z",
+              has_logo: false,
+              has_bw_variants: false,
+              has_links: false,
+            },
+          ],
+          generated_at: "2026-02-19T00:00:00.000Z",
+        });
+      }
+      if (url.includes("/api/admin/networks-streaming/overrides")) {
+        return jsonResponse(
+          {
+            error: "Not authenticated. Backend override request failed.",
+            error_code: "not_authenticated_for_overrides",
+          },
+          403,
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<AdminNetworksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bravo")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("Overrides are read-only for this session. Summary rows loaded successfully."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Not authenticated. Backend override request failed.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Show unresolved/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Read-only session" })).toBeDisabled();
+    });
   });
 
   it("shows terminal auth error when helper rejects after retries are exhausted", async () => {

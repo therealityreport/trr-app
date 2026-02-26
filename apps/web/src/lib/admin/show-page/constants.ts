@@ -72,6 +72,7 @@ export const DEFAULT_BATCH_JOB_OPERATIONS: BatchJobOperation[] = ["count"];
 export const SHOW_GALLERY_ALLOWED_SECTIONS: AssetSectionKey[] = [
   "cast_photos",
   "profile_pictures",
+  "banners",
   "posters",
   "backdrops",
 ];
@@ -81,11 +82,15 @@ export const DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS: AssetSectionKey[] = [
   ...SHOW_GALLERY_ALLOWED_SECTIONS,
 ];
 export const DEFAULT_BATCH_JOB_CONTENT_SECTIONS: AssetSectionKey[] = [
-  ...DEFAULT_SHOW_GALLERY_SELECTED_SECTIONS,
+  "cast_photos",
+  "profile_pictures",
+  "posters",
+  "backdrops",
 ];
 
 export const buildShowGalleryVisibleDefaults = (): ShowGalleryVisibleBySection => ({
   backdrops: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
+  banners: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
   posters: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
   profile_pictures: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
   cast_photos: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,

@@ -5,7 +5,7 @@ import ClientOnly from "@/components/ClientOnly";
 import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
-import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 export default function AdminNewsPage() {
@@ -32,7 +32,10 @@ export default function AdminNewsPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Brands", "/admin/brands")} className="mb-1" />
+              <AdminBreadcrumbs
+                items={buildBrandsPageBreadcrumb("Publications / News", "/brands/news")}
+                className="mb-1"
+              />
               <h1 className="break-words text-3xl font-bold text-zinc-900">Publications / News</h1>
               <p className="break-words text-sm text-zinc-500">Editorial and publication brand tracking.</p>
               <BrandsTabs activeTab="news" className="mt-4" />

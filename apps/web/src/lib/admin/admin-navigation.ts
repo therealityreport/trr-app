@@ -50,10 +50,16 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   {
     key: "networks-streaming",
     title: "Brands",
-    href: "/admin/brands",
+    href: "/brands",
     description: "Manage brand coverage across networks, streaming services, production companies, and publications.",
     badge: "Data",
     activeMatchPrefixes: [
+      "/brands",
+      "/brands/networks-and-streaming",
+      "/brands/production-companies",
+      "/brands/news",
+      "/brands/other",
+      "/brands/shows-and-franchises",
       "/admin/brands",
       "/admin/networks-and-streaming",
       "/admin/production-companies",

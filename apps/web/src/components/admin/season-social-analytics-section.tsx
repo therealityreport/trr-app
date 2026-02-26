@@ -162,6 +162,21 @@ type AnalyticsResponse = {
       last_post_at: string | null;
       last_comment_at: string | null;
       data_freshness_minutes: number | null;
+      post_metadata?: {
+        total_posts: number;
+        captions?: { posts_with: number; pct: number | null };
+        tags?: { posts_with: number; pct: number | null };
+        mentions?: { posts_with: number; pct: number | null };
+        collaborators?: { posts_with: number; pct: number | null };
+        content_types?: {
+          total_posts: number;
+          buckets?: Array<{
+            key: "photo" | "album" | "video" | "other";
+            count: number;
+            pct: number | null;
+          }>;
+        };
+      };
     };
   };
   weekly: Array<{
@@ -386,6 +401,12 @@ type MirrorCoverageResponse = {
   partial_count: number;
   pending_count: number;
   posts_scanned: number;
+  comment_media_items_scanned?: number;
+  comment_media_needs_mirror_count?: number;
+  comment_media_mirrored_count?: number;
+  comment_media_failed_count?: number;
+  comment_media_partial_count?: number;
+  comment_media_pending_count?: number;
   by_platform?: Record<
     string,
     {
@@ -396,6 +417,12 @@ type MirrorCoverageResponse = {
       partial_count: number;
       pending_count: number;
       posts_scanned: number;
+      comment_media_items_scanned?: number;
+      comment_media_needs_mirror_count?: number;
+      comment_media_mirrored_count?: number;
+      comment_media_failed_count?: number;
+      comment_media_partial_count?: number;
+      comment_media_pending_count?: number;
     }
   >;
 };
@@ -523,9 +550,15 @@ const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter"]
 const STALE_RUN_THRESHOLD_DEFAULT_MINUTES = 45;
 const MAX_COMMENT_ANCHOR_SOURCE_IDS_PER_PLATFORM = 5000;
 const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
+const COMPACT_INTEGER_FORMATTER = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
 const formatInteger = (value: number | null | undefined): string => INTEGER_FORMATTER.format(Number(value ?? 0));
+const formatCompactInteger = (value: number | null | undefined): string =>
+  COMPACT_INTEGER_FORMATTER.format(Math.max(0, Number(value ?? 0)));
 const SOCIAL_TIME_ZONE = "America/New_York";
 const DATE_TOKEN_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -757,7 +790,7 @@ const toNonNegative = (value: number | null | undefined): number => {
 };
 
 const isCoveragePctUpToDate = (value: number | null): boolean =>
-  typeof value === "number" && value >= 99.95;
+  typeof value === "number" && value >= 98;
 
 const buildCoverageSummary = ({
   postsSaved,
@@ -1299,10 +1332,10 @@ const deriveWeekDetailTokenCounts = (detail: WeekDetailResponse): WeekDetailToke
     const platformTags = new Set<string>();
     const posts = detail.platforms?.[platform]?.posts ?? [];
     for (const post of posts) {
-      const postHashtags = Array.isArray(post.hashtags) && post.hashtags.length > 0
-        ? post.hashtags
-        : extractHashtags(post.text);
-      for (const hashtag of postHashtags) {
+      // Always merge stored hashtags with caption-derived ones
+      const storedHashtags = Array.isArray(post.hashtags) ? post.hashtags : [];
+      const captionHashtags = extractHashtags(post.text);
+      for (const hashtag of [...storedHashtags, ...captionHashtags]) {
         const normalized = normalizeHashtag(hashtag);
         if (normalized) {
           hashtags.add(normalized);
@@ -1310,10 +1343,10 @@ const deriveWeekDetailTokenCounts = (detail: WeekDetailResponse): WeekDetailToke
         }
       }
 
-      const postMentions = Array.isArray(post.mentions) && post.mentions.length > 0
-        ? post.mentions
-        : extractMentions(post.text);
-      for (const mention of postMentions) {
+      // Always merge stored mentions with caption-derived ones
+      const storedMentions = Array.isArray(post.mentions) ? post.mentions : [];
+      const captionMentions = extractMentions(post.text);
+      for (const mention of [...storedMentions, ...captionMentions]) {
         const normalized = normalizeMention(mention);
         if (normalized) {
           mentions.add(normalized);
@@ -3555,6 +3588,59 @@ export default function SeasonSocialAnalyticsSection({
     return grouped;
   }, [analytics]);
   const dataQuality = analytics?.summary.data_quality;
+  const postMetadata = dataQuality?.post_metadata;
+  const postMetadataTotalPosts = Math.max(0, Number(postMetadata?.total_posts ?? analytics?.summary.total_posts ?? 0));
+  const postMetadataMetricCards = useMemo(
+    () => [
+      { key: "captions", label: "Captions", value: postMetadata?.captions },
+      { key: "tags", label: "Tags", value: postMetadata?.tags },
+      { key: "mentions", label: "Mentions", value: postMetadata?.mentions },
+      { key: "collaborators", label: "Collaborators", value: postMetadata?.collaborators },
+    ],
+    [postMetadata?.captions, postMetadata?.collaborators, postMetadata?.mentions, postMetadata?.tags],
+  );
+  const contentTypeDistributionLines = useMemo(() => {
+    const buckets = Array.isArray(postMetadata?.content_types?.buckets) ? postMetadata.content_types.buckets : [];
+    return buckets
+      .filter((bucket) => bucket && typeof bucket.key === "string")
+      .map((bucket) => {
+        const key = String(bucket.key || "").toLowerCase();
+        const label = key === "photo" ? "Photo" : key === "album" ? "Album" : key === "video" ? "Video" : "Other";
+        const pctLabel = formatPctLabel(typeof bucket.pct === "number" ? bucket.pct : null);
+        const countLabel = formatInteger(Number(bucket.count ?? 0));
+        return `${label} ${pctLabel} (${countLabel})`;
+      });
+  }, [postMetadata?.content_types?.buckets]);
+  const commentsSavedActualSummary = useMemo(() => {
+    const totals = weeklyPlatformRows.reduce(
+      (acc, week) => {
+        const saved = Math.max(0, Number(week.total_comments ?? 0));
+        const inferredReported = PLATFORM_ORDER.reduce(
+          (sum, platform) => sum + Number(week.reported_comments?.[platform] ?? 0),
+          0,
+        );
+        const reported = Math.max(0, Number(week.total_reported_comments ?? inferredReported));
+        return {
+          saved: acc.saved + saved,
+          reported: acc.reported + reported,
+        };
+      },
+      { saved: 0, reported: 0 },
+    );
+    const actual = Math.max(totals.saved, totals.reported);
+    const pct = actual > 0 ? Math.min(100, (totals.saved * 100) / actual) : null;
+    return {
+      saved: totals.saved,
+      actual,
+      pct,
+    };
+  }, [weeklyPlatformRows]);
+  const commentsSavedPctCard = useMemo(() => {
+    if (typeof dataQuality?.comments_saved_pct_overall === "number") {
+      return dataQuality.comments_saved_pct_overall;
+    }
+    return commentsSavedActualSummary.pct;
+  }, [commentsSavedActualSummary.pct, dataQuality?.comments_saved_pct_overall]);
   const runHealth = useMemo(() => {
     if (runSummaries.length === 0) {
       return {
@@ -4619,23 +4705,41 @@ export default function SeasonSocialAnalyticsSection({
       ) : (
         <>
           {(isBravoView || isSentimentView) && (
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
             <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Content Volume</p>
-              <p className="mt-2 text-3xl font-bold text-zinc-900">{formatInteger(analytics?.summary.total_posts)}</p>
+              <p className="mt-2 text-3xl font-bold text-zinc-900">{formatCompactInteger(analytics?.summary.total_posts)}</p>
               <p className="mt-1 text-xs text-zinc-500">Bravo posts/videos captured</p>
             </article>
             <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Viewer Comments</p>
-              <p className="mt-2 text-3xl font-bold text-zinc-900">{formatInteger(analytics?.summary.total_comments)}</p>
+              <p className="mt-2 text-3xl font-bold text-zinc-900">{formatCompactInteger(analytics?.summary.total_comments)}</p>
               <p className="mt-1 text-xs text-zinc-500">Comment/reply records persisted</p>
             </article>
             <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Engagement</p>
               <p className="mt-2 text-3xl font-bold text-zinc-900">
-                {formatInteger(analytics?.summary.total_engagement)}
+                {formatCompactInteger(analytics?.summary.total_engagement)}
               </p>
               <p className="mt-1 text-xs text-zinc-500">Cross-platform interactions</p>
+            </article>
+            <article
+              className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+              data-testid="metric-comments-saved-pct-card"
+            >
+              <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-comments-saved-pct-value">
+                {formatPctLabel(commentsSavedPctCard)}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">of Comments Saved</p>
+            </article>
+            <article
+              className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+              data-testid="metric-comments-saved-actual-card"
+            >
+              <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-comments-saved-actual-value">
+                {`${formatCompactInteger(commentsSavedActualSummary.saved)}/${formatCompactInteger(commentsSavedActualSummary.actual)}*`}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">Comments (Saved/Actual)</p>
             </article>
             <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Sentiment Mix</p>
@@ -4649,6 +4753,34 @@ export default function SeasonSocialAnalyticsSection({
                 <p className="font-semibold text-red-700">
                   Negative {formatPercent(analytics?.summary.sentiment_mix.negative ?? 0)}
                 </p>
+              </div>
+            </article>
+            {postMetadataMetricCards.map((metric) => (
+              <article
+                key={`post-metadata-${metric.key}`}
+                className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+                data-testid={`metric-${metric.key}-coverage-card`}
+              >
+                <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid={`metric-${metric.key}-coverage-value`}>
+                  {formatPctLabel(metric.value?.pct)}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">of {metric.label} Saved</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {`${formatInteger(Number(metric.value?.posts_with ?? 0))}/${formatInteger(postMetadataTotalPosts)} ${metric.label} (Saved/Posts)`}
+                </p>
+              </article>
+            ))}
+            <article
+              className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+              data-testid="metric-content-type-distribution-card"
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Content Type Distribution</p>
+              <div className="mt-2 space-y-1 text-xs text-zinc-700">
+                {contentTypeDistributionLines.length > 0 ? (
+                  contentTypeDistributionLines.map((line) => <p key={line}>{line}</p>)
+                ) : (
+                  <p>N/A</p>
+                )}
               </div>
             </article>
             </section>

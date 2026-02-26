@@ -25,6 +25,47 @@ export interface CastAsset {
   instagram?: string;
   status?: "main" | "friend" | "new" | "alum";
   trrPersonId?: string;
+  sourceUrl?: string;
+}
+
+export type PaletteLibrarySourceType = "upload" | "url" | "media_library";
+
+export interface PaletteSamplePoint {
+  x: number;
+  y: number;
+  radius: number;
+}
+
+export interface PaletteLibraryEntryRecord {
+  id: string;
+  trr_show_id: string;
+  season_number: number | null;
+  name: string;
+  colors: string[];
+  source_type: PaletteLibrarySourceType;
+  source_image_url: string | null;
+  seed: number;
+  marker_points: PaletteSamplePoint[];
+  created_by_uid: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreatePaletteLibraryEntryInput {
+  trrShowId: string;
+  seasonNumber: number | null;
+  name: string;
+  colors: string[];
+  sourceType: PaletteLibrarySourceType;
+  sourceImageUrl?: string | null;
+  seed: number;
+  markerPoints: PaletteSamplePoint[];
+  createdByUid?: string | null;
+}
+
+export interface ListPaletteLibraryEntriesOptions {
+  seasonNumber?: number | null;
+  includeAllSeasonEntries?: boolean;
 }
 
 export interface ShowRecord {
@@ -132,6 +173,8 @@ export interface UpdateSeasonInput {
 
 let surveyShowsSchemaEnsured = false;
 let surveyShowsSchemaEnsuring: Promise<void> | null = null;
+let paletteLibrarySchemaEnsured = false;
+let paletteLibrarySchemaEnsuring: Promise<void> | null = null;
 
 async function ensureSurveyShowsSchema(): Promise<void> {
   if (surveyShowsSchemaEnsured) return;
@@ -158,6 +201,74 @@ async function ensureSurveyShowsSchema(): Promise<void> {
   })();
 
   return surveyShowsSchemaEnsuring;
+}
+
+async function ensurePaletteLibrarySchema(): Promise<void> {
+  if (paletteLibrarySchemaEnsured) return;
+  if (paletteLibrarySchemaEnsuring) return paletteLibrarySchemaEnsuring;
+
+  paletteLibrarySchemaEnsuring = (async () => {
+    await query(
+      `CREATE OR REPLACE FUNCTION set_updated_at_timestamp()
+       RETURNS TRIGGER AS $$
+       BEGIN
+         NEW.updated_at = now();
+         RETURN NEW;
+       END;
+       $$ LANGUAGE plpgsql;`,
+    );
+    await query(
+      `CREATE TABLE IF NOT EXISTS survey_show_palette_library (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        trr_show_id uuid NOT NULL,
+        season_number integer,
+        name text NOT NULL,
+        colors jsonb NOT NULL DEFAULT '[]'::jsonb,
+        source_type text NOT NULL,
+        source_image_url text,
+        seed integer NOT NULL,
+        marker_points jsonb NOT NULL DEFAULT '[]'::jsonb,
+        created_by_uid text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT survey_show_palette_library_season_number_valid
+          CHECK (season_number IS NULL OR season_number > 0),
+        CONSTRAINT survey_show_palette_library_source_type_valid
+          CHECK (source_type IN ('upload', 'url', 'media_library'))
+      )`,
+    );
+    await query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_survey_show_palette_library_name_scope
+       ON survey_show_palette_library (trr_show_id, COALESCE(season_number, -1), lower(name))`,
+    );
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_survey_show_palette_library_show
+       ON survey_show_palette_library (trr_show_id)`,
+    );
+    await query(
+      `CREATE INDEX IF NOT EXISTS idx_survey_show_palette_library_show_season
+       ON survey_show_palette_library (trr_show_id, season_number)`,
+    );
+    await query(
+      `DO $$
+       BEGIN
+         IF NOT EXISTS (
+           SELECT 1
+           FROM pg_trigger
+           WHERE tgname = 'trg_survey_show_palette_library_updated_at'
+         ) THEN
+           CREATE TRIGGER trg_survey_show_palette_library_updated_at
+           BEFORE UPDATE ON survey_show_palette_library
+           FOR EACH ROW EXECUTE FUNCTION set_updated_at_timestamp();
+         END IF;
+       END $$;`,
+    );
+
+    paletteLibrarySchemaEnsured = true;
+    paletteLibrarySchemaEnsuring = null;
+  })();
+
+  return paletteLibrarySchemaEnsuring;
 }
 
 // ============================================================================
@@ -539,6 +650,94 @@ export async function deleteSeason(id: string): Promise<boolean> {
 }
 
 // ============================================================================
+// Palette Library Functions
+// ============================================================================
+
+export async function listPaletteLibraryEntriesByShow(
+  trrShowId: string,
+  options: ListPaletteLibraryEntriesOptions = {},
+): Promise<PaletteLibraryEntryRecord[]> {
+  await ensurePaletteLibrarySchema();
+
+  const includeAllSeasonEntries = options.includeAllSeasonEntries ?? true;
+  const seasonNumber = options.seasonNumber;
+
+  if (seasonNumber === undefined) {
+    const result = await query<PaletteLibraryEntryRecord>(
+      `SELECT
+         id, trr_show_id, season_number, name, colors, source_type, source_image_url,
+         seed, marker_points, created_by_uid, created_at, updated_at
+       FROM survey_show_palette_library
+       WHERE trr_show_id = $1
+       ORDER BY lower(name) ASC, created_at DESC`,
+      [trrShowId],
+    );
+    return result.rows.map(parsePaletteLibraryJsonFields);
+  }
+
+  if (seasonNumber === null) {
+    const result = await query<PaletteLibraryEntryRecord>(
+      `SELECT
+         id, trr_show_id, season_number, name, colors, source_type, source_image_url,
+         seed, marker_points, created_by_uid, created_at, updated_at
+       FROM survey_show_palette_library
+       WHERE trr_show_id = $1 AND season_number IS NULL
+       ORDER BY lower(name) ASC, created_at DESC`,
+      [trrShowId],
+    );
+    return result.rows.map(parsePaletteLibraryJsonFields);
+  }
+
+  const result = await query<PaletteLibraryEntryRecord>(
+    `SELECT
+       id, trr_show_id, season_number, name, colors, source_type, source_image_url,
+       seed, marker_points, created_by_uid, created_at, updated_at
+     FROM survey_show_palette_library
+     WHERE trr_show_id = $1
+       AND (
+         season_number = $2
+         OR ($3::boolean = true AND season_number IS NULL)
+       )
+     ORDER BY season_number NULLS LAST, lower(name) ASC, created_at DESC`,
+    [trrShowId, seasonNumber, includeAllSeasonEntries],
+  );
+  return result.rows.map(parsePaletteLibraryJsonFields);
+}
+
+export async function createPaletteLibraryEntry(
+  input: CreatePaletteLibraryEntryInput,
+): Promise<PaletteLibraryEntryRecord> {
+  await ensurePaletteLibrarySchema();
+  const result = await query<PaletteLibraryEntryRecord>(
+    `INSERT INTO survey_show_palette_library (
+       trr_show_id, season_number, name, colors, source_type, source_image_url, seed, marker_points, created_by_uid
+     ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9)
+     RETURNING
+       id, trr_show_id, season_number, name, colors, source_type, source_image_url,
+       seed, marker_points, created_by_uid, created_at, updated_at`,
+    [
+      input.trrShowId,
+      input.seasonNumber,
+      input.name,
+      JSON.stringify(input.colors),
+      input.sourceType,
+      input.sourceImageUrl ?? null,
+      input.seed,
+      JSON.stringify(input.markerPoints),
+      input.createdByUid ?? null,
+    ],
+  );
+
+  return parsePaletteLibraryJsonFields(result.rows[0]);
+}
+
+export async function deletePaletteLibraryEntryById(id: string): Promise<boolean> {
+  await ensurePaletteLibrarySchema();
+  const result = await query(`DELETE FROM survey_show_palette_library WHERE id = $1`, [id]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -560,5 +759,23 @@ function parseSeasonJsonFields(row: ShowSeasonRecord): ShowSeasonRecord {
     ...row,
     colors: typeof row.colors === "string" ? JSON.parse(row.colors) : row.colors,
     cast_members: typeof row.cast_members === "string" ? JSON.parse(row.cast_members) : row.cast_members,
+  };
+}
+
+function parsePaletteLibraryJsonFields(row: PaletteLibraryEntryRecord): PaletteLibraryEntryRecord {
+  const rowWithUnknownJson = row as unknown as {
+    colors?: unknown;
+    marker_points?: unknown;
+  };
+  return {
+    ...row,
+    colors:
+      typeof rowWithUnknownJson.colors === "string"
+        ? (JSON.parse(rowWithUnknownJson.colors) as string[])
+        : ((rowWithUnknownJson.colors as string[] | null) ?? []),
+    marker_points:
+      typeof rowWithUnknownJson.marker_points === "string"
+        ? (JSON.parse(rowWithUnknownJson.marker_points) as PaletteSamplePoint[])
+        : ((rowWithUnknownJson.marker_points as PaletteSamplePoint[] | null) ?? []),
   };
 }

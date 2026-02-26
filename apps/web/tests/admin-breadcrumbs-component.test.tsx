@@ -10,8 +10,9 @@ describe("AdminBreadcrumbs component", () => {
       <AdminBreadcrumbs
         items={[
           { label: "Admin", href: "/admin" },
-          { label: "Brands", href: "/admin/brands" },
-          { label: "ABC", href: "/admin/networks-and-streaming/network/abc" },
+          { label: "Brands", href: "/brands" },
+          { label: "Networks & Streaming Services", href: "/brands/networks-and-streaming" },
+          { label: "ABC", href: "/brands/networks-and-streaming/network/abc" },
         ]}
       />,
     );
@@ -22,10 +23,14 @@ describe("AdminBreadcrumbs component", () => {
     expect(within(nav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
     expect(within(nav).getByRole("link", { name: "Brands" })).toHaveAttribute(
       "href",
-      "/admin/brands",
+      "/brands",
+    );
+    expect(within(nav).getByRole("link", { name: "Networks & Streaming Services" })).toHaveAttribute(
+      "href",
+      "/brands/networks-and-streaming",
     );
     const current = within(nav).getByRole("link", { name: "ABC" });
-    expect(current).toHaveAttribute("href", "/admin/networks-and-streaming/network/abc");
+    expect(current).toHaveAttribute("href", "/brands/networks-and-streaming/network/abc");
     expect(current).toHaveAttribute("aria-current", "page");
   });
 

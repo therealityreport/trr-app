@@ -15,6 +15,27 @@ const getBackendHeaders = (): HeadersInit | null => {
   };
 };
 
+const normalizeOverrideErrorCode = (status: number, message: string): string => {
+  const normalized = message.trim().toLowerCase();
+  if (status === 401 || status === 403) {
+    return "not_authenticated_for_overrides";
+  }
+  if (normalized.includes("not authenticated") || normalized.includes("forbidden")) {
+    return "not_authenticated_for_overrides";
+  }
+  if (status >= 500) {
+    return "backend_override_unavailable";
+  }
+  if (
+    normalized.includes("backend auth not configured") ||
+    normalized.includes("backend api not configured") ||
+    normalized.includes("service role")
+  ) {
+    return "backend_override_unavailable";
+  }
+  return "backend_override_unavailable";
+};
+
 const backendError = (response: Response, payload: Record<string, unknown>) => {
   const error =
     typeof payload.error === "string"
@@ -22,7 +43,8 @@ const backendError = (response: Response, payload: Record<string, unknown>) => {
       : typeof payload.detail === "string"
         ? payload.detail
         : "Backend override request failed";
-  return NextResponse.json({ error }, { status: response.status });
+  const errorCode = normalizeOverrideErrorCode(response.status, error);
+  return NextResponse.json({ error_code: errorCode, error }, { status: response.status });
 };
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -32,12 +54,24 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     const params = await context.params;
     const backendUrl = getBackendApiUrl(`/admin/shows/networks-streaming/overrides/${params.id}`);
     if (!backendUrl) {
-      return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
+      return NextResponse.json(
+        {
+          error_code: "backend_override_unavailable",
+          error: "Backend API not configured",
+        },
+        { status: 500 },
+      );
     }
 
     const headers = getBackendHeaders();
     if (!headers) {
-      return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
+      return NextResponse.json(
+        {
+          error_code: "backend_override_unavailable",
+          error: "Backend auth not configured",
+        },
+        { status: 500 },
+      );
     }
 
     const body =
@@ -58,7 +92,13 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
     const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json(
+      {
+        error_code: normalizeOverrideErrorCode(status, message),
+        error: message,
+      },
+      { status },
+    );
   }
 }
 
@@ -69,12 +109,24 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     const params = await context.params;
     const backendUrl = getBackendApiUrl(`/admin/shows/networks-streaming/overrides/${params.id}`);
     if (!backendUrl) {
-      return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
+      return NextResponse.json(
+        {
+          error_code: "backend_override_unavailable",
+          error: "Backend API not configured",
+        },
+        { status: 500 },
+      );
     }
 
     const headers = getBackendHeaders();
     if (!headers) {
-      return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
+      return NextResponse.json(
+        {
+          error_code: "backend_override_unavailable",
+          error: "Backend auth not configured",
+        },
+        { status: 500 },
+      );
     }
 
     const response = await fetch(backendUrl, { method: "DELETE", headers });
@@ -86,6 +138,12 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
     const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json(
+      {
+        error_code: normalizeOverrideErrorCode(status, message),
+        error: message,
+      },
+      { status },
+    );
   }
 }

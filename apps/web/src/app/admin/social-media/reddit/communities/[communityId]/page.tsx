@@ -37,10 +37,15 @@ const resolveBackHref = (raw: string | null): string => {
 
 export default function RedditCommunityViewPage() {
   const { user, checking, hasAccess } = useAdminGuard();
-  const params = useParams<{ communityId: string }>();
+  const params = useParams<{ communityId?: string; communitySlug?: string }>();
   const searchParams = useSearchParams();
 
-  const communityId = typeof params.communityId === "string" ? params.communityId : "";
+  const initialCommunityKey =
+    typeof params.communitySlug === "string"
+      ? params.communitySlug
+      : typeof params.communityId === "string"
+        ? params.communityId
+        : "";
   const backHref = resolveBackHref(searchParams.get("return_to"));
   const [communityContext, setCommunityContext] = useState<RedditCommunityContext | null>(null);
   const showSlug = communityContext?.showSlug ?? null;
@@ -194,7 +199,7 @@ export default function RedditCommunityViewPage() {
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <RedditSourcesManager
               mode="global"
-              initialCommunityId={communityId}
+              initialCommunityId={initialCommunityKey}
               hideCommunityList
               backHref={backHref}
               episodeDiscussionsPlacement="inline"

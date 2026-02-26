@@ -189,7 +189,7 @@ export default function AdminNetworkStreamingDetailPage() {
 
         const canonicalSlug = toEntitySlug(payload.entity_slug || payload.display_name);
         if (canonicalSlug && canonicalSlug !== routeEntitySlug) {
-          router.replace(`/admin/networks-and-streaming/${payload.entity_type}/${canonicalSlug}`);
+          router.replace(`/brands/networks-and-streaming/${payload.entity_type}/${canonicalSlug}`);
         }
       } catch (fetchError) {
         if (cancelled) return;
@@ -247,7 +247,7 @@ export default function AdminNetworkStreamingDetailPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto max-w-6xl">
             <AdminBreadcrumbs
-              items={buildNetworkDetailBreadcrumb(pageTitle, `/admin/networks-and-streaming/${routeEntityType}/${routeEntitySlug}`)}
+              items={buildNetworkDetailBreadcrumb(pageTitle, `/brands/networks-and-streaming/${routeEntityType}/${routeEntitySlug}`)}
               className="mb-1"
             />
             <h1 className="mt-2 break-words text-3xl font-bold text-zinc-900">{pageTitle}</h1>
@@ -279,7 +279,7 @@ export default function AdminNetworkStreamingDetailPage() {
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Link
-                  href="/admin/networks-and-streaming"
+                  href="/brands/networks-and-streaming"
                   className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
                 >
                   Back to Network & Streaming Services
@@ -292,7 +292,7 @@ export default function AdminNetworkStreamingDetailPage() {
                     {notFoundSuggestions.map((item) => (
                       <li key={`${item.entity_type}:${item.entity_slug}`}>
                         <Link
-                          href={`/admin/networks-and-streaming/${item.entity_type}/${item.entity_slug}`}
+                          href={`/brands/networks-and-streaming/${item.entity_type}/${item.entity_slug}`}
                           className="text-sm text-amber-900 underline [overflow-wrap:anywhere]"
                         >
                           {item.name}

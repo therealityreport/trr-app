@@ -112,6 +112,17 @@ function formatSourceBadgeLabel(source: string, sourceUrl?: string | null): stri
   if (!raw) return "unknown";
 
   const lower = raw.toLowerCase();
+  if (lower.includes("harvest")) {
+    if (sourceUrl) {
+      try {
+        const hostname = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
+        if (hostname) return hostname;
+      } catch {
+        // Fall through to default fallback.
+      }
+    }
+    return "web";
+  }
   if (lower.startsWith("web_scrape") || lower.startsWith("webscrape")) {
     if (sourceUrl) {
       try {
@@ -202,10 +213,12 @@ interface ImageManagementProps {
   onToggleStar?: (starred: boolean) => Promise<void>;
   onSetFeaturedPoster?: () => Promise<void>;
   onSetFeaturedBackdrop?: () => Promise<void>;
+  onSetFeaturedLogo?: () => Promise<void>;
   onClearFeaturedPoster?: () => Promise<void>;
   onClearFeaturedBackdrop?: () => Promise<void>;
   isFeaturedPoster?: boolean;
   isFeaturedBackdrop?: boolean;
+  isFeaturedLogo?: boolean;
   onUpdateContentType?: (contentType: string) => Promise<void>;
   onDelete?: () => Promise<void>;
   onReassign?: () => void;
@@ -222,7 +235,8 @@ interface ImageManagementProps {
       | "delete"
       | "edit"
       | "featuredPoster"
-      | "featuredBackdrop",
+      | "featuredBackdrop"
+      | "featuredLogo",
       string
     >
   >;
@@ -280,10 +294,12 @@ interface MetadataPanelProps {
     onToggleStar?: (starred: boolean) => Promise<void>;
     onSetFeaturedPoster?: () => Promise<void>;
     onSetFeaturedBackdrop?: () => Promise<void>;
+    onSetFeaturedLogo?: () => Promise<void>;
     onClearFeaturedPoster?: () => Promise<void>;
     onClearFeaturedBackdrop?: () => Promise<void>;
     isFeaturedPoster?: boolean;
     isFeaturedBackdrop?: boolean;
+    isFeaturedLogo?: boolean;
     onUpdateContentType?: (contentType: string) => Promise<void>;
     onDelete?: () => Promise<void>;
     onReassign?: () => void;
@@ -300,7 +316,8 @@ interface MetadataPanelProps {
         | "delete"
         | "edit"
         | "featuredPoster"
-        | "featuredBackdrop",
+        | "featuredBackdrop"
+        | "featuredLogo",
         string
       >
     >;
@@ -332,9 +349,17 @@ function MetadataPanel({
   const captionTruncateLength = 200;
   const needsTruncation =
     metadata.caption && metadata.caption.length > captionTruncateLength;
-  const sourcePageLabel = metadata.sourcePageTitle || metadata.sourceUrl || null;
-  const sourceBadgeLabel = formatSourceBadgeLabel(metadata.source, metadata.sourceUrl);
-  const foundOnSourceUrl = metadata.sourceUrl ?? metadata.originalImageUrl ?? null;
+  const originalSourcePageUrl = metadata.originalSourcePageUrl ?? metadata.sourceUrl ?? null;
+  const originalSourceFileUrl =
+    metadata.originalSourceFileUrl ??
+    metadata.originalImageUrl ??
+    metadata.sourceUrl ??
+    null;
+  const sourcePageLabel = metadata.sourcePageTitle || originalSourcePageUrl || null;
+  const sourceBadgeLabel =
+    metadata.originalSourceLabel ||
+    formatSourceBadgeLabel(metadata.source, originalSourcePageUrl ?? originalSourceFileUrl);
+  const foundOnSourceUrl = originalSourcePageUrl ?? originalSourceFileUrl ?? null;
   const foundOnSourceLabel = formatFoundOnSourceLabel(metadata.source, foundOnSourceUrl);
   const foundOnPageTitle = metadata.sourcePageTitle || "Unknown";
   const galleryStatusNormalized = (metadata.galleryStatus ?? "").trim().toLowerCase();
@@ -353,9 +378,9 @@ function MetadataPanel({
     : "—";
   const metadataCoverageRows: Array<{ label: string; value: string }> = [
     { label: "Source", value: metadata.source || "—" },
-    { label: "Source Badge", value: sourceBadgeLabel || "—" },
-    { label: "Source Page", value: sourcePageLabel ?? "—" },
-    { label: "Source URL", value: metadata.sourceUrl ?? "—" },
+    { label: "Original Source", value: sourceBadgeLabel || "—" },
+    { label: "Original Source Page", value: sourcePageLabel ?? "—" },
+    { label: "Original Source File URL", value: originalSourceFileUrl ?? "—" },
     { label: "Source Variant", value: metadata.sourceVariant ?? "—" },
     { label: "Source Logo", value: metadata.sourceLogo ?? "—" },
     { label: "Name", value: metadata.assetName ?? "—" },
@@ -442,6 +467,7 @@ function MetadataPanel({
   const canStar = Boolean(management?.onToggleStar);
   const canSetFeaturedPoster = Boolean(management?.onSetFeaturedPoster);
   const canSetFeaturedBackdrop = Boolean(management?.onSetFeaturedBackdrop);
+  const canSetFeaturedLogo = Boolean(management?.onSetFeaturedLogo);
   const canEditTools = Boolean(extras && onToggleExtras);
   const hasAnyActions = true;
   const refreshDisabledReason = !canRefresh
@@ -479,6 +505,10 @@ function MetadataPanel({
     ? disabledReasons.featuredBackdrop ??
       "Featured backdrop selection is unavailable for this image."
     : disabledReasons.featuredBackdrop ?? null;
+  const featuredLogoDisabledReason = !canSetFeaturedLogo
+    ? disabledReasons.featuredLogo ??
+      "Featured logo selection is unavailable for this image."
+    : disabledReasons.featuredLogo ?? null;
   const editDisabledReason = !canEditTools
     ? disabledReasons.edit ?? "Edit tools are unavailable for this image."
     : disabledReasons.edit ?? null;
@@ -582,6 +612,24 @@ function MetadataPanel({
           </button>
           <button
             type="button"
+            onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
+            disabled={
+              actionLoading !== null ||
+              starLoading ||
+              Boolean(featuredLogoDisabledReason) ||
+              Boolean(management.isFeaturedLogo)
+            }
+            title={featuredLogoDisabledReason ?? undefined}
+            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+          >
+            {actionLoading === "featuredLogo"
+              ? "Saving..."
+              : management.isFeaturedLogo
+                ? "Featured Logo"
+                : "Set as Featured Logo"}
+          </button>
+          <button
+            type="button"
             onClick={() => onToggleExtras?.()}
             disabled={Boolean(editDisabledReason)}
             title={editDisabledReason ?? undefined}
@@ -598,22 +646,22 @@ function MetadataPanel({
       {/* Source Badge */}
       <div className="mb-4">
         <span className="tracking-widest text-[10px] uppercase text-white/50">
-          Source
+          Original Source
         </span>
         <div className="mt-1 flex items-center gap-2">
-          {metadata.s3Mirroring && (
+          {metadata.isS3Mirrored && (
             <span className="inline-block rounded px-2 py-0.5 text-xs font-medium text-white bg-blue-500/80">
-              S3 MIRRORING
+              S3 MIRROR
             </span>
           )}
-          {metadata.sourceUrl ? (
+          {originalSourceFileUrl ? (
             <a
-              href={metadata.sourceUrl}
+              href={originalSourceFileUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-block rounded px-2 py-0.5 text-xs font-medium text-black underline decoration-black/40 underline-offset-2 hover:decoration-black"
               style={{ backgroundColor: metadata.sourceBadgeColor }}
-              title="Open source page"
+              title="Open original source file"
             >
               {sourceBadgeLabel.toUpperCase()}
             </a>
@@ -673,19 +721,19 @@ function MetadataPanel({
             <div className="mt-3 space-y-2">
               <div>
                 <span className="tracking-widest text-[10px] uppercase text-white/50">
-                  Original URL
+                  Original Source File URL
                 </span>
-                {metadata.originalImageUrl ? (
+                {originalSourceFileUrl ? (
                   <a
-                    href={metadata.originalImageUrl}
+                    href={originalSourceFileUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-1 block break-all text-xs text-white/90 underline"
                   >
-                    {metadata.originalImageUrl}
+                    {originalSourceFileUrl}
                   </a>
                 ) : (
-                  <p className="mt-1 text-xs text-white/80">Original URL unavailable</p>
+                  <p className="mt-1 text-xs text-white/80">Original source file URL unavailable</p>
                 )}
               </div>
               <div>
@@ -708,16 +756,16 @@ function MetadataPanel({
 
         <div className="mb-4">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Source Page
+            Original Source Page
           </span>
-          {metadata.sourceUrl ? (
+          {originalSourcePageUrl ? (
             <a
-              href={metadata.sourceUrl}
+              href={originalSourcePageUrl}
               target="_blank"
               rel="noreferrer"
               className="mt-1 block text-sm text-white/90 underline break-all"
             >
-              {sourcePageLabel ?? metadata.sourceUrl}
+              {sourcePageLabel ?? originalSourcePageUrl}
             </a>
           ) : (
             <p className="mt-1 text-sm text-white/90 break-all">{sourcePageLabel ?? "—"}</p>
@@ -1080,6 +1128,23 @@ function MetadataPanel({
                   : "Set as Featured Backdrop"}
             </button>
             <button
+              onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
+              disabled={
+                actionLoading !== null ||
+                starLoading ||
+                Boolean(featuredLogoDisabledReason) ||
+                Boolean(management.isFeaturedLogo)
+              }
+              title={featuredLogoDisabledReason ?? undefined}
+              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "featuredLogo"
+                ? "Saving..."
+                : management.isFeaturedLogo
+                  ? "Featured Logo"
+                  : "Set as Featured Logo"}
+            </button>
+            <button
               onClick={() => onToggleExtras?.()}
               disabled={Boolean(editDisabledReason)}
               title={editDisabledReason ?? undefined}
@@ -1151,10 +1216,12 @@ export function ImageLightbox({
   onToggleStar,
   onSetFeaturedPoster,
   onSetFeaturedBackdrop,
+  onSetFeaturedLogo,
   onClearFeaturedPoster,
   onClearFeaturedBackdrop,
   isFeaturedPoster,
   isFeaturedBackdrop,
+  isFeaturedLogo,
   onUpdateContentType,
   onRefresh,
   onSync,
@@ -1712,10 +1779,12 @@ export function ImageLightbox({
                       onToggleStar,
                       onSetFeaturedPoster,
                       onSetFeaturedBackdrop,
+                      onSetFeaturedLogo,
                       onClearFeaturedPoster,
                       onClearFeaturedBackdrop,
                       isFeaturedPoster,
                       isFeaturedBackdrop,
+                      isFeaturedLogo,
                       onUpdateContentType,
                       onDelete,
                       onReassign,

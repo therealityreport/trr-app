@@ -225,10 +225,12 @@ export interface SeasonListOptions extends PaginationOptions {
 export interface SourcePaginationOptions extends PaginationOptions {
   sources?: string[];
   includeBroken?: boolean;
+  full?: boolean;
 }
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 500;
+const ASSET_GALLERY_FULL_FETCH_LIMIT = 5000;
 const SHOW_SLUG_SQL = `
   lower(
     trim(
@@ -3384,6 +3386,9 @@ export interface SeasonAsset {
   thumbnail_focus_y?: number | null;
   thumbnail_zoom?: number | null;
   thumbnail_crop_mode?: "manual" | "auto" | null;
+  logo_black_url?: string | null;
+  logo_white_url?: string | null;
+  logo_link_is_primary?: boolean | null;
 }
 
 type SeasonAssetVariantUrls = Pick<
@@ -3394,6 +3399,11 @@ type SeasonAssetVariantUrls = Pick<
   | "detail_url"
   | "crop_display_url"
   | "crop_detail_url"
+>;
+
+type SeasonAssetLogoVariantUrls = Pick<
+  SeasonAsset,
+  "logo_black_url" | "logo_white_url"
 >;
 
 const pickVariantUrlFromSignature = (
@@ -3499,6 +3509,22 @@ const resolveSeasonAssetVariantUrls = (
   };
 };
 
+const resolveLogoVariantUrls = (
+  metadata: Record<string, unknown> | null | undefined
+): SeasonAssetLogoVariantUrls => {
+  const md = metadata && typeof metadata === "object" ? metadata : null;
+  return {
+    logo_black_url: pickUrlCandidate(
+      getMetadataString(md, "logo_black_url"),
+      getMetadataString(md, "hosted_logo_black_url")
+    ),
+    logo_white_url: pickUrlCandidate(
+      getMetadataString(md, "logo_white_url"),
+      getMetadataString(md, "hosted_logo_white_url")
+    ),
+  };
+};
+
 /**
  * Get all media assets for a show/season.
  * Combines images from season_images, episode_images, and cast_photos.
@@ -3508,11 +3534,10 @@ export async function getAssetsByShowSeason(
   seasonNumber: number,
   options?: SourcePaginationOptions
 ): Promise<SeasonAsset[]> {
-  // Admin gallery should return "everything" by default (up to MAX_LIMIT).
-  const { limit, offset } = normalizePagination({
-    ...options,
-    limit: options?.limit ?? MAX_LIMIT,
-  });
+  const isFullFetch = options?.full === true;
+  const queryLimit = isFullFetch ? ASSET_GALLERY_FULL_FETCH_LIMIT : MAX_LIMIT;
+  const limit = Math.min(Math.max(options?.limit ?? queryLimit, 1), queryLimit);
+  const offset = Math.max(options?.offset ?? 0, 0);
   const assets: SeasonAsset[] = [];
   const hostedUrlSeen = new Set<string>();
 
@@ -3568,8 +3593,8 @@ export async function getAssetsByShowSeason(
            FROM core.episodes
            WHERE season_id = $1::uuid
              AND air_date IS NOT NULL
-           LIMIT 500`,
-          [seasonId]
+           LIMIT $2::int`,
+          [seasonId, queryLimit]
         );
 
         const parsedDates = episodeDates.rows
@@ -3657,8 +3682,8 @@ export async function getAssetsByShowSeason(
            ON ma.id = ml.media_asset_id
          WHERE ml.entity_type = 'season'
            AND ml.entity_id = $1::uuid
-         LIMIT 500`,
-        [seasonId]
+         LIMIT $2::int`,
+        [seasonId, queryLimit]
       );
 
       for (const row of linkResult.rows) {
@@ -3773,8 +3798,8 @@ export async function getAssetsByShowSeason(
        WHERE show_id = $1::uuid
          AND season_number = $2::int
          AND hosted_url IS NOT NULL
-       LIMIT 500`,
-      [showId, seasonNumber]
+       LIMIT $3::int`,
+      [showId, seasonNumber, queryLimit]
     );
 
     for (const img of seasonImages.rows) {
@@ -3850,8 +3875,8 @@ export async function getAssetsByShowSeason(
          AND season_number = $2::int
          AND hosted_url IS NOT NULL
        ORDER BY episode_number ASC
-       LIMIT 500`,
-      [showId, seasonNumber]
+       LIMIT $3::int`,
+      [showId, seasonNumber, queryLimit]
     );
 
     for (const img of episodeImages.rows) {
@@ -3909,8 +3934,8 @@ export async function getAssetsByShowSeason(
          ON sea.id = e.season_id
        WHERE c.show_id = $1::uuid
          AND sea.season_number = $2::int
-       LIMIT 500`,
-      [showId, seasonNumber]
+       LIMIT $3::int`,
+      [showId, seasonNumber, queryLimit]
     );
 
     if (seasonCast.rows.length > 0) {
@@ -3970,8 +3995,8 @@ export async function getAssetsByShowSeason(
              )
            )
          ORDER BY COALESCE(fetched_at, hosted_at, updated_at) DESC NULLS LAST
-         LIMIT 500`,
-        [personIds, seasonNumber, seasonStartSqlDate, seasonEndSqlDate]
+         LIMIT $5::int`,
+        [personIds, seasonNumber, seasonStartSqlDate, seasonEndSqlDate, queryLimit]
       );
       const castTagRows = await getTagsByPhotoIds(castPhotos.rows.map((photo) => photo.id));
 
@@ -4081,10 +4106,10 @@ export async function getAssetsByShowId(
   showId: string,
   options?: SourcePaginationOptions
 ): Promise<SeasonAsset[]> {
-  const { limit, offset } = normalizePagination({
-    ...options,
-    limit: options?.limit ?? MAX_LIMIT,
-  });
+  const isFullFetch = options?.full === true;
+  const queryLimit = isFullFetch ? ASSET_GALLERY_FULL_FETCH_LIMIT : MAX_LIMIT;
+  const limit = Math.min(Math.max(options?.limit ?? queryLimit, 1), queryLimit);
+  const offset = Math.max(options?.offset ?? 0, 0);
 
   const assets: SeasonAsset[] = [];
   const hostedUrlSeen = new Set<string>();
@@ -4094,6 +4119,7 @@ export async function getAssetsByShowId(
     const linkResult = await pgQuery<{
       link_id: string;
       link_kind: string | null;
+      link_is_primary: boolean | null;
       context: Record<string, unknown> | null;
       media_asset_id: string;
       asset_id: string | null;
@@ -4112,6 +4138,7 @@ export async function getAssetsByShowId(
       `SELECT
          ml.id AS link_id,
          ml.kind AS link_kind,
+         ml.is_primary AS link_is_primary,
          ml.context,
          ml.media_asset_id,
          ma.id AS asset_id,
@@ -4131,8 +4158,8 @@ export async function getAssetsByShowId(
          ON ma.id = ml.media_asset_id
        WHERE ml.entity_type = 'show'
          AND ml.entity_id = $1::uuid
-       LIMIT 500`,
-      [showId]
+       LIMIT $2::int`,
+      [showId, queryLimit]
     );
 
     for (const row of linkResult.rows) {
@@ -4154,6 +4181,7 @@ export async function getAssetsByShowId(
         getMetadataString(mergedMetadata, "source_page_url") ??
         row.source_url ??
         null;
+      const logoVariantUrls = resolveLogoVariantUrls(mergedMetadata);
       const normalizedScrape = normalizeScrapeSource(
         row.source ?? "unknown",
         sourceUrlForNormalization,
@@ -4192,6 +4220,7 @@ export async function getAssetsByShowId(
           originalUrl: readMetadataOriginalUrl(mergedMetadata),
           sourceUrl: sourceUrlForNormalization,
         }),
+        ...logoVariantUrls,
         width: row.width ?? null,
         height: row.height ?? null,
         caption: row.caption ?? null,
@@ -4204,6 +4233,10 @@ export async function getAssetsByShowId(
         hosted_content_type: row.hosted_content_type ?? null,
         link_id: row.link_id,
         media_asset_id: row.media_asset_id,
+        logo_link_is_primary:
+          (row.link_kind ?? "").trim().toLowerCase() === "logo"
+            ? Boolean(row.link_is_primary)
+            : null,
         people_count: contextPeopleCount,
         people_count_source: contextPeopleCountSource,
         ...thumbnailCropFields,
@@ -4233,14 +4266,15 @@ export async function getAssetsByShowId(
        FROM core.show_images
        WHERE show_id = $1::uuid
          AND hosted_url IS NOT NULL
-       LIMIT 500`,
-      [showId]
+       LIMIT $2::int`,
+      [showId, queryLimit]
     );
 
     for (const img of showImages.rows) {
       if (!img.hosted_url) continue;
       if (hostedUrlSeen.has(img.hosted_url)) continue;
       const imageKind = img.image_type ?? img.kind ?? "poster";
+      const logoVariantUrls = resolveLogoVariantUrls(img.metadata);
       assets.push({
         id: img.id,
         type: "show",
@@ -4254,6 +4288,7 @@ export async function getAssetsByShowId(
           originalUrl: img.url_original,
           sourceUrl: img.url,
         }),
+        ...logoVariantUrls,
         width: img.width,
         height: img.height,
         caption: null,
@@ -4262,6 +4297,7 @@ export async function getAssetsByShowId(
         metadata: img.metadata,
         link_id: null,
         media_asset_id: null,
+        logo_link_is_primary: null,
         people_count: null,
         people_count_source: null,
         thumbnail_focus_x: null,

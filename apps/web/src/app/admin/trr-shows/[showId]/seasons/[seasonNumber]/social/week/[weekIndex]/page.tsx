@@ -6,6 +6,7 @@ import type { Route } from "next";
 import Link from "next/link";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
 import {
   buildSeasonWeekBreadcrumb,
   humanizeSlug,
@@ -42,6 +43,9 @@ interface BasePost {
   engagement: number;
   total_comments_available: number;
   comments: Comment[];
+  dislikes?: number;
+  downvotes?: number;
+  upvotes?: number;
 }
 
 interface InstagramPost extends BasePost {
@@ -198,8 +202,10 @@ interface CommentsCoverageResponse {
   by_platform?: Record<
     string,
     {
-      saved_comments: number;
-      reported_comments: number;
+      saved_comments?: number;
+      reported_comments?: number;
+      total_saved_comments?: number;
+      total_reported_comments?: number;
       coverage_pct: number | null;
       up_to_date: boolean;
       stale_posts_count: number;
@@ -276,6 +282,9 @@ const PLATFORM_LABELS: Record<string, string> = {
   tiktok: "TikTok",
   twitter: "Twitter/X",
   youtube: "YouTube",
+};
+const PLATFORM_HANDLE_FALLBACK: Record<string, string> = {
+  youtube: "Bravo",
 };
 
 const STAT_LABELS: Record<string, string> = {
@@ -440,6 +449,11 @@ function getNum(post: AnyPost, key: string): number {
   return (post as unknown as Record<string, number>)[key] ?? 0;
 }
 
+function hasNum(post: AnyPost, key: string): boolean {
+  const val = (post as unknown as Record<string, unknown>)[key];
+  return typeof val === "number" && Number.isFinite(val);
+}
+
 function getStrArr(post: AnyPost, key: string): string[] {
   const val = (post as unknown as Record<string, unknown>)[key];
   return Array.isArray(val) ? (val as string[]) : [];
@@ -468,6 +482,40 @@ function formatSavedVsActualComments(saved: number, actual: number): string {
 
 function isCommentsCoverageIncomplete(saved: number, actual: number): boolean {
   return saved < actual;
+}
+
+function toEffectiveCommentCoverage(saved: number, actual: number): {
+  saved: number;
+  actual: number;
+  incomplete: boolean;
+} {
+  const normalizedSaved = Number.isFinite(saved) ? Math.max(0, saved) : 0;
+  const normalizedActual = Number.isFinite(actual) ? Math.max(0, actual) : 0;
+  const effectiveSaved = Math.min(normalizedSaved, normalizedActual);
+  return {
+    saved: effectiveSaved,
+    actual: normalizedActual,
+    incomplete: isCommentsCoverageIncomplete(effectiveSaved, normalizedActual),
+  };
+}
+
+function getCoverageEntryCounts(
+  entry:
+    | {
+        saved_comments?: number;
+        reported_comments?: number;
+        total_saved_comments?: number;
+        total_reported_comments?: number;
+      }
+    | null
+    | undefined,
+): { saved: number; actual: number } {
+  const rawSaved = Number(entry?.saved_comments ?? entry?.total_saved_comments ?? 0);
+  const rawActual = Number(entry?.reported_comments ?? entry?.total_reported_comments ?? 0);
+  return {
+    saved: Number.isFinite(rawSaved) ? Math.max(0, rawSaved) : 0,
+    actual: Number.isFinite(rawActual) ? Math.max(0, rawActual) : 0,
+  };
 }
 
 function formatCoverageLabel(saved: number, actual: number): string {
@@ -501,6 +549,26 @@ function getPostThumbnailUrl(platform: string, post: AnyPost): string | null {
     return mediaUrls[0] || null;
   }
   return getStr(post, "thumbnail_url") || null;
+}
+
+function getPlatformIconKey(platform: string): SocialPlatformTabIconKey | null {
+  if (
+    platform === "instagram" ||
+    platform === "tiktok" ||
+    platform === "twitter" ||
+    platform === "youtube"
+  ) {
+    return platform;
+  }
+  return null;
+}
+
+function formatPostHandle(platform: string, author: string): string {
+  const normalized = String(author || "").trim().replace(/^@+/, "");
+  if (normalized) return `@${normalized}`;
+  const fallback = PLATFORM_HANDLE_FALLBACK[platform];
+  if (fallback) return `@${fallback}`;
+  return "@unknown";
 }
 
 function getJobStage(job: SocialJob): string {
@@ -958,6 +1026,11 @@ function EngagementRow({ platform, post }: { platform: string; post: AnyPost }) 
   } else if (platform === "youtube") {
     pushMetric("Views", getNum(post, "views"));
     pushMetric("Likes", getNum(post, "likes"));
+    if (hasNum(post, "dislikes")) {
+      pushMetric("Dislikes", getNum(post, "dislikes"));
+    } else if (hasNum(post, "downvotes")) {
+      pushMetric("Downvotes", getNum(post, "downvotes"));
+    }
     items.push({ label: "Comments", value: commentsValue });
   } else if (platform === "twitter") {
     pushMetric("Likes", getNum(post, "likes"));
@@ -1006,21 +1079,38 @@ function PostCard({
   const savedComments = getSavedCommentsForPost(post);
   const commentsCoverageIncomplete = isCommentsCoverageIncomplete(savedComments, actualComments);
   const thumbnailUrl = getPostThumbnailUrl(platform, post);
+  const platformIconKey = getPlatformIconKey(platform);
+  const postHandle = formatPostHandle(platform, post.author);
 
   return (
     <>
-      <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+      <div className="h-full bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
         {/* Header */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <span
-              className={`text-xs font-medium px-2 py-0.5 rounded ${PLATFORM_COLORS[platform] ?? "bg-gray-100 text-gray-800"}`}
-            >
-              {PLATFORM_LABELS[platform] ?? platform}
-            </span>
-            <span className="text-sm font-medium text-gray-900">
-              @{post.author || "unknown"}
-            </span>
+            {platformIconKey ? (
+              <span aria-label={`${PLATFORM_LABELS[platform] ?? platform} platform`} className="inline-flex">
+                <SocialPlatformTabIcon tab={platformIconKey} />
+              </span>
+            ) : (
+              <span
+                className={`text-xs font-medium px-2 py-0.5 rounded ${PLATFORM_COLORS[platform] ?? "bg-gray-100 text-gray-800"}`}
+              >
+                {PLATFORM_LABELS[platform] ?? platform}
+              </span>
+            )}
+            {post.url ? (
+              <a
+                href={post.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-gray-900 hover:underline"
+              >
+                {postHandle}
+              </a>
+            ) : (
+              <span className="text-sm font-medium text-gray-900">{postHandle}</span>
+            )}
             {platform === "twitter" && getStr(post, "display_name") && (
               <span className="text-xs text-gray-500">{getStr(post, "display_name")}</span>
             )}
@@ -1035,7 +1125,7 @@ function PostCard({
 
         {/* Thumbnail preview */}
         {thumbnailUrl && (
-          <div className="mb-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+          <div className="mb-3 aspect-[3/4] overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={thumbnailUrl}
@@ -1045,11 +1135,7 @@ function PostCard({
               onError={(event) => {
                 event.currentTarget.style.display = "none";
               }}
-              className={`w-full ${
-                platform === "youtube"
-                  ? "max-h-[360px] object-contain bg-black/5"
-                  : "h-44 object-cover"
-              }`}
+              className="h-full w-full object-cover"
             />
           </div>
         )}
@@ -1119,19 +1205,7 @@ function PostCard({
           )}
 
         {/* Actions row */}
-        <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
-          <div className="flex items-center gap-3">
-            {post.url && (
-              <a
-                href={post.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
-              >
-                View on {PLATFORM_LABELS[platform] ?? platform} ↗
-              </a>
-            )}
-          </div>
+        <div className="flex items-center justify-end mt-3 pt-2 border-t border-gray-100">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -1511,7 +1585,7 @@ export default function WeekDetailPage() {
         max_comments_per_post: number;
         max_replies_per_post: number;
         fetch_replies: boolean;
-        ingest_mode: "posts_and_comments" | "comments_only";
+        ingest_mode: "posts_and_comments";
         sync_strategy: "incremental";
         allow_inline_dev_fallback: boolean;
         date_start: string;
@@ -1522,7 +1596,7 @@ export default function WeekDetailPage() {
         max_comments_per_post: 100000,
         max_replies_per_post: 100000,
         fetch_replies: true,
-        ingest_mode: SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "posts_and_comments" : "comments_only",
+        ingest_mode: "posts_and_comments",
         sync_strategy: "incremental",
         allow_inline_dev_fallback: true,
         date_start: dateStart,
@@ -1748,25 +1822,6 @@ export default function WeekDetailPage() {
 
       const platformLabel = platformFilter === "all" ? "all platforms" : PLATFORM_LABELS[platformFilter];
       const weekLabel = data.week.label || (data.week.week_index === 0 ? "Pre-Season" : `Week ${data.week.week_index}`);
-      let localSavedComments = 0;
-      let localReportedComments = 0;
-      const platformEntries =
-        platformFilter === "all"
-          ? Object.entries(data.platforms)
-          : [[platformFilter, data.platforms[platformFilter]] as [string, PlatformData | undefined]];
-      for (const [platform, platformData] of platformEntries) {
-        if (!platformData) continue;
-        for (const post of platformData.posts) {
-          localSavedComments += getSavedCommentsForPost(post);
-          localReportedComments += getActualCommentsForPost(platform, post);
-        }
-      }
-      if (!SOCIAL_FULL_SYNC_MIRROR_ENABLED && !isCommentsCoverageIncomplete(localSavedComments, localReportedComments)) {
-        setSyncMessage(`${weekLabel} (${platformLabel}) is already up to date.`);
-        setSyncingComments(false);
-        syncSessionStateRef.current = null;
-        return;
-      }
       setSyncStartedAt(new Date(syncSessionStateRef.current.startedAtMs));
       setSyncPass(1);
       try {
@@ -1788,7 +1843,7 @@ export default function WeekDetailPage() {
       if (generation !== syncSessionGenerationRef.current) return;
       setSyncMessage(
         `Pass 1/${COMMENT_SYNC_MAX_PASSES} queued for ${weekLabel} (${platformLabel}) · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · ${
-          SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Sync + Mirror started." : "Comment sync started."
+          SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Sync + Mirror started." : "Sync Metrics started."
         }`,
       );
     } catch (err) {
@@ -1797,7 +1852,7 @@ export default function WeekDetailPage() {
           ? err.message
           : SOCIAL_FULL_SYNC_MIRROR_ENABLED
             ? "Failed to run full sync + mirror"
-            : "Failed to sync comments",
+            : "Failed to sync metrics",
       );
       setSyncingComments(false);
       syncSessionStateRef.current = null;
@@ -2101,7 +2156,7 @@ export default function WeekDetailPage() {
 
   const filteredCommentCoverage = useMemo(() => {
     if (!data) return { saved: 0, actual: 0, incomplete: false };
-    let saved = 0;
+    let effectiveSaved = 0;
     let actual = 0;
     const platformEntries =
       platformFilter === "all"
@@ -2114,43 +2169,61 @@ export default function WeekDetailPage() {
           const postDayToken = toLocalDateToken(post.posted_at);
           if (!postDayToken || postDayToken !== activeDayFilter) continue;
         }
-        saved += getSavedCommentsForPost(post);
-        actual += getActualCommentsForPost(platform, post);
+        const savedCount = getSavedCommentsForPost(post);
+        const actualCount = getActualCommentsForPost(platform, post);
+        effectiveSaved += Math.min(savedCount, actualCount);
+        actual += actualCount;
       }
     }
-    return {
-      saved,
-      actual,
-      incomplete: isCommentsCoverageIncomplete(saved, actual),
-    };
+    return toEffectiveCommentCoverage(effectiveSaved, actual);
   }, [activeDayFilter, data, platformFilter]);
+
+  const syncFilteredCommentCoverage = useMemo(() => {
+    if (!syncCoveragePreview) return null;
+    const coverageByPlatform = syncCoveragePreview.by_platform ?? {};
+
+    if (platformFilter === "all" && Object.keys(coverageByPlatform).length > 0) {
+      let saved = 0;
+      let actual = 0;
+      for (const entry of Object.values(coverageByPlatform)) {
+        const counts = getCoverageEntryCounts(entry);
+        saved += Math.min(counts.saved, counts.actual);
+        actual += counts.actual;
+      }
+      return toEffectiveCommentCoverage(saved, actual);
+    }
+
+    if (platformFilter !== "all") {
+      const platformEntry = coverageByPlatform[platformFilter];
+      if (platformEntry) {
+        const counts = getCoverageEntryCounts(platformEntry);
+        return toEffectiveCommentCoverage(counts.saved, counts.actual);
+      }
+    }
+
+    const totals = getCoverageEntryCounts({
+      total_saved_comments: syncCoveragePreview.total_saved_comments,
+      total_reported_comments: syncCoveragePreview.total_reported_comments,
+    });
+    return toEffectiveCommentCoverage(totals.saved, totals.actual);
+  }, [platformFilter, syncCoveragePreview]);
 
   const commentsSavedPct = useMemo(() => {
     const effectiveCoverage =
-      syncingComments && syncCoveragePreview
-        ? {
-            saved: Number(syncCoveragePreview.total_saved_comments ?? 0),
-            actual: Number(syncCoveragePreview.total_reported_comments ?? 0),
-            incomplete: !Boolean(syncCoveragePreview.up_to_date),
-          }
+      syncingComments && syncFilteredCommentCoverage
+        ? syncFilteredCommentCoverage
         : filteredCommentCoverage;
     if (effectiveCoverage.actual <= 0) return 100;
     const ratio = (effectiveCoverage.saved / effectiveCoverage.actual) * 100;
     return Math.max(0, Math.min(100, ratio));
-  }, [filteredCommentCoverage, syncCoveragePreview, syncingComments]);
+  }, [filteredCommentCoverage, syncFilteredCommentCoverage, syncingComments]);
 
   const displayedCommentCoverage = useMemo(() => {
-    if (syncingComments && syncCoveragePreview) {
-      const saved = Number(syncCoveragePreview.total_saved_comments ?? 0);
-      const actual = Number(syncCoveragePreview.total_reported_comments ?? 0);
-      return {
-        saved,
-        actual,
-        incomplete: isCommentsCoverageIncomplete(saved, actual),
-      };
+    if (syncingComments && syncFilteredCommentCoverage) {
+      return syncFilteredCommentCoverage;
     }
     return filteredCommentCoverage;
-  }, [filteredCommentCoverage, syncCoveragePreview, syncingComments]);
+  }, [filteredCommentCoverage, syncFilteredCommentCoverage, syncingComments]);
 
   const syncProgress = useMemo(() => {
     const summary = syncRun?.summary ?? {};
@@ -2527,10 +2600,10 @@ export default function WeekDetailPage() {
                 : platformFilter === "all"
                   ? SOCIAL_FULL_SYNC_MIRROR_ENABLED
                     ? "Full Sync + Mirror"
-                    : "Sync All Comments"
+                    : "Sync Metrics"
                   : SOCIAL_FULL_SYNC_MIRROR_ENABLED
                     ? `Full Sync ${PLATFORM_LABELS[platformFilter]} + Mirror`
-                    : `Sync ${PLATFORM_LABELS[platformFilter]} Comments`}
+                    : `Sync ${PLATFORM_LABELS[platformFilter]} Metrics`}
             </button>
 
             {/* Result count */}
@@ -2718,7 +2791,7 @@ export default function WeekDetailPage() {
               {activeDayFilter ? "No posts found for this day." : "No posts found for this week."}
             </div>
           ) : (
-            <div className="space-y-4">
+            <div data-testid="week-post-gallery" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {allPosts.map(({ platform, post }) => (
                 <PostCard
                   key={`${platform}-${post.source_id}`}

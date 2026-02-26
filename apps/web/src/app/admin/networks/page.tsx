@@ -7,7 +7,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
-import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming-entity";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -115,18 +115,30 @@ interface OverrideDraft {
 
 type TypeFilter = "all" | NetworksStreamingType;
 
-const parseErrorPayload = async (response: Response): Promise<string> => {
+interface ErrorPayload {
+  code: string | null;
+  message: string;
+}
+
+const parseErrorPayload = async (response: Response): Promise<ErrorPayload> => {
   const fallback = `Request failed (${response.status})`;
   try {
-    const payload = (await response.json()) as { error?: string; detail?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      detail?: string;
+      message?: string;
+      error_code?: string;
+    };
+    const code = typeof payload.error_code === "string" ? payload.error_code : null;
     if (typeof payload.error === "string" && typeof payload.detail === "string") {
-      return `${payload.error}: ${payload.detail}`;
+      return { code, message: `${payload.error}: ${payload.detail}` };
     }
-    if (typeof payload.error === "string") return payload.error;
-    if (typeof payload.detail === "string") return payload.detail;
-    return fallback;
+    if (typeof payload.error === "string") return { code, message: payload.error };
+    if (typeof payload.message === "string") return { code, message: payload.message };
+    if (typeof payload.detail === "string") return { code, message: payload.detail };
+    return { code, message: fallback };
   } catch {
-    return fallback;
+    return { code: null, message: fallback };
   }
 };
 
@@ -139,10 +151,11 @@ export default function AdminNetworksPage() {
   const pathname = usePathname();
   const { user, checking, hasAccess } = useAdminGuard();
   const userIdentity = user?.email ?? user?.uid ?? null;
-  const isProductionCompaniesPage = pathname === "/admin/production-companies";
-  const isLegacyNetworksPage = pathname === "/admin/networks";
+  const isProductionCompaniesPage = pathname === "/brands/production-companies" || pathname === "/admin/production-companies";
+  const isLegacyNetworksPage = pathname === "/admin/networks" || pathname === "/brands/networks";
   const activeBrandsTab = isProductionCompaniesPage ? "production-companies" : "networks-streaming";
-  const pageTitle = isProductionCompaniesPage ? "Production Companies" : "Network & Streaming Services";
+  const pageTitle = isProductionCompaniesPage ? "Production Companies" : "Networks & Streaming Services";
+  const pageHref = isProductionCompaniesPage ? "/brands/production-companies" : "/brands/networks-and-streaming";
   const pageDescription = isProductionCompaniesPage
     ? "Production company coverage and sync health from the full Supabase show inventory."
     : "Coverage and sync health across network and streaming brand dimensions from the full Supabase show inventory.";
@@ -162,6 +175,8 @@ export default function AdminNetworksPage() {
   const [overrideDrafts, setOverrideDrafts] = useState<Record<string, OverrideDraft>>({});
   const [overridesLoading, setOverridesLoading] = useState(false);
   const [overridesError, setOverridesError] = useState<string | null>(null);
+  const [overridesReadOnly, setOverridesReadOnly] = useState(false);
+  const [overridesErrorCode, setOverridesErrorCode] = useState<string | null>(null);
   const [savingOverrideKey, setSavingOverrideKey] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(isProductionCompaniesPage ? "production" : "all");
 
@@ -195,7 +210,7 @@ export default function AdminNetworksPage() {
         cache: "no-store",
       });
       if (!response.ok) {
-        setSummaryError(await parseErrorPayload(response));
+        setSummaryError((await parseErrorPayload(response)).message);
         setSummary(null);
         return;
       }
@@ -215,13 +230,26 @@ export default function AdminNetworksPage() {
   const loadOverrides = useCallback(async () => {
     setOverridesLoading(true);
     setOverridesError(null);
+    setOverridesReadOnly(false);
+    setOverridesErrorCode(null);
     try {
       const response = await fetchWithAuth("/api/admin/networks-streaming/overrides?active_only=true", {
         method: "GET",
         cache: "no-store",
       });
       if (!response.ok) {
-        setOverridesError(await parseErrorPayload(response));
+        const payload = await parseErrorPayload(response);
+        if (payload.code === "not_authenticated_for_overrides") {
+          setOverridesReadOnly(true);
+          setOverridesErrorCode(payload.code);
+          setOverridesError("Overrides are read-only for this session. Summary rows loaded successfully.");
+        } else if (payload.code === "backend_override_unavailable") {
+          setOverridesErrorCode(payload.code);
+          setOverridesError("Overrides backend is unavailable right now. Summary rows are still available.");
+        } else {
+          setOverridesErrorCode(payload.code ?? "unknown");
+          setOverridesError(payload.message);
+        }
         setOverrides({});
         return;
       }
@@ -234,7 +262,14 @@ export default function AdminNetworksPage() {
       setOverrides(byKey);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load overrides";
-      setOverridesError(message);
+      if (message === "Not authenticated") {
+        setOverridesReadOnly(true);
+        setOverridesErrorCode("not_authenticated_for_overrides");
+        setOverridesError("Overrides are read-only for this session. Summary rows loaded successfully.");
+      } else {
+        setOverridesErrorCode("unknown");
+        setOverridesError(message);
+      }
       setOverrides({});
     } finally {
       setOverridesLoading(false);
@@ -295,7 +330,7 @@ export default function AdminNetworksPage() {
         });
 
         if (!response.ok) {
-          setSyncError(await parseErrorPayload(response));
+          setSyncError((await parseErrorPayload(response)).message);
           return;
         }
 
@@ -460,6 +495,10 @@ export default function AdminNetworksPage() {
 
   const onSaveOverride = useCallback(
     async (item: UnresolvedLogoItem) => {
+      if (overridesReadOnly) {
+        setSyncError("Overrides are read-only for this session.");
+        return;
+      }
       const mapKey = `${item.type}:${normalizeEntityKey(item.name)}`;
       const draft = draftFor(item);
       setSavingOverrideKey(mapKey);
@@ -485,7 +524,7 @@ export default function AdminNetworksPage() {
           body: JSON.stringify(payload),
         });
         if (!response.ok) {
-          setSyncError(await parseErrorPayload(response));
+          setSyncError((await parseErrorPayload(response)).message);
           return;
         }
         await loadOverrides();
@@ -496,7 +535,7 @@ export default function AdminNetworksPage() {
         setSavingOverrideKey(null);
       }
     },
-    [draftFor, fetchWithAuth, loadOverrides],
+    [draftFor, fetchWithAuth, loadOverrides, overridesReadOnly],
   );
 
   const onExportUnresolvedCsv = useCallback(() => {
@@ -538,7 +577,7 @@ export default function AdminNetworksPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Brands", "/admin/brands")} className="mb-1" />
+              <AdminBreadcrumbs items={buildBrandsPageBreadcrumb(pageTitle, pageHref)} className="mb-1" />
               <h1 className="break-words text-3xl font-bold text-zinc-900">{pageTitle}</h1>
               <p className="break-words text-sm text-zinc-500">{pageDescription}</p>
               <BrandsTabs activeTab={activeBrandsTab} className="mt-4" />
@@ -687,7 +726,15 @@ export default function AdminNetworksPage() {
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncError}</div>
             ) : null}
             {overridesError ? (
-              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{overridesError}</div>
+              <div
+                className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
+                  overridesErrorCode === "not_authenticated_for_overrides"
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : "border-red-200 bg-red-50 text-red-700"
+                }`}
+              >
+                {overridesError}
+              </div>
             ) : null}
 
             <div className={`mt-4 rounded-lg border px-3 py-2 text-sm ${missingColumns.length > 0 ? "border-red-200 bg-red-50 text-red-800" : "border-green-200 bg-green-50 text-green-800"}`}>
@@ -821,7 +868,7 @@ export default function AdminNetworksPage() {
                             </td>
                             <td className="max-w-[300px] px-3 py-2 font-medium text-zinc-900 [overflow-wrap:anywhere]">
                               <Link
-                                href={`/admin/networks-and-streaming/${row.type}/${toEntitySlug(row.name)}`}
+                                href={`/brands/networks-and-streaming/${row.type}/${toEntitySlug(row.name)}`}
                                 className="text-zinc-900 underline-offset-2 hover:underline"
                               >
                                 {row.name}
@@ -968,33 +1015,41 @@ export default function AdminNetworksPage() {
                                     value={draft.wikidata_id_override}
                                     onChange={(event) => onChangeOverrideDraft(item, "wikidata_id_override", event.target.value)}
                                     placeholder="Wikidata ID"
+                                    disabled={overridesReadOnly}
                                     className="rounded border border-zinc-300 px-2 py-1"
                                   />
                                   <input
                                     value={draft.wikipedia_url_override}
                                     onChange={(event) => onChangeOverrideDraft(item, "wikipedia_url_override", event.target.value)}
                                     placeholder="Wikipedia URL"
+                                    disabled={overridesReadOnly}
                                     className="rounded border border-zinc-300 px-2 py-1"
                                   />
                                   <input
                                     value={draft.logo_source_url}
                                     onChange={(event) => onChangeOverrideDraft(item, "logo_source_url", event.target.value)}
                                     placeholder="Logo source URL"
+                                    disabled={overridesReadOnly}
                                     className="rounded border border-zinc-300 px-2 py-1 md:col-span-2"
                                   />
                                   <input
                                     value={draft.notes}
                                     onChange={(event) => onChangeOverrideDraft(item, "notes", event.target.value)}
                                     placeholder="Notes"
+                                    disabled={overridesReadOnly}
                                     className="rounded border border-zinc-300 px-2 py-1 md:col-span-2"
                                   />
                                   <button
                                     type="button"
                                     onClick={() => void onSaveOverride(item)}
-                                    disabled={savingOverrideKey === mapKey || overridesLoading}
+                                    disabled={savingOverrideKey === mapKey || overridesLoading || overridesReadOnly}
                                     className="rounded bg-zinc-900 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-500 md:col-span-2"
                                   >
-                                    {savingOverrideKey === mapKey ? "Saving..." : "Save Override"}
+                                    {overridesReadOnly
+                                      ? "Read-only session"
+                                      : savingOverrideKey === mapKey
+                                        ? "Saving..."
+                                        : "Save Override"}
                                   </button>
                                 </div>
                               </td>

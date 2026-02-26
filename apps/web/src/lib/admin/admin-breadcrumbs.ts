@@ -6,6 +6,7 @@ export type AdminBreadcrumbItem = {
 const ADMIN_ROOT_LABEL = "Admin";
 const ADMIN_ROOT_HREF = "/admin";
 const SHOWS_SECTION_HREF = "/shows";
+const BRANDS_SECTION_HREF = "/brands";
 
 const toSafeDecoded = (value: string): string => {
   try {
@@ -52,11 +53,22 @@ export const buildAdminSectionBreadcrumb = (
   { label: sectionLabel, href: sectionHref },
 ];
 
+export const buildBrandsSectionBreadcrumb = (): AdminBreadcrumbItem[] =>
+  buildAdminSectionBreadcrumb("Brands", BRANDS_SECTION_HREF);
+
+export const buildBrandsPageBreadcrumb = (
+  pageLabel: string,
+  pageHref: string,
+): AdminBreadcrumbItem[] => [
+  ...buildBrandsSectionBreadcrumb(),
+  { label: pageLabel, href: pageHref },
+];
+
 export const buildNetworkDetailBreadcrumb = (
   entityLabel: string,
   entityHref: string,
 ): AdminBreadcrumbItem[] => [
-  ...buildAdminSectionBreadcrumb("Brands", "/admin/brands"),
+  ...buildBrandsPageBreadcrumb("Networks & Streaming Services", "/brands/networks-and-streaming"),
   { label: entityLabel, href: entityHref },
 ];
 
@@ -105,7 +117,7 @@ export const buildPersonBreadcrumb = (
 
 export const buildSeasonSocialBreadcrumb = (
   showName: string,
-  _seasonNumber: number | string,
+  seasonNumber: number | string,
   options: {
     showHref: string;
     seasonHref: string;
@@ -116,10 +128,26 @@ export const buildSeasonSocialBreadcrumb = (
   },
 ): AdminBreadcrumbItem[] => {
   const socialLabel = options.socialLabel?.trim() || "Social Media";
-  const trail: AdminBreadcrumbItem[] = [
-    ...buildShowBreadcrumb(showName, { showHref: options.showHref }),
-    { label: socialLabel, href: options.socialHref.trim() || options.showHref.trim() || SHOWS_SECTION_HREF },
-  ];
+  const normalizedSeasonNumber =
+    typeof seasonNumber === "number"
+      ? Number.isFinite(seasonNumber)
+        ? String(seasonNumber)
+        : ""
+      : seasonNumber.trim();
+
+  const trail: AdminBreadcrumbItem[] = [...buildShowBreadcrumb(showName, { showHref: options.showHref })];
+
+  if (normalizedSeasonNumber.length > 0) {
+    trail.push({
+      label: `Season ${normalizedSeasonNumber}`,
+      href: options.seasonHref.trim() || options.showHref.trim() || SHOWS_SECTION_HREF,
+    });
+  }
+
+  trail.push({
+    label: socialLabel,
+    href: options.socialHref.trim() || options.showHref.trim() || SHOWS_SECTION_HREF,
+  });
   const subTabLabel = options.subTabLabel?.trim();
   if (subTabLabel) {
     trail.push({

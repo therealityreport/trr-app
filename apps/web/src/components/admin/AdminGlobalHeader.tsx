@@ -5,6 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import AdminSideMenu from "@/components/admin/AdminSideMenu";
+import { HealthIndicator } from "@/components/admin/SystemHealthModal";
+import SystemHealthModal from "@/components/admin/SystemHealthModal";
 import { ADMIN_NAV_ITEMS } from "@/lib/admin/admin-navigation";
 import {
   readAdminRecentShows,
@@ -25,6 +27,7 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
   const pathname =
     typeof rawPathname === "string" && rawPathname.startsWith("/") ? rawPathname : "/";
   const [menuOpen, setMenuOpen] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
   const [recentShows, setRecentShows] = useState<AdminRecentShowEntry[]>([]);
 
   useEffect(() => {
@@ -65,6 +68,8 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
               className="h-[70.2px] w-80"
             />
           </Link>
+
+          <HealthIndicator onClick={() => setHealthOpen(true)} />
         </div>
 
         {children ? <div className={bodyClassName}>{children}</div> : null}
@@ -77,6 +82,8 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
         recentShows={recentShows}
         onClose={() => setMenuOpen(false)}
       />
+
+      <SystemHealthModal isOpen={healthOpen} onClose={() => setHealthOpen(false)} />
     </>
   );
 }
