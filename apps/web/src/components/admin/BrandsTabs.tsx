@@ -18,12 +18,12 @@ interface BrandsTab {
 }
 
 const BRANDS_TABS: readonly BrandsTab[] = [
-  { id: "brands", label: "Brands", href: "/admin/brands" },
-  { id: "networks-streaming", label: "Network & Streaming Services", href: "/admin/networks-and-streaming" },
-  { id: "production-companies", label: "Production Companies", href: "/admin/production-companies" },
-  { id: "shows", label: "Shows", href: "/shows" },
-  { id: "news", label: "Publications / News", href: "/admin/news" },
-  { id: "other", label: "Other", href: "/admin/other" },
+  { id: "brands", label: "Brands", href: "/brands" },
+  { id: "networks-streaming", label: "Networks & Streaming Services", href: "/brands/networks-and-streaming" },
+  { id: "production-companies", label: "Production Companies", href: "/brands/production-companies" },
+  { id: "shows", label: "Shows & Franchises", href: "/brands/shows-and-franchises" },
+  { id: "news", label: "Publications / News", href: "/brands/news" },
+  { id: "other", label: "Other", href: "/brands/other" },
 ];
 
 function cx(...classes: Array<string | false | null | undefined>): string {

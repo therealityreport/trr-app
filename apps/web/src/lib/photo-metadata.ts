@@ -21,8 +21,12 @@ export interface PhotoMetadata {
   source: string;
   sourceBadgeColor: string;
   s3Mirroring?: boolean;
+  isS3Mirrored?: boolean;
   s3MirrorFileName?: string | null;
   originalImageUrl?: string | null;
+  originalSourceFileUrl?: string | null;
+  originalSourcePageUrl?: string | null;
+  originalSourceLabel?: string | null;
   fileType?: string | null;
   createdAt?: Date | null;
   addedAt?: Date | null;
@@ -256,6 +260,17 @@ const isLikelyHostedMirrorUrl = (value: string): boolean => {
     return false;
   } catch {
     return false;
+  }
+};
+
+const getDomainLabel = (value: string | null | undefined): string | null => {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return null;
+  try {
+    const hostname = new URL(normalized).hostname.toLowerCase().replace(/^www\./, "");
+    return hostname ? hostname.toUpperCase() : null;
+  } catch {
+    return null;
   }
 };
 
@@ -670,6 +685,7 @@ export function mapPhotoToMetadata(
         : typeof metadata.page_url === "string"
           ? metadata.page_url
         : null;
+  const originalSourcePageUrl = sourceUrl;
   const originalImageUrl = resolveOriginalImageUrl(
     [
       typeof metadata.source_image_url === "string" ? metadata.source_image_url : null,
@@ -688,6 +704,13 @@ export function mapPhotoToMetadata(
       (photo as { crop_detail_url?: string | null }).crop_detail_url ?? null,
     ]
   );
+  const originalSourceFileUrl = originalImageUrl;
+  const originalSourceLabel =
+    getDomainLabel(originalSourcePageUrl) ??
+    getDomainLabel(originalSourceFileUrl) ??
+    (photo.source?.trim() ? photo.source.toUpperCase() : null);
+  const normalizedHostedUrl = normalizeUrl(photo.hosted_url ?? null);
+  const isS3Mirrored = normalizedHostedUrl ? isLikelyHostedMirrorUrl(normalizedHostedUrl) : false;
   const faceBoxes = parseFaceBoxes(
     (photo as { face_boxes?: unknown }).face_boxes ?? metadata.face_boxes
   );
@@ -754,8 +777,12 @@ export function mapPhotoToMetadata(
     source: photo.source,
     sourceBadgeColor: SOURCE_COLORS[photo.source.toLowerCase()] ?? "#6b7280",
     s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
+    isS3Mirrored,
     s3MirrorFileName,
     originalImageUrl,
+    originalSourceFileUrl,
+    originalSourcePageUrl,
+    originalSourceLabel,
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
@@ -894,6 +921,7 @@ export function mapSeasonAssetToMetadata(
         : typeof metadata.page_url === "string"
           ? metadata.page_url
           : null;
+  const originalSourcePageUrl = sourceUrl;
   const originalImageUrl = resolveOriginalImageUrl(
     [
       asset.source_url ?? null,
@@ -913,6 +941,13 @@ export function mapSeasonAssetToMetadata(
       asset.original_url ?? null,
     ]
   );
+  const originalSourceFileUrl = originalImageUrl;
+  const originalSourceLabel =
+    getDomainLabel(originalSourcePageUrl) ??
+    getDomainLabel(originalSourceFileUrl) ??
+    (asset.source?.trim() ? asset.source.toUpperCase() : null);
+  const normalizedHostedUrl = normalizeUrl(asset.hosted_url ?? null);
+  const isS3Mirrored = normalizedHostedUrl ? isLikelyHostedMirrorUrl(normalizedHostedUrl) : false;
   const faceBoxes = parseFaceBoxes(metadata.face_boxes);
   const peopleCount =
     toPeopleCount((asset as { people_count?: unknown }).people_count) ??
@@ -1051,8 +1086,12 @@ export function mapSeasonAssetToMetadata(
     source: asset.source,
     sourceBadgeColor: SOURCE_COLORS[asset.source.toLowerCase()] ?? "#6b7280",
     s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
+    isS3Mirrored,
     s3MirrorFileName,
     originalImageUrl,
+    originalSourceFileUrl,
+    originalSourcePageUrl,
+    originalSourceLabel,
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,

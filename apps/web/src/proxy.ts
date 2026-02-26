@@ -116,9 +116,28 @@ function isAdminUiPath(pathname: string): boolean {
   return (
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
+    pathname === "/brands" ||
+    pathname.startsWith("/brands/") ||
     pathname === "/shows" ||
     pathname.startsWith("/shows/")
   );
+}
+
+function mapLegacyBrandsPath(pathname: string): string | null {
+  if (pathname === "/admin/brands") return "/brands";
+  if (pathname === "/admin/networks-and-streaming") return "/brands/networks-and-streaming";
+  if (pathname.startsWith("/admin/networks-and-streaming/")) {
+    return pathname.replace("/admin/networks-and-streaming/", "/brands/networks-and-streaming/");
+  }
+  if (pathname === "/admin/networks") return "/brands/networks-and-streaming";
+  if (pathname.startsWith("/admin/networks/")) {
+    return pathname.replace("/admin/networks/", "/brands/networks-and-streaming/");
+  }
+  if (pathname === "/admin/production-companies") return "/brands/production-companies";
+  if (pathname === "/admin/shows") return "/brands/shows-and-franchises";
+  if (pathname === "/admin/news") return "/brands/news";
+  if (pathname === "/admin/other") return "/brands/other";
+  return null;
 }
 
 function isAdminApiPath(pathname: string): boolean {
@@ -142,6 +161,16 @@ export function proxy(request: NextRequest): NextResponse {
   const allowedAdminApiHosts = resolveAdminApiAllowedHosts(adminOrigin);
   const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);
   const onCanonicalAdminHost = hostsMatch(canonicalAdminHost, requestHost);
+  const legacyBrandsPath = mapLegacyBrandsPath(pathname);
+
+  if (legacyBrandsPath) {
+    const redirectOrigin = onCanonicalAdminHost ? request.nextUrl.origin : adminOrigin;
+    if (!redirectOrigin) {
+      return NextResponse.json({ error: "Admin origin is not configured." }, { status: 403 });
+    }
+    return NextResponse.redirect(new URL(legacyBrandsPath + request.nextUrl.search, redirectOrigin), 307);
+  }
+
   const isAllowedAdminApiHost = isAllowedHost(allowedAdminApiHosts, requestHost);
   const onAdminUiPath = isAdminUiPath(pathname);
   const onAdminApiPath = isAdminApiPath(pathname);

@@ -22,7 +22,7 @@ describe("admin navigation config", () => {
       "/admin/games",
       "/admin/surveys",
       "/admin/social-media",
-      "/admin/brands",
+      "/brands",
       "/admin/users",
       "/admin/groups",
       "/admin/fonts",

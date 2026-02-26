@@ -22,7 +22,9 @@ const buildMetadata = (overrides?: Partial<PhotoMetadata>): PhotoMetadata => ({
 });
 
 const openMetadataPanel = () => {
-  fireEvent.click(screen.getByLabelText("Show metadata"));
+  const buttons = screen.getAllByLabelText("Show metadata");
+  const lastButton = buttons[buttons.length - 1];
+  fireEvent.click(lastButton);
 };
 
 describe("ImageLightbox metadata panel", () => {
@@ -45,20 +47,26 @@ describe("ImageLightbox metadata panel", () => {
     expect(link).toHaveAttribute("rel", "noreferrer");
   });
 
-  it("shows Original URL unavailable when true source URL is missing", () => {
+  it("shows Original source file URL unavailable when true source URL is missing", () => {
+    const metadata = buildMetadata();
+    metadata.originalSourceFileUrl = null;
+    metadata.originalSourcePageUrl = null;
+    metadata.originalImageUrl = null;
+    metadata.sourceUrl = null;
+
     render(
       <ImageLightbox
         src="https://cdn.example.com/image.jpg"
         alt="Test image"
         isOpen
         onClose={() => {}}
-        metadata={buildMetadata({ originalImageUrl: null })}
+        metadata={metadata}
       />
     );
 
     openMetadataPanel();
 
-    expect(screen.getByText("Original URL unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Original source file URL unavailable")).toBeInTheDocument();
   });
 
   it("renders Found on row as normalized SOURCE | PAGE TITLE", () => {
@@ -236,6 +244,27 @@ describe("ImageLightbox metadata panel", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Set as Featured Backdrop" })[0]);
     await waitFor(() => expect(onSetFeaturedBackdrop).toHaveBeenCalledTimes(1));
+  });
+
+  it("supports setting featured logo through management actions", async () => {
+    const onSetFeaturedLogo = vi.fn(async () => {});
+
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+        canManage
+        onSetFeaturedLogo={onSetFeaturedLogo}
+      />
+    );
+
+    openMetadataPanel();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Set as Featured Logo" })[0]);
+    await waitFor(() => expect(onSetFeaturedLogo).toHaveBeenCalledTimes(1));
   });
 
   it("shows featured state labels and disabled reasons for ineligible featured actions", () => {

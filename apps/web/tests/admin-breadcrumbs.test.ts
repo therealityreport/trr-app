@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildBrandsPageBreadcrumb,
+  buildNetworkDetailBreadcrumb,
   buildSeasonSocialBreadcrumb,
   buildNormalizedSurveyDetailBreadcrumb,
   buildPersonBreadcrumb,
@@ -49,6 +51,7 @@ describe("admin-breadcrumb helpers", () => {
       { label: "Admin", href: "/admin" },
       { label: "Shows", href: "/shows" },
       { label: "RHOSLC", href: "/shows/rhoslc" },
+      { label: "Season 5", href: "/shows/rhoslc/s5" },
       { label: "Social Media", href: "/shows/rhoslc/s5/social/reddit" },
       { label: "Reddit Analytics", href: "/shows/rhoslc/s5/social/reddit" },
       { label: "Week 2", href: "/shows/rhoslc/s5/social/week/2?social_platform=reddit" },
@@ -68,6 +71,7 @@ describe("admin-breadcrumb helpers", () => {
       { label: "Admin", href: "/admin" },
       { label: "Shows", href: "/shows" },
       { label: "RHOSLC", href: "/shows/rhoslc" },
+      { label: "Season 5", href: "/shows/rhoslc/s5" },
       { label: "Social Media", href: "/shows/rhoslc/s5/social/reddit" },
       { label: "Reddit Analytics", href: "/shows/rhoslc/s5/social/reddit" },
     ]);
@@ -112,6 +116,23 @@ describe("admin-breadcrumb helpers", () => {
       { label: "Admin", href: "/admin" },
       { label: "Normalized Surveys", href: "/admin/surveys/normalized" },
       { label: "Weekly Pulse", href: "/admin/surveys/normalized/weekly-pulse" },
+    ]);
+  });
+
+  it("builds brands page breadcrumbs with current page included", () => {
+    expect(buildBrandsPageBreadcrumb("Networks & Streaming Services", "/brands/networks-and-streaming")).toEqual([
+      { label: "Admin", href: "/admin" },
+      { label: "Brands", href: "/brands" },
+      { label: "Networks & Streaming Services", href: "/brands/networks-and-streaming" },
+    ]);
+
+    expect(
+      buildNetworkDetailBreadcrumb("Bravo", "/brands/networks-and-streaming/network/bravo"),
+    ).toEqual([
+      { label: "Admin", href: "/admin" },
+      { label: "Brands", href: "/brands" },
+      { label: "Networks & Streaming Services", href: "/brands/networks-and-streaming" },
+      { label: "Bravo", href: "/brands/networks-and-streaming/network/bravo" },
     ]);
   });
 });

@@ -13,6 +13,7 @@ describe("show media gallery section visibility", () => {
     expect(contents).toContain("const SHOW_GALLERY_ALLOWED_SECTIONS: AssetSectionKey[] = [");
     expect(contents).toContain("\"cast_photos\"");
     expect(contents).toContain("\"profile_pictures\"");
+    expect(contents).toContain("\"banners\"");
     expect(contents).toContain("\"posters\"");
     expect(contents).toContain("\"backdrops\"");
     expect(contents).not.toMatch(/<h4[^>]*>\s*Episode Stills\s*<\/h4>/);

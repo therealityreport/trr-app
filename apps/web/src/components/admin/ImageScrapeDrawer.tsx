@@ -167,6 +167,7 @@ export type EntityContext = SeasonContext | ShowContext | PersonContext;
 type ImageKind =
   | "poster"
   | "backdrop"
+  | "banner"
   | "logo"
   | "episode_still"
   | "cast"
@@ -180,6 +181,7 @@ type ImportMode = "standard" | "season_announcement";
 const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "poster", label: "Poster" },
   { value: "backdrop", label: "Backdrop" },
+  { value: "banner", label: "Banner" },
   { value: "episode_still", label: "Episode Still" },
   { value: "cast", label: "Cast Photos" },
   { value: "promo", label: "Promo" },
@@ -199,6 +201,18 @@ const LOGO_SCOPE_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 const GROUP_PICTURE_OPTION_VALUE = "__group_picture_full_time__";
+
+const resolveSeasonAnnouncementGroupKind = (image: {
+  width?: number | null;
+  height?: number | null;
+}): ImageKind => {
+  const width = typeof image.width === "number" ? image.width : 0;
+  const height = typeof image.height === "number" ? image.height : 0;
+  if (width > 0 && height > 0) {
+    return width >= height ? "banner" : "poster";
+  }
+  return "poster";
+};
 
 interface ImageScrapeDrawerProps {
   isOpen: boolean;
@@ -859,10 +873,19 @@ export function ImageScrapeDrawer({
       const imagesToImport = previewData.images
         .filter((img) => selectedImages.has(img.id))
         .map((img) => {
-          const imageKind = imageKinds[img.id] || "other";
-          const explicitPersonIds = imageKind === "cast" ? resolveCastPersonIds(img.id) : [];
+          const selectedKind = imageKinds[img.id] || "other";
+          const isSeasonAnnouncement =
+            entityContext.type !== "person" && importMode === "season_announcement";
+          const isGroupCastSelection =
+            selectedKind === "cast" &&
+            castSelectionByImage[img.id] === GROUP_PICTURE_OPTION_VALUE;
+          const imageKind =
+            isSeasonAnnouncement && isGroupCastSelection
+              ? resolveSeasonAnnouncementGroupKind(img)
+              : selectedKind;
+          const explicitPersonIds = selectedKind === "cast" ? resolveCastPersonIds(img.id) : [];
           const autoPersonIds =
-            imageKind === "cast" &&
+            selectedKind === "cast" &&
             importMode === "season_announcement" &&
             explicitPersonIds.length === 0
               ? inferCastPersonIdsFromCaption(captions[img.id] || img.alt_text || img.context || "")

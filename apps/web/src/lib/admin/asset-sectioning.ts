@@ -9,6 +9,7 @@ export type AssetSectionKey =
   | "reunion"
   | "intro_card"
   | "episode_stills"
+  | "banners"
   | "posters"
   | "backdrops"
   | "other";
@@ -20,6 +21,7 @@ export const ASSET_SECTION_ORDER: AssetSectionKey[] = [
   "reunion",
   "intro_card",
   "episode_stills",
+  "banners",
   "posters",
   "backdrops",
   "other",
@@ -32,6 +34,7 @@ export const ASSET_SECTION_LABELS: Record<AssetSectionKey, string> = {
   reunion: "Reunion",
   intro_card: "Intro Card",
   episode_stills: "Episode Stills",
+  banners: "Banners",
   posters: "Posters",
   backdrops: "Backdrops",
   other: "Other",
@@ -44,6 +47,7 @@ export const ASSET_SECTION_TO_BATCH_CONTENT_TYPE: Record<AssetSectionKey, string
   reunion: "reunion",
   intro_card: "intro_card",
   episode_stills: "episode_stills",
+  banners: "banners",
   posters: "posters",
   backdrops: "backdrops",
   other: "other",
@@ -135,9 +139,10 @@ const mapContentTypeToSection = (
 };
 
 export function classifySeasonAssetSection(
-  asset: SeasonAsset,
+  asset: SeasonAsset | null | undefined,
   options?: { seasonNumber?: number; showName?: string }
 ): AssetSectionKey | null {
+  if (!asset) return null;
   const metadata = (asset.metadata ?? {}) as Record<string, unknown>;
   const kind = normalizeToken(asset.kind);
   const hasProfileSignal =
@@ -173,6 +178,7 @@ export function classifySeasonAssetSection(
   if (hasProfileSignal) return "profile_pictures";
   if (asset.type === "episode") return "episode_stills";
 
+  if (kind === "banner") return "banners";
   if (kind === "backdrop") return "backdrops";
   if (kind === "poster") return "posters";
   if (kind === "confessional") return "confessionals";
@@ -197,6 +203,7 @@ export function groupSeasonAssetsBySection(
     reunion: [],
     intro_card: [],
     episode_stills: [],
+    banners: [],
     posters: [],
     backdrops: [],
     other: [],

@@ -389,6 +389,10 @@ describe("mapPhotoToMetadata", () => {
     });
 
     expect(result.originalImageUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/1/1b/lisa.jpg");
+    expect(result.originalSourceFileUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/1/1b/lisa.jpg");
+    expect(result.originalSourcePageUrl).toBeNull();
+    expect(result.originalSourceLabel).toBe("STATIC.WIKIA.NOCOOKIE.NET");
+    expect(result.isS3Mirrored).toBe(true);
   });
 
   it("keeps originalImageUrl null when only hosted/mirror URLs exist", () => {
@@ -536,6 +540,10 @@ describe("mapSeasonAssetToMetadata", () => {
     );
 
     expect(meta.originalImageUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg");
+    expect(meta.originalSourceFileUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg");
+    expect(meta.originalSourcePageUrl).toBeNull();
+    expect(meta.originalSourceLabel).toBe("STATIC.WIKIA.NOCOOKIE.NET");
+    expect(meta.isS3Mirrored).toBe(true);
   });
 
   it("uses metadata content_type as canonical contentType for season assets", () => {

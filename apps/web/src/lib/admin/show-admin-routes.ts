@@ -454,11 +454,10 @@ export function buildShowAdminUrl(input: {
   }
 
   if (tab === "assets") {
-    const nextQuery = buildCanonicalQuery(input.query);
-    if (assetsSubTab !== "images") {
-      nextQuery.set("assets", assetsSubTab);
-    }
-    return appendQuery(`${base}/media`, nextQuery);
+    return appendQuery(
+      `${base}/media/${assetsSubTab}`,
+      buildCanonicalQuery(input.query)
+    );
   }
 
   if (tab === "social") {

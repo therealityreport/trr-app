@@ -71,6 +71,7 @@ describe("asset-sectioning", () => {
     expect(classifySeasonAssetSection(makeAsset({ type: "episode", kind: "still" }))).toBe(
       "episode_stills"
     );
+    expect(classifySeasonAssetSection(makeAsset({ kind: "banner" }))).toBe("banners");
     expect(classifySeasonAssetSection(makeAsset({ kind: "poster" }))).toBe("posters");
     expect(classifySeasonAssetSection(makeAsset({ kind: "backdrop" }))).toBe("backdrops");
     expect(
@@ -111,11 +112,13 @@ describe("asset-sectioning", () => {
       [
         makeAsset({ id: "a1", kind: "poster" }),
         makeAsset({ id: "a2", kind: "backdrop" }),
-        makeAsset({ id: "a3", kind: "cast", context_section: "promo" }),
+        makeAsset({ id: "a3", kind: "banner" }),
+        makeAsset({ id: "a4", kind: "cast", context_section: "promo" }),
       ],
       { includeOther: false }
     );
 
+    expect(grouped.banners).toHaveLength(1);
     expect(grouped.posters).toHaveLength(1);
     expect(grouped.backdrops).toHaveLength(1);
     expect(grouped.other).toHaveLength(0);

@@ -16,6 +16,31 @@ const dedupeCandidates = (values: Array<string | null>): string[] => {
   return out;
 };
 
+const isLikelyMirroredUrl = (value: string): boolean => {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return (
+      host.includes("cloudfront.net") ||
+      host.includes("amazonaws.com") ||
+      host.includes("s3.") ||
+      host.includes("therealityreport")
+    );
+  } catch {
+    return false;
+  }
+};
+
+const partitionByMirror = (values: Array<string | null>): { mirrored: string[]; external: string[] } => {
+  const mirrored: string[] = [];
+  const external: string[] = [];
+  for (const value of values) {
+    if (!value) continue;
+    if (isLikelyMirroredUrl(value)) mirrored.push(value);
+    else external.push(value);
+  }
+  return { mirrored, external };
+};
+
 export interface ImageCardCandidateInput {
   cropDisplayUrl?: string | null;
   thumbUrl?: string | null;
@@ -56,23 +81,43 @@ export interface PersonPhotoLike extends ImageCardCandidateInput, ImageDetailCan
 }
 
 export const buildCardImageUrlCandidates = (input: ImageCardCandidateInput): string[] => {
-  return dedupeCandidates([
+  const variantCandidates = [
     normalizeImageUrl(input.cropDisplayUrl),
     normalizeImageUrl(input.thumbUrl),
     normalizeImageUrl(input.displayUrl),
     normalizeImageUrl(input.hostedUrl),
+  ];
+  const sourceCandidates = [
     normalizeImageUrl(input.originalUrl),
     normalizeImageUrl(input.sourceUrl),
+  ];
+  const variantPartition = partitionByMirror(variantCandidates);
+  const sourcePartition = partitionByMirror(sourceCandidates);
+  return dedupeCandidates([
+    ...variantPartition.mirrored,
+    ...variantPartition.external,
+    ...sourcePartition.mirrored,
+    ...sourcePartition.external,
   ]);
 };
 
 export const buildDetailImageUrlCandidates = (input: ImageDetailCandidateInput): string[] => {
-  return dedupeCandidates([
+  const sourceCandidates = [
     normalizeImageUrl(input.hostedUrl),
     normalizeImageUrl(input.originalUrl),
     normalizeImageUrl(input.sourceUrl),
+  ];
+  const generatedCandidates = [
     normalizeImageUrl(input.detailUrl),
     normalizeImageUrl(input.cropDetailUrl),
+  ];
+  const variantPartition = partitionByMirror(generatedCandidates);
+  const sourcePartition = partitionByMirror(sourceCandidates);
+  return dedupeCandidates([
+    ...sourcePartition.mirrored,
+    ...sourcePartition.external,
+    ...variantPartition.mirrored,
+    ...variantPartition.external,
   ]);
 };
 

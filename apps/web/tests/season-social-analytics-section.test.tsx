@@ -746,7 +746,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await screen.findByText("Weekly Trend");
   });
 
-  it("formats summary count cards with comma separators", async () => {
+  it("formats summary count cards with compact number notation", async () => {
     mockSeasonSocialFetch({
       ...analyticsBase,
       summary: {
@@ -766,9 +766,54 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    expect(await screen.findByText("1,025")).toBeInTheDocument();
-    expect(screen.getByText("41,725")).toBeInTheDocument();
-    expect(screen.getByText("129,514,143")).toBeInTheDocument();
+    expect(await screen.findByText("1K")).toBeInTheDocument();
+    expect(screen.getByText("41.7K")).toBeInTheDocument();
+    expect(screen.getByText("129.5M")).toBeInTheDocument();
+  });
+
+  it("renders post metadata completeness cards and content type distribution", async () => {
+    mockSeasonSocialFetch({
+      ...analyticsBase,
+      summary: {
+        ...analyticsBase.summary,
+        data_quality: {
+          ...analyticsBase.summary.data_quality,
+          post_metadata: {
+            total_posts: 100,
+            captions: { posts_with: 88, pct: 88 },
+            tags: { posts_with: 14, pct: 14 },
+            mentions: { posts_with: 39, pct: 39 },
+            collaborators: { posts_with: 8, pct: 8 },
+            content_types: {
+              total_posts: 100,
+              buckets: [
+                { key: "photo", count: 45, pct: 45 },
+                { key: "album", count: 12, pct: 12 },
+                { key: "video", count: 36, pct: 36 },
+                { key: "other", count: 7, pct: 7 },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    expect(await screen.findByTestId("metric-captions-coverage-value")).toHaveTextContent("88.0%");
+    expect(screen.getByTestId("metric-tags-coverage-value")).toHaveTextContent("14.0%");
+    expect(screen.getByTestId("metric-mentions-coverage-value")).toHaveTextContent("39.0%");
+    expect(screen.getByTestId("metric-collaborators-coverage-value")).toHaveTextContent("8.0%");
+    expect(screen.getByText("88/100 Captions (Saved/Posts)")).toBeInTheDocument();
+    expect(screen.getByText("Photo 45.0% (45)")).toBeInTheDocument();
+    expect(screen.getByText("Video 36.0% (36)")).toBeInTheDocument();
   });
 
   it("requires two consecutive poll failures before setting retry state", () => {
@@ -1204,9 +1249,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const lastUpdated = await screen.findByText("Last Updated");
     const seasonMetadata = lastUpdated.closest("dl");
     expect(seasonMetadata).toBeTruthy();
-    const metadataRows = seasonMetadata!.querySelectorAll("div");
-    expect(metadataRows.length).toBeGreaterThan(1);
-    const windowValue = metadataRows[1].querySelector("dd");
+    const windowLabel = screen.getByText("Window", { selector: "dt" });
+    const windowRow = windowLabel.closest("div");
+    expect(windowRow).toBeTruthy();
+    const windowValue = windowRow?.querySelector("dd");
     expect(windowValue?.textContent).toContain("to");
   });
 
@@ -2550,6 +2596,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const contentVolumeCard = screen.getByText("Content Volume").closest("article");
     expect(contentVolumeCard).not.toBeNull();
     expect(within(contentVolumeCard as HTMLElement).getByText("10")).toBeInTheDocument();
+    expect(screen.getByTestId("metric-comments-saved-pct-value")).toHaveTextContent("40.0%");
+    expect(screen.getByText("of Comments Saved")).toBeInTheDocument();
+    expect(screen.getByTestId("metric-comments-saved-actual-value")).toHaveTextContent("8/20*");
+    expect(screen.getByText("Comments (Saved/Actual)")).toBeInTheDocument();
     expect(await screen.findByText(/targets unavailable/i)).toBeInTheDocument();
   });
 

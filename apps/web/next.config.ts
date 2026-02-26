@@ -57,6 +57,7 @@ const nextConfig: NextConfig = {
         { source: "/shows/:showId/cast", destination: "/shows/:showId?tab=cast" },
         { source: "/shows/:showId/surveys", destination: "/shows/:showId?tab=surveys" },
         { source: "/shows/:showId/media", destination: "/shows/:showId?tab=assets&assets=images" },
+        { source: "/shows/:showId/media/images", destination: "/shows/:showId?tab=assets&assets=images" },
         { source: "/shows/:showId/media/videos", destination: "/shows/:showId?tab=assets&assets=videos" },
         { source: "/shows/:showId/media/brand", destination: "/shows/:showId?tab=assets&assets=brand" },
         { source: "/shows/:showId/social", destination: "/shows/:showId?tab=social&social_view=bravo" },

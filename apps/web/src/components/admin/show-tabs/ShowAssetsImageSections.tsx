@@ -12,13 +12,16 @@ type GalleryRenderArgs = {
 
 interface ShowAssetsImageSectionsProps {
   backdrops: SeasonAsset[];
+  banners: SeasonAsset[];
   posters: SeasonAsset[];
   featuredBackdropImageId?: string | null;
   featuredPosterImageId?: string | null;
   hasMoreBackdrops?: boolean;
+  hasMoreBanners?: boolean;
   hasMorePosters?: boolean;
   autoAdvanceMode?: "manual" | "auto";
   onLoadMoreBackdrops?: () => void;
+  onLoadMoreBanners?: () => void;
   onLoadMorePosters?: () => void;
   onOpenAssetLightbox: (
     asset: SeasonAsset,
@@ -31,13 +34,16 @@ interface ShowAssetsImageSectionsProps {
 
 export function ShowAssetsImageSections({
   backdrops,
+  banners,
   posters,
   featuredBackdropImageId,
   featuredPosterImageId,
   hasMoreBackdrops = false,
+  hasMoreBanners = false,
   hasMorePosters = false,
   autoAdvanceMode = "manual",
   onLoadMoreBackdrops,
+  onLoadMoreBanners,
   onLoadMorePosters,
   onOpenAssetLightbox,
   renderGalleryImage,
@@ -168,6 +174,40 @@ export function ShowAssetsImageSections({
           )}
           {hasMorePosters && autoAdvanceMode === "auto" && (
             <div ref={posterSentinelRef} className="h-1 w-full" aria-hidden="true" />
+          )}
+        </section>
+      )}
+
+      {banners.length > 0 && (
+        <section>
+          <h4 className="mb-3 text-sm font-semibold text-zinc-900">Banners</h4>
+          <div className="grid grid-cols-3 gap-4">
+            {banners.map((asset, index, assets) => (
+              <button
+                key={asset.id}
+                type="button"
+                onClick={(event) => onOpenAssetLightbox(asset, index, assets, event.currentTarget)}
+                className="relative aspect-[16/9] cursor-zoom-in overflow-hidden rounded-lg bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {renderGalleryImage({
+                  asset,
+                  alt: asset.caption || "Banner",
+                  sizes: "300px",
+                  className: "object-cover",
+                })}
+              </button>
+            ))}
+          </div>
+          {hasMoreBanners && onLoadMoreBanners && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={onLoadMoreBanners}
+                className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+              >
+                Load More Banners
+              </button>
+            </div>
           )}
         </section>
       )}

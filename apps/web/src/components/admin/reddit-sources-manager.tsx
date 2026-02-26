@@ -359,13 +359,36 @@ const formatSeasonScopeLabel = (showName: string | undefined, seasonNumber: numb
 };
 
 const getCommunityTypeBadges = (community: RedditCommunity): string[] => {
-  if (community.is_show_focused) return ["SHOW"];
-  if (community.network_focus_targets.length > 0) return ["NETWORK"];
-  if (community.franchise_focus_targets.length > 0) return ["FRANCHISE"];
-  return [];
+  const badges: string[] = [];
+  if (community.is_show_focused) {
+    badges.push("SHOW COMMUNITY");
+  }
+  if (community.network_focus_targets.length > 0) {
+    badges.push("NETWORK COMMUNITY");
+  }
+  if (community.franchise_focus_targets.length > 0) {
+    badges.push("FRANCHISE COMMUNITY");
+  }
+  return badges;
 };
 
 const getCommunityTitle = (community: Pick<RedditCommunity, "subreddit">): string => `r/${community.subreddit}`;
+
+const normalizeCommunityLookupKey = (value: string | null | undefined): string => {
+  if (!value) return "";
+  const raw = value.trim();
+  if (!raw) return "";
+  const withoutPrefix = raw.replace(/^r\//i, "");
+  return withoutPrefix.toLowerCase();
+};
+
+const toTitleCase = (value: string): string =>
+  value
+    .toLowerCase()
+    .split(" ")
+    .filter((part) => part.length > 0)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 
 const getRelevantPostFlares = (community: RedditCommunity): string[] => {
   const selectedFlairKeys = new Set(
@@ -398,6 +421,68 @@ const formatDiscussionTypeLabel = (type: "live" | "post" | "weekly"): string => 
   if (type === "post") return "Post";
   return "Weekly";
 };
+
+const formatDiscussionPeriodLabel = (type: "live" | "post" | "weekly"): string => {
+  if (type === "live") return "Live Discussion";
+  if (type === "post") return "Post Episode Discussion";
+  return "Weekly Discussion";
+};
+
+const formatAdditionalPostsWithFlair = (postCount: number): string => {
+  const additionalPostCount = Math.max(0, Math.trunc(postCount) - 1);
+  if (additionalPostCount === 1) {
+    return "1 additional post with flair";
+  }
+  return `${fmtNum(additionalPostCount)} additional posts with flair`;
+};
+
+const renderEpisodeMatrixCards = (rows: EpisodeDiscussionMatrixRow[]) => (
+  <div className="space-y-2">
+    {rows.map((row) => {
+      const cells: Array<["live" | "post" | "weekly", EpisodeDiscussionMatrixCell]> = [
+        ["live", row.live],
+        ["post", row.post],
+        ["weekly", row.weekly],
+      ];
+      return (
+        <article
+          key={`episode-matrix-${row.episode_number}`}
+          className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-zinc-800">Episode {row.episode_number}</p>
+            <p className="text-[11px] text-zinc-600">
+              {fmtNum(row.total_posts)} posts · {fmtNum(row.total_comments)} comments
+            </p>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {cells.map(([cellKey, cell]) => (
+              <div
+                key={`episode-matrix-pill-${row.episode_number}-${cellKey}`}
+                className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700"
+              >
+                <span className="font-semibold">{formatDiscussionPeriodLabel(cellKey)}</span>
+                <span> · {fmtNum(cell.post_count)} posts</span>
+                <span> · {fmtNum(cell.total_comments)} comments</span>
+                <span> · {formatAdditionalPostsWithFlair(cell.post_count)}</span>
+                {cell.top_post_url && (
+                  <a
+                    href={cell.top_post_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-1 font-semibold text-blue-700 hover:underline"
+                  >
+                    Top post
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </article>
+      );
+    })}
+  </div>
+);
 
 type EpisodeSyncStatusFilter =
   | "all"
@@ -552,6 +637,7 @@ export default function RedditSourcesManager({
   seasonNumber,
   initialCommunityId,
   hideCommunityList = false,
+  backHref,
   episodeDiscussionsPlacement = "settings",
   enableEpisodeSync = false,
   onCommunityContextChange,
@@ -776,8 +862,14 @@ export default function RedditSourcesManager({
     const list = sortCommunityList((payload.communities ?? []).map(toCommunityModel));
     setCommunities(list);
     setSelectedCommunityId((prev) => {
-      if (initialCommunityId && list.some((community) => community.id === initialCommunityId)) {
-        return initialCommunityId;
+      if (initialCommunityId) {
+        const initialKey = normalizeCommunityLookupKey(initialCommunityId);
+        const initialMatch = list.find(
+          (community) =>
+            community.id === initialCommunityId ||
+            normalizeCommunityLookupKey(community.subreddit) === initialKey,
+        );
+        if (initialMatch) return initialMatch.id;
       }
       if (prev && list.some((community) => community.id === prev)) return prev;
       return list[0]?.id ?? null;
@@ -954,7 +1046,18 @@ export default function RedditSourcesManager({
         },
       );
       if (!analyticsResponse.ok) {
-        throw new Error("Failed to load social periods for episode discussions");
+        console.warn("[reddit_episode_period_context_fetch_failed]", {
+          show_id: community.trr_show_id,
+          season_id: season.id,
+          season_number: season.season_number,
+          status: analyticsResponse.status,
+        });
+        periodOptionsCacheRef.current.set(periodCacheKey, []);
+        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+          setPeriodOptions([]);
+          setSelectedPeriodKey("all-periods");
+        }
+        return;
       }
       const analyticsPayload = (await analyticsResponse.json().catch(() => ({}))) as {
         weekly?: SocialAnalyticsPeriodRow[];
@@ -1189,17 +1292,18 @@ export default function RedditSourcesManager({
     return qs ? `${pathname}?${qs}` : pathname;
   }, [pathname, searchParams]);
 
-  const buildCommunityViewHref = useCallback((communityId: string): string => {
+  const buildCommunityViewHref = useCallback((community: Pick<RedditCommunity, "subreddit">): string => {
     const params = new URLSearchParams();
     if (mode === "season" && returnToValue) {
       params.set("return_to", returnToValue);
     }
     const qs = params.toString();
-    return `/admin/social-media/reddit/communities/${communityId}${qs ? `?${qs}` : ""}`;
+    const communitySlug = encodeURIComponent(community.subreddit);
+    return `/admin/social-media/reddit/${communitySlug}${qs ? `?${qs}` : ""}`;
   }, [mode, returnToValue]);
 
   const communityViewHref = useMemo(
-    () => (selectedCommunity ? buildCommunityViewHref(selectedCommunity.id) : null),
+    () => (selectedCommunity ? buildCommunityViewHref(selectedCommunity) : null),
     [buildCommunityViewHref, selectedCommunity],
   );
 
@@ -1427,6 +1531,48 @@ export default function RedditSourcesManager({
     );
   }, [discovery, selectedCommunity, showOnlyMatches]);
 
+  const isBravoRealHousewivesCommunity =
+    normalizeCommunityLookupKey(selectedCommunity?.subreddit) === "bravorealhousewives";
+
+  const episodeDiscussionTitlePatterns = useMemo(
+    () =>
+      normalizeFlairList([
+        "Live Episode Discussion",
+        "Post Episode Discussion",
+        "Weekly Episode Discussion",
+        ...(selectedCommunity?.episode_title_patterns ?? []),
+      ]).map((value) => value.toLowerCase()),
+    [selectedCommunity?.episode_title_patterns],
+  );
+
+  const nonEpisodeDiscoveryThreads = useMemo(() => {
+    if (episodeDiscussionTitlePatterns.length === 0) return visibleDiscoveryThreads;
+    return visibleDiscoveryThreads.filter((thread) => {
+      const title = thread.title.trim().toLowerCase();
+      return !episodeDiscussionTitlePatterns.some((pattern) => title.includes(pattern));
+    });
+  }, [episodeDiscussionTitlePatterns, visibleDiscoveryThreads]);
+
+  const flairGroupedDiscoveryThreads = useMemo(() => {
+    if (!hideCommunityList) return [];
+    const groups = new Map<string, { flairLabel: string; threads: DiscoveryThread[] }>();
+    for (const thread of nonEpisodeDiscoveryThreads) {
+      const flairLabel = thread.link_flair_text?.trim();
+      if (!flairLabel) continue;
+      if (isBravoRealHousewivesCommunity && flairLabel.toLowerCase() !== "salt lake city") continue;
+      const flairKey = flairLabel.toLowerCase();
+      const existing = groups.get(flairKey);
+      if (existing) {
+        existing.threads.push(thread);
+        continue;
+      }
+      groups.set(flairKey, { flairLabel, threads: [thread] });
+    }
+    return [...groups.values()].sort(
+      (a, b) => b.threads.length - a.threads.length || a.flairLabel.localeCompare(b.flairLabel),
+    );
+  }, [hideCommunityList, isBravoRealHousewivesCommunity, nonEpisodeDiscoveryThreads]);
+
   const networkFocusSuggestions = useMemo(() => {
     const values = communities.flatMap((community) => community.network_focus_targets);
     return normalizeFlairList(["Bravo", ...values]);
@@ -1455,14 +1601,13 @@ export default function RedditSourcesManager({
   const isDedicatedCommunityView = hideCommunityList;
   const allowCreateActions = mode === "global" && !hideCommunityList;
   const seasonScopeLabel = isSeasonLandingView ? formatSeasonScopeLabel(showName, seasonNumber) : null;
-  const dedicatedCommunityHeading = useMemo(() => {
-    if (!isDedicatedCommunityView) return null;
-    const label =
-      selectedShowLabel ??
-      (selectedCommunity ? resolveShowLabel(selectedCommunity.trr_show_name, []) : null) ??
-      "Show";
-    return `${label} Communities`;
-  }, [isDedicatedCommunityView, selectedCommunity, selectedShowLabel]);
+  const dedicatedBackHref = backHref?.trim() || "/admin/social-media";
+  const dedicatedCommunityTypeLabel = useMemo(() => {
+    if (!isDedicatedCommunityView || !selectedCommunity) return "Community";
+    const badges = getCommunityTypeBadges(selectedCommunity);
+    if (badges.length === 0) return "Community";
+    return toTitleCase(badges[0] ?? "Community");
+  }, [isDedicatedCommunityView, selectedCommunity]);
 
   const resetCommunityForm = () => {
     setCommunitySubreddit("");
@@ -1961,6 +2106,92 @@ export default function RedditSourcesManager({
     syncCandidateResults,
   ]);
 
+  const renderDiscoveryThreadCard = (thread: DiscoveryThread) => {
+    if (!selectedCommunity) return null;
+    return (
+      <div key={thread.reddit_post_id} className="rounded-lg border border-zinc-100 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <a
+              href={thread.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:underline"
+            >
+              {thread.title}
+            </a>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+              <span>u/{thread.author ?? "unknown"}</span>
+              <span>{fmtNum(thread.score)} score</span>
+              <span>{fmtNum(thread.num_comments)} comments</span>
+              <span>sort: {thread.source_sorts.join(", ")}</span>
+              {thread.link_flair_text && (
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                  Flair: {thread.link_flair_text}
+                </span>
+              )}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {thread.is_show_match ? (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                  Show Match · score {thread.match_score}
+                </span>
+              ) : (
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
+                  Non-match
+                </span>
+              )}
+              {(thread.matched_terms ?? []).map((term) => (
+                <span
+                  key={`${thread.reddit_post_id}-m-${term}`}
+                  className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700"
+                >
+                  + {term}
+                </span>
+              ))}
+              {(thread.matched_cast_terms ?? []).map((term) => (
+                <span
+                  key={`${thread.reddit_post_id}-cast-${term}`}
+                  className="rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] text-cyan-700"
+                >
+                  cast: {term}
+                </span>
+              ))}
+              {(thread.cross_show_terms ?? []).map((term) => (
+                <span
+                  key={`${thread.reddit_post_id}-x-${term}`}
+                  className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700"
+                >
+                  - {term}
+                </span>
+              ))}
+              {(selectedCommunity.analysis_flares.length > 0 ||
+                selectedCommunity.analysis_all_flares.length > 0) && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    (thread.passes_flair_filter ?? true)
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-rose-50 text-rose-700"
+                  }`}
+                >
+                  {(thread.passes_flair_filter ?? true) ? "Selected flair" : "Flair excluded"}
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => void saveDiscoveredThread(thread)}
+            className="shrink-0 rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Add Thread
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderEpisodeTitlePhraseSettings = () => {
     if (!selectedCommunity) return null;
 
@@ -2208,54 +2439,8 @@ export default function RedditSourcesManager({
           </div>
         )}
 
-        {episodeMatrix.length > 0 && (
-          <div className="mb-3 overflow-x-auto rounded-lg border border-zinc-200">
-            <table className="min-w-full text-left text-xs">
-              <thead className="bg-zinc-50 text-zinc-600">
-                <tr>
-                  <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Episode</th>
-                  <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Live</th>
-                  <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Post</th>
-                  <th className="px-2 py-2 font-semibold uppercase tracking-[0.12em]">Weekly</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100">
-                {episodeMatrix.map((row) => {
-                  const cells: Array<["live" | "post" | "weekly", EpisodeDiscussionMatrixCell]> = [
-                    ["live", row.live],
-                    ["post", row.post],
-                    ["weekly", row.weekly],
-                  ];
-                  return (
-                    <tr key={`episode-matrix-${row.episode_number}`}>
-                      <td className="whitespace-nowrap px-2 py-2 font-semibold text-zinc-800">
-                        Episode {row.episode_number}
-                      </td>
-                      {cells.map(([cellKey, cell]) => (
-                        <td
-                          key={`episode-matrix-cell-${row.episode_number}-${cellKey}`}
-                          className="px-2 py-2 text-zinc-600"
-                        >
-                          <div>{fmtNum(cell.post_count)} posts</div>
-                          <div>{fmtNum(cell.total_comments)} comments</div>
-                          {cell.top_post_url && (
-                            <a
-                              href={cell.top_post_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[11px] font-semibold text-blue-700 hover:underline"
-                            >
-                              Top post
-                            </a>
-                          )}
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+        {!isDedicatedCommunityView && episodeMatrix.length > 0 && (
+          <div className="mb-3">{renderEpisodeMatrixCards(episodeMatrix)}</div>
         )}
 
         {episodeCandidates.length > 0 && (
@@ -2450,7 +2635,28 @@ export default function RedditSourcesManager({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           {isDedicatedCommunityView ? (
-            <h3 className="text-xl font-bold text-zinc-900">{dedicatedCommunityHeading ?? "Show Communities"}</h3>
+            selectedCommunity ? (
+              <>
+                <a
+                  href={dedicatedBackHref}
+                  className="mb-2 inline-flex rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                >
+                  Back to Communities
+                </a>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                  {dedicatedCommunityTypeLabel}
+                </p>
+                <h3 className="text-xl font-bold text-zinc-900">{getCommunityTitle(selectedCommunity)}</h3>
+                <p className="text-sm text-zinc-500">{selectedCommunity.trr_show_name}</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
+                  {selectedCommunity.analysis_flares.length} scan ·{" "}
+                  {selectedRelevantPostFlares.length} relevant flares
+                </p>
+              </>
+            ) : (
+              <h3 className="text-xl font-bold text-zinc-900">Community</h3>
+            )
           ) : (
             <>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
@@ -2865,7 +3071,7 @@ export default function RedditSourcesManager({
           ) : (
             <div className="space-y-4">
               {communities.map((community) => {
-                const communityPageHref = buildCommunityViewHref(community.id);
+                const communityPageHref = buildCommunityViewHref(community);
                 const communityTypeBadges = getCommunityTypeBadges(community);
                 const communityTitle = getCommunityTitle(community);
                 const relevantPostFlares = getRelevantPostFlares(community);
@@ -3454,11 +3660,21 @@ export default function RedditSourcesManager({
                       Assigned Threads
                     </h5>
                     <span className="text-xs font-semibold text-zinc-600">
-                      {selectedCommunity.assigned_threads.length} saved
+                      {isDedicatedCommunityView
+                        ? `${episodeMatrix.length} episodes`
+                        : `${selectedCommunity.assigned_threads.length} saved`}
                     </span>
                   </button>
                   {assignedThreadsExpanded &&
-                    (selectedCommunity.assigned_threads.length === 0 ? (
+                    (isDedicatedCommunityView ? (
+                      episodeMatrix.length === 0 ? (
+                        <p className="text-sm text-zinc-500">
+                          Refresh discussions to load the episode discussion table.
+                        </p>
+                      ) : (
+                        renderEpisodeMatrixCards(episodeMatrix)
+                      )
+                    ) : selectedCommunity.assigned_threads.length === 0 ? (
                       <p className="text-sm text-zinc-500">No saved threads for this community.</p>
                     ) : (
                       <div className="space-y-3">
@@ -3580,90 +3796,34 @@ export default function RedditSourcesManager({
                     </p>
                   ) : visibleDiscoveryThreads.length === 0 ? (
                     <p className="text-sm text-zinc-500">No threads matched the current filter.</p>
+                  ) : isDedicatedCommunityView ? (
+                    flairGroupedDiscoveryThreads.length === 0 ? (
+                      <p className="text-sm text-zinc-500">
+                        {isBravoRealHousewivesCommunity
+                          ? "No additional Salt Lake City flair posts found outside episode discussions."
+                          : "No non-episode posts with selected flairs matched the current filter."}
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        {flairGroupedDiscoveryThreads.map((group) => (
+                          <details
+                            key={`flair-group-${group.flairLabel.toLowerCase()}`}
+                            open
+                            className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3"
+                          >
+                            <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-800">
+                              {group.flairLabel} · {fmtNum(group.threads.length)} posts
+                            </summary>
+                            <div className="mt-3 space-y-3">
+                              {group.threads.map((thread) => renderDiscoveryThreadCard(thread))}
+                            </div>
+                          </details>
+                        ))}
+                      </div>
+                    )
                   ) : (
                     <div className="space-y-3">
-                      {visibleDiscoveryThreads.map((thread) => (
-                        <div key={thread.reddit_post_id} className="rounded-lg border border-zinc-100 p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <a
-                                href={thread.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:underline"
-                              >
-                                {thread.title}
-                              </a>
-                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                                <span>u/{thread.author ?? "unknown"}</span>
-                                <span>{fmtNum(thread.score)} score</span>
-                                <span>{fmtNum(thread.num_comments)} comments</span>
-                                <span>sort: {thread.source_sorts.join(", ")}</span>
-                                {thread.link_flair_text && (
-                                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                                    Flair: {thread.link_flair_text}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                {thread.is_show_match ? (
-                                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                                    Show Match · score {thread.match_score}
-                                  </span>
-                                ) : (
-                                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
-                                    Non-match
-                                  </span>
-                                )}
-                                {(thread.matched_terms ?? []).map((term) => (
-                                  <span
-                                    key={`${thread.reddit_post_id}-m-${term}`}
-                                    className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700"
-                                  >
-                                    + {term}
-                                  </span>
-                                ))}
-                                {(thread.matched_cast_terms ?? []).map((term) => (
-                                  <span
-                                    key={`${thread.reddit_post_id}-cast-${term}`}
-                                    className="rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] text-cyan-700"
-                                  >
-                                    cast: {term}
-                                  </span>
-                                ))}
-                                {(thread.cross_show_terms ?? []).map((term) => (
-                                  <span
-                                    key={`${thread.reddit_post_id}-x-${term}`}
-                                    className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700"
-                                  >
-                                    - {term}
-                                  </span>
-                                ))}
-                                {(selectedCommunity.analysis_flares.length > 0 ||
-                                  selectedCommunity.analysis_all_flares.length > 0) && (
-                                  <span
-                                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                      (thread.passes_flair_filter ?? true)
-                                        ? "bg-emerald-50 text-emerald-700"
-                                        : "bg-rose-50 text-rose-700"
-                                    }`}
-                                  >
-                                    {(thread.passes_flair_filter ?? true) ? "Selected flair" : "Flair excluded"}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() => void saveDiscoveredThread(thread)}
-                              className="shrink-0 rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Add Thread
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                      {visibleDiscoveryThreads.map((thread) => renderDiscoveryThreadCard(thread))}
                     </div>
                   )}
                 </article>

@@ -107,6 +107,7 @@ const weekPayload = {
           comments: [],
           title: "Episode Clip",
           likes: 80,
+          dislikes: 12,
           comments_count: 14,
           views: 5000,
           thumbnail_url: "https://images.test/yt-preview.jpg",
@@ -133,6 +134,63 @@ const byeWeekPayload = {
     label: "BYE WEEK (Jan 15-Jan 22)",
     week_type: "bye",
     episode_number: null,
+  },
+};
+
+const crossPlatformCoveragePayload = {
+  ...weekPayload,
+  platforms: {
+    instagram: {
+      ...weekPayload.platforms.instagram,
+      posts: [
+        {
+          ...weekPayload.platforms.instagram.posts[0],
+          total_comments_available: 500,
+        },
+      ],
+    },
+    tiktok: {
+      ...weekPayload.platforms.tiktok,
+      posts: [
+        {
+          ...weekPayload.platforms.tiktok.posts[0],
+          total_comments_available: 500,
+        },
+      ],
+    },
+    youtube: {
+      ...weekPayload.platforms.youtube,
+      posts: [
+        {
+          ...weekPayload.platforms.youtube.posts[0],
+          total_comments_available: 14,
+        },
+      ],
+    },
+    twitter: {
+      posts: [
+        {
+          source_id: "x-1",
+          author: "BravoTV",
+          text: "X post",
+          url: "https://x.com/BravoTV/status/1",
+          posted_at: "2026-01-01T00:00:00.000Z",
+          engagement: 1000,
+          total_comments_available: 506,
+          comments: [],
+          likes: 100,
+          replies_count: 1386,
+          views: 120000,
+          retweets: 10,
+        },
+      ],
+      totals: { posts: 1, total_comments: 1386, total_engagement: 1000 },
+    },
+  },
+  totals: {
+    posts: 4,
+    total_comments: 1422,
+    total_engagement: 1420,
   },
 };
 
@@ -170,12 +228,21 @@ describe("WeekDetailPage thumbnails", () => {
     render(<WeekDetailPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
-    const backLink = screen.getByRole("link", { name: /Back to Season Social Analytics/i });
-    expect(backLink.getAttribute("href")).toContain("source_scope=bravo");
+    expect(screen.getByText("Week 1")).toBeInTheDocument();
+  });
+  const gallery = screen.getByTestId("week-post-gallery");
+  expect(gallery.className).toContain("lg:grid-cols-4");
+  expect(screen.getByLabelText("Instagram platform")).toBeInTheDocument();
+  expect(screen.getByLabelText("TikTok platform")).toBeInTheDocument();
+  expect(screen.getByLabelText("YouTube platform")).toBeInTheDocument();
+  const youtubeHandleLink = screen.getByRole("link", { name: "@Bravo" });
+  expect(youtubeHandleLink).toHaveAttribute("href", "https://youtube.com/watch?v=abc");
+  const backLink = screen.getByRole("link", { name: /Back to Season Social Analytics/i });
+  expect(backLink.getAttribute("href")).toContain("source_scope=bravo");
 
-    expect(screen.getByAltText("Instagram post thumbnail")).toHaveAttribute(
+    const instagramThumb = screen.getByAltText("Instagram post thumbnail");
+    expect(instagramThumb.parentElement?.className).toContain("aspect-[3/4]");
+    expect(instagramThumb).toHaveAttribute(
       "src",
       "https://images.test/ig-preview.jpg",
     );
@@ -193,11 +260,38 @@ describe("WeekDetailPage thumbnails", () => {
     expect(
       screen.getByText("* Not all platform-reported comments are saved in Supabase yet."),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/View on YouTube/i)).not.toBeInTheDocument();
     expect(screen.getByText(/0\/10\* comments/i)).toBeInTheDocument();
+    expect(screen.getByText((_content, element) => element?.textContent === "12 Dislikes")).toBeInTheDocument();
     expect(screen.getByText("REEL")).toBeInTheDocument();
     expect(screen.getByText("14s")).toBeInTheDocument();
     expect(screen.getByText("@tagged_user")).toBeInTheDocument();
     expect(screen.getByText("@collab_user")).toBeInTheDocument();
+  });
+
+  it("does not render YouTube dislike/downvote metrics when values are unavailable", async () => {
+    const payloadWithoutDislikes = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    delete payloadWithoutDislikes.platforms.youtube.posts[0].dislikes;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payloadWithoutDislikes,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Week 1")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("12 Dislikes")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Downvotes/i)).not.toBeInTheDocument();
   });
 
   it("renders BYE WEEK label from backend week detail payload", async () => {
@@ -219,6 +313,37 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getAllByText("BYE WEEK (Jan 15-Jan 22)").length).toBeGreaterThan(0);
     });
+  });
+
+  it("does not overstate ALL comments coverage when one platform is under-saved", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => crossPlatformCoveragePayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Week 1")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("38.1%")).toBeInTheDocument();
+    expect(screen.getByText("542/1.4K* Comments (Saved/Actual)")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Twitter\/X/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("36.5%")).toBeInTheDocument();
+    });
+    expect(screen.getByText("506/1.4K* Comments (Saved/Actual)")).toBeInTheDocument();
   });
 
   it("applies day and social platform query prefilters and can clear day filter", async () => {
@@ -443,7 +568,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    const syncButton = await screen.findByRole("button", { name: /Sync .*Comments/i });
+    const syncButton = await screen.findByRole("button", { name: /Sync .*Metrics/i });
     fireEvent.click(syncButton);
 
     await waitFor(() => {
@@ -473,7 +598,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     expect(body.source_scope).toBe("bravo");
     expect(body.sync_strategy).toBe("incremental");
-    expect(body.ingest_mode).toBe("comments_only");
+    expect(body.ingest_mode).toBe("posts_and_comments");
     expect(body.max_comments_per_post).toBe(100000);
     expect(body.max_replies_per_post).toBe(100000);
     expect(body.date_start).toBe(weekPayload.week.start);
@@ -481,19 +606,77 @@ describe("WeekDetailPage thumbnails", () => {
     expect(body.platforms).toBeUndefined();
   });
 
-  it("skips queueing a run when selected posts are already up to date", async () => {
+  it("queues a full sync run even when selected posts are already up to date", async () => {
     const upToDatePayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
     upToDatePayload.platforms.instagram.posts[0].total_comments_available = 10;
     upToDatePayload.platforms.tiktok.posts[0].total_comments_available = 12;
     upToDatePayload.platforms.youtube.posts[0].total_comments_available = 14;
 
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/social/analytics/week/1")) {
         return {
           ok: true,
           status: 200,
           json: async () => upToDatePayload,
+        } as Response;
+      }
+      if (url.includes("/social/ingest") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            run_id: "2e6556a4-6498-4cb7-9dba-5da9d16a5bbf",
+            queued_or_started_jobs: 8,
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/runs?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            runs: [
+              {
+                id: "2e6556a4-6498-4cb7-9dba-5da9d16a5bbf",
+                status: "completed",
+                summary: {
+                  total_jobs: 8,
+                  completed_jobs: 8,
+                  failed_jobs: 0,
+                  active_jobs: 0,
+                  items_found_total: 36,
+                  stage_counts: {
+                    posts: { total: 4, completed: 4, failed: 0, active: 0 },
+                    comments: { total: 4, completed: 4, failed: 0, active: 0 },
+                  },
+                },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/jobs?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ jobs: [] }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/comments-coverage?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_saved_comments: 36,
+            total_reported_comments: 36,
+            coverage_pct: 100,
+            up_to_date: true,
+            stale_posts_count: 0,
+            posts_scanned: 3,
+            by_platform: {},
+            evaluated_at: "2026-01-01T00:02:00.000Z",
+          }),
         } as Response;
       }
       throw new Error(`Unexpected URL: ${url}`);
@@ -506,17 +689,17 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    const syncButton = await screen.findByRole("button", { name: /Sync .*Comments/i });
+    const syncButton = await screen.findByRole("button", { name: /Sync .*Metrics/i });
     fireEvent.click(syncButton);
 
     await waitFor(() => {
-      expect(screen.getByText(/already up to date/i)).toBeInTheDocument();
+      expect(screen.getByText(/Pass 1\/8 queued for Week 1 \(all platforms\)/)).toBeInTheDocument();
     });
 
     const ingestCall = fetchMock.mock.calls.find(
       (call) => String(call[0]).includes("/social/ingest") && (call[1] as RequestInit | undefined)?.method === "POST",
     );
-    expect(ingestCall).toBeUndefined();
+    expect(ingestCall).toBeDefined();
   });
 
   it("shows explicit error and skips fetch when season/week route params are invalid", async () => {
@@ -529,6 +712,8 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText(/Invalid season\/week URL/i)).toBeInTheDocument();
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/")),
+    ).toBe(false);
   });
 });

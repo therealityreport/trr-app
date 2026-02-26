@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/admin/networks-and-streaming/network/bravo",
+  usePathname: () => "/brands/networks-and-streaming/network/bravo",
   useParams: () => mocks.params,
   useRouter: () => mocks.router,
 }));
@@ -48,71 +48,109 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
+const queueStatusResponse = jsonResponse({
+  queue_enabled: true,
+  workers: {
+    healthy: true,
+    healthy_workers: 2,
+    active_workers: 1,
+    total_workers: 2,
+    stale_after_seconds: 60,
+    reason: null,
+    workers: [],
+  },
+  queue: {
+    by_status: {
+      running: 0,
+      pending: 0,
+      queued: 0,
+      retrying: 0,
+      failed: 0,
+      cancelled: 0,
+      completed: 0,
+    },
+    by_platform: {},
+    by_job_type: {},
+    recent_failures: [],
+  },
+});
+
+let detailResponse: Response;
+
 describe("admin network detail page", () => {
   beforeEach(() => {
     mocks.fetchAdminWithAuth.mockReset();
     mocks.replace.mockReset();
     mocks.params.entityType = "network";
     mocks.params.entitySlug = "bravo";
+
+    mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
+        return Promise.resolve(queueStatusResponse.clone());
+      }
+      if (url.includes("/api/admin/networks-streaming/detail")) {
+        return Promise.resolve(detailResponse.clone());
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`));
+    });
   });
 
   it("renders breadcrumbs, logos, metadata, and added shows via shared auth helper", async () => {
-    mocks.fetchAdminWithAuth.mockResolvedValue(
-      jsonResponse({
-        entity_type: "network",
-        entity_key: "bravo",
-        entity_slug: "bravo",
-        display_name: "Bravo",
-        available_show_count: 8,
-        added_show_count: 2,
-        core: {
-          entity_id: "77",
-          origin_country: "US",
-          display_priority: null,
-          tmdb_logo_path: "/logo.png",
-          logo_path: "logos/bravo.png",
-          hosted_logo_key: "logos/bravo.png",
-          hosted_logo_url: "https://cdn.example.com/bravo.png",
-          hosted_logo_black_url: "https://cdn.example.com/bravo-black.png",
-          hosted_logo_white_url: "https://cdn.example.com/bravo-white.png",
-          wikidata_id: "Q123",
-          wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
-          wikimedia_logo_file: "Bravo_logo.svg",
-          link_enriched_at: "2026-02-24T00:00:00.000Z",
-          link_enrichment_source: "wikimedia",
-          facebook_id: "bravotv",
-          instagram_id: "bravotv",
-          twitter_id: "bravotv",
-          tiktok_id: "bravotv",
+    detailResponse = jsonResponse({
+      entity_type: "network",
+      entity_key: "bravo",
+      entity_slug: "bravo",
+      display_name: "Bravo",
+      available_show_count: 8,
+      added_show_count: 2,
+      core: {
+        entity_id: "77",
+        origin_country: "US",
+        display_priority: null,
+        tmdb_logo_path: "/logo.png",
+        logo_path: "logos/bravo.png",
+        hosted_logo_key: "logos/bravo.png",
+        hosted_logo_url: "https://cdn.example.com/bravo.png",
+        hosted_logo_black_url: "https://cdn.example.com/bravo-black.png",
+        hosted_logo_white_url: "https://cdn.example.com/bravo-white.png",
+        wikidata_id: "Q123",
+        wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+        wikimedia_logo_file: "Bravo_logo.svg",
+        link_enriched_at: "2026-02-24T00:00:00.000Z",
+        link_enrichment_source: "wikimedia",
+        facebook_id: "bravotv",
+        instagram_id: "bravotv",
+        twitter_id: "bravotv",
+        tiktok_id: "bravotv",
+      },
+      override: {
+        id: "ov-1",
+        display_name_override: "Bravo TV",
+        wikidata_id_override: "Q123",
+        wikipedia_url_override: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+        logo_source_urls_override: ["https://logo.example.com/bravo.svg"],
+        source_priority_override: ["override", "wikimedia"],
+        aliases_override: ["BravoTV"],
+        notes: "Pinned URL",
+        is_active: true,
+        updated_by: "admin@example.com",
+        updated_at: "2026-02-24T00:00:00.000Z",
+      },
+      completion: {
+        resolution_status: "resolved",
+        resolution_reason: null,
+        last_attempt_at: "2026-02-24T00:00:00.000Z",
+      },
+      shows: [
+        {
+          trr_show_id: "show-1",
+          show_name: "The Real Housewives of Salt Lake City",
+          canonical_slug: "the-real-housewives-of-salt-lake-city",
+          poster_url: "https://cdn.example.com/poster.jpg",
         },
-        override: {
-          id: "ov-1",
-          display_name_override: "Bravo TV",
-          wikidata_id_override: "Q123",
-          wikipedia_url_override: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
-          logo_source_urls_override: ["https://logo.example.com/bravo.svg"],
-          source_priority_override: ["override", "wikimedia"],
-          aliases_override: ["BravoTV"],
-          notes: "Pinned URL",
-          is_active: true,
-          updated_by: "admin@example.com",
-          updated_at: "2026-02-24T00:00:00.000Z",
-        },
-        completion: {
-          resolution_status: "resolved",
-          resolution_reason: null,
-          last_attempt_at: "2026-02-24T00:00:00.000Z",
-        },
-        shows: [
-          {
-            trr_show_id: "show-1",
-            show_name: "The Real Housewives of Salt Lake City",
-            canonical_slug: "the-real-housewives-of-salt-lake-city",
-            poster_url: "https://cdn.example.com/poster.jpg",
-          },
-        ],
-      }),
-    );
+      ],
+    });
 
     render(<AdminNetworkStreamingDetailPage />);
 
@@ -121,14 +159,17 @@ describe("admin network detail page", () => {
       expect(screen.getByRole("heading", { name: "Bravo" })).toBeInTheDocument();
     });
 
-    const detailCall = mocks.fetchAdminWithAuth.mock.calls[0];
+    const detailCall = mocks.fetchAdminWithAuth.mock.calls.find(([url]) =>
+      String(url).includes("/api/admin/networks-streaming/detail?")
+    );
+    expect(detailCall).toBeDefined();
     expect(String(detailCall[0])).toContain("/api/admin/networks-streaming/detail?");
     expect(String(detailCall[0])).toContain("entity_type=network");
     expect(String(detailCall[0])).toContain("entity_slug=bravo");
 
     const breadcrumbNav = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(breadcrumbNav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
-    expect(within(breadcrumbNav).getByRole("link", { name: "Brands" })).toHaveAttribute("href", "/admin/brands");
+    expect(within(breadcrumbNav).getByRole("link", { name: "Brands" })).toHaveAttribute("href", "/brands");
     expect(screen.getByText("Saved Logos")).toBeInTheDocument();
     expect(screen.getByText("Saved Info / URLs")).toBeInTheDocument();
     expect(screen.getByText("Added Shows")).toBeInTheDocument();
@@ -141,55 +182,53 @@ describe("admin network detail page", () => {
   });
 
   it("handles missing logos and metadata values gracefully", async () => {
-    mocks.fetchAdminWithAuth.mockResolvedValue(
-      jsonResponse({
-        entity_type: "streaming",
-        entity_key: "peacock-premium",
-        entity_slug: "peacock-premium",
-        display_name: "Peacock Premium",
-        available_show_count: 5,
-        added_show_count: 0,
-        core: {
-          entity_id: "1",
-          origin_country: null,
-          display_priority: 1,
-          tmdb_logo_path: null,
-          logo_path: null,
-          hosted_logo_key: null,
-          hosted_logo_url: null,
-          hosted_logo_black_url: null,
-          hosted_logo_white_url: null,
-          wikidata_id: null,
-          wikipedia_url: null,
-          wikimedia_logo_file: null,
-          link_enriched_at: null,
-          link_enrichment_source: null,
-          facebook_id: null,
-          instagram_id: null,
-          twitter_id: null,
-          tiktok_id: null,
-        },
-        override: {
-          id: null,
-          display_name_override: null,
-          wikidata_id_override: null,
-          wikipedia_url_override: null,
-          logo_source_urls_override: [],
-          source_priority_override: [],
-          aliases_override: [],
-          notes: null,
-          is_active: false,
-          updated_by: null,
-          updated_at: null,
-        },
-        completion: {
-          resolution_status: "manual_required",
-          resolution_reason: "missing_logo",
-          last_attempt_at: null,
-        },
-        shows: [],
-      }),
-    );
+    detailResponse = jsonResponse({
+      entity_type: "streaming",
+      entity_key: "peacock-premium",
+      entity_slug: "peacock-premium",
+      display_name: "Peacock Premium",
+      available_show_count: 5,
+      added_show_count: 0,
+      core: {
+        entity_id: "1",
+        origin_country: null,
+        display_priority: 1,
+        tmdb_logo_path: null,
+        logo_path: null,
+        hosted_logo_key: null,
+        hosted_logo_url: null,
+        hosted_logo_black_url: null,
+        hosted_logo_white_url: null,
+        wikidata_id: null,
+        wikipedia_url: null,
+        wikimedia_logo_file: null,
+        link_enriched_at: null,
+        link_enrichment_source: null,
+        facebook_id: null,
+        instagram_id: null,
+        twitter_id: null,
+        tiktok_id: null,
+      },
+      override: {
+        id: null,
+        display_name_override: null,
+        wikidata_id_override: null,
+        wikipedia_url_override: null,
+        logo_source_urls_override: [],
+        source_priority_override: [],
+        aliases_override: [],
+        notes: null,
+        is_active: false,
+        updated_by: null,
+        updated_at: null,
+      },
+      completion: {
+        resolution_status: "manual_required",
+        resolution_reason: "missing_logo",
+        last_attempt_at: null,
+      },
+      shows: [],
+    });
     mocks.params.entityType = "streaming";
     mocks.params.entitySlug = "peacock-premium";
 
@@ -203,60 +242,58 @@ describe("admin network detail page", () => {
   });
 
   it("redirects to canonical slug when payload slug differs", async () => {
-    mocks.fetchAdminWithAuth.mockResolvedValue(
-      jsonResponse({
-        entity_type: "network",
-        entity_key: "bravo",
-        entity_slug: "bravo-tv",
-        display_name: "Bravo TV",
-        available_show_count: 1,
-        added_show_count: 1,
-        core: {
-          entity_id: "1",
-          origin_country: "US",
-          display_priority: null,
-          tmdb_logo_path: null,
-          logo_path: null,
-          hosted_logo_key: null,
-          hosted_logo_url: null,
-          hosted_logo_black_url: null,
-          hosted_logo_white_url: null,
-          wikidata_id: null,
-          wikipedia_url: null,
-          wikimedia_logo_file: null,
-          link_enriched_at: null,
-          link_enrichment_source: null,
-          facebook_id: null,
-          instagram_id: null,
-          twitter_id: null,
-          tiktok_id: null,
-        },
-        override: {
-          id: null,
-          display_name_override: null,
-          wikidata_id_override: null,
-          wikipedia_url_override: null,
-          logo_source_urls_override: [],
-          source_priority_override: [],
-          aliases_override: [],
-          notes: null,
-          is_active: false,
-          updated_by: null,
-          updated_at: null,
-        },
-        completion: {
-          resolution_status: null,
-          resolution_reason: null,
-          last_attempt_at: null,
-        },
-        shows: [],
-      }),
-    );
+    detailResponse = jsonResponse({
+      entity_type: "network",
+      entity_key: "bravo",
+      entity_slug: "bravo-tv",
+      display_name: "Bravo TV",
+      available_show_count: 1,
+      added_show_count: 1,
+      core: {
+        entity_id: "1",
+        origin_country: "US",
+        display_priority: null,
+        tmdb_logo_path: null,
+        logo_path: null,
+        hosted_logo_key: null,
+        hosted_logo_url: null,
+        hosted_logo_black_url: null,
+        hosted_logo_white_url: null,
+        wikidata_id: null,
+        wikipedia_url: null,
+        wikimedia_logo_file: null,
+        link_enriched_at: null,
+        link_enrichment_source: null,
+        facebook_id: null,
+        instagram_id: null,
+        twitter_id: null,
+        tiktok_id: null,
+      },
+      override: {
+        id: null,
+        display_name_override: null,
+        wikidata_id_override: null,
+        wikipedia_url_override: null,
+        logo_source_urls_override: [],
+        source_priority_override: [],
+        aliases_override: [],
+        notes: null,
+        is_active: false,
+        updated_by: null,
+        updated_at: null,
+      },
+      completion: {
+        resolution_status: null,
+        resolution_reason: null,
+        last_attempt_at: null,
+      },
+      shows: [],
+    });
 
     render(<AdminNetworkStreamingDetailPage />);
 
     await waitFor(() => {
-      expect(mocks.replace).toHaveBeenCalledWith("/admin/networks-and-streaming/network/bravo-tv");
+      expect(mocks.replace).toHaveBeenCalledWith("/brands/networks-and-streaming/network/bravo-tv");
     });
   });
 

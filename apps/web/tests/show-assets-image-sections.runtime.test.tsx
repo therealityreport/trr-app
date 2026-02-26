@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { ShowAssetsImageSections } from "@/components/admin/show-tabs/ShowAssetsImageSections";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
-const buildAsset = (id: string, kind: "poster" | "backdrop"): SeasonAsset =>
+const buildAsset = (id: string, kind: "poster" | "backdrop" | "banner"): SeasonAsset =>
   ({
     id,
     kind,
@@ -48,6 +48,7 @@ describe("ShowAssetsImageSections runtime", () => {
     render(
       <ShowAssetsImageSections
         backdrops={[backdrop]}
+        banners={[]}
         posters={[poster]}
         featuredBackdropImageId="backdrop-1"
         featuredPosterImageId="poster-1"
@@ -73,10 +74,13 @@ describe("ShowAssetsImageSections runtime", () => {
     render(
       <ShowAssetsImageSections
         backdrops={[buildAsset("backdrop-1", "backdrop")]}
+        banners={[buildAsset("banner-1", "banner")]}
         posters={[buildAsset("poster-1", "poster")]}
         hasMoreBackdrops
+        hasMoreBanners
         hasMorePosters
         onLoadMoreBackdrops={vi.fn()}
+        onLoadMoreBanners={vi.fn()}
         onLoadMorePosters={vi.fn()}
         onOpenAssetLightbox={vi.fn()}
         renderGalleryImage={({ asset }): ReactNode => <span>{asset.id}</span>}
@@ -84,6 +88,7 @@ describe("ShowAssetsImageSections runtime", () => {
     );
 
     expect(screen.getByRole("button", { name: "Load More Backdrops" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load More Banners" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load More Posters" })).toBeInTheDocument();
   });
 
@@ -91,11 +96,14 @@ describe("ShowAssetsImageSections runtime", () => {
     render(
       <ShowAssetsImageSections
         backdrops={[buildAsset("backdrop-1", "backdrop")]}
+        banners={[buildAsset("banner-1", "banner")]}
         posters={[buildAsset("poster-1", "poster")]}
         hasMoreBackdrops
+        hasMoreBanners
         hasMorePosters
         autoAdvanceMode="auto"
         onLoadMoreBackdrops={vi.fn()}
+        onLoadMoreBanners={vi.fn()}
         onLoadMorePosters={vi.fn()}
         onOpenAssetLightbox={vi.fn()}
         renderGalleryImage={({ asset }): ReactNode => <span>{asset.id}</span>}

@@ -32,7 +32,7 @@ export default function AdminBrandsPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Brands", "/admin/brands")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Brands", "/brands")} className="mb-1" />
               <h1 className="break-words text-3xl font-bold text-zinc-900">Brands</h1>
               <p className="break-words text-sm text-zinc-500">
                 Brand surfaces across networks, streaming services, production companies, publications, and show contexts.
@@ -60,22 +60,28 @@ export default function AdminBrandsPage() {
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Link
-                href="/admin/networks-and-streaming"
+                href="/brands/networks-and-streaming"
                 className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
               >
                 Open Network & Streaming Services
               </Link>
               <Link
-                href="/admin/production-companies"
+                href="/brands/production-companies"
                 className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Open Production Companies
               </Link>
               <Link
-                href="/admin/news"
+                href="/brands/news"
                 className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Open Publications / News
+              </Link>
+              <Link
+                href="/brands/shows-and-franchises"
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+              >
+                Open Shows & Franchises
               </Link>
             </div>
           </section>

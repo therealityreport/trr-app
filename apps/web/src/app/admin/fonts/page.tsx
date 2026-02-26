@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import ImagePaletteLab from "@/components/admin/color-lab/ImagePaletteLab";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import {
@@ -1371,6 +1372,10 @@ function AdminFontsPageContent() {
                   </div>
                 );
               })}
+            </section>
+
+            <section className="mt-6">
+              <ImagePaletteLab title="Image Palette Lab (Global)" />
             </section>
           </>
         )}

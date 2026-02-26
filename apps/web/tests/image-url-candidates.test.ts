@@ -77,4 +77,24 @@ describe("image-url-candidates", () => {
       "https://cdn.example.com/hosted.webp",
     ]);
   });
+
+  it("prioritizes mirrored hosted candidates before external display variants", () => {
+    const candidates = buildCardImageUrlCandidates({
+      cropDisplayUrl: "https://origin.example.com/crop.jpg",
+      thumbUrl: "https://origin.example.com/thumb.jpg",
+      displayUrl: "https://origin.example.com/display.jpg",
+      hostedUrl: "https://d1fmdyqfafwim3.cloudfront.net/media/hosted.webp",
+      originalUrl: "https://origin.example.com/original.jpg",
+      sourceUrl: "https://origin.example.com/source.jpg",
+    });
+
+    expect(candidates[0]).toBe("https://d1fmdyqfafwim3.cloudfront.net/media/hosted.webp");
+    expect(candidates.slice(1)).toEqual([
+      "https://origin.example.com/crop.jpg",
+      "https://origin.example.com/thumb.jpg",
+      "https://origin.example.com/display.jpg",
+      "https://origin.example.com/original.jpg",
+      "https://origin.example.com/source.jpg",
+    ]);
+  });
 });
