@@ -44,6 +44,33 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
+const queueStatusResponse = jsonResponse({
+  queue_enabled: true,
+  workers: {
+    healthy: true,
+    healthy_workers: 2,
+    active_workers: 1,
+    total_workers: 2,
+    stale_after_seconds: 60,
+    reason: null,
+    workers: [],
+  },
+  queue: {
+    by_status: {
+      running: 0,
+      pending: 0,
+      queued: 0,
+      retrying: 0,
+      failed: 0,
+      cancelled: 0,
+      completed: 0,
+    },
+    by_platform: {},
+    by_job_type: {},
+    recent_failures: [],
+  },
+});
+
 describe("Admin surveys fetch stability", () => {
   beforeEach(() => {
     guardState.user = { uid: "u1", email: "admin@example.com", displayName: "Admin User" };
@@ -51,21 +78,26 @@ describe("Admin surveys fetch stability", () => {
     guardState.checking = false;
     guardState.hasAccess = true;
     authMocks.fetchAdminWithAuth.mockReset();
-  });
-
-  it("does not refetch when user object identity changes but userKey is unchanged", async () => {
     authMocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
+        return queueStatusResponse.clone();
+      }
       if (url.includes("/api/admin/surveys?full=true")) {
         return jsonResponse({ items: [] });
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
+  });
+
+  it("does not refetch when user object identity changes but userKey is unchanged", async () => {
+    const surveyCallCount = () =>
+      authMocks.fetchAdminWithAuth.mock.calls.filter(([input]) => String(input).includes("/api/admin/surveys?full=true")).length;
 
     const { rerender } = render(<AdminSurveysPage />);
 
     await waitFor(() => {
-      expect(authMocks.fetchAdminWithAuth).toHaveBeenCalledTimes(1);
+      expect(surveyCallCount()).toBe(1);
     });
 
     // Simulate equivalent auth re-emission with a new user object reference.
@@ -73,6 +105,6 @@ describe("Admin surveys fetch stability", () => {
     rerender(<AdminSurveysPage />);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(authMocks.fetchAdminWithAuth).toHaveBeenCalledTimes(1);
+    expect(surveyCallCount()).toBe(1);
   });
 });

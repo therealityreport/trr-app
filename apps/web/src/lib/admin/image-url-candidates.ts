@@ -102,22 +102,22 @@ export const buildCardImageUrlCandidates = (input: ImageCardCandidateInput): str
 };
 
 export const buildDetailImageUrlCandidates = (input: ImageDetailCandidateInput): string[] => {
-  const variantCandidates = [
-    normalizeImageUrl(input.detailUrl),
-    normalizeImageUrl(input.cropDetailUrl),
-    normalizeImageUrl(input.hostedUrl),
-  ];
   const sourceCandidates = [
+    normalizeImageUrl(input.hostedUrl),
     normalizeImageUrl(input.originalUrl),
     normalizeImageUrl(input.sourceUrl),
   ];
-  const variantPartition = partitionByMirror(variantCandidates);
+  const generatedCandidates = [
+    normalizeImageUrl(input.detailUrl),
+    normalizeImageUrl(input.cropDetailUrl),
+  ];
+  const variantPartition = partitionByMirror(generatedCandidates);
   const sourcePartition = partitionByMirror(sourceCandidates);
   return dedupeCandidates([
-    ...variantPartition.mirrored,
-    ...variantPartition.external,
     ...sourcePartition.mirrored,
     ...sourcePartition.external,
+    ...variantPartition.mirrored,
+    ...variantPartition.external,
   ]);
 };
 

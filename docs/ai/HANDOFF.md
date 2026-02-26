@@ -4,6 +4,66 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-26) — Social analytics summary cards expanded for post metadata completeness
 
+## Latest Update (2026-02-26) — Network admin detail and image candidate hardening
+
+- Fixed detail image URL candidate ordering so hosted/original/source URLs are now prioritized before generated detail/crop variants.
+- Stabilized admin network detail and surveys tests by routing `fetchAdminWithAuth` mocks by endpoint so header queue-status polling no longer pollutes detail or surveys payload assertions.
+- Aligned admin navigation expectation with current brand route (`/brands`) and kept existing route-contract intent intact.
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/image-url-candidates.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-network-detail-page-auth.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-network-detail-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-surveys-userkey-fetch-stability.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-navigation.test.ts`
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest tests/admin-network-detail-page-auth.test.tsx tests/admin-network-detail-page.test.tsx tests/admin-surveys-userkey-fetch-stability.test.tsx tests/person-gallery-detail-priority.test.ts tests/admin-navigation.test.ts tests/season-social-analytics-section.test.tsx` (pass, 76/76)
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-backend`
+  - `senior-qa`
+  - `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - secondary: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Confirm route-level test assumptions for admin network/survey pages and expected navigation behavior`
+    deliverable: `Endpoint-sequencing mock strategy and nav route expectation update`
+    verification_command: `pnpm -C apps/web exec vitest tests/admin-network-detail-page-auth.test.tsx tests/admin-network-detail-page.test.tsx tests/admin-surveys-userkey-fetch-stability.test.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `Maintain UI behavior while changing backend-fetch-dependent tests`
+    deliverable: `No functional UI changes; assertions updated for endpoint side-effects and async behavior`
+    verification_command: `pnpm -C apps/web exec vitest tests/admin-network-detail-page-auth.test.tsx tests/admin-network-detail-page.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `Verify admin network detail/surveys fetch contracts and header queue-status endpoint impact in tests`
+    deliverable: `Deterministic mock branching by endpoint path`
+    verification_command: `pnpm -C apps/web exec vitest tests/admin-network-detail-page-auth.test.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `Regressively validate targeted behavior and flake vectors`
+    deliverable: `Targeted vitest pass for previously unstable test set`
+    verification_command: `pnpm -C apps/web exec vitest tests/admin-network-detail-page-auth.test.tsx tests/admin-network-detail-page.test.tsx tests/admin-surveys-userkey-fetch-stability.test.tsx tests/admin-navigation.test.ts tests/season-social-analytics-section.test.tsx tests/person-gallery-detail-priority.test.ts`
+    status: `completed`
+- risk_class: `code_first`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-26) — Social analytics summary cards expanded for post metadata completeness
+
 - Added new top summary containers in season social analytics for post metadata completeness:
   - `% of Captions Saved`
   - `% of Tags Saved`

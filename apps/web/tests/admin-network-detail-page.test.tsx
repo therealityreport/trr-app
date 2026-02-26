@@ -41,96 +41,134 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
+const queueStatusResponse = jsonResponse({
+  queue_enabled: true,
+  workers: {
+    healthy: true,
+    healthy_workers: 2,
+    active_workers: 1,
+    total_workers: 2,
+    stale_after_seconds: 60,
+    reason: null,
+    workers: [],
+  },
+  queue: {
+    by_status: {
+      running: 0,
+      pending: 0,
+      queued: 0,
+      retrying: 0,
+      failed: 0,
+      cancelled: 0,
+      completed: 0,
+    },
+    by_platform: {},
+    by_job_type: {},
+    recent_failures: [],
+  },
+});
+
+let detailResponse: Response;
+
 describe("Admin network detail page", () => {
   beforeEach(() => {
     mocks.fetchAdminWithAuth.mockReset();
     mocks.replace.mockReset();
     mocks.router.replace = mocks.replace;
     mocks.params = { entityType: "network", entitySlug: "bravo" };
+
+    mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
+        return Promise.resolve(queueStatusResponse.clone());
+      }
+      if (url.includes("/api/admin/networks-streaming/detail")) {
+        return Promise.resolve(detailResponse.clone());
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`));
+    });
   });
 
   it("renders mirrored logo gallery assets", async () => {
-    mocks.fetchAdminWithAuth.mockResolvedValue(
-      jsonResponse({
-        entity_type: "network",
-        entity_key: "bravo",
-        entity_slug: "bravo",
-        display_name: "Bravo",
-        available_show_count: 62,
-        added_show_count: 9,
-        core: {
-          entity_id: "74",
-          origin_country: "US",
-          display_priority: null,
-          tmdb_logo_path: null,
-          logo_path: null,
-          hosted_logo_key: "images/logos/networks/74/base.png",
-          hosted_logo_url: "https://cdn.example.com/bravo.png",
-          hosted_logo_black_url: "https://cdn.example.com/bravo-black.png",
-          hosted_logo_white_url: "https://cdn.example.com/bravo-white.png",
-          wikidata_id: "Q902771",
-          wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
-          wikimedia_logo_file: "Bravo_Logo.svg",
-          link_enriched_at: "2026-02-24T00:00:00Z",
-          link_enrichment_source: "wikidata",
-          facebook_id: null,
-          instagram_id: null,
-          twitter_id: null,
-          tiktok_id: null,
+    detailResponse = jsonResponse({
+      entity_type: "network",
+      entity_key: "bravo",
+      entity_slug: "bravo",
+      display_name: "Bravo",
+      available_show_count: 62,
+      added_show_count: 9,
+      core: {
+        entity_id: "74",
+        origin_country: "US",
+        display_priority: null,
+        tmdb_logo_path: null,
+        logo_path: null,
+        hosted_logo_key: "images/logos/networks/74/base.png",
+        hosted_logo_url: "https://cdn.example.com/bravo.png",
+        hosted_logo_black_url: "https://cdn.example.com/bravo-black.png",
+        hosted_logo_white_url: "https://cdn.example.com/bravo-white.png",
+        wikidata_id: "Q902771",
+        wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+        wikimedia_logo_file: "Bravo_Logo.svg",
+        link_enriched_at: "2026-02-24T00:00:00Z",
+        link_enrichment_source: "wikidata",
+        facebook_id: null,
+        instagram_id: null,
+        twitter_id: null,
+        tiktok_id: null,
+      },
+      override: {
+        id: null,
+        display_name_override: null,
+        wikidata_id_override: null,
+        wikipedia_url_override: null,
+        logo_source_urls_override: [],
+        source_priority_override: [],
+        aliases_override: [],
+        notes: null,
+        is_active: false,
+        updated_by: null,
+        updated_at: null,
+      },
+      completion: {
+        resolution_status: "resolved",
+        resolution_reason: null,
+        last_attempt_at: "2026-02-24T00:00:00Z",
+      },
+      logo_assets: [
+        {
+          id: "asset-1",
+          source: "official",
+          source_url: "https://brandfetch.com/bravotv.com",
+          source_rank: 1,
+          hosted_logo_url: "https://cdn.example.com/bravo-official.png",
+          hosted_logo_content_type: "image/png",
+          base_logo_format: "png",
+          pixel_width: 900,
+          pixel_height: 300,
+          mirror_status: "mirrored",
+          failure_reason: null,
+          is_primary: true,
+          updated_at: "2026-02-24T00:00:00Z",
         },
-        override: {
-          id: null,
-          display_name_override: null,
-          wikidata_id_override: null,
-          wikipedia_url_override: null,
-          logo_source_urls_override: [],
-          source_priority_override: [],
-          aliases_override: [],
-          notes: null,
-          is_active: false,
-          updated_by: null,
-          updated_at: null,
+        {
+          id: "asset-2",
+          source: "catalog",
+          source_url: "https://logos.fandom.com/wiki/Bravo",
+          source_rank: 2,
+          hosted_logo_url: "https://cdn.example.com/bravo-fandom.png",
+          hosted_logo_content_type: "image/png",
+          base_logo_format: "png",
+          pixel_width: 800,
+          pixel_height: 260,
+          mirror_status: "mirrored",
+          failure_reason: null,
+          is_primary: false,
+          updated_at: "2026-02-24T00:00:00Z",
         },
-        completion: {
-          resolution_status: "resolved",
-          resolution_reason: null,
-          last_attempt_at: "2026-02-24T00:00:00Z",
-        },
-        logo_assets: [
-          {
-            id: "asset-1",
-            source: "official",
-            source_url: "https://brandfetch.com/bravotv.com",
-            source_rank: 1,
-            hosted_logo_url: "https://cdn.example.com/bravo-official.png",
-            hosted_logo_content_type: "image/png",
-            base_logo_format: "png",
-            pixel_width: 900,
-            pixel_height: 300,
-            mirror_status: "mirrored",
-            failure_reason: null,
-            is_primary: true,
-            updated_at: "2026-02-24T00:00:00Z",
-          },
-          {
-            id: "asset-2",
-            source: "catalog",
-            source_url: "https://logos.fandom.com/wiki/Bravo",
-            source_rank: 2,
-            hosted_logo_url: "https://cdn.example.com/bravo-fandom.png",
-            hosted_logo_content_type: "image/png",
-            base_logo_format: "png",
-            pixel_width: 800,
-            pixel_height: 260,
-            mirror_status: "mirrored",
-            failure_reason: null,
-            is_primary: false,
-            updated_at: "2026-02-24T00:00:00Z",
-          },
-        ],
-        shows: [],
-      }),
-    );
+      ],
+      shows: [],
+    });
 
     render(<AdminNetworkStreamingDetailPage />);
 
@@ -151,22 +189,20 @@ describe("Admin network detail page", () => {
 
   it("renders suggestion-based not found state for invalid slug", async () => {
     mocks.params = { entityType: "network", entitySlug: "abc" };
-    mocks.fetchAdminWithAuth.mockResolvedValue(
-      jsonResponse(
-        {
-          error: "not_found",
-          suggestions: [
-            {
-              entity_type: "network",
-              name: "Bravo",
-              entity_slug: "bravo",
-              available_show_count: 62,
-              added_show_count: 9,
-            },
-          ],
-        },
-        404,
-      ),
+    detailResponse = jsonResponse(
+      {
+        error: "not_found",
+        suggestions: [
+          {
+            entity_type: "network",
+            name: "Bravo",
+            entity_slug: "bravo",
+            available_show_count: 62,
+            added_show_count: 9,
+          },
+        ],
+      },
+      404,
     );
 
     render(<AdminNetworkStreamingDetailPage />);
@@ -183,56 +219,54 @@ describe("Admin network detail page", () => {
 
   it("shows production logo-optional indicator", async () => {
     mocks.params = { entityType: "production", entitySlug: "shed-media" };
-    mocks.fetchAdminWithAuth.mockResolvedValue(
-      jsonResponse({
-        entity_type: "production",
-        entity_key: "shed media",
-        entity_slug: "shed-media",
-        display_name: "Shed Media",
-        available_show_count: 12,
-        added_show_count: 3,
-        core: {
-          entity_id: "13120",
-          origin_country: null,
-          display_priority: null,
-          tmdb_logo_path: null,
-          logo_path: null,
-          hosted_logo_key: null,
-          hosted_logo_url: null,
-          hosted_logo_black_url: null,
-          hosted_logo_white_url: null,
-          wikidata_id: null,
-          wikipedia_url: null,
-          wikimedia_logo_file: null,
-          link_enriched_at: null,
-          link_enrichment_source: null,
-          facebook_id: null,
-          instagram_id: null,
-          twitter_id: null,
-          tiktok_id: null,
-        },
-        override: {
-          id: null,
-          display_name_override: null,
-          wikidata_id_override: null,
-          wikipedia_url_override: null,
-          logo_source_urls_override: [],
-          source_priority_override: [],
-          aliases_override: [],
-          notes: null,
-          is_active: false,
-          updated_by: null,
-          updated_at: null,
-        },
-        completion: {
-          resolution_status: "resolved",
-          resolution_reason: null,
-          last_attempt_at: "2026-02-24T00:00:00Z",
-        },
-        logo_assets: [],
-        shows: [],
-      }),
-    );
+    detailResponse = jsonResponse({
+      entity_type: "production",
+      entity_key: "shed media",
+      entity_slug: "shed-media",
+      display_name: "Shed Media",
+      available_show_count: 12,
+      added_show_count: 3,
+      core: {
+        entity_id: "13120",
+        origin_country: null,
+        display_priority: null,
+        tmdb_logo_path: null,
+        logo_path: null,
+        hosted_logo_key: null,
+        hosted_logo_url: null,
+        hosted_logo_black_url: null,
+        hosted_logo_white_url: null,
+        wikidata_id: null,
+        wikipedia_url: null,
+        wikimedia_logo_file: null,
+        link_enriched_at: null,
+        link_enrichment_source: null,
+        facebook_id: null,
+        instagram_id: null,
+        twitter_id: null,
+        tiktok_id: null,
+      },
+      override: {
+        id: null,
+        display_name_override: null,
+        wikidata_id_override: null,
+        wikipedia_url_override: null,
+        logo_source_urls_override: [],
+        source_priority_override: [],
+        aliases_override: [],
+        notes: null,
+        is_active: false,
+        updated_by: null,
+        updated_at: null,
+      },
+      completion: {
+        resolution_status: "resolved",
+        resolution_reason: null,
+        last_attempt_at: "2026-02-24T00:00:00Z",
+      },
+      logo_assets: [],
+      shows: [],
+    });
 
     render(<AdminNetworkStreamingDetailPage />);
 
