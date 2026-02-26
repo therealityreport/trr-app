@@ -36,11 +36,11 @@ describe("image-url-candidates", () => {
     });
 
     expect(candidates).toEqual([
-      "https://cdn.example.com/detail.webp",
-      "https://cdn.example.com/crop-detail.webp",
       "https://cdn.example.com/hosted.webp",
       "https://origin.example.com/original.jpg",
       "https://origin.example.com/source.jpg",
+      "https://cdn.example.com/detail.webp",
+      "https://cdn.example.com/crop-detail.webp",
     ]);
   });
 
