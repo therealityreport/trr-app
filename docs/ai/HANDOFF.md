@@ -4,6 +4,35 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
 
 ## Latest Update (2026-02-26) — Social analytics summary cards expanded for post metadata completeness
 
+## Latest Update (2026-02-26) — Instagram sync metrics pipeline stabilized and merged to main
+
+- Completed and merged all pending work for Instagram sync metrics behavior into `main` (PR #58).
+- Scope covered:
+  - Image candidate ordering logic for social detail image fallbacks.
+  - Admin network detail and surveys test isolation for queue-status polling.
+  - Seasonal analytics metadata UI test stabilization.
+  - Admin navigation contract alignment (`/brands`).
+- Validation:
+  - `gh pr checks 58` (all checks pass: Web CI Node 20, Web CI Node 22, generate-repo-map, Vercel, Vercel Preview Comments).
+  - `pnpm -C apps/web exec vitest run tests/image-url-candidates.test.ts tests/admin-network-detail-page-auth.test.tsx tests/admin-network-detail-page.test.tsx tests/admin-surveys-userkey-fetch-stability.test.tsx tests/admin-navigation.test.ts tests/person-gallery-detail-priority.test.ts tests/season-social-analytics-section.test.tsx` (pass).
+- Integration state:
+  - All work is now on `TRR-APP` `main`; `TRR-Backend` and `screenalytics` were kept on `main` with no code changes for this pass.
+- cleanup_completed:
+  - Local feature branches removed (`main` checkout, `pull` fast-forward).
+  - Remote feature branches removed in `TRR-APP`, `TRR-Backend`, and `screenalytics`.
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-backend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+
 ## Latest Update (2026-02-26) — Network admin detail and image candidate hardening
 
 - Fixed detail image URL candidate ordering so hosted/original/source URLs are now prioritized before generated detail/crop variants.
