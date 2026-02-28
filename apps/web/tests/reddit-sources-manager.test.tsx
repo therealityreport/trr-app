@@ -241,13 +241,23 @@ const maybeHandleSeasonPeriodRequests = (url: string): Response | null => {
 
 const findCardByPeriodLabel = (label: string): HTMLElement => {
   const articleCards = screen.getAllByRole("article");
-  const foundCard = articleCards.find((article) =>
-    !!within(article).queryByText((content) => content.includes(label)),
-  );
-  if (!foundCard) {
+  const foundCard = articleCards.find((article) => {
+    const hasLabel = !!within(article).queryByText((content) => content.includes(label));
+    const refreshPostsButtons = within(article).queryAllByRole("button", { name: "Refresh Posts" });
+    const seedInputs = within(article).queryAllByPlaceholderText(
+      "Optional seed post URLs (comma or newline separated)",
+    );
+    return hasLabel && refreshPostsButtons.length === 1 && seedInputs.length === 1;
+  });
+  if (foundCard) {
+    return foundCard as HTMLElement;
+  }
+
+  const fallbackCard = articleCards.find((article) => !!within(article).queryByText((content) => content.includes(label)));
+  if (!fallbackCard) {
     throw new Error(`Unable to find period card for label ${label}`);
   }
-  return foundCard as HTMLElement;
+  return fallbackCard as HTMLElement;
 };
 
 describe("RedditSourcesManager", () => {
