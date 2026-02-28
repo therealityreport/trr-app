@@ -128,8 +128,12 @@ const weekPayload = {
   },
 };
 
-function clickPostDetailCardByThumbnailAlt(altText: string) {
-  const thumbnail = screen.getByAltText(altText);
+async function clickPostDetailCardByThumbnailAlt(altText: string) {
+  const thumbnails = await screen.findAllByRole("img");
+  const thumbnail = thumbnails.find((image) => {
+    const alt = image.getAttribute("alt") ?? "";
+    return alt.includes(altText);
+  });
   const button = thumbnail.closest("button");
   if (!button) {
     throw new Error(`Post card button for thumbnail "${altText}" not found`);
@@ -407,7 +411,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -476,7 +480,7 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
-    clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -554,7 +558,7 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
-    clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -633,7 +637,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -836,7 +840,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -944,7 +948,7 @@ describe("WeekDetailPage thumbnails", () => {
     });
 
     fireEvent.click(screen.getByLabelText("Instagram platform"));
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -1012,7 +1016,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -1091,7 +1095,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -1192,7 +1196,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Comments & Replies" })).toBeInTheDocument();
