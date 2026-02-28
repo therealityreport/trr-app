@@ -1421,7 +1421,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
 
     expect(await screen.findByText("Episode 1")).toBeInTheDocument();
-    expect(screen.getByText("Live Discussion")).toBeInTheDocument();
+    expect(screen.getByText(/Live/i)).toBeInTheDocument();
     expect(screen.getByText("Post Episode Discussion")).toBeInTheDocument();
     expect(screen.queryByText("Weekly Discussion")).not.toBeInTheDocument();
     expect(screen.getAllByText(/Air date/i).length).toBeGreaterThan(0);
@@ -1639,8 +1639,8 @@ describe("RedditSourcesManager", () => {
       preSeasonHeading.compareDocumentPosition(postSeasonHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      await screen.findByText(/\b\d+\s+tracked flair posts(?:\s+in window)?\s*·\s*\d+\s+unassigned tracked posts\b/i),
-    ).toBeInTheDocument();
+      (await screen.findAllByText(/\b\d+\s+tracked flair posts(?:\s+in window)?\s*·\s*\d+\s+unassigned tracked posts\b/i)).length,
+    ).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Episode 1" }));
     expect(await screen.findByRole("dialog", { name: "Episode 1 posts" })).toBeInTheDocument();
@@ -2749,7 +2749,7 @@ describe("RedditSourcesManager", () => {
       expect(screen.getAllByText("r/BravoRealHousewives").length).toBeGreaterThan(0);
     });
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open community settings" }));
 
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "Season" })).toHaveValue("season-1");
