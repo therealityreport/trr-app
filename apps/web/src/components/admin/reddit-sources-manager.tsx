@@ -1,9 +1,12 @@
 "use client";
-
-import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
+import {
+  buildShowRedditCommunityUrl,
+  buildShowRedditUrl,
+} from "@/lib/admin/show-admin-routes";
 
 type ManagerMode = "season" | "global";
 
@@ -213,6 +216,8 @@ interface ShowSeasonOption {
   season_number: number;
   title?: string | null;
   name?: string | null;
+  air_date?: string | null;
+  premiere_date?: string | null;
   has_scheduled_or_aired_episode?: boolean;
   episode_airdate_count?: number;
 }
@@ -226,6 +231,7 @@ interface TrrShowMetadata {
 
 export interface RedditCommunityContext {
   communityLabel: string;
+  communitySlug: string;
   showLabel: string;
   showFullName: string;
   showSlug: string | null;
@@ -260,6 +266,7 @@ interface CommunityFlaresRefreshResponse {
 export interface RedditSourcesManagerProps {
   mode: ManagerMode;
   showId?: string;
+  showSlug?: string;
   showName?: string;
   seasonId?: string | null;
   seasonNumber?: number | null;
@@ -350,14 +357,6 @@ const resolveShowLabel = (showName: string, alternatives: string[] | null | unde
   return acronym || showName;
 };
 
-const formatSeasonScopeLabel = (showName: string | undefined, seasonNumber: number | null | undefined): string => {
-  const base = resolveShowLabel(showName?.trim() || "Show", null);
-  if (typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0) {
-    return `${base} S${seasonNumber}`;
-  }
-  return base;
-};
-
 const getCommunityTypeBadges = (community: RedditCommunity): string[] => {
   const badges: string[] = [];
   if (community.is_show_focused) {
@@ -372,7 +371,8 @@ const getCommunityTypeBadges = (community: RedditCommunity): string[] => {
   return badges;
 };
 
-const getCommunityTitle = (community: Pick<RedditCommunity, "subreddit">): string => `r/${community.subreddit}`;
+const getCommunityTitle = (community: Pick<RedditCommunity, "subreddit">): string =>
+  `r/${community.subreddit.replace(/^\/?r\//i, "")}`;
 
 const normalizeCommunityLookupKey = (value: string | null | undefined): string => {
   if (!value) return "";
@@ -382,6 +382,91 @@ const normalizeCommunityLookupKey = (value: string | null | undefined): string =
   return withoutPrefix.toLowerCase();
 };
 
+const normalizeCommunitySlugForPath = (value: string | null | undefined): string => {
+  if (!value) return "";
+  const raw = value.trim();
+  if (!raw) return "";
+
+  let candidate = raw;
+  const redditUrlMatch = candidate.match(
+    /^https?:\/\/(?:www\.)?(?:old\.)?reddit\.com\/r\/([^/?#]+)/i,
+  );
+  if (redditUrlMatch?.[1]) {
+    candidate = redditUrlMatch[1];
+  }
+
+  return candidate
+    .replace(/^\/?r\//i, "")
+    .replace(/^u\//i, "")
+    .replace(/^@/, "")
+    .replace(/[/?#].*$/, "")
+    .trim();
+};
+
+const calculateLevenshteinDistance = (source: string, target: string): number => {
+  const sourceLength = source.length;
+  const targetLength = target.length;
+  if (sourceLength === 0) return targetLength;
+  if (targetLength === 0) return sourceLength;
+
+  const matrix = Array.from({ length: sourceLength + 1 }, () =>
+    Array.from<number>({ length: targetLength + 1 }).fill(0),
+  );
+  for (let i = 0; i <= sourceLength; i += 1) matrix[i]![0] = i;
+  for (let j = 0; j <= targetLength; j += 1) matrix[0]![j] = j;
+
+  for (let i = 1; i <= sourceLength; i += 1) {
+    for (let j = 1; j <= targetLength; j += 1) {
+      const substitutionCost = source[i - 1] === target[j - 1] ? 0 : 1;
+      const deletion = matrix[i - 1]![j]! + 1;
+      const insertion = matrix[i]![j - 1]! + 1;
+      const substitution = matrix[i - 1]![j - 1]! + substitutionCost;
+      matrix[i]![j] = Math.min(deletion, insertion, substitution);
+    }
+  }
+  return matrix[sourceLength]![targetLength]!;
+};
+
+const resolveInitialCommunityMatch = (
+  communities: RedditCommunity[],
+  initialCommunityId: string | null | undefined,
+): RedditCommunity | null => {
+  if (!initialCommunityId) return null;
+
+  const exactId = communities.find((community) => community.id === initialCommunityId);
+  if (exactId) return exactId;
+
+  const lookupKey = normalizeCommunityLookupKey(initialCommunityId);
+  if (!lookupKey) return null;
+
+  const exactSubreddit = communities.find(
+    (community) => normalizeCommunityLookupKey(community.subreddit) === lookupKey,
+  );
+  if (exactSubreddit) return exactSubreddit;
+
+  const candidates = communities
+    .map((community) => ({
+      community,
+      subredditKey: normalizeCommunityLookupKey(community.subreddit),
+    }))
+    .filter((entry) => entry.subredditKey.length > 0)
+    .map((entry) => ({
+      ...entry,
+      distance: calculateLevenshteinDistance(lookupKey, entry.subredditKey),
+      lengthDelta: Math.abs(lookupKey.length - entry.subredditKey.length),
+    }))
+    .filter((entry) => entry.lengthDelta <= 3);
+
+  if (candidates.length === 0) return null;
+
+  const minDistance = Math.min(...candidates.map((entry) => entry.distance));
+  if (minDistance > 2) return null;
+
+  const closest = candidates.filter((entry) => entry.distance === minDistance);
+  if (closest.length !== 1) return null;
+  return closest[0]!.community;
+};
+
 const toTitleCase = (value: string): string =>
   value
     .toLowerCase()
@@ -389,6 +474,44 @@ const toTitleCase = (value: string): string =>
     .filter((part) => part.length > 0)
     .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
     .join(" ");
+
+const parseDateMs = (value: string | null | undefined): number | null => {
+  if (!value || typeof value !== "string") return null;
+  const parsed = new Date(value);
+  const ms = parsed.getTime();
+  if (!Number.isFinite(ms)) return null;
+  return ms;
+};
+
+const isSeasonEligibleForRedditSelection = (
+  season: ShowSeasonOption,
+  options?: { maxSeasonNumber?: number | null; nowMs?: number },
+): boolean => {
+  const hasEpisodeSignal =
+    typeof season.episode_airdate_count === "number" && season.episode_airdate_count > 0;
+  if (!hasEpisodeSignal) return false;
+
+  const maxSeasonNumber = options?.maxSeasonNumber;
+  if (
+    typeof maxSeasonNumber === "number" &&
+    Number.isFinite(maxSeasonNumber) &&
+    season.season_number > maxSeasonNumber
+  ) {
+    return false;
+  }
+
+  const nowMs = options?.nowMs ?? Date.now();
+  const premiereMs = parseDateMs(season.premiere_date);
+  if (premiereMs !== null) {
+    return premiereMs <= nowMs;
+  }
+  const seasonAirDateMs = parseDateMs(season.air_date);
+  if (seasonAirDateMs !== null) {
+    return seasonAirDateMs <= nowMs;
+  }
+
+  return true;
+};
 
 const getRelevantPostFlares = (community: RedditCommunity): string[] => {
   const selectedFlairKeys = new Set(
@@ -629,9 +752,45 @@ const parseRedditUrl = (
   }
 };
 
+const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
+  "admin",
+  "api",
+  "auth",
+  "brands",
+  "bravodle",
+  "hub",
+  "login",
+  "privacy-policy",
+  "profile",
+  "realations",
+  "realitease",
+  "shows",
+  "surveys",
+  "terms-of-sale",
+  "terms-of-service",
+  "test-auth",
+]);
+
+const resolveRouteShowSlugFromPath = (
+  pathname: string | null | undefined,
+): string | null => {
+  if (!pathname) return null;
+  const segments = pathname
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  const first = segments[0]?.toLowerCase();
+  if (!first) return null;
+  if (ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS.has(first)) return null;
+  if (!/^[a-z0-9-]+$/i.test(first)) return null;
+  return first;
+};
+
 export default function RedditSourcesManager({
   mode,
   showId,
+  showSlug,
   showName,
   seasonId,
   seasonNumber,
@@ -643,7 +802,6 @@ export default function RedditSourcesManager({
   onCommunityContextChange,
 }: RedditSourcesManagerProps) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [communities, setCommunities] = useState<RedditCommunity[]>([]);
   const [coveredShows, setCoveredShows] = useState<CoveredShow[]>([]);
   const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(
@@ -693,6 +851,7 @@ export default function RedditSourcesManager({
   const [episodeSaving, setEpisodeSaving] = useState(false);
   const [assignedThreadsExpanded, setAssignedThreadsExpanded] = useState(true);
   const [showCommunitySettingsModal, setShowCommunitySettingsModal] = useState(false);
+  const [showDedicatedSeasonMenu, setShowDedicatedSeasonMenu] = useState(false);
   const [selectedShowLabel, setSelectedShowLabel] = useState<string | null>(null);
   const [selectedShowSlug, setSelectedShowSlug] = useState<string | null>(null);
   const [episodeMeta, setEpisodeMeta] = useState<EpisodeDiscussionRefreshPayload["meta"] | null>(
@@ -708,10 +867,23 @@ export default function RedditSourcesManager({
   const showMetadataCacheRef = useRef<Map<string, { showLabel: string; showSlug: string | null }>>(
     new Map(),
   );
+  const dedicatedSeasonMenuRef = useRef<HTMLDivElement | null>(null);
+  const autoLoadedEpisodeMatrixKeyRef = useRef<string | null>(null);
   const episodeContextRequestTokenRef = useRef(0);
   const episodeContextAbortRef = useRef<AbortController | null>(null);
+  const routeShowSlugFromPath = useMemo(
+    () => resolveRouteShowSlugFromPath(pathname),
+    [pathname],
+  );
 
-  const getAuthHeaders = useCallback(async () => getClientAuthHeaders(), []);
+  const getAuthHeaders = useCallback(
+    async () =>
+      getClientAuthHeaders({
+        // Allow localhost/dev admin bypass when Firebase client auth is not hydrated yet.
+        allowDevAdminBypass: true,
+      }),
+    [],
+  );
 
   const fetchWithTimeout = useCallback(
     async (
@@ -734,7 +906,11 @@ export default function RedditSourcesManager({
         }
       }
       try {
-        return await fetchAdminWithAuth(input, { ...requestInit, signal: controller.signal });
+        return await fetchAdminWithAuth(
+          input,
+          { ...requestInit, signal: controller.signal },
+          { allowDevAdminBypass: true },
+        );
       } catch (err) {
         if ((err as { name?: string } | null)?.name === "AbortError") {
           throw new Error("Request timed out. Please try again.");
@@ -863,18 +1039,19 @@ export default function RedditSourcesManager({
     setCommunities(list);
     setSelectedCommunityId((prev) => {
       if (initialCommunityId) {
-        const initialKey = normalizeCommunityLookupKey(initialCommunityId);
-        const initialMatch = list.find(
-          (community) =>
-            community.id === initialCommunityId ||
-            normalizeCommunityLookupKey(community.subreddit) === initialKey,
-        );
+        const initialMatch = resolveInitialCommunityMatch(list, initialCommunityId);
         if (initialMatch) return initialMatch.id;
+        // In dedicated community mode, do not silently jump to another community
+        // if the requested slug/id is missing from the refreshed list.
+        if (hideCommunityList) {
+          if (prev && list.some((community) => community.id === prev)) return prev;
+          return null;
+        }
       }
       if (prev && list.some((community) => community.id === prev)) return prev;
       return list[0]?.id ?? null;
     });
-  }, [fetchWithTimeout, getAuthHeaders, initialCommunityId, mode, seasonId, showId]);
+  }, [fetchWithTimeout, getAuthHeaders, hideCommunityList, initialCommunityId, mode, seasonId, showId]);
 
   const refreshData = useCallback(async () => {
     setLoading(true);
@@ -893,6 +1070,14 @@ export default function RedditSourcesManager({
   }, [refreshData]);
 
   useEffect(() => {
+    if (!initialCommunityId || communities.length === 0) return;
+    const routeMatch = resolveInitialCommunityMatch(communities, initialCommunityId);
+    if (!routeMatch) return;
+    if (routeMatch.id === selectedCommunityId) return;
+    setSelectedCommunityId(routeMatch.id);
+  }, [communities, initialCommunityId, selectedCommunityId]);
+
+  useEffect(() => {
     setSelectedNetworkTargetInput("");
     setSelectedFranchiseTargetInput("");
     setEpisodePatternInput("");
@@ -907,10 +1092,12 @@ export default function RedditSourcesManager({
     setEpisodeMatrix([]);
     setAssignedThreadsExpanded(true);
     setShowCommunitySettingsModal(false);
+    setShowDedicatedSeasonMenu(false);
     setSelectedShowLabel(null);
     setSelectedShowSlug(null);
     setSyncStatusFilter("all");
     setSyncReasonCodeFilter("all");
+    autoLoadedEpisodeMatrixKeyRef.current = null;
   }, [selectedCommunityId]);
 
   const selectedCommunity = useMemo(
@@ -934,6 +1121,20 @@ export default function RedditSourcesManager({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [showCommunitySettingsModal]);
+
+  useEffect(() => {
+    if (!showDedicatedSeasonMenu) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (dedicatedSeasonMenuRef.current?.contains(target)) return;
+      setShowDedicatedSeasonMenu(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [showDedicatedSeasonMenu]);
 
   const selectedPeriod = useMemo(
     () => periodOptions.find((option) => option.key === selectedPeriodKey) ?? periodOptions[0] ?? null,
@@ -1213,10 +1414,24 @@ export default function RedditSourcesManager({
         if (!isEpisodeContextRequestActive(requestToken, options?.signal)) {
           return;
         }
-        setSeasonOptions(seasons ?? []);
         if (seasons.length === 0) {
           throw new Error("No seasons found for this show");
         }
+
+        const maxSeasonNumberForContext =
+          typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0
+            ? seasonNumber
+            : null;
+        const eligibleSeasons = seasons
+          .filter((season) =>
+            isSeasonEligibleForRedditSelection(season, {
+              maxSeasonNumber: maxSeasonNumberForContext,
+            }),
+          )
+          .sort((a, b) => b.season_number - a.season_number);
+        const selectableSeasons = eligibleSeasons.length > 0 ? eligibleSeasons : seasons;
+
+        setSeasonOptions(selectableSeasons);
 
         const explicitSeason =
           (seasonId ? seasons.find((season) => season.id === seasonId) : null) ??
@@ -1225,7 +1440,7 @@ export default function RedditSourcesManager({
             : null);
         const resolvedSeason =
           explicitSeason ??
-          seasons.find((season) => season.has_scheduled_or_aired_episode === true) ??
+          selectableSeasons[0] ??
           seasons[0];
         if (!resolvedSeason) {
           throw new Error("No season could be resolved for this community");
@@ -1287,20 +1502,43 @@ export default function RedditSourcesManager({
     };
   }, [loadSeasonAndPeriodContext, selectedCommunity]);
 
-  const returnToValue = useMemo(() => {
-    const qs = searchParams.toString();
-    return qs ? `${pathname}?${qs}` : pathname;
-  }, [pathname, searchParams]);
+  const buildCommunityViewHref = useCallback((community: Pick<RedditCommunity, "id" | "subreddit" | "trr_show_id" | "trr_show_name">): string => {
+    const selectedCommunityShowSlug =
+      selectedCommunity?.trr_show_id === community.trr_show_id ? selectedShowSlug : null;
+    const normalizedCommunitySlug = normalizeCommunitySlugForPath(community.subreddit);
+    const inferredShowSlug = resolvePreferredShowRouteSlug({
+      fallback: resolveShowLabel(community.trr_show_name ?? showName ?? "", null),
+    });
+    const normalizedInferredShowSlug = inferredShowSlug === "show" ? null : inferredShowSlug;
+    const fallbackShowSlug =
+      showSlug ??
+      routeShowSlugFromPath ??
+      selectedCommunityShowSlug ??
+      normalizedInferredShowSlug;
+    const fallbackSeasonNumber =
+      typeof selectedSeasonNumber === "number" && Number.isFinite(selectedSeasonNumber)
+        ? selectedSeasonNumber
+        : typeof seasonNumber === "number" && Number.isFinite(seasonNumber)
+          ? seasonNumber
+          : null;
 
-  const buildCommunityViewHref = useCallback((community: Pick<RedditCommunity, "subreddit">): string => {
-    const params = new URLSearchParams();
-    if (mode === "season" && returnToValue) {
-      params.set("return_to", returnToValue);
+    if (fallbackShowSlug && normalizedCommunitySlug) {
+      return buildShowRedditCommunityUrl({
+        showSlug: fallbackShowSlug,
+        communitySlug: normalizedCommunitySlug,
+        seasonNumber: fallbackSeasonNumber,
+      });
     }
-    const qs = params.toString();
-    const communitySlug = encodeURIComponent(community.subreddit);
-    return `/admin/social-media/reddit/${communitySlug}${qs ? `?${qs}` : ""}`;
-  }, [mode, returnToValue]);
+    return `/admin/social-media/reddit/communities/${encodeURIComponent(community.id)}`;
+  }, [
+    routeShowSlugFromPath,
+    seasonNumber,
+    selectedCommunity?.trr_show_id,
+    selectedSeasonNumber,
+    selectedShowSlug,
+    showName,
+    showSlug,
+  ]);
 
   const communityViewHref = useMemo(
     () => (selectedCommunity ? buildCommunityViewHref(selectedCommunity) : null),
@@ -1315,6 +1553,7 @@ export default function RedditSourcesManager({
     }
     onCommunityContextChange({
       communityLabel: `r/${selectedCommunity.subreddit}`,
+      communitySlug: normalizeCommunitySlugForPath(selectedCommunity.subreddit),
       showLabel: selectedShowLabel ?? resolveShowLabel(selectedCommunity.trr_show_name, []),
       showFullName: selectedCommunity.trr_show_name,
       showSlug: selectedShowSlug,
@@ -1600,7 +1839,7 @@ export default function RedditSourcesManager({
   const isSeasonLandingView = mode === "season" && !hideCommunityList;
   const isDedicatedCommunityView = hideCommunityList;
   const allowCreateActions = mode === "global" && !hideCommunityList;
-  const seasonScopeLabel = isSeasonLandingView ? formatSeasonScopeLabel(showName, seasonNumber) : null;
+  const seasonScopeLabel = isSeasonLandingView ? resolveShowLabel(showName?.trim() || "Show", null) : null;
   const dedicatedBackHref = backHref?.trim() || "/admin/social-media";
   const dedicatedCommunityTypeLabel = useMemo(() => {
     if (!isDedicatedCommunityView || !selectedCommunity) return "Community";
@@ -1608,6 +1847,93 @@ export default function RedditSourcesManager({
     if (badges.length === 0) return "Community";
     return toTitleCase(badges[0] ?? "Community");
   }, [isDedicatedCommunityView, selectedCommunity]);
+  const seasonSelectionShowSlug = useMemo(() => {
+    const fallbackName = selectedCommunity?.trr_show_name ?? showName ?? "";
+    const fallbackLabel = selectedShowLabel ?? resolveShowLabel(fallbackName, null);
+    if (!fallbackLabel && !selectedShowSlug && !showSlug && !routeShowSlugFromPath) return null;
+    return (
+      showSlug ??
+      routeShowSlugFromPath ??
+      selectedShowSlug ??
+      resolvePreferredShowRouteSlug({ fallback: fallbackLabel })
+    );
+  }, [
+    routeShowSlugFromPath,
+    selectedCommunity?.trr_show_name,
+    selectedShowLabel,
+    selectedShowSlug,
+    showName,
+    showSlug,
+  ]);
+  const seasonSelectionCommunitySlug = useMemo(
+    () => normalizeCommunitySlugForPath(selectedCommunity?.subreddit ?? null) || null,
+    [selectedCommunity?.subreddit],
+  );
+  const seasonSelectionMaxSeasonNumber =
+    typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0
+      ? seasonNumber
+      : null;
+  const seasonSelectionOptions = useMemo(() => {
+    const options = seasonOptions
+      .filter(
+        (season): season is ShowSeasonOption =>
+          Boolean(season?.id) &&
+          typeof season.season_number === "number" &&
+          Number.isFinite(season.season_number) &&
+          isSeasonEligibleForRedditSelection(season, {
+            maxSeasonNumber: seasonSelectionMaxSeasonNumber,
+          }),
+      )
+      .sort((a, b) => b.season_number - a.season_number);
+    if (options.length > 0) return options;
+    if (seasonSelectionMaxSeasonNumber !== null) {
+      return [{ id: `season-${seasonSelectionMaxSeasonNumber}`, season_number: seasonSelectionMaxSeasonNumber }];
+    }
+    return [];
+  }, [seasonOptions, seasonSelectionMaxSeasonNumber]);
+  const activeSeasonSelectionCandidate =
+    selectedSeasonNumber ??
+    (typeof seasonNumber === "number" && Number.isFinite(seasonNumber) ? seasonNumber : null);
+  const activeSeasonSelection = useMemo(() => {
+    if (seasonSelectionOptions.length === 0) return null;
+    if (
+      typeof activeSeasonSelectionCandidate === "number" &&
+      Number.isFinite(activeSeasonSelectionCandidate) &&
+      seasonSelectionOptions.some((season) => season.season_number === activeSeasonSelectionCandidate)
+    ) {
+      return activeSeasonSelectionCandidate;
+    }
+    return seasonSelectionOptions[0]?.season_number ?? null;
+  }, [activeSeasonSelectionCandidate, seasonSelectionOptions]);
+  const buildSeasonSelectionHref = useCallback(
+    (nextSeasonNumber: number): string | null => {
+      if (!seasonSelectionShowSlug) return null;
+      if (isDedicatedCommunityView && seasonSelectionCommunitySlug) {
+        return buildShowRedditCommunityUrl({
+          showSlug: seasonSelectionShowSlug,
+          communitySlug: seasonSelectionCommunitySlug,
+          seasonNumber: nextSeasonNumber,
+        });
+      }
+      return buildShowRedditUrl({
+        showSlug: seasonSelectionShowSlug,
+        seasonNumber: nextSeasonNumber,
+      });
+    },
+    [isDedicatedCommunityView, seasonSelectionCommunitySlug, seasonSelectionShowSlug],
+  );
+  const handleSeasonSelectionChange = useCallback(
+    (rawValue: string) => {
+      const nextSeasonNumber = Number.parseInt(rawValue, 10);
+      if (!Number.isFinite(nextSeasonNumber) || nextSeasonNumber <= 0) return;
+      setShowDedicatedSeasonMenu(false);
+      const href = buildSeasonSelectionHref(nextSeasonNumber);
+      if (!href || typeof window === "undefined") return;
+      if (`${window.location.pathname}${window.location.search}` === href) return;
+      window.location.assign(href);
+    },
+    [buildSeasonSelectionHref],
+  );
 
   const resetCommunityForm = () => {
     setCommunitySubreddit("");
@@ -1929,12 +2255,38 @@ export default function RedditSourcesManager({
     seasonId,
   ]);
 
+  useEffect(() => {
+    if (!isDedicatedCommunityView || !selectedCommunity) return;
+    if (loading || periodsLoading || episodeRefreshing) return;
+    const resolvedSeasonId = episodeSeasonId ?? seasonId ?? null;
+    if (!resolvedSeasonId) return;
+    const refreshKey = `${selectedCommunity.id}:${resolvedSeasonId}`;
+    if (autoLoadedEpisodeMatrixKeyRef.current === refreshKey) return;
+    autoLoadedEpisodeMatrixKeyRef.current = refreshKey;
+    void handleRefreshEpisodeDiscussions();
+  }, [
+    episodeRefreshing,
+    episodeSeasonId,
+    handleRefreshEpisodeDiscussions,
+    isDedicatedCommunityView,
+    loading,
+    periodsLoading,
+    seasonId,
+    selectedCommunity,
+  ]);
+
   const handleEpisodeSeasonChange = useCallback(
     (nextSeasonId: string | null) => {
       if (!selectedCommunity) return;
       setEpisodeSeasonId(nextSeasonId);
+      setEpisodeContextWarning(null);
       const season = seasonOptions.find((item) => item.id === nextSeasonId);
       if (season) {
+        if (isDedicatedCommunityView) {
+          setPeriodOptions([]);
+          setSelectedPeriodKey("all-periods");
+          return;
+        }
         const requestToken = episodeContextRequestTokenRef.current + 1;
         episodeContextRequestTokenRef.current = requestToken;
         episodeContextAbortRef.current?.abort();
@@ -1962,7 +2314,7 @@ export default function RedditSourcesManager({
         setPeriodOptions([]);
       }
     },
-    [loadPeriodOptionsForSeason, seasonOptions, selectedCommunity],
+    [isDedicatedCommunityView, loadPeriodOptionsForSeason, seasonOptions, selectedCommunity],
   );
 
   const handleSaveSelectedEpisodeDiscussions = useCallback(async () => {
@@ -2637,12 +2989,73 @@ export default function RedditSourcesManager({
           {isDedicatedCommunityView ? (
             selectedCommunity ? (
               <>
-                <a
-                  href={dedicatedBackHref}
-                  className="mb-2 inline-flex rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                >
-                  Back to Communities
-                </a>
+                <div className="mb-2 flex items-center gap-2">
+                  <a
+                    href={dedicatedBackHref}
+                    className="inline-flex items-center justify-center rounded-lg border border-zinc-300 p-1.5 text-zinc-700 hover:bg-zinc-50"
+                    aria-label="Back to communities"
+                    title="Back to communities"
+                  >
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 20 20"
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    >
+                      <path d="M12.5 4.5 7 10l5.5 5.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </a>
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => setShowCommunitySettingsModal(true)}
+                    className="inline-flex items-center justify-center rounded-lg border border-zinc-300 p-1.5 text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    aria-label="Open community settings"
+                    title="Settings"
+                  >
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 20 20"
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                    >
+                      <path d="M10 3.3 11.1 5.5l2.4.35.6 2.35 2 .9-.9 2 .9 2-2 .9-.6 2.35-2.4.35L10 18.7l-1.1-2.2-2.4-.35-.6-2.35-2-.9.9-2-.9-2 2-.9.6-2.35 2.4-.35L10 3.3Z" />
+                      <circle cx="10" cy="10" r="2.4" />
+                    </svg>
+                  </button>
+                  <div className="relative" ref={dedicatedSeasonMenuRef}>
+                    <button
+                      type="button"
+                      disabled={seasonSelectionOptions.length === 0 || !seasonSelectionShowSlug}
+                      onClick={() => setShowDedicatedSeasonMenu((current) => !current)}
+                      className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {activeSeasonSelection ? `Season ${activeSeasonSelection}` : "Season"}
+                    </button>
+                    {showDedicatedSeasonMenu && seasonSelectionOptions.length > 0 && (
+                      <div className="absolute left-0 z-20 mt-1 min-w-[112px] rounded-lg border border-zinc-200 bg-white p-1 shadow-lg">
+                        {seasonSelectionOptions.map((season) => (
+                          <button
+                            key={`season-menu-dedicated-${season.id}`}
+                            type="button"
+                            onClick={() => handleSeasonSelectionChange(String(season.season_number))}
+                            className={`block w-full rounded-md px-2 py-1 text-left text-xs font-semibold ${
+                              activeSeasonSelection === season.season_number
+                                ? "bg-zinc-900 text-white"
+                                : "text-zinc-700 hover:bg-zinc-100"
+                            }`}
+                          >
+                            Season {season.season_number}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
                   {dedicatedCommunityTypeLabel}
                 </p>
@@ -2666,6 +3079,32 @@ export default function RedditSourcesManager({
               <p className="text-sm text-zinc-500">
                 Review show, network, and franchise communities for this season.
               </p>
+              <div className="mt-3 space-y-1.5">
+                <label
+                  htmlFor="reddit-season-selection-landing"
+                  className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500"
+                >
+                  Season Selection
+                </label>
+                <select
+                  id="reddit-season-selection-landing"
+                  aria-label="Season Selection"
+                  value={activeSeasonSelection != null ? String(activeSeasonSelection) : ""}
+                  onChange={(event) => handleSeasonSelectionChange(event.target.value)}
+                  disabled={seasonSelectionOptions.length === 0 || !seasonSelectionShowSlug}
+                  className="w-full max-w-[180px] rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm font-semibold text-zinc-700 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                >
+                  {seasonSelectionOptions.length > 0 ? (
+                    seasonSelectionOptions.map((season) => (
+                      <option key={`season-select-landing-${season.id}`} value={String(season.season_number)}>
+                        S{season.season_number}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">Unavailable</option>
+                  )}
+                </select>
+              </div>
             </>
           )}
         </div>
@@ -2694,18 +3133,18 @@ export default function RedditSourcesManager({
             <button
               type="button"
               disabled={isBusy}
-              onClick={() => setShowCommunitySettingsModal(true)}
-              className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Settings
-            </button>
-            <button
-              type="button"
-              disabled={isBusy}
               onClick={() => void handleDiscover(selectedCommunity)}
               className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Discover Threads
+            </button>
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={() => void handleDeleteCommunity(selectedCommunity.id)}
+              className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Delete
             </button>
           </div>
         )}
@@ -3160,7 +3599,7 @@ export default function RedditSourcesManager({
                             <p className="truncate text-sm font-semibold text-zinc-900">
                               {community.display_name || `r/${community.subreddit}`}
                             </p>
-                            <p className="truncate text-xs text-zinc-500">r/{community.subreddit}</p>
+                            <p className="truncate text-xs text-zinc-500">{getCommunityTitle(community)}</p>
                           </div>
                           <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-700">
                             {community.assigned_thread_count}
@@ -3182,28 +3621,28 @@ export default function RedditSourcesManager({
               </div>
             ) : (
               <>
-                <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                        Community
-                      </p>
-                      {communityViewHref ? (
-                        <a
-                          href={communityViewHref}
-                          className="text-lg font-bold text-zinc-900 underline-offset-4 hover:underline"
-                        >
-                          {getCommunityTitle(selectedCommunity)}
-                        </a>
-                      ) : (
-                        <h4 className="text-lg font-bold text-zinc-900">
-                          {getCommunityTitle(selectedCommunity)}
-                        </h4>
-                      )}
-                      <p className="text-sm text-zinc-500">{selectedCommunity.trr_show_name}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {!isDedicatedCommunityView && (
+                {!isDedicatedCommunityView && (
+                  <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                          Community
+                        </p>
+                        {communityViewHref ? (
+                          <a
+                            href={communityViewHref}
+                            className="text-lg font-bold text-zinc-900 underline-offset-4 hover:underline"
+                          >
+                            {getCommunityTitle(selectedCommunity)}
+                          </a>
+                        ) : (
+                          <h4 className="text-lg font-bold text-zinc-900">
+                            {getCommunityTitle(selectedCommunity)}
+                          </h4>
+                        )}
+                        <p className="text-sm text-zinc-500">{selectedCommunity.trr_show_name}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           disabled={isBusy}
@@ -3224,16 +3663,14 @@ export default function RedditSourcesManager({
                           </svg>
                           Settings
                         </button>
-                      )}
-                      {communityViewHref && !isDedicatedCommunityView && (
-                        <a
-                          href={communityViewHref}
-                          className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
-                        >
-                          Community View
-                        </a>
-                      )}
-                      {!isDedicatedCommunityView && (
+                        {communityViewHref && (
+                          <a
+                            href={communityViewHref}
+                            className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                          >
+                            Community View
+                          </a>
+                        )}
                         <button
                           type="button"
                           disabled={isBusy}
@@ -3242,20 +3679,20 @@ export default function RedditSourcesManager({
                         >
                           Discover Threads
                         </button>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                  <p className="mt-2 text-xs text-zinc-500">
-                    {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
-                    {selectedCommunity.analysis_flares.length} scan ·{" "}
-                    {selectedRelevantPostFlares.length} relevant flares
-                  </p>
-                  {selectedCommunity.notes && (
-                    <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
-                      {selectedCommunity.notes}
+                    <p className="mt-2 text-xs text-zinc-500">
+                      {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
+                      {selectedCommunity.analysis_flares.length} scan ·{" "}
+                      {selectedRelevantPostFlares.length} relevant flares
                     </p>
-                  )}
-                </article>
+                    {selectedCommunity.notes && (
+                      <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                        {selectedCommunity.notes}
+                      </p>
+                    )}
+                  </article>
+                )}
 
                 {episodeDiscussionsPlacement === "inline" && renderEpisodeDiscussionPanel()}
 
@@ -3669,7 +4106,7 @@ export default function RedditSourcesManager({
                     (isDedicatedCommunityView ? (
                       episodeMatrix.length === 0 ? (
                         <p className="text-sm text-zinc-500">
-                          Refresh discussions to load the episode discussion table.
+                          No episode discussion rows found for this community yet.
                         </p>
                       ) : (
                         renderEpisodeMatrixCards(episodeMatrix)

@@ -4,10 +4,10 @@ import type { AssetSectionKey } from "@/lib/admin/asset-sectioning";
 import type { BatchJobOperation, SeasonTab, TabId } from "@/lib/admin/season-page/types";
 
 export const SEASON_PAGE_TABS: ReadonlyArray<SeasonTab> = [
-  { id: "overview", label: "Overview" },
-  { id: "episodes", label: "Seasons & Episodes" },
+  { id: "overview", label: "Home", icon: "home" },
+  { id: "episodes", label: "Episodes" },
   { id: "assets", label: "Assets" },
-  { id: "videos", label: "Videos" },
+  { id: "news", label: "News" },
   { id: "fandom", label: "Fandom" },
   { id: "cast", label: "Cast" },
   { id: "surveys", label: "Surveys" },
@@ -59,7 +59,7 @@ export const SEASON_BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
 export const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
 
 export const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "bravo", label: "BRAVO ANALYTICS" },
+  { id: "bravo", label: "OFFICIAL ANALYTICS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },

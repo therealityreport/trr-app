@@ -8,6 +8,8 @@ const castMultiSelectMock = vi.fn(() => <div data-testid="cast-multi-select-rend
 const castSingleSelectMock = vi.fn(() => <div data-testid="cast-single-select-render" />);
 const rankTextFieldsMock = vi.fn(() => <div data-testid="rank-text-fields-render" />);
 const posterSingleSelectMock = vi.fn(() => <div data-testid="poster-single-select-render" />);
+const starRatingMock = vi.fn(() => <div data-testid="star-rating-render" />);
+const iconRatingMock = vi.fn(() => <div data-testid="icon-rating-render" />);
 
 vi.mock("@/components/survey/PersonRankingsInput", () => ({
   __esModule: true,
@@ -57,6 +59,22 @@ vi.mock("@/components/survey/PosterSingleSelect", () => ({
   },
 }));
 
+vi.mock("@/components/survey/StarRatingInput", () => ({
+  __esModule: true,
+  default: (props: unknown) => {
+    starRatingMock(props);
+    return <div data-testid="star-rating-render" />;
+  },
+}));
+
+vi.mock("@/components/survey/IconRatingInput", () => ({
+  __esModule: true,
+  default: (props: unknown) => {
+    iconRatingMock(props);
+    return <div data-testid="icon-rating-render" />;
+  },
+}));
+
 import QuestionRenderer from "@/components/survey/QuestionRenderer";
 
 function makeQuestion(uiVariant: "person-rankings" | "poster-rankings" | "circle-ranking" | "rectangle-ranking") {
@@ -83,6 +101,8 @@ describe("QuestionRenderer ranking dispatch", () => {
     castSingleSelectMock.mockClear();
     rankTextFieldsMock.mockClear();
     posterSingleSelectMock.mockClear();
+    starRatingMock.mockClear();
+    iconRatingMock.mockClear();
   });
 
   it("dispatches person-rankings and legacy circle-ranking to PersonRankingsInput", () => {
@@ -199,5 +219,89 @@ describe("QuestionRenderer ranking dispatch", () => {
 
     expect(screen.getByTestId("poster-single-select-render")).toBeInTheDocument();
     expect(posterSingleSelectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses star rating for numeric-ranking when no icons are configured", () => {
+    render(
+      <QuestionRenderer
+        question={{
+          id: "q-num-plain",
+          survey_id: "survey-1",
+          question_key: "episode_rating",
+          question_text: "Rate this episode",
+          question_type: "numeric",
+          display_order: 1,
+          is_required: false,
+          config: { uiVariant: "numeric-ranking", min: 0, max: 10, step: 0.1 },
+          created_at: "",
+          updated_at: "",
+          options: [],
+        } as never}
+        value={7.2}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("star-rating-render")).toBeInTheDocument();
+    expect(iconRatingMock).not.toHaveBeenCalled();
+  });
+
+  it("uses show icon fallback for numeric-ranking when show icon is provided", () => {
+    render(
+      <QuestionRenderer
+        question={{
+          id: "q-num-show-icon",
+          survey_id: "survey-1",
+          question_key: "episode_rating",
+          question_text: "Rate this episode",
+          question_type: "numeric",
+          display_order: 1,
+          is_required: false,
+          config: { uiVariant: "numeric-ranking", min: 0, max: 10, step: 0.1 },
+          created_at: "",
+          updated_at: "",
+          options: [],
+        } as never}
+        value={7.2}
+        onChange={() => {}}
+        showIconUrl="https://cdn.example.com/icons/rhoslc/brackstar.png"
+      />,
+    );
+
+    expect(screen.getByTestId("icon-rating-render")).toBeInTheDocument();
+    expect(starRatingMock).not.toHaveBeenCalled();
+  });
+
+  it("uses per-question icon override before show icon for numeric-ranking", () => {
+    render(
+      <QuestionRenderer
+        question={{
+          id: "q-num-override",
+          survey_id: "survey-1",
+          question_key: "episode_rating",
+          question_text: "Rate this episode",
+          question_type: "numeric",
+          display_order: 1,
+          is_required: false,
+          config: {
+            uiVariant: "numeric-ranking",
+            min: 0,
+            max: 10,
+            step: 0.1,
+            iconOverrideUrl: "https://cdn.example.com/icons/custom/override.png",
+          },
+          created_at: "",
+          updated_at: "",
+          options: [],
+        } as never}
+        value={7.2}
+        onChange={() => {}}
+        showIconUrl="https://cdn.example.com/icons/rhoslc/brackstar.png"
+      />,
+    );
+
+    expect(screen.getByTestId("icon-rating-render")).toBeInTheDocument();
+    const props = iconRatingMock.mock.calls.at(-1)?.[0] as { iconSrc?: string };
+    expect(props.iconSrc).toBe("https://cdn.example.com/icons/custom/override.png");
   });
 });

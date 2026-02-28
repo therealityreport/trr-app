@@ -74,6 +74,18 @@ interface BrandMediaAssetLike {
   metadata?: Record<string, unknown> | null;
 }
 
+interface ShowIconRecord {
+  id: string;
+  show_key: string;
+  filename: string;
+  hosted_url: string;
+  s3_key: string;
+  content_type: string;
+  size_bytes: number;
+  created_at: string;
+  created_by?: string | null;
+}
+
 export interface TrrSeasonLike {
   id: string;
   season_number: number;
@@ -705,6 +717,10 @@ export default function ShowBrandEditor({
   const [defaultMediaPickerKind, setDefaultMediaPickerKind] = useState<DefaultMediaPickerKind | null>(null);
   const [showMediaAssets, setShowMediaAssets] = useState<BrandMediaAssetLike[]>([]);
   const [showMediaLoading, setShowMediaLoading] = useState(false);
+  const [showIcons, setShowIcons] = useState<ShowIconRecord[]>([]);
+  const [showIconsLoading, setShowIconsLoading] = useState(false);
+  const [showIconsUploadBusy, setShowIconsUploadBusy] = useState(false);
+  const [showIconsDeleteBusyId, setShowIconsDeleteBusyId] = useState<string | null>(null);
 
   // New season state
   const [creatingSeason, setCreatingSeason] = useState(false);
@@ -749,6 +765,31 @@ export default function ShowBrandEditor({
       setShowMediaLoading(false);
     }
   }, [fetchWithAuth, getAuthHeaders, trrShowId]);
+
+  const fetchShowIcons = useCallback(async () => {
+    const showKey = showRecord?.key;
+    if (!showKey) {
+      setShowIcons([]);
+      return;
+    }
+    setShowIconsLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchWithAuth(`/api/admin/shows/${showKey}/icons`, {
+        headers,
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        icons?: ShowIconRecord[];
+      };
+      if (!response.ok) throw new Error("Failed to fetch icons");
+      setShowIcons(Array.isArray(data.icons) ? data.icons : []);
+    } catch (err) {
+      console.warn("Failed to load show icons", err);
+      setShowIcons([]);
+    } finally {
+      setShowIconsLoading(false);
+    }
+  }, [fetchWithAuth, getAuthHeaders, showRecord?.key]);
 
   const fetchBrand = useCallback(async () => {
     setLoading(true);
@@ -811,6 +852,10 @@ export default function ShowBrandEditor({
   useEffect(() => {
     void fetchShowMediaAssets();
   }, [fetchShowMediaAssets]);
+
+  useEffect(() => {
+    void fetchShowIcons();
+  }, [fetchShowIcons]);
 
   const availableSeasonNumbers = useMemo(() => {
     const fromTrr = trrSeasons.map((s) => s.season_number).filter((n) => Number.isFinite(n));
@@ -1047,6 +1092,65 @@ export default function ShowBrandEditor({
     setDefaultMediaPickerKind(null);
   };
 
+  const uploadShowIcon = useCallback(
+    async (file: File) => {
+      if (!showRecord?.key) return;
+      setShowIconsUploadBusy(true);
+      setError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await fetchWithAuth(`/api/admin/shows/${showRecord.key}/icons`, {
+          method: "POST",
+          headers,
+          body: formData,
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          hosted_url?: string;
+        };
+        if (!response.ok) {
+          throw new Error(data.error ?? `Icon upload failed (HTTP ${response.status})`);
+        }
+        if (typeof data.hosted_url === "string" && data.hosted_url.trim()) {
+          setIconUrl(data.hosted_url.trim());
+        }
+        await fetchShowIcons();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to upload icon");
+      } finally {
+        setShowIconsUploadBusy(false);
+      }
+    },
+    [fetchShowIcons, fetchWithAuth, getAuthHeaders, showRecord?.key],
+  );
+
+  const deleteShowIcon = useCallback(
+    async (iconId: string) => {
+      if (!showRecord?.key) return;
+      setShowIconsDeleteBusyId(iconId);
+      setError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithAuth(`/api/admin/shows/${showRecord.key}/icons/${iconId}`, {
+          method: "DELETE",
+          headers,
+        });
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error ?? `Delete failed (HTTP ${response.status})`);
+        }
+        await fetchShowIcons();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete icon");
+      } finally {
+        setShowIconsDeleteBusyId(null);
+      }
+    },
+    [fetchShowIcons, fetchWithAuth, getAuthHeaders, showRecord?.key],
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -1273,16 +1377,72 @@ export default function ShowBrandEditor({
         <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Asset URLs</p>
           <div className="mt-3 grid gap-4 lg:grid-cols-3">
-            <label className="block">
+            <div className="block">
               <span className="mb-1 block text-sm font-semibold text-zinc-700">Icon</span>
-              <input
-                type="text"
-                value={iconUrl}
-                onChange={(e) => setIconUrl(e.target.value)}
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:outline-none"
-                placeholder="https://..."
-              />
-            </label>
+              <div className="flex flex-col gap-2">
+                <input
+                  type="text"
+                  value={iconUrl}
+                  onChange={(e) => setIconUrl(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:outline-none"
+                  placeholder="https://..."
+                />
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-zinc-700">
+                  <span className="rounded-md border border-zinc-300 bg-white px-2 py-1">
+                    {showIconsUploadBusy ? "Uploading..." : "Upload Icon"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    className="sr-only"
+                    disabled={showIconsUploadBusy}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      void uploadShowIcon(file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <span className="text-zinc-500">PNG/JPG/WEBP/SVG</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {showIconsLoading ? (
+                    <span className="text-xs text-zinc-500">Loading icons...</span>
+                  ) : showIcons.length === 0 ? (
+                    <span className="text-xs text-zinc-500">No uploaded icons yet.</span>
+                  ) : (
+                    showIcons.map((icon) => (
+                      <div
+                        key={icon.id}
+                        className={`rounded-md border p-1 ${iconUrl === icon.hosted_url ? "border-zinc-900" : "border-zinc-200"}`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setIconUrl(icon.hosted_url)}
+                          className="block"
+                          title="Set as show icon"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={icon.hosted_url}
+                            alt={icon.filename}
+                            className="h-10 w-10 rounded object-cover"
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteShowIcon(icon.id)}
+                          disabled={showIconsDeleteBusyId === icon.id}
+                          className="mt-1 w-full text-[10px] font-semibold uppercase tracking-[0.08em] text-red-600 disabled:opacity-50"
+                        >
+                          {showIconsDeleteBusyId === icon.id ? "..." : "Delete"}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
             <label className="block">
               <span className="mb-1 block text-sm font-semibold text-zinc-700">Wordmark</span>
               <input

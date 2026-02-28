@@ -5,6 +5,7 @@ import { useRef, type KeyboardEvent } from "react";
 interface SeasonTab<TTab extends string = string> {
   id: TTab;
   label: string;
+  icon?: "home";
 }
 
 interface SeasonTabsNavProps<TTab extends string = string> {
@@ -62,6 +63,7 @@ export function SeasonTabsNav<TTab extends string>({
           }}
           id={`season-tab-${tab.id}`}
           role="tab"
+          aria-label={tab.icon === "home" ? tab.label : undefined}
           aria-selected={activeTab === tab.id}
           aria-controls={`season-tabpanel-${tab.id}`}
           tabIndex={activeTab === tab.id ? 0 : -1}
@@ -71,7 +73,33 @@ export function SeasonTabsNav<TTab extends string>({
               : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
           }`}
         >
-          {tab.label}
+          {tab.icon === "home" ? (
+            <span className="inline-flex items-center">
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M3 11.5L12 4l9 7.5"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M6.5 10.5V20h11v-9.5"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span className="sr-only">{tab.label}</span>
+            </span>
+          ) : (
+            tab.label
+          )}
         </button>
       ))}
     </nav>

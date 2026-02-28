@@ -68,6 +68,7 @@ import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filte
 import {
   THUMBNAIL_DEFAULTS,
   isThumbnailCropMode,
+  parseThumbnailCrop,
   resolveThumbnailPresentation,
 } from "@/lib/thumbnail-crop";
 import {
@@ -96,7 +97,10 @@ import {
   buildShowAdminUrl,
   buildSeasonAdminUrl,
   cleanLegacyRoutingQuery,
+  parseSeasonEpisodeNumberFromPath,
+  parseSeasonSocialPathFilters,
   parseSocialAnalyticsViewFromPath,
+  parseSeasonSocialPathSegment,
   parseSeasonRouteState,
 } from "@/lib/admin/show-admin-routes";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
@@ -294,7 +298,7 @@ interface TrrSeasonFandom {
   source_variants?: unknown;
 }
 
-type TabId = "overview" | "episodes" | "assets" | "videos" | "fandom" | "cast" | "surveys" | "social";
+type TabId = "overview" | "episodes" | "assets" | "news" | "fandom" | "cast" | "surveys" | "social";
 type SeasonCastSource = "season_evidence" | "show_fallback";
 type GalleryDiagnosticFilter = "all" | "missing-variants" | "oversized" | "unclassified";
 type RefreshProgressState = {
@@ -330,11 +334,11 @@ type EpisodeCoverageRow = {
   hasRuntime: boolean;
 };
 
-const SEASON_PAGE_TABS: ReadonlyArray<{ id: TabId; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "episodes", label: "Seasons & Episodes" },
+const SEASON_PAGE_TABS: ReadonlyArray<{ id: TabId; label: string; icon?: "home" }> = [
+  { id: "overview", label: "Home", icon: "home" },
+  { id: "episodes", label: "Episodes" },
   { id: "assets", label: "Assets" },
-  { id: "videos", label: "Videos" },
+  { id: "news", label: "News" },
   { id: "fandom", label: "Fandom" },
   { id: "cast", label: "Cast" },
   { id: "surveys", label: "Surveys" },
@@ -382,7 +386,7 @@ const SEASON_BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
 const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
 
 const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "bravo", label: "BRAVO ANALYTICS" },
+  { id: "bravo", label: "OFFICIAL ANALYTICS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
@@ -392,6 +396,19 @@ const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: str
 const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {
   if (!value) return false;
   return SEASON_SOCIAL_ANALYTICS_VIEWS.some((item) => item.id === value);
+};
+
+const normalizeSocialAnalyticsViewInput = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "official") return "bravo";
+  return normalized;
+};
+
+const formatSocialAnalyticsViewLabel = (view: SocialAnalyticsView): string => {
+  if (view === "bravo") return "Official";
+  return `${view.charAt(0).toUpperCase()}${view.slice(1)}`;
 };
 
 const BATCH_JOB_OPERATION_LABELS = {
@@ -706,22 +723,26 @@ const getAssetDetailUrl = (asset: SeasonAsset): string =>
   firstImageUrlCandidate(getSeasonAssetDetailUrlCandidates(asset)) ?? asset.hosted_url;
 
 const buildAssetAutoCropPayload = (asset: SeasonAsset): Record<string, unknown> | null => {
-  if (
-    !isThumbnailCropMode(asset.thumbnail_crop_mode) ||
-    typeof asset.thumbnail_focus_x !== "number" ||
-    !Number.isFinite(asset.thumbnail_focus_x) ||
-    typeof asset.thumbnail_focus_y !== "number" ||
-    !Number.isFinite(asset.thumbnail_focus_y) ||
-    typeof asset.thumbnail_zoom !== "number" ||
-    !Number.isFinite(asset.thumbnail_zoom)
-  ) {
-    return null;
-  }
+  const directCrop = parseThumbnailCrop(
+    {
+      x: asset.thumbnail_focus_x,
+      y: asset.thumbnail_focus_y,
+      zoom: asset.thumbnail_zoom,
+      mode: asset.thumbnail_crop_mode,
+    },
+    { clamp: true }
+  );
+  const metadataCrop = parseThumbnailCrop(
+    (asset.metadata as Record<string, unknown> | null)?.thumbnail_crop,
+    { clamp: true }
+  );
+  const crop = directCrop ?? metadataCrop;
+  if (!crop) return null;
   return {
-    x: asset.thumbnail_focus_x,
-    y: asset.thumbnail_focus_y,
-    zoom: asset.thumbnail_zoom,
-    mode: asset.thumbnail_crop_mode,
+    x: crop.x,
+    y: crop.y,
+    zoom: crop.zoom,
+    mode: crop.mode,
   };
 };
 
@@ -977,7 +998,7 @@ export default function SeasonDetailPage() {
   const [fandomSyncCommitLoading, setFandomSyncCommitLoading] = useState(false);
   const [fandomSyncError, setFandomSyncError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
-  const [assetsView, setAssetsView] = useState<"media" | "brand">("media");
+  const [assetsView, setAssetsView] = useState<"images" | "videos" | "branding">("images");
   const [allowPlaceholderMediaOverride, setAllowPlaceholderMediaOverride] = useState(false);
   const [galleryDiagnosticFilter, setGalleryDiagnosticFilter] =
     useState<GalleryDiagnosticFilter>("all");
@@ -1149,6 +1170,18 @@ export default function SeasonDetailPage() {
     () => parseSeasonRouteState(pathname, new URLSearchParams(searchParams.toString())),
     [pathname, searchParams]
   );
+  const seasonEpisodeNumberFromPath = useMemo(
+    () => parseSeasonEpisodeNumberFromPath(pathname),
+    [pathname],
+  );
+  const seasonSocialPathSegment = useMemo(
+    () => parseSeasonSocialPathSegment(pathname),
+    [pathname],
+  );
+  const seasonSocialPathFilters = useMemo(
+    () => parseSeasonSocialPathFilters(pathname),
+    [pathname],
+  );
   const seasonCastRouteState = useMemo(
     () => parseSeasonCastRouteState(new URLSearchParams(searchParams.toString())),
     [searchParams]
@@ -1209,6 +1242,15 @@ export default function SeasonDetailPage() {
   }, [show?.alternative_names, show?.canonical_slug, show?.slug, showRouteParam]);
 
   useEffect(() => {
+    if (!showSlugForRouting) return;
+    if (Number.isFinite(seasonNumber) && seasonNumber > 0) return;
+    router.replace(
+      buildShowAdminUrl({ showSlug: showSlugForRouting, tab: "seasons" }) as Route,
+      { scroll: false },
+    );
+  }, [router, seasonNumber, showSlugForRouting]);
+
+  useEffect(() => {
     if (!show?.name || !showSlugForRouting) return;
     recordAdminRecentShow({
       slug: showSlugForRouting,
@@ -1235,7 +1277,7 @@ export default function SeasonDetailPage() {
   );
 
   const setAssetsSubTab = useCallback(
-    (view: "media" | "brand") => {
+    (view: "images" | "videos" | "branding") => {
       setAssetsView(view);
       const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
       router.replace(
@@ -1288,15 +1330,16 @@ export default function SeasonDetailPage() {
   ]);
 
   const socialAnalyticsView = useMemo<SocialAnalyticsView>(() => {
-    const queryValue = searchParams.get("social_view");
+    const queryValue = normalizeSocialAnalyticsViewInput(searchParams.get("social_view"));
     if (isSocialAnalyticsView(queryValue)) return queryValue;
-    const pathValue = parseSocialAnalyticsViewFromPath(pathname);
+    const pathValue = normalizeSocialAnalyticsViewInput(parseSocialAnalyticsViewFromPath(pathname));
     return isSocialAnalyticsView(pathValue) ? pathValue : "bravo";
   }, [pathname, searchParams]);
 
   const setSocialAnalyticsView = useCallback(
     (view: SocialAnalyticsView) => {
       const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      nextQuery.delete("social_platform");
       if (view === "bravo") {
         nextQuery.delete("social_view");
       } else {
@@ -1308,11 +1351,16 @@ export default function SeasonDetailPage() {
           seasonNumber,
           tab: "social",
           query: nextQuery,
+          socialRoute: {
+            weekIndex: seasonSocialPathFilters?.weekIndex,
+            platform: seasonSocialPathFilters?.platform,
+            handle: seasonSocialPathFilters?.handle,
+          },
         }) as Route,
         { scroll: false }
       );
     },
-    [router, searchParams, seasonNumber, showSlugForRouting]
+    [router, searchParams, seasonNumber, showSlugForRouting, seasonSocialPathFilters]
   );
 
   const [addBackdropsOpen, setAddBackdropsOpen] = useState(false);
@@ -1422,9 +1470,17 @@ export default function SeasonDetailPage() {
 
   useEffect(() => {
     if (!showSlugForRouting) return;
+    const isEpisodeSocialPath =
+      seasonRouteState.tab === "social" &&
+      seasonEpisodeNumberFromPath != null &&
+      seasonSocialPathSegment != null;
+    if (isEpisodeSocialPath) {
+      return;
+    }
 
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
     if (seasonRouteState.tab === "social") {
+      preservedQuery.delete("social_platform");
       if (socialAnalyticsView === "bravo") {
         preservedQuery.delete("social_view");
       } else {
@@ -1438,9 +1494,17 @@ export default function SeasonDetailPage() {
       assetsSubTab: seasonRouteState.assetsSubTab,
       query: preservedQuery,
       socialView: seasonRouteState.tab === "social" ? socialAnalyticsView : undefined,
+      socialRoute:
+        seasonRouteState.tab === "social"
+          ? {
+              weekIndex: seasonSocialPathFilters?.weekIndex,
+              platform: seasonSocialPathFilters?.platform,
+              handle: seasonSocialPathFilters?.handle,
+            }
+          : undefined,
     });
     const currentHasLegacyRoutingQuery =
-      searchParams.has("tab") || searchParams.has("assets");
+      searchParams.has("tab") || searchParams.has("assets") || searchParams.has("social_platform");
     const canonicalPath = canonicalRouteUrl.split("?")[0] ?? canonicalRouteUrl;
     const currentPath = pathname;
     const pathMismatch = currentPath !== canonicalPath;
@@ -1459,6 +1523,9 @@ export default function SeasonDetailPage() {
     seasonNumber,
     showSlugForRouting,
     socialAnalyticsView,
+    seasonEpisodeNumberFromPath,
+    seasonSocialPathFilters,
+    seasonSocialPathSegment,
     seasonRouteState.assetsSubTab,
     seasonRouteState.tab,
   ]);
@@ -2000,7 +2067,7 @@ export default function SeasonDetailPage() {
 
   useEffect(() => {
     if (!hasAccess) return;
-    if (activeTab !== "assets" || assetsView !== "brand") return;
+    if (activeTab !== "assets" || assetsView !== "branding") return;
     if (showCastFetchAttemptedRef.current) return;
     fetchShowCastForBrand();
   }, [hasAccess, activeTab, assetsView, fetchShowCastForBrand]);
@@ -2022,13 +2089,13 @@ export default function SeasonDetailPage() {
 
   useEffect(() => {
     if (!hasAccess || !showId) return;
-    if (activeTab !== "videos") return;
+    if (activeTab !== "assets" || assetsView !== "videos") return;
     const controller = new AbortController();
     void fetchSeasonBravoVideos({ signal: controller.signal });
     return () => {
       controller.abort();
     };
-  }, [activeTab, fetchSeasonBravoVideos, hasAccess, showId]);
+  }, [activeTab, assetsView, fetchSeasonBravoVideos, hasAccess, showId]);
 
   const fetchAssets = useCallback(async () => {
     if (!showId) return;
@@ -2080,7 +2147,7 @@ export default function SeasonDetailPage() {
 
   useEffect(() => {
     if (!hasAccess || !showId) return;
-    if (activeTab !== "assets" || assetsView !== "media") return;
+    if (activeTab !== "assets" || assetsView !== "images") return;
     void fetchAssets().catch((err) => {
       console.error("Failed to refresh filtered season media:", err);
     });
@@ -4693,7 +4760,7 @@ export default function SeasonDetailPage() {
     );
   }
 
-  const socialViewBreadcrumbLabel = `${socialAnalyticsView.charAt(0).toUpperCase()}${socialAnalyticsView.slice(1)} Analytics`;
+  const socialViewBreadcrumbLabel = `${formatSocialAnalyticsViewLabel(socialAnalyticsView)} Analytics`;
 
   const socialTabHref = buildSeasonAdminUrl({
     showSlug: showSlugForRouting,
@@ -4985,7 +5052,11 @@ export default function SeasonDetailPage() {
               <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    {assetsView === "media" ? "Season Media" : "Brand"}
+                    {assetsView === "images"
+                      ? "Season Images"
+                      : assetsView === "videos"
+                        ? "Season Videos"
+                        : "Branding"}
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
                     {show.name} · Season {season.season_number}
@@ -4995,29 +5066,40 @@ export default function SeasonDetailPage() {
                   <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
                     <button
                       type="button"
-                      onClick={() => setAssetsSubTab("media")}
+                      onClick={() => setAssetsSubTab("images")}
                       className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                        assetsView === "media"
+                        assetsView === "images"
                           ? "bg-white text-zinc-900 shadow-sm"
                           : "text-zinc-500 hover:text-zinc-700"
                       }`}
                     >
-                      Media
+                      Images
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAssetsSubTab("brand")}
+                      onClick={() => setAssetsSubTab("videos")}
                       className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                        assetsView === "brand"
+                        assetsView === "videos"
                           ? "bg-white text-zinc-900 shadow-sm"
                           : "text-zinc-500 hover:text-zinc-700"
                       }`}
                     >
-                      Brand
+                      Videos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssetsSubTab("branding")}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                        assetsView === "branding"
+                          ? "bg-white text-zinc-900 shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-700"
+                      }`}
+                    >
+                      Branding
                     </button>
                   </div>
 
-                  {assetsView === "media" && (
+                  {assetsView === "images" && (
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={handleRefreshImages}
@@ -5130,7 +5212,7 @@ export default function SeasonDetailPage() {
                 </div>
               )}
 
-              {assetsView === "media" ? (
+              {assetsView === "images" ? (
                 <div className="space-y-8">
                 <section className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                   <button
@@ -5491,7 +5573,7 @@ export default function SeasonDetailPage() {
                   <p className="text-sm text-zinc-500">No media found for this season.</p>
                 )}
               </div>
-              ) : (
+              ) : assetsView === "branding" ? (
                 <div className="space-y-4">
                   {trrShowCastLoading ? (
                     <div className="flex items-center justify-center py-12">
@@ -5520,12 +5602,12 @@ export default function SeasonDetailPage() {
                     />
                   )}
                 </div>
-              )}
+              ) : null}
               </div>
             </SeasonAssetsTab>
           )}
 
-          {activeTab === "videos" && (
+          {activeTab === "assets" && assetsView === "videos" && (
             <SeasonVideosTab>
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
@@ -5593,6 +5675,32 @@ export default function SeasonDetailPage() {
               </div>
               </div>
             </SeasonVideosTab>
+          )}
+
+          {activeTab === "news" && (
+            <section
+              id="season-tabpanel-news"
+              role="tabpanel"
+              aria-labelledby="season-tab-news"
+            >
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                  Season News
+                </p>
+                <h3 className="mt-1 text-xl font-bold text-zinc-900">
+                  {show.name} · Season {season.season_number}
+                </h3>
+                <p className="mt-3 text-sm text-zinc-600">
+                  Season-specific curation is managed in the show-level News tab.
+                </p>
+                <Link
+                  href={buildShowAdminUrl({ showSlug: showSlugForRouting, tab: "news" }) as Route}
+                  className="mt-4 inline-flex rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Open Show News
+                </Link>
+              </div>
+            </section>
           )}
 
           {activeTab === "fandom" && (

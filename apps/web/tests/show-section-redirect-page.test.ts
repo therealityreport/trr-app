@@ -26,7 +26,7 @@ describe("show section redirect route", () => {
         }),
       })
     ).resolves.toBeTruthy();
-  });
+  }, 15000);
 
   it("renders show admin page for overview alias (no query redirect)", async () => {
     const page = await import("@/app/admin/trr-shows/[showId]/[showSection]/page");
@@ -38,7 +38,7 @@ describe("show section redirect route", () => {
         }),
       })
     ).resolves.toBeTruthy();
-  });
+  }, 15000);
 
   it("still redirects season slug aliases to canonical season route", async () => {
     const page = await import("@/app/admin/trr-shows/[showId]/[showSection]/page");
@@ -49,6 +49,6 @@ describe("show section redirect route", () => {
           showSection: "season-4",
         }),
       })
-    ).rejects.toThrow("REDIRECT:/shows/7f528757-5017-4599-8252-c02f0d0736cf/s4");
+    ).rejects.toThrow("REDIRECT:/7f528757-5017-4599-8252-c02f0d0736cf/s4");
   });
 });

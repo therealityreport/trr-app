@@ -36,7 +36,7 @@ export type ShowCastRosterMode = "episode_evidence" | "imdb_show_membership";
 export type CastPhotoFallbackMode = "none" | "bravo";
 export type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
 
-export type ShowTab = { id: TabId; label: string };
+export type ShowTab = { id: TabId; label: string; icon?: "home" };
 
 export type RefreshProgressState = {
   stage?: string | null;

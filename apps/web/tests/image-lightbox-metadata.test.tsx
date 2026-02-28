@@ -7,6 +7,7 @@ const buildMetadata = (overrides?: Partial<PhotoMetadata>): PhotoMetadata => ({
   source: "fandom",
   sourceBadgeColor: "#00d6a3",
   contentType: "PROMO",
+  isS3Mirrored: true,
   s3MirrorFileName: "4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
   sourcePageTitle: "Lisa Barlow",
   sourceUrl: "https://real-housewives.fandom.com/wiki/Lisa_Barlow",
@@ -28,6 +29,43 @@ const openMetadataPanel = () => {
 };
 
 describe("ImageLightbox metadata panel", () => {
+  it("shows S3 mirror details and badge when media is mirrored", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata()}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("S3 MIRROR").length).toBeGreaterThan(0);
+  });
+
+  it("hides S3 mirror details when media is not mirrored", () => {
+    render(
+      <ImageLightbox
+        src="https://static.wikia.nocookie.net/rhoslc/images/lisa.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          isS3Mirrored: false,
+          s3MirrorFileName: null,
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.queryByText("S3 Mirror File")).not.toBeInTheDocument();
+    expect(screen.queryByText("S3 MIRROR")).not.toBeInTheDocument();
+  });
+
   it("renders Original URL link with new-tab attributes", () => {
     render(
       <ImageLightbox

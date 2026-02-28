@@ -5,6 +5,7 @@ import {
   withAuthTransaction,
   type AuthContext,
 } from "@/lib/server/postgres";
+import { getShowByTrrShowId } from "@/lib/server/shows/shows-repository";
 import type {
   AnswerInput,
   NormalizedSurvey,
@@ -89,10 +90,16 @@ export async function getSurveyWithQuestions(
   }));
 
   const trrLink = await getLinkBySurveyId(survey.id);
+  let showIconUrl: string | null = null;
+  if (trrLink?.trr_show_id) {
+    const show = await getShowByTrrShowId(trrLink.trr_show_id);
+    showIconUrl = show?.icon_url ?? null;
+  }
 
   return {
     ...survey,
     questions: questionsWithOptions,
+    show_icon_url: showIconUrl,
     ...(trrLink ? { trr_link: trrLink } : {}),
   };
 }

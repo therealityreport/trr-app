@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCardImageUrlCandidates,
   buildDetailImageUrlCandidates,
+  getPersonPhotoCardUrlCandidates,
   getPersonPhotoOriginalUrlCandidates,
   getSeasonAssetCardUrlCandidates,
 } from "@/lib/admin/image-url-candidates";
@@ -75,6 +76,26 @@ describe("image-url-candidates", () => {
       "https://origin.example.com/original.jpg",
       "https://origin.example.com/source.jpg",
       "https://cdn.example.com/hosted.webp",
+    ]);
+  });
+
+  it("prefers uncropped/base candidates before crop_display for person gallery cards", () => {
+    const candidates = getPersonPhotoCardUrlCandidates({
+      crop_display_url: "https://cdn.example.com/crop.webp",
+      thumb_url: "https://cdn.example.com/thumb.webp",
+      display_url: "https://cdn.example.com/display.webp",
+      hosted_url: "https://cdn.example.com/hosted.webp",
+      original_url: "https://origin.example.com/original.jpg",
+      url: "https://origin.example.com/source.jpg",
+    });
+
+    expect(candidates).toEqual([
+      "https://cdn.example.com/thumb.webp",
+      "https://cdn.example.com/display.webp",
+      "https://cdn.example.com/hosted.webp",
+      "https://origin.example.com/original.jpg",
+      "https://origin.example.com/source.jpg",
+      "https://cdn.example.com/crop.webp",
     ]);
   });
 

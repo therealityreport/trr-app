@@ -43,7 +43,6 @@ describe("ReunionSeatingPredictionInput", () => {
     for (const seatCount of seatCounts) {
       for (const width of widths) {
         const layout = computeReunionSeatLayout(seatCount, width);
-        const consecutiveDistances: number[] = [];
         for (let i = 0; i < layout.centers.length; i += 1) {
           for (let j = i + 1; j < layout.centers.length; j += 1) {
             const a = layout.centers[i]!;
@@ -52,17 +51,45 @@ describe("ReunionSeatingPredictionInput", () => {
             expect(distance, `seatCount=${seatCount}, width=${width}, i=${i}, j=${j}`).toBeGreaterThan(layout.seatSize + 1);
           }
         }
-        for (let i = 1; i < layout.centers.length; i += 1) {
-          const prev = layout.centers[i - 1]!;
-          const current = layout.centers[i]!;
-          consecutiveDistances.push(Math.hypot(current.x - prev.x, current.y - prev.y));
+
+        const hostIndex = Math.floor((layout.centers.length - 1) / 2);
+        const host = layout.centers[hostIndex]!;
+        expect(Math.abs(host.x - layout.arcWidth / 2), `host not centered seatCount=${seatCount}, width=${width}`).toBeLessThanOrEqual(1);
+
+        const leftSide = layout.centers.slice(0, hostIndex);
+        const rightSide = layout.centers.slice(hostIndex + 1);
+        const sideSpacing = [leftSide, rightSide];
+
+        for (const [sideIndex, side] of sideSpacing.entries()) {
+          if (side.length < 2) continue;
+          const segmentDistances: number[] = [];
+          for (let i = 1; i < side.length; i += 1) {
+            const prev = side[i - 1]!;
+            const current = side[i]!;
+            segmentDistances.push(Math.hypot(current.x - prev.x, current.y - prev.y));
+          }
+          const averageDistance = segmentDistances.reduce((sum, value) => sum + value, 0) / segmentDistances.length;
+          const maxDeviation = Math.max(...segmentDistances.map((value) => Math.abs(value - averageDistance)));
+          expect(
+            maxDeviation,
+            `uneven side spacing side=${sideIndex} seatCount=${seatCount}, width=${width}, avg=${averageDistance.toFixed(2)}`,
+          ).toBeLessThanOrEqual(averageDistance * 0.35);
         }
-        const averageDistance = consecutiveDistances.reduce((sum, value) => sum + value, 0) / consecutiveDistances.length;
-        const maxDeviation = Math.max(...consecutiveDistances.map((value) => Math.abs(value - averageDistance)));
-        expect(
-          maxDeviation,
-          `uneven spacing seatCount=${seatCount}, width=${width}, avg=${averageDistance.toFixed(2)}`,
-        ).toBeLessThanOrEqual(averageDistance * 0.28);
+
+        if (leftSide.length > 0 && rightSide.length > 0) {
+          const leftHostDistance = Math.min(
+            ...leftSide.map((seat) => Math.hypot(host.x - seat.x, host.y - seat.y)),
+          );
+          const rightHostDistance = Math.min(
+            ...rightSide.map((seat) => Math.hypot(host.x - seat.x, host.y - seat.y)),
+          );
+          const maxHostDistance = Math.max(leftHostDistance, rightHostDistance);
+          const hostGapDelta = Math.abs(leftHostDistance - rightHostDistance);
+          expect(
+            hostGapDelta,
+            `host-to-side imbalance seatCount=${seatCount}, width=${width}`,
+          ).toBeLessThanOrEqual(maxHostDistance * 0.22);
+        }
       }
     }
   });
@@ -80,6 +107,7 @@ describe("ReunionSeatingPredictionInput", () => {
       />,
     );
 
+    expect(screen.getByTestId("reunion-host-seat")).toBeInTheDocument();
     expect(screen.getByTestId("reunion-unassigned-bank")).toBeInTheDocument();
     const chip = screen.getByTestId("reunion-token-angie");
     const seat = screen.getByTestId("fulltime-seat-0");

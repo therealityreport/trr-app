@@ -16,6 +16,7 @@ import {
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { ReunionSeatingPredictionConfig } from "@/lib/surveys/question-config-types";
 import SurveyContinueButton from "./SurveyContinueButton";
+import CastCircleToken from "./CastCircleToken";
 import {
   isCloudfrontCdnFontCandidate,
   resolveCloudfrontCdnFont,
@@ -57,6 +58,15 @@ interface SeatCenter {
   x: number;
   y: number;
 }
+
+const FIGMA_REUNION_HOST_Y_RATIO = 0.086;
+const FIGMA_REUNION_SIDE_Y_START_RATIO = 0.171;
+const FIGMA_REUNION_SIDE_Y_END_RATIO = 0.914;
+const FIGMA_REUNION_SIDE_OFFSET_START_RATIO = 0.193;
+const FIGMA_REUNION_SIDE_OFFSET_END_RATIO = 0.409;
+const FIGMA_REUNION_BASE_GROUP_WIDTH = 356.5;
+const FIGMA_REUNION_BASE_GROUP_HEIGHT = 388;
+const FIGMA_REUNION_BASE_SEAT_SIZE = 66.5;
 
 export interface ReunionSeatLayout {
   arcWidth: number;
@@ -168,94 +178,106 @@ function minSeatDistance(centers: SeatCenter[]): number {
   return min;
 }
 
-function buildUShapeSeatCenters(total: number, arcWidth: number, arcHeight: number): SeatCenter[] {
-  if (total <= 0) return [];
-  if (total === 1) {
-    return [{ x: arcWidth / 2, y: arcHeight * 0.3 }];
-  }
+function buildArcSideCenters({
+  count,
+  centerX,
+  arcWidth,
+  arcHeight,
+  direction,
+}: {
+  count: number;
+  centerX: number;
+  arcWidth: number;
+  arcHeight: number;
+  direction: "left" | "right";
+}): SeatCenter[] {
+  if (count <= 0) return [];
+  const directionSign = direction === "left" ? -1 : 1;
+  const tForIndex = (index: number) => (count === 1 ? 0.5 : index / (count - 1));
+  const rowStepRatio = (FIGMA_REUNION_SIDE_Y_END_RATIO - FIGMA_REUNION_HOST_Y_RATIO) / count;
 
-  const centerX = arcWidth * 0.5;
-  const centerY = arcHeight * 0.56;
-  const radiusX = arcWidth * 0.33;
-  const radiusY = arcHeight * 0.31;
-  const startAngle = (210 * Math.PI) / 180;
-  const endAngle = (-30 * Math.PI) / 180;
-  const samples = 480;
-
-  const sampledPoints: SeatCenter[] = [];
-  const cumulativeLengths: number[] = [];
-  let totalLength = 0;
-
-  for (let i = 0; i <= samples; i += 1) {
-    const t = i / samples;
-    const angle = startAngle + (endAngle - startAngle) * t;
-    const point: SeatCenter = {
-      x: centerX + Math.cos(angle) * radiusX,
-      y: centerY - Math.sin(angle) * radiusY,
+  return Array.from({ length: count }, (_, index) => {
+    const t = tForIndex(index);
+    // Keep each row at a constant vertical step from host to bottom row.
+    const yRatio = FIGMA_REUNION_HOST_Y_RATIO + rowStepRatio * (index + 1);
+    const offsetRatio =
+      FIGMA_REUNION_SIDE_OFFSET_START_RATIO
+      + (FIGMA_REUNION_SIDE_OFFSET_END_RATIO - FIGMA_REUNION_SIDE_OFFSET_START_RATIO) * t;
+    return {
+      x: centerX + directionSign * arcWidth * offsetRatio,
+      y: arcHeight * clampNumber(yRatio, FIGMA_REUNION_SIDE_Y_START_RATIO, FIGMA_REUNION_SIDE_Y_END_RATIO),
     };
-    sampledPoints.push(point);
-
-    if (i === 0) {
-      cumulativeLengths.push(0);
-      continue;
-    }
-
-    const previous = sampledPoints[i - 1]!;
-    totalLength += Math.hypot(point.x - previous.x, point.y - previous.y);
-    cumulativeLengths.push(totalLength);
-  }
-
-  const centers: SeatCenter[] = [];
-  for (let seatIndex = 0; seatIndex < total; seatIndex += 1) {
-    const targetLength = (totalLength * seatIndex) / (total - 1);
-    let segmentIndex = 1;
-    while (segmentIndex < cumulativeLengths.length && cumulativeLengths[segmentIndex]! < targetLength) {
-      segmentIndex += 1;
-    }
-
-    const previousLength = cumulativeLengths[segmentIndex - 1] ?? 0;
-    const nextLength = cumulativeLengths[segmentIndex] ?? previousLength;
-    const distance = nextLength - previousLength;
-    const blend = distance <= 0 ? 0 : (targetLength - previousLength) / distance;
-    const previousPoint = sampledPoints[segmentIndex - 1] ?? sampledPoints[0]!;
-    const nextPoint = sampledPoints[segmentIndex] ?? previousPoint;
-
-    centers.push({
-      x: previousPoint.x + (nextPoint.x - previousPoint.x) * blend,
-      y: previousPoint.y + (nextPoint.y - previousPoint.y) * blend,
-    });
-  }
-
-  return centers;
+  });
 }
 
-export function computeReunionSeatLayout(seatCount: number, containerWidth: number): ReunionSeatLayout {
-  const progress = clampNumber((containerWidth - 320) / (1180 - 320), 0, 1);
-  const arcWidth = Math.round(clampNumber(containerWidth - 30, 292, 760));
+function buildReunionCenters(
+  leftCount: number,
+  rightCount: number,
+  arcWidth: number,
+  arcHeight: number,
+): SeatCenter[] {
+  const centerX = arcWidth * 0.5;
+  const leftCenters = buildArcSideCenters({
+    count: leftCount,
+    centerX,
+    arcWidth,
+    arcHeight,
+    direction: "left",
+  });
+  const rightCenters = buildArcSideCenters({
+    count: rightCount,
+    centerX,
+    arcWidth,
+    arcHeight,
+    direction: "right",
+  });
+  const hostCenter: SeatCenter = { x: centerX, y: arcHeight * FIGMA_REUNION_HOST_Y_RATIO };
+  return [...leftCenters, hostCenter, ...rightCenters];
+}
 
+export function computeReunionSeatLayout(
+  seatCount: number,
+  containerWidth: number,
+  distribution?: { leftCount: number; rightCount: number },
+): ReunionSeatLayout {
+  const progress = clampNumber((containerWidth - 320) / (1280 - 320), 0, 1);
+  const arcWidth = Math.round(clampNumber(containerWidth - 24, 292, 760));
+
+  const totalSideSeats = Math.max(0, seatCount - 1);
+  const leftCount = distribution
+    ? clampNumber(distribution.leftCount, 0, totalSideSeats)
+    : Math.floor(totalSideSeats / 2);
+  const rightCount = distribution
+    ? clampNumber(distribution.rightCount, 0, totalSideSeats)
+    : (totalSideSeats - leftCount);
+
+  const figmaHeightRatio = FIGMA_REUNION_BASE_GROUP_HEIGHT / FIGMA_REUNION_BASE_GROUP_WIDTH;
+  const figmaSeatRatio = FIGMA_REUNION_BASE_SEAT_SIZE / FIGMA_REUNION_BASE_GROUP_WIDTH;
   let arcHeight = Math.round(
-    clampNumber(360 + progress * 220 + Math.max(0, seatCount - 7) * 18, 370, 760),
+    clampNumber(arcWidth * figmaHeightRatio + Math.max(0, seatCount - 11) * (12 + progress * 8), 280, 620),
   );
-  const desiredSeatSize = Math.round(clampNumber(72 + progress * 52, 64, 132));
-  const desiredGap = Math.round(clampNumber(8 + progress * 5, 8, 14));
+  const desiredSeatSize = Math.round(
+    clampNumber(arcWidth * figmaSeatRatio, 48, 92),
+  );
+  const desiredGap = Math.round(clampNumber(8 + progress * 4, 8, 14));
 
-  let centers = buildUShapeSeatCenters(seatCount, arcWidth, arcHeight);
+  let centers = buildReunionCenters(leftCount, rightCount, arcWidth, arcHeight);
   let maxSeatFromSpacing = Math.floor(minSeatDistance(centers) - desiredGap);
   let seatSize = Math.min(desiredSeatSize, maxSeatFromSpacing);
 
   let attempts = 0;
-  while (seatSize < 56 && arcHeight < 760 && attempts < 4) {
-    arcHeight = Math.round(clampNumber(arcHeight + 56, 370, 760));
-    centers = buildUShapeSeatCenters(seatCount, arcWidth, arcHeight);
+  while (seatSize < 42 && arcHeight < 620 && attempts < 6) {
+    arcHeight = Math.round(clampNumber(arcHeight + 28, 250, 620));
+    centers = buildReunionCenters(leftCount, rightCount, arcWidth, arcHeight);
     maxSeatFromSpacing = Math.floor(minSeatDistance(centers) - desiredGap);
     seatSize = Math.min(desiredSeatSize, maxSeatFromSpacing);
     attempts += 1;
   }
 
-  seatSize = Math.round(clampNumber(seatSize, 50, 132));
+  seatSize = Math.round(clampNumber(seatSize, 36, 92));
   const seatStroke = Math.max(2, Math.round(seatSize * 0.04));
-  const hostSize = Math.round(clampNumber(seatSize * 1.08, 70, 150));
-  const hostCenterY = Math.round(clampNumber(arcHeight * 0.77, hostSize * 0.72, arcHeight - hostSize * 0.5));
+  const hostSize = seatSize;
+  const hostCenterY = centers[Math.max(0, leftCount)]?.y ?? Math.round(arcHeight * 0.28);
 
   return {
     arcWidth,
@@ -292,11 +314,12 @@ function parseFullTimeSeatId(id: string): number | null {
   return Number.isFinite(raw) ? raw : null;
 }
 
-function DraggableCastChip({
+function DraggableCastCircleToken({
   option,
   kind,
   disabled,
   active,
+  sizePx = 56,
   testId,
   onClick,
 }: {
@@ -304,6 +327,7 @@ function DraggableCastChip({
   kind: DragToken["kind"];
   disabled?: boolean;
   active?: boolean;
+  sizePx?: number;
   testId?: string;
   onClick?: () => void;
 }) {
@@ -316,26 +340,25 @@ function DraggableCastChip({
   const style: React.CSSProperties = {
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     opacity: isDragging ? 0.45 : 1,
-    cursor: disabled ? "not-allowed" : "grab",
-    borderColor: active ? "#111111" : "#A1A1AA",
-    backgroundColor: active ? "#111111" : "#F5F5F5",
-    color: active ? "#FFFFFF" : "#111111",
   };
 
   return (
-    <button
+    <CastCircleToken
       ref={setNodeRef}
-      type="button"
       onClick={onClick}
+      label={option.label}
+      img={option.imagePath}
+      selected={Boolean(active)}
+      sizeVariant="custom"
+      sizePx={sizePx}
+      draggable={!disabled}
+      disabled={disabled}
       {...listeners}
       {...attributes}
-      className="inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition"
       style={style}
       aria-label={`Drag ${option.label}`}
       data-testid={testId}
-    >
-      {option.label}
-    </button>
+    />
   );
 }
 
@@ -623,10 +646,42 @@ export default function ReunionSeatingPredictionInput({
     );
   }, [disabled, question.id, stage]);
 
-  const seatCount = fullTime.length + (hasSingleFriend ? 2 : 0);
+  const includeFriendEndSeats = hasSingleFriend && stage !== "full_time";
+  // Keep arc geometry symmetric: round odd counts up per side, then hide the extra slot.
+  const fullTimeSideSlotCount = Math.ceil(fullTime.length / 2);
+  const leftSeatCount = fullTimeSideSlotCount + (includeFriendEndSeats ? 1 : 0);
+  const rightSeatCount = fullTimeSideSlotCount + (includeFriendEndSeats ? 1 : 0);
+  const arcSeatCount = leftSeatCount + 1 + rightSeatCount;
+  const seatDescriptors = React.useMemo(() => {
+    const descriptors: Array<
+      | { kind: "host" }
+      | { kind: "friend"; side: "left" | "right" }
+      | { kind: "full_time"; fullTimeIndex: number }
+      | { kind: "hidden_full_time" }
+    > = [];
+    if (includeFriendEndSeats) descriptors.push({ kind: "friend", side: "left" });
+    for (let index = 0; index < fullTimeSideSlotCount; index += 1) {
+      descriptors.push({ kind: "full_time", fullTimeIndex: index });
+    }
+    descriptors.push({ kind: "host" });
+    for (let slotIndex = 0; slotIndex < fullTimeSideSlotCount; slotIndex += 1) {
+      const fullTimeIndex = fullTimeSideSlotCount + slotIndex;
+      if (fullTimeIndex < fullTime.length) {
+        descriptors.push({ kind: "full_time", fullTimeIndex });
+      } else {
+        descriptors.push({ kind: "hidden_full_time" });
+      }
+    }
+    if (includeFriendEndSeats) descriptors.push({ kind: "friend", side: "right" });
+    return descriptors;
+  }, [includeFriendEndSeats, fullTime.length, fullTimeSideSlotCount]);
+
   const layout = React.useMemo(
-    () => computeReunionSeatLayout(seatCount, containerWidth),
-    [containerWidth, seatCount],
+    () => computeReunionSeatLayout(arcSeatCount, containerWidth, {
+      leftCount: leftSeatCount,
+      rightCount: rightSeatCount,
+    }),
+    [arcSeatCount, containerWidth, leftSeatCount, rightSeatCount],
   );
 
   const progress = clampNumber((containerWidth - 320) / (1180 - 320), 0, 1);
@@ -662,6 +717,7 @@ export default function ReunionSeatingPredictionInput({
     : 0.08).toFixed(4);
 
   const panelRadius = Math.round(16 + progress * 8);
+  const bankTokenSize = Math.round(clampNumber(48 + progress * 8, 48, 56));
   const optionById = React.useMemo(
     () => new Map(sortedOptions.map((option) => [option.id, option])),
     [sortedOptions],
@@ -678,7 +734,9 @@ export default function ReunionSeatingPredictionInput({
     width: `${layout.seatSize}px`,
     height: `${layout.seatSize}px`,
     borderRadius: "9999px",
-    border: `${layout.seatStroke}px solid #000000`,
+    borderWidth: `${layout.seatStroke}px`,
+    borderStyle: "solid",
+    borderColor: "#000000",
     backgroundColor: "#F8F8F8",
     overflow: "hidden",
     left: "0px",
@@ -726,11 +784,12 @@ export default function ReunionSeatingPredictionInput({
         onDragEnd={handleDragEnd}
       >
         <div
-          className="relative mx-auto mt-4"
+          className="relative mx-auto mt-3"
           style={{ width: `${layout.arcWidth}px`, height: `${layout.arcHeight}px` }}
           data-testid="reunion-seating-arc"
         >
           {layout.centers.map((center, seatIdx) => {
+            const descriptor = seatDescriptors[seatIdx];
             const baseSeatStyle: React.CSSProperties = {
               ...seatTokenStyle,
               left: `${center.x}px`,
@@ -738,11 +797,41 @@ export default function ReunionSeatingPredictionInput({
               transform: "translate(-50%, -50%)",
             };
 
-            const isFriendLeftSeat = hasSingleFriend && seatIdx === 0;
-            const isFriendRightSeat = hasSingleFriend && seatIdx === seatCount - 1;
+            if (!descriptor) return null;
+            if (descriptor.kind === "hidden_full_time") return null;
 
-            if (isFriendLeftSeat || isFriendRightSeat) {
-              const side = isFriendLeftSeat ? "left" : "right";
+            if (descriptor.kind === "host") {
+              return (
+                <div
+                  key="host-seat"
+                  className="absolute rounded-full border-[3px] border-black bg-white"
+                  style={{
+                    ...baseSeatStyle,
+                    width: `${layout.hostSize}px`,
+                    height: `${layout.hostSize}px`,
+                  }}
+                  aria-label={hostName}
+                  data-testid="reunion-host-seat"
+                >
+                  {hostImagePath ? (
+                    <Image
+                      src={hostImagePath}
+                      alt={hostName}
+                      fill
+                      unoptimized={hostImagePath.startsWith("http")}
+                      className="object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-lg font-bold text-zinc-800">
+                      AC
+                    </span>
+                  )}
+                </div>
+              );
+            }
+
+            if (descriptor.kind === "friend") {
+              const side = descriptor.side;
               const active = friendSide === side && singleFriend;
               return (
                 <DroppableSeat
@@ -779,7 +868,7 @@ export default function ReunionSeatingPredictionInput({
               );
             }
 
-            const fullTimeIdx = seatIdx - (hasSingleFriend ? 1 : 0);
+            const fullTimeIdx = descriptor.fullTimeIndex;
             const occupantId = fullTimeOrder[fullTimeIdx] ?? "";
             const occupant = occupantId ? optionById.get(occupantId) : undefined;
             return (
@@ -807,37 +896,9 @@ export default function ReunionSeatingPredictionInput({
               </DroppableSeat>
             );
           })}
-
-          <div
-            className="absolute left-1/2 flex items-center justify-center rounded-full border-[4px] border-black bg-white"
-            style={{
-              width: `${layout.hostSize}px`,
-              height: `${layout.hostSize}px`,
-              top: `${layout.hostCenterY}px`,
-              transform: "translate(-50%, -50%)",
-              overflow: "hidden",
-            }}
-            aria-label={hostName}
-            data-testid="reunion-host"
-          >
-            {hostImagePath ? (
-              <Image
-                src={hostImagePath}
-                alt={hostName}
-                fill
-                unoptimized={hostImagePath.startsWith("http")}
-                className="object-cover"
-              />
-            ) : (
-              <span className="text-lg font-bold text-zinc-800">AC</span>
-            )}
-          </div>
         </div>
 
-        <div
-          className="mx-auto mt-5 max-w-[760px] rounded-2xl border border-zinc-300/80 bg-zinc-100/70 px-4 py-4"
-          data-testid="reunion-unassigned-bank"
-        >
+        <div className="mx-auto mt-3 w-full max-w-[760px]" data-testid="reunion-unassigned-bank">
           <p
             className="text-center text-xs font-semibold uppercase text-zinc-600"
             style={{ letterSpacing: `${optionLetterSpacing}em` }}
@@ -847,13 +908,18 @@ export default function ReunionSeatingPredictionInput({
 
           {stage === "friend_side" && singleFriend ? (
             <div className="mt-3 flex justify-center">
-              <FriendBank singleFriend={singleFriend} disabled={disabled || !fullTimeComplete} />
+              <FriendBank
+                singleFriend={singleFriend}
+                disabled={disabled || !fullTimeComplete}
+                tokenSize={bankTokenSize}
+              />
             </div>
           ) : (
             <FullTimeBank
               options={unassignedFullTime}
               selectedId={selectedFullTimeId}
               disabled={disabled}
+              tokenSize={bankTokenSize}
               onSelect={(optionId) => setSelectedFullTimeId((prev) => (prev === optionId ? null : optionId))}
             />
           )}
@@ -905,11 +971,13 @@ function FullTimeBank({
   options,
   selectedId,
   disabled,
+  tokenSize,
   onSelect,
 }: {
   options: SeatingOption[];
   selectedId: string | null;
   disabled: boolean;
+  tokenSize: number;
   onSelect: (optionId: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "fulltime-bank" });
@@ -917,23 +985,24 @@ function FullTimeBank({
   return (
     <div
       ref={setNodeRef}
-      className="mt-3 flex flex-wrap justify-center gap-2.5 rounded-xl border border-transparent p-2 transition"
-      style={{ borderColor: isOver ? "#111111" : "transparent" }}
+      className="mt-2 flex gap-3 overflow-x-auto px-1 py-2 transition sm:flex-wrap sm:justify-center sm:overflow-visible"
+      style={{ outline: isOver ? "2px dashed rgba(17,17,17,0.45)" : "2px solid transparent", outlineOffset: 2 }}
       data-testid="fulltime-bank"
     >
       {options.map((option) => (
-        <DraggableCastChip
+        <DraggableCastCircleToken
           key={option.id}
           option={option}
           kind="full_time"
           disabled={disabled}
           active={selectedId === option.id}
+          sizePx={tokenSize}
           onClick={() => onSelect(option.id)}
           testId={`reunion-token-${option.id}`}
         />
       ))}
       {!disabled && options.length > 0 && (
-        <span className="sr-only">Drag cast chips to the reunion seats</span>
+        <span className="sr-only">Drag cast circles to the reunion seats</span>
       )}
     </div>
   );
@@ -942,23 +1011,26 @@ function FullTimeBank({
 function FriendBank({
   singleFriend,
   disabled,
+  tokenSize,
 }: {
   singleFriend: SeatingOption;
   disabled: boolean;
+  tokenSize: number;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "friend-bank" });
 
   return (
     <div
       ref={setNodeRef}
-      className="rounded-xl border p-2 transition"
-      style={{ borderColor: isOver ? "#111111" : "transparent" }}
+      className="flex gap-3 overflow-x-auto px-1 py-2 transition sm:justify-center sm:overflow-visible"
+      style={{ outline: isOver ? "2px dashed rgba(17,17,17,0.45)" : "2px solid transparent", outlineOffset: 2 }}
       data-testid="friend-bank"
     >
-      <DraggableCastChip
+      <DraggableCastCircleToken
         option={singleFriend}
         kind="friend"
         disabled={disabled}
+        sizePx={tokenSize}
         testId={`reunion-friend-token-${singleFriend.id}`}
       />
     </div>

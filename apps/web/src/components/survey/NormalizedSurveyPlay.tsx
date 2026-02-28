@@ -434,6 +434,7 @@ export default function NormalizedSurveyPlay({
                 question={question}
                 value={answers[question.id] ?? null}
                 onChange={(value) => handleAnswerChange(question.id, value)}
+                showIconUrl={survey.show_icon_url ?? null}
               />
               {(() => {
                 const hasInlineContinue =

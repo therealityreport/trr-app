@@ -3,9 +3,10 @@ import { NextRequest } from "next/server";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, resolveAdminShowIdMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  resolveAdminShowIdMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -16,6 +17,10 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/admin/resolve-show-id", () => ({
+  resolveAdminShowId: resolveAdminShowIdMock,
+}));
+
 import { POST } from "@/app/api/admin/trr-api/shows/[showId]/roles/route";
 import { PATCH } from "@/app/api/admin/trr-api/shows/[showId]/roles/[roleId]/route";
 
@@ -23,9 +28,11 @@ describe("show role mutation proxy routes", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    resolveAdminShowIdMock.mockReset();
     vi.restoreAllMocks();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
+    resolveAdminShowIdMock.mockResolvedValue("00000000-0000-0000-0000-000000000001");
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 

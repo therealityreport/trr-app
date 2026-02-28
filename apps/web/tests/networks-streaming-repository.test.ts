@@ -89,4 +89,77 @@ describe("networks-streaming repository detail", () => {
     const queryTexts = queryMock.mock.calls.map((call: unknown[]) => String(call[0] ?? ""));
     expect(queryTexts.some((sql) => sql.includes("FROM admin.network_streaming_logo_assets"))).toBe(false);
   });
+
+  it("returns detail for production company entity type", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    queryMock.mockImplementation(async (text: string) => {
+      if (text.includes("target_entity")) {
+        return {
+          rows: [
+            {
+              entity_type: "production",
+              name_key: "warner bros. television",
+              display_name: "Warner Bros. Television",
+              entity_slug: "warner-bros-television",
+              available_show_count: 12,
+              added_show_count: 5,
+              core_entity_id: "1957",
+              core_origin_country: "US",
+              core_display_priority: null,
+              core_tmdb_logo_path: "/wb-logo.png",
+              core_logo_path: null,
+              core_hosted_logo_key: null,
+              core_hosted_logo_url: "https://cdn.example.com/wb.png",
+              core_hosted_logo_black_url: null,
+              core_hosted_logo_white_url: null,
+              core_wikidata_id: "Q1043427",
+              core_wikipedia_url: "https://en.wikipedia.org/wiki/Warner_Bros._Television",
+              core_wikimedia_logo_file: null,
+              core_link_enriched_at: null,
+              core_link_enrichment_source: null,
+              core_facebook_id: null,
+              core_instagram_id: null,
+              core_twitter_id: null,
+              core_tiktok_id: null,
+              override_id: null,
+              override_display_name_override: null,
+              override_wikidata_id_override: null,
+              override_wikipedia_url_override: null,
+              override_logo_source_urls_override: [],
+              override_source_priority_override: [],
+              override_aliases_override: [],
+              override_notes: null,
+              override_is_active: false,
+              override_updated_by: null,
+              override_updated_at: null,
+              completion_resolution_status: null,
+              completion_resolution_reason: null,
+              completion_last_attempt_at: null,
+            },
+          ],
+        };
+      }
+      if (text.includes("entity_show_source")) {
+        return {
+          rows: [{ trr_show_id: "abc-123", show_name: "Test Show", canonical_slug: "test-show", poster_url: null }],
+        };
+      }
+      if (text.includes("to_regclass")) {
+        return { rows: [{ exists: false }] };
+      }
+      throw new Error(`Unexpected query: ${text.slice(0, 120)}`);
+    });
+
+    const result = await getNetworkStreamingDetail({
+      entity_type: "production",
+      entity_slug: "warner-bros-television",
+      show_scope: "added",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.entity_type).toBe("production");
+    expect(result?.entity_key).toBe("warner bros. television");
+    expect(result?.shows).toHaveLength(1);
+    expect(result?.core.entity_id).toBe("1957");
+  });
 });

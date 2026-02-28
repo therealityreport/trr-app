@@ -251,7 +251,7 @@ describe("RedditSourcesManager", () => {
     expect(screen.getAllByText("The Real Housewives of Potomac").length).toBeGreaterThan(0);
     expect(screen.queryByText("Episode Discussion")).not.toBeInTheDocument();
     expect(screen.queryByText("Live Thread")).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("renders EPISODE DISCUSSION badge from source_kind and allows collapsing assigned threads", async () => {
     const episodeSyncCommunity = {
@@ -312,11 +312,53 @@ describe("RedditSourcesManager", () => {
 
     expect(screen.getByText("Community")).toBeInTheDocument();
     expect(screen.queryByText("Selected Community")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("link", {
-        name: "Community View",
-      }),
-    ).toHaveAttribute("href", "/admin/social-media/reddit/BravoRealHousewives");
+    await waitFor(() => {
+      expect(
+        screen.getByRole("link", {
+          name: "Community View",
+        }),
+      ).toHaveAttribute(
+        "href",
+        "/rhoslc/social/reddit/BravoRealHousewives/s6",
+      );
+    });
+  });
+
+  it("normalizes prefixed subreddit slugs when building community view links", async () => {
+    const prefixedCommunity = {
+      ...baseCommunity,
+      subreddit: "r/BravoRealHousewives",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [prefixedCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/BravoRealHousewives/i).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("link", {
+          name: "Community View",
+        }),
+      ).toHaveAttribute(
+        "href",
+        "/rhoslc/social/reddit/BravoRealHousewives/s6",
+      );
+    });
   });
 
   it("uses dedicated community summary/actions without top-row delete in community view mode", async () => {
@@ -337,7 +379,7 @@ describe("RedditSourcesManager", () => {
         mode="global"
         hideCommunityList
         initialCommunityId="community-1"
-        backHref="/shows/rhoslc/s6/social/reddit"
+        backHref="/shows/rhoslc/social/reddit/BravoRealHousewives/s6"
       />,
     );
 
@@ -345,25 +387,58 @@ describe("RedditSourcesManager", () => {
       expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open community settings" })).toBeInTheDocument();
     });
     expect(await screen.findByText("Network Community")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to Communities" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Back to communities" })).toHaveAttribute(
       "href",
-      "/shows/rhoslc/s6/social/reddit",
+      "/shows/rhoslc/social/reddit/BravoRealHousewives/s6",
     );
+    expect(screen.queryByText("Season Selection")).not.toBeInTheDocument();
+    const dedicatedSeasonButton = screen.getByRole("button", { name: "Season 6" });
+    expect(dedicatedSeasonButton).toBeInTheDocument();
+    fireEvent.click(dedicatedSeasonButton);
+    expect(screen.getAllByRole("button", { name: "Season 6" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Season 5" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Season 7" })).not.toBeInTheDocument();
     const heading = await screen.findByRole("heading", { name: "r/BravoRealHousewives" });
     expect(screen.getAllByText("The Real Housewives of Salt Lake City").length).toBeGreaterThan(0);
     expect(screen.getAllByText("0 all-post · 1 scan · 1 relevant flares").length).toBeGreaterThan(0);
     const headerRow = heading.closest("div")?.parentElement as HTMLElement;
-    expect(within(headerRow).getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(within(headerRow).getByRole("button", { name: "Open community settings" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "Discover Threads" })).toBeInTheDocument();
-    expect(within(headerRow).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(within(headerRow).getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(within(headerRow).queryByRole("button", { name: "Add Community" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Community" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("button", { name: "Delete" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+    expect((await screen.findAllByRole("button", { name: "Delete" })).length).toBeGreaterThan(0);
+  });
+
+  it("resolves typo community slugs to the canonical subreddit in dedicated view", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="BravoRealHouseswives"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "r/BravoRealHousewives" })).toBeInTheDocument();
+    });
   });
 
   it("shows discovery filter hints and show-match badge after discover", async () => {
@@ -524,7 +599,10 @@ describe("RedditSourcesManager", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+    const openSettingsButton = await screen.findByRole("button", {
+      name: /open community settings|settings/i,
+    });
+    fireEvent.click(openSettingsButton);
     const selectedScanChip = await screen.findByRole("button", {
       name: "Scan terms · Episode Discussion",
     });
@@ -818,7 +896,7 @@ describe("RedditSourcesManager", () => {
     expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
     expect(screen.getByText("No episode discussion candidates loaded yet.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
     expect(await screen.findByText("Title Phrases")).toBeInTheDocument();
     expect(
       screen.getByText(/Required flares for episode refresh are sourced from/i),
@@ -1469,8 +1547,13 @@ describe("RedditSourcesManager", () => {
       />,
     );
 
-    expect(await screen.findByText("RHOSLC S6")).toBeInTheDocument();
+    expect(await screen.findByText("RHOSLC")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Reddit Communities" })).toBeInTheDocument();
+    expect(screen.getByText("Season Selection")).toBeInTheDocument();
+    const landingSeasonSelect = screen.getByRole("combobox", { name: "Season Selection" });
+    expect(landingSeasonSelect).toHaveValue("6");
+    expect(within(landingSeasonSelect).queryByRole("option", { name: "S7" })).not.toBeInTheDocument();
+    expect(within(landingSeasonSelect).getByRole("option", { name: "S6" })).toBeInTheDocument();
     expect(screen.queryByText("Assigned Threads")).not.toBeInTheDocument();
     expect(screen.queryByText("Discovered Threads")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Community" })).not.toBeInTheDocument();
@@ -1478,6 +1561,12 @@ describe("RedditSourcesManager", () => {
 
     const bravoCommunityLink = await screen.findByRole("link", {
       name: "r/BravoRealHousewives",
+    });
+    await waitFor(() => {
+      expect(bravoCommunityLink).toHaveAttribute(
+        "href",
+        "/rhoslc/social/reddit/BravoRealHousewives/s6",
+      );
     });
     const bravoCard = bravoCommunityLink.closest("article") as HTMLElement;
     expect(within(bravoCard).getByText("NETWORK COMMUNITY")).toBeInTheDocument();

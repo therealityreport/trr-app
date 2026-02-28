@@ -7,7 +7,7 @@ type SeasonPageTabId =
   | "overview"
   | "episodes"
   | "assets"
-  | "videos"
+  | "news"
   | "fandom"
   | "cast"
   | "surveys"

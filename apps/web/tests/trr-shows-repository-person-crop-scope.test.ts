@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 describe("trr shows repository person crop scope", () => {
-  it("uses media_links context thumbnail_crop as source-of-truth for person gallery crop fields", () => {
+  it("uses media_links context thumbnail_crop first, then metadata fallback for person gallery crop fields", () => {
     const filePath = path.resolve(
       __dirname,
       "../src/lib/server/trr-api/trr-shows-repository.ts",
@@ -11,7 +11,7 @@ describe("trr shows repository person crop scope", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(/const contextThumbnailCrop =[\s\S]*?thumbnail_crop/);
-    expect(contents).toMatch(/const thumbnailCropFields = toThumbnailCropFields\(contextThumbnailCrop\);/);
-    expect(contents).not.toMatch(/contextThumbnailCrop \?\? metadataThumbnailCrop/);
+    expect(contents).toMatch(/const metadataThumbnailCrop =[\s\S]*?thumbnail_crop/);
+    expect(contents).toMatch(/const effectiveThumbnailCropFields =[\s\S]*?toThumbnailCropFields\(metadataThumbnailCrop\)/);
   });
 });

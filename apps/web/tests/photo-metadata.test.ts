@@ -326,6 +326,149 @@ describe("mapPhotoToMetadata", () => {
     expect(result.people).toEqual(["Meredith Marks"]);
   });
 
+  it("uses IMDb tag payload for people and titles when flattened fields are missing", () => {
+    const result = mapPhotoToMetadata({
+      id: "imdb-tags-photo",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: "https://example.com/imdb.jpg",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: {
+        tags: {
+          people: [
+            { imdb_id: "nm1", name: "Andy Cohen" },
+            { imdb_id: "nm2", name: "Wes O'Dell" },
+          ],
+          titles: [{ imdb_id: "tt1", title: "Watch What Happens Live" }],
+        },
+      },
+      fetched_at: null,
+    });
+
+    expect(result.people).toEqual(["Andy Cohen", "Wes O'Dell"]);
+    expect(result.titles).toEqual(["Watch What Happens Live"]);
+    expect(result.peopleCount).toBe(2);
+  });
+
+  it("derives IMDb people and title from caption when tag payload is missing", () => {
+    const result = mapPhotoToMetadata({
+      id: "imdb-caption-photo",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: "https://example.com/imdb2.jpg",
+      caption: "Andy Cohen , Wes O'Dell , and Fraser Olender in Fraser Olender & Wes O'Dell (2022)",
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+
+    expect(result.people).toEqual(["Andy Cohen", "Wes O'Dell", "Fraser Olender"]);
+    expect(result.titles).toEqual(["Fraser Olender & Wes O'Dell"]);
+  });
+
+  it("uses row source_page_url plus IMDb defaults for sparse legacy rows", () => {
+    const result = mapPhotoToMetadata({
+      id: "imdb-source-page-fallback",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/M/MV5BTEST._V1_.jpg",
+      hosted_url: "https://cdn.example.com/imdb-fallback.jpg",
+      source_page_url: "https://www.imdb.com/name/nm0000001/mediaviewer/rm123456789/",
+      caption: "Andy Cohen in Watch What Happens Live (2022)",
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: {
+        imdb_person_id: "nm0000001",
+        imdb_viewer_id: "rm123456789",
+      },
+      fetched_at: null,
+    });
+
+    expect(result.originalSourcePageUrl).toBe(
+      "https://www.imdb.com/name/nm0000001/mediaviewer/rm123456789/"
+    );
+    expect(result.originalSourceFileUrl).toBe("https://m.media-amazon.com/images/M/MV5BTEST._V1_.jpg");
+    expect(result.sourceVariant).toBe("imdb_person_gallery");
+    expect(result.sourceLogo).toBe("IMDb");
+    expect(result.sourcePageTitle).toBe("Watch What Happens Live");
+    expect(result.assetName).toBe("Watch What Happens Live");
+  });
+
+  it("derives IMDb source page URL from metadata IDs and source file URL from tag payload", () => {
+    const result = mapPhotoToMetadata({
+      id: "imdb-derived-source-url",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: "https://cdn.example.com/imdb-derived.jpg",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: {
+        imdb_person_id: "nm0000001",
+        imdb_viewer_id: "rm555000111",
+        tags: {
+          image_url: "https://m.media-amazon.com/images/M/MV5BDERIVED._V1_.jpg",
+        },
+      },
+      fetched_at: null,
+    });
+
+    expect(result.originalSourcePageUrl).toBe(
+      "https://www.imdb.com/name/nm0000001/mediaviewer/rm555000111/"
+    );
+    expect(result.originalSourceFileUrl).toBe(
+      "https://m.media-amazon.com/images/M/MV5BDERIVED._V1_.jpg"
+    );
+  });
+
+  it("derives IMDb source page URL from mediaviewer path metadata when full URL is missing", () => {
+    const result = mapPhotoToMetadata({
+      id: "imdb-mv-path-fallback",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/M/MV5BPATH._V1_.jpg",
+      hosted_url: "https://cdn.example.com/imdb-path.jpg",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: {
+        mediaviewer_url_path: "/name/nm0169212/mediaviewer/rm1344200961/?ref_=nmmi_mi_23_2",
+      },
+      fetched_at: null,
+    });
+
+    expect(result.originalSourcePageUrl).toBe(
+      "https://www.imdb.com/name/nm0169212/mediaviewer/rm1344200961/"
+    );
+    expect(result.originalSourceFileUrl).toBe("https://m.media-amazon.com/images/M/MV5BPATH._V1_.jpg");
+  });
+
   it("derives s3 mirror filename from hosted URL", () => {
     const result = mapPhotoToMetadata({
       id: "mirror-from-url",
@@ -368,6 +511,28 @@ describe("mapPhotoToMetadata", () => {
     });
 
     expect(result.s3MirrorFileName).toBe("cast-portrait.jpg");
+  });
+
+  it("does not infer s3 mirror filename from source URL when hosted mirror is missing", () => {
+    const result = mapPhotoToMetadata({
+      id: "non-mirrored-source",
+      person_id: "p1",
+      source: "web_scrape:fandom.com",
+      url: "https://static.wikia.nocookie.net/rhoslc/images/1/1b/lisa.jpg",
+      hosted_url: null,
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+
+    expect(result.isS3Mirrored).toBe(false);
+    expect(result.s3MirrorFileName).toBeNull();
   });
 
   it("sets originalImageUrl from true source URL instead of hosted mirror URL", () => {
@@ -414,6 +579,30 @@ describe("mapPhotoToMetadata", () => {
     });
 
     expect(result.originalImageUrl).toBeNull();
+  });
+
+  it("does not treat original_url as hosted when resolving original source file URL", () => {
+    const result = mapPhotoToMetadata({
+      id: "original-url-not-hosted",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/M/MV5BTRUE._V1_.jpg",
+      hosted_url: "https://d111111abcdef8.cloudfront.net/media/aa/bb.webp",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      original_url: "https://m.media-amazon.com/images/M/MV5BTRUE._V1_.jpg",
+      fetched_at: null,
+    });
+
+    expect(result.originalSourceFileUrl).toBe(
+      "https://m.media-amazon.com/images/M/MV5BTRUE._V1_.jpg"
+    );
   });
 });
 
@@ -513,6 +702,35 @@ describe("mapSeasonAssetToMetadata", () => {
     );
 
     expect(meta.s3MirrorFileName).toBe("poster-main.png");
+  });
+
+  it("does not infer season asset s3 mirror filename from non-hosted source fields", () => {
+    const meta = mapSeasonAssetToMetadata(
+      {
+        id: "a3-source-only",
+        type: "season",
+        source: "web_scrape:fandom.com",
+        kind: "other",
+        hosted_url: null,
+        source_url: "https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg",
+        original_url: "https://fandom.com/wiki/lisa",
+        width: null,
+        height: null,
+        caption: null,
+        season_number: 4,
+        person_name: null,
+        metadata: null,
+        fetched_at: null,
+        created_at: null,
+        ingest_status: null,
+        hosted_content_type: null,
+      } as unknown as Parameters<typeof mapSeasonAssetToMetadata>[0],
+      4,
+      "RHOSLC",
+    );
+
+    expect(meta.isS3Mirrored).toBe(false);
+    expect(meta.s3MirrorFileName).toBeNull();
   });
 
   it("prefers source_url as originalImageUrl for imported season assets", () => {

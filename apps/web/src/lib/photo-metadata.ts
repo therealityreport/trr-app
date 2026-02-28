@@ -488,6 +488,48 @@ const inferImdbEpisodeStillFromCaption = (value: string | null | undefined): boo
   return /\bin\s+.+\(\d{4}\)\s*$/i.test(text);
 };
 
+const parseImdbCaptionEntities = (
+  value: string | null | undefined
+): { people: string[]; titles: string[] } => {
+  if (!value) return { people: [], titles: [] };
+  const text = value.trim().replace(/\s+/g, " ");
+  if (!text) return { people: [], titles: [] };
+
+  const titles: string[] = [];
+  const people: string[] = [];
+  const seenPeople = new Set<string>();
+  const seenTitles = new Set<string>();
+  const titleMatch = text.match(/\bin\s+(.+?)\s*\((\d{4})\)\s*$/i);
+  if (!titleMatch) {
+    return { people: [], titles: [] };
+  }
+
+  const title = titleMatch[1].trim().replace(/^["']+|["']+$/g, "");
+  if (title && !seenTitles.has(title.toLowerCase())) {
+    seenTitles.add(title.toLowerCase());
+    titles.push(title);
+  }
+
+  const peopleSegment = text.slice(0, titleMatch.index).trim();
+  if (peopleSegment) {
+    const chunks = peopleSegment.split(/\s*,\s*|\s+and\s+/i);
+    for (const chunk of chunks) {
+      const person = chunk
+        .trim()
+        .replace(/^and\s+/i, "")
+        .replace(/^["']+|["']+$/g, "")
+        .trim();
+      if (!person) continue;
+      const key = person.toLowerCase();
+      if (seenPeople.has(key)) continue;
+      seenPeople.add(key);
+      people.push(person);
+    }
+  }
+
+  return { people, titles };
+};
+
 export const resolveMetadataDimensions = (
   metadata: Record<string, unknown> | null | undefined
 ): { width: number | null; height: number | null } => {
@@ -626,6 +668,8 @@ export function mapPhotoToMetadata(
   const imdbTypeRaw =
     typeof metadata.imdb_image_type === "string"
       ? metadata.imdb_image_type
+      : typeof (metadata.tags as Record<string, unknown> | undefined)?.image_type === "string"
+        ? ((metadata.tags as Record<string, unknown>).image_type as string)
       : null;
   const imdbType = imdbTypeRaw ?? (isImdb ? photo.context_type ?? null : null);
   const inferredSectionTag = resolveSectionTag({
@@ -666,37 +710,82 @@ export function mapPhotoToMetadata(
     episodeNumber && Number.isFinite(episodeNumber)
       ? `Episode ${episodeNumber}${episodeTitle ? ` - ${episodeTitle}` : ""}`
       : episodeTitle;
+  const captionEntities = isImdb ? parseImdbCaptionEntities(photo.caption) : { people: [], titles: [] };
+  const tags = metadata.tags as Record<string, unknown> | undefined;
 
-  const sourceVariant =
-    typeof metadata.source_variant === "string"
-      ? metadata.source_variant
+  const metadataSourceUrl = getMetadataString(
+    metadata,
+    "source_page_url",
+    "sourcePageUrl",
+    "source_url",
+    "sourceUrl",
+    "page_url",
+    "pageUrl",
+    "original_source_page_url",
+    "originalSourcePageUrl"
+  );
+  const sourcePageUrlFromPhoto =
+    typeof photo.source_page_url === "string" && photo.source_page_url.trim().length > 0
+      ? photo.source_page_url.trim()
       : null;
-  const sourcePageTitle =
-    typeof metadata.source_page_title === "string"
-      ? metadata.source_page_title
-      : typeof metadata.page_title === "string"
-        ? metadata.page_title
-      : null;
-  const sourceUrl =
-    typeof metadata.source_page_url === "string"
-      ? metadata.source_page_url
-      : typeof metadata.source_url === "string"
-        ? metadata.source_url
-        : typeof metadata.page_url === "string"
-          ? metadata.page_url
-        : null;
+  const imdbSourceUrlFallback = (() => {
+    if (!isImdb) return null;
+    const mediaViewerPath = getMetadataString(
+      metadata,
+      "mediaviewer_url_path",
+      "mediaviewerUrlPath",
+      "mediaindex_url_path",
+      "mediaindexUrlPath"
+    );
+    if (mediaViewerPath && mediaViewerPath.startsWith("/name/")) {
+      const cleanPath = mediaViewerPath.split("?", 1)[0];
+      if (cleanPath.includes("/mediaviewer/") || cleanPath.includes("/mediaindex/")) {
+        return `https://www.imdb.com${cleanPath}`;
+      }
+    }
+    const imdbPersonId = getMetadataString(metadata, "imdb_person_id", "imdbPersonId");
+    if (!imdbPersonId) return null;
+    const viewerId = getMetadataString(
+      metadata,
+      "imdb_viewer_id",
+      "imdbViewerId",
+      "viewer_id",
+      "viewerId"
+    );
+    if (viewerId) {
+      return `https://www.imdb.com/name/${imdbPersonId}/mediaviewer/${viewerId}/`;
+    }
+    return `https://www.imdb.com/name/${imdbPersonId}/mediaindex/`;
+  })();
+  const sourceUrl = metadataSourceUrl ?? sourcePageUrlFromPhoto ?? imdbSourceUrlFallback;
+
+  const sourceVariant = getMetadataString(
+    metadata,
+    "source_variant",
+    "sourceVariant",
+    "variant"
+  ) ?? (isImdb ? "imdb_person_gallery" : null);
+  const sourcePageTitle = getMetadataString(
+    metadata,
+    "source_page_title",
+    "sourcePageTitle",
+    "page_title",
+    "pageTitle"
+  ) ?? captionEntities.titles[0] ?? null;
   const originalSourcePageUrl = sourceUrl;
   const originalImageUrl = resolveOriginalImageUrl(
     [
+      getMetadataString(metadata, "original_source_file_url", "originalSourceFileUrl"),
       typeof metadata.source_image_url === "string" ? metadata.source_image_url : null,
       typeof metadata.original_image_url === "string" ? metadata.original_image_url : null,
       typeof metadata.image_url === "string" ? metadata.image_url : null,
+      getMetadataString(metadata, "source_file_url", "sourceFileUrl"),
+      getMetadataString(tags, "image_url", "imageUrl", "source_file_url", "sourceFileUrl"),
       photo.url ?? null,
       (photo as { original_url?: string | null }).original_url ?? null,
     ],
     [
       photo.hosted_url ?? null,
-      (photo as { original_url?: string | null }).original_url ?? null,
       (photo as { thumb_url?: string | null }).thumb_url ?? null,
       (photo as { display_url?: string | null }).display_url ?? null,
       (photo as { detail_url?: string | null }).detail_url ?? null,
@@ -714,11 +803,71 @@ export function mapPhotoToMetadata(
   const faceBoxes = parseFaceBoxes(
     (photo as { face_boxes?: unknown }).face_boxes ?? metadata.face_boxes
   );
+  const peopleFromPhoto = (photo.people_names ?? []).filter(
+    (name): name is string => typeof name === "string" && name.trim().length > 0
+  );
+  const peopleFromMeta = Array.isArray(metadata.people_names)
+    ? (metadata.people_names as unknown[])
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim())
+    : [];
+  const peopleFromTags = Array.isArray(tags?.people)
+    ? (tags.people as unknown[])
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const name =
+            (item as Record<string, unknown>).name ??
+            (item as Record<string, unknown>).person_name ??
+            null;
+          return typeof name === "string" && name.trim().length > 0 ? name.trim() : null;
+        })
+        .filter((value): value is string => typeof value === "string")
+    : [];
+  const titlesFromPhoto = (photo.title_names ?? []).filter(
+    (title): title is string => typeof title === "string" && title.trim().length > 0
+  );
+  const titlesFromMeta = Array.isArray(metadata.title_names)
+    ? (metadata.title_names as unknown[])
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim())
+    : [];
+  const titlesFromTags = Array.isArray(tags?.titles)
+    ? (tags.titles as unknown[])
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const title =
+            (item as Record<string, unknown>).title ??
+            (item as Record<string, unknown>).name ??
+            null;
+          return typeof title === "string" && title.trim().length > 0 ? title.trim() : null;
+        })
+        .filter((value): value is string => typeof value === "string")
+    : [];
+  const people = [
+    ...new Set([
+      ...peopleFromPhoto,
+      ...peopleFromMeta,
+      ...peopleFromTags,
+      ...captionEntities.people,
+      ...(options?.fallbackPeople ?? []).filter(
+        (name): name is string => typeof name === "string" && name.trim().length > 0
+      ),
+    ]),
+  ];
+  const titles = [
+    ...new Set([
+      ...titlesFromPhoto,
+      ...titlesFromMeta,
+      ...titlesFromTags,
+      ...captionEntities.titles,
+    ]),
+  ];
   const peopleCount =
     toPeopleCount((photo as { people_count?: unknown }).people_count) ??
     toPeopleCount(metadata.people_count) ??
+    (people.length > 0 ? people.length : null) ??
     (faceBoxes.length > 0 ? faceBoxes.length : null);
-  const s3MirrorFileName = inferS3MirrorFileName(metadata, [photo.hosted_url, photo.url]);
+  const s3MirrorFileName = inferS3MirrorFileName(metadata, [photo.hosted_url]);
   const rawCreatedAt =
     metadata.created_at ??
     metadata.createdAt ??
@@ -745,21 +894,18 @@ export function mapPhotoToMetadata(
     (typeof metadata.season_number === "number" ? metadata.season_number : null) ??
     parseSeasonNumber(sectionLabel) ??
     parseSeasonNumber(photo.caption ?? null);
-  const sourceLogo =
-    typeof metadata.source_logo === "string"
-      ? metadata.source_logo
-      : typeof metadata.sourceLogo === "string"
-        ? metadata.sourceLogo
-        : null;
+  const sourceLogo = getMetadataString(
+    metadata,
+    "source_logo",
+    "sourceLogo",
+    "original_source_logo",
+    "originalSourceLogo"
+  ) ?? (isImdb ? "IMDb" : null);
   const assetName =
-    typeof metadata.asset_name === "string"
-      ? metadata.asset_name
-      : typeof metadata.assetName === "string"
-        ? metadata.assetName
-        : null;
-  const fallbackPeople = (options?.fallbackPeople ?? []).filter(
-    (name) => typeof name === "string" && name.trim().length > 0
-  );
+    getMetadataString(metadata, "asset_name", "assetName", "name", "title") ??
+    sourcePageTitle ??
+    captionEntities.titles[0] ??
+    null;
   const galleryStatus =
     typeof metadata.gallery_status === "string" && metadata.gallery_status.trim().length > 0
       ? metadata.gallery_status.trim()
@@ -809,8 +955,8 @@ export function mapPhotoToMetadata(
         : null,
     season: inferredSeason,
     contextType: photo.context_type,
-    people: [...new Set([...(photo.people_names ?? []), ...fallbackPeople])],
-    titles: [...new Set(photo.title_names ?? [])],
+    people,
+    titles,
     fetchedAt: photo.fetched_at ? new Date(photo.fetched_at) : null,
     galleryStatus,
     galleryStatusReason,
@@ -938,7 +1084,6 @@ export function mapSeasonAssetToMetadata(
       asset.detail_url ?? null,
       asset.crop_display_url ?? null,
       asset.crop_detail_url ?? null,
-      asset.original_url ?? null,
     ]
   );
   const originalSourceFileUrl = originalImageUrl;
@@ -955,8 +1100,6 @@ export function mapSeasonAssetToMetadata(
     (faceBoxes.length > 0 ? faceBoxes.length : null);
   const s3MirrorFileName = inferS3MirrorFileName(metadata, [
     asset.hosted_url,
-    asset.original_url,
-    sourceUrl,
   ]);
 
   // Dates

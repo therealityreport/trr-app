@@ -8,7 +8,7 @@ import { isValidPositiveIntegerString, isValidUuid } from "@/lib/server/validati
 
 export const dynamic = "force-dynamic";
 
-const SUPPORTED_PLATFORMS = new Set(["instagram", "tiktok", "twitter", "youtube"]);
+const SUPPORTED_PLATFORMS = new Set(["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"]);
 
 interface RouteParams {
   params: Promise<{ showId: string; seasonNumber: string }>;
@@ -72,7 +72,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const platform = String(platformRaw ?? "").trim().toLowerCase();
     if (!SUPPORTED_PLATFORMS.has(platform)) {
       return NextResponse.json(
-        { error: "platform must be one of instagram, tiktok, twitter, youtube", code: "BAD_REQUEST", retryable: false },
+        {
+          error: "platform must be one of instagram, tiktok, twitter, youtube, facebook, threads",
+          code: "BAD_REQUEST",
+          retryable: false,
+        },
         { status: 400 },
       );
     }

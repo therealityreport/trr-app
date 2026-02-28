@@ -4,7 +4,7 @@ export type TabId =
   | "overview"
   | "episodes"
   | "assets"
-  | "videos"
+  | "news"
   | "fandom"
   | "cast"
   | "surveys"
@@ -48,7 +48,7 @@ export type EpisodeCoverageRow = {
 
 export type BatchJobOperation = "count" | "crop" | "id_text" | "resize";
 
-export type SeasonTab = { id: TabId; label: string };
+export type SeasonTab = { id: TabId; label: string; icon?: "home" };
 
 export type SeasonGalleryState = {
   assetsVisibleCount: number;

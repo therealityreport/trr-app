@@ -32,7 +32,7 @@ describe("season tab alias redirect route", () => {
         }),
       }),
     ).rejects.toThrow(
-      "REDIRECT:/shows/7f528757-5017-4599-8252-c02f0d0736cf/s6?source_scope=community&social_platform=reddit&tab=social",
+      "REDIRECT:/7f528757-5017-4599-8252-c02f0d0736cf/s6/social?source_scope=community&social_platform=reddit",
     );
   });
 
@@ -48,7 +48,7 @@ describe("season tab alias redirect route", () => {
         searchParams: Promise.resolve({}),
       }),
     ).rejects.toThrow(
-      "REDIRECT:/shows/7f528757-5017-4599-8252-c02f0d0736cf/s6?tab=overview",
+      "REDIRECT:/7f528757-5017-4599-8252-c02f0d0736cf/s6",
     );
   });
 
@@ -64,7 +64,7 @@ describe("season tab alias redirect route", () => {
         searchParams: Promise.resolve({ source_scope: "community" }),
       }),
     ).rejects.toThrow(
-      "REDIRECT:/shows/7f528757-5017-4599-8252-c02f0d0736cf/s6?source_scope=community&tab=overview",
+      "REDIRECT:/7f528757-5017-4599-8252-c02f0d0736cf/s6?source_scope=community",
     );
   });
 });

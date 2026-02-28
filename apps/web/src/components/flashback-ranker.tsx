@@ -16,6 +16,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import type { SurveyRankingItem } from "@/lib/surveys/types";
+import CastCircleToken from "@/components/survey/CastCircleToken";
 
 const LINE_MAX_HEIGHT = 600;
 const LINE_VERTICAL_PADDING = 32; // matches py-8 padding applied to the column wrapper
@@ -549,9 +550,6 @@ export default function FlashbackRanker({
               items={benchItems}
               layout={circleLayout}
               tokenSize={circleBenchTokenSize}
-              containerFillColor={resolvedStyleOverrides.unassignedContainerFillColor}
-              containerBorderColor={resolvedStyleOverrides.unassignedContainerBorderColor}
-              tokenBorderColor={resolvedStyleOverrides.unassignedItemBorderColor}
             />
             <SelectionPicker
               open={pickerSlotIndex !== null}
@@ -737,52 +735,75 @@ function FigmaCircleBench({
   items,
   layout,
   tokenSize,
-  containerFillColor,
-  containerBorderColor,
-  tokenBorderColor,
 }: {
   items: SurveyRankingItem[];
   layout: FigmaCircleLayoutMetrics;
   tokenSize: number;
-  containerFillColor: string;
-  containerBorderColor: string;
-  tokenBorderColor: string;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "bench" });
 
   return (
     <section
-      className="mx-auto w-full px-1"
+      className="mx-auto w-full"
       style={{ maxWidth: `${layout.gridWidth}px`, marginTop: `${layout.benchMarginTop}px` }}
     >
       <div
         ref={setNodeRef}
-        className="rounded-2xl border shadow-sm transition"
+        className="w-full transition"
         style={{
-          padding: `${layout.benchPaddingY}px ${layout.benchPaddingX}px`,
-          borderColor: isOver ? "rgba(0,0,0,0.22)" : containerBorderColor,
-          backgroundColor: isOver ? "rgba(0,0,0,0.06)" : containerFillColor,
+          outline: isOver ? "2px dashed rgba(17,17,17,0.5)" : "2px solid transparent",
+          outlineOffset: "2px",
         }}
         aria-label="Unassigned cast members"
         data-testid="figma-circle-unassigned-bank"
       >
         <div
-          className="flex snap-x snap-mandatory overflow-x-auto pb-1 sm:flex-wrap sm:justify-center sm:overflow-visible"
-          style={{ gap: `${layout.benchGap}px` }}
+          className="flex overflow-x-auto py-2 px-1 sm:flex-wrap sm:justify-center sm:overflow-visible"
+          style={{ gap: `${layout.benchGap}px`, paddingInline: `${layout.benchPaddingX}px`, paddingBlock: `${layout.benchPaddingY}px` }}
         >
           {items.map((item) => (
-            <div key={item.id} className="shrink-0 snap-start">
-              <Token
+            <div key={item.id} className="shrink-0">
+              <DraggableCircleBenchToken
                 item={item}
                 size={tokenSize}
-                circleStyle="figma-rank"
-                circleBorderColor={tokenBorderColor}
               />
             </div>
           ))}
         </div>
       </div>
     </section>
+  );
+}
+
+function DraggableCircleBenchToken({
+  item,
+  size,
+}: {
+  item: SurveyRankingItem;
+  size: number;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: item.id,
+  });
+  const { ["aria-pressed"]: ariaPressedFromDnd, ...draggableAttributes } = attributes;
+  void ariaPressedFromDnd;
+
+  return (
+    <CastCircleToken
+      ref={setNodeRef}
+      label={item.label}
+      img={item.img ?? null}
+      sizeVariant="custom"
+      sizePx={size}
+      draggable
+      aria-label={`Drag ${item.label}`}
+      className={isDragging ? "opacity-0" : ""}
+      style={{
+        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+      }}
+      {...listeners}
+      {...draggableAttributes}
+    />
   );
 }
 

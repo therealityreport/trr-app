@@ -23,7 +23,7 @@ export const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
 ];
 
 export const SHOW_PAGE_TABS: ShowTab[] = [
-  { id: "details", label: "Overview" },
+  { id: "details", label: "Home", icon: "home" },
   { id: "seasons", label: "Seasons" },
   { id: "assets", label: "Assets" },
   { id: "news", label: "News" },
@@ -34,7 +34,7 @@ export const SHOW_PAGE_TABS: ShowTab[] = [
 ];
 
 export const SHOW_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "bravo", label: "BRAVO ANALYTICS" },
+  { id: "bravo", label: "OFFICIAL ANALYTICS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
@@ -47,6 +47,8 @@ export const SHOW_SOCIAL_PLATFORM_TABS: Array<{ key: PlatformTab; label: string 
   { key: "tiktok", label: "TikTok" },
   { key: "twitter", label: "Twitter/X" },
   { key: "youtube", label: "YouTube" },
+  { key: "facebook", label: "Facebook" },
+  { key: "threads", label: "Threads" },
 ];
 
 export const isSocialAnalyticsView = (
@@ -238,10 +240,10 @@ export const CAST_REFRESH_PHASE_ORDER: CastRefreshPhaseId[] = [
 ];
 
 export const SEASON_PAGE_TABS = [
-  { tab: "overview", label: "Overview" },
-  { tab: "episodes", label: "Seasons & Episodes" },
+  { tab: "overview", label: "Home" },
+  { tab: "episodes", label: "Episodes" },
   { tab: "assets", label: "Assets" },
-  { tab: "videos", label: "Videos" },
+  { tab: "news", label: "News" },
   { tab: "fandom", label: "Fandom" },
   { tab: "cast", label: "Cast" },
   { tab: "surveys", label: "Surveys" },

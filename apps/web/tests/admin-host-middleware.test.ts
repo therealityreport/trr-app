@@ -95,6 +95,34 @@ describe("admin host proxy", () => {
     );
   });
 
+  it("redirects /people routes on public host to admin origin", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/people/mary-cosby");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "http://admin.localhost:3000/people/mary-cosby",
+    );
+  });
+
+  it("redirects root show routes on public host to admin origin", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/rhoslc/s6/social/reddit");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "http://admin.localhost:3000/rhoslc/s6/social/reddit",
+    );
+  });
+
   it("redirects /brands requests on public host to admin origin", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -185,6 +213,32 @@ describe("admin host proxy", () => {
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 
     const request = new NextRequest("http://admin.localhost:3000/shows/rhoslc");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("allows /people routes on admin host", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/people/mary-cosby");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("allows root show routes on admin host", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/rhoslc/s6/social/reddit");
     const response = proxy(request);
 
     expect(response.status).toBe(200);

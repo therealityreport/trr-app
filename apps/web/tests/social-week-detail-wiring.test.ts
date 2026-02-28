@@ -65,8 +65,44 @@ describe("social week detail wiring", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(/query\.set\("social_platform", socialPlatform\)/);
-    expect(contents).toMatch(/query\.set\("social_view", socialView\)/);
-    expect(contents).toMatch(/query\.set\("season_id", resolvedSeasonId\)/);
+    expect(contents).toMatch(/normalizedSocialView/);
+    expect(contents).toMatch(/query\.set\("social_view", normalizedSocialView\)/);
+    expect(contents).not.toMatch(/query\.set\("season_id", resolvedSeasonId\)/);
+  });
+
+  it("canonicalizes legacy social_platform query links to platform path URLs", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/nextQuery\.delete\("social_platform"\)/);
+    expect(contents).toMatch(/platform:\s*socialPlatformFromQuery/);
+    expect(contents).toMatch(/router\.replace\(\s*buildSeasonSocialWeekUrl\(/s);
+  });
+
+  it("canonicalizes legacy /social/week/{n} paths to /social/w{n}/{subtab}", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/pathname\.includes\(\"\/social\/week\/\"\)/);
+    expect(contents).toMatch(/legacyWeekPathRedirectRef/);
+    expect(contents).toMatch(/buildSeasonSocialWeekUrl\(\{/);
+  });
+
+  it("keeps canonical platform path while mutating week-detail query params", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/platform:\s*socialPlatform \?\? undefined/);
+    expect(contents).toMatch(/buildSeasonSocialWeekUrl\(\{\s*showSlug:\s*showSlugForRouting,/s);
   });
 
   it("wires deep social breadcrumbs with linked show and social ancestors", () => {

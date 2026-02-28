@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { resolveAdminShowId } from "@/lib/server/admin/resolve-show-id";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,9 @@ interface RouteParams {
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
-    const { showId, roleId } = await params;
+    const { showId: rawShowId, roleId } = await params;
+    const showId = await resolveAdminShowId(rawShowId);
+    if (!showId) return NextResponse.json({ error: `Show not found for "${rawShowId}".` }, { status: 404 });
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/roles/${roleId}`);
     if (!backendUrl) return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
 

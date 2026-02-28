@@ -66,6 +66,7 @@ import {
   buildShowAdminUrl,
   cleanLegacyRoutingQuery,
   parseSocialAnalyticsViewFromPath,
+  parseShowSocialPathFilters,
   parseShowRouteState,
 } from "@/lib/admin/show-admin-routes";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
@@ -99,6 +100,7 @@ import {
 import {
   THUMBNAIL_DEFAULTS,
   isThumbnailCropMode,
+  parseThumbnailCrop,
   resolveThumbnailPresentation,
 } from "@/lib/thumbnail-crop";
 import {
@@ -369,7 +371,7 @@ type ShowCastSource = "episode_evidence" | "show_fallback" | "imdb_show_membersh
 type ShowCastRosterMode = "episode_evidence" | "imdb_show_membership";
 type CastPhotoFallbackMode = "none" | "bravo";
 type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
-type ShowTab = { id: TabId; label: string };
+type ShowTab = { id: TabId; label: string; icon?: "home" };
 type RefreshProgressState = {
   stage?: string | null;
   message?: string | null;
@@ -477,7 +479,7 @@ const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
 ];
 
 const SHOW_PAGE_TABS: ShowTab[] = [
-  { id: "details", label: "Overview" },
+  { id: "details", label: "Home", icon: "home" },
   { id: "seasons", label: "Seasons" },
   { id: "assets", label: "Assets" },
   { id: "news", label: "News" },
@@ -488,7 +490,7 @@ const SHOW_PAGE_TABS: ShowTab[] = [
 ];
 
 const SHOW_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "bravo", label: "BRAVO ANALYTICS" },
+  { id: "bravo", label: "OFFICIAL ANALYTICS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
@@ -506,6 +508,19 @@ const SHOW_SOCIAL_PLATFORM_TABS: Array<{ key: PlatformTab; label: string }> = [
 const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {
   if (!value) return false;
   return SHOW_SOCIAL_ANALYTICS_VIEWS.some((item) => item.id === value);
+};
+
+const normalizeSocialAnalyticsViewInput = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "official") return "bravo";
+  return normalized;
+};
+
+const formatSocialAnalyticsViewLabel = (view: SocialAnalyticsView): string => {
+  if (view === "bravo") return "Official";
+  return `${view.charAt(0).toUpperCase()}${view.slice(1)}`;
 };
 
 const isSocialPlatformTab = (value: string | null | undefined): value is PlatformTab => {
@@ -544,10 +559,10 @@ const buildShowGalleryVisibleDefaults = (): ShowGalleryVisibleBySection => ({
   cast_photos: SHOW_GALLERY_SECTION_INITIAL_VISIBLE,
 });
 
-const SHOW_ASSET_SUB_TABS: Array<{ id: "images" | "videos" | "brand"; label: string }> = [
+const SHOW_ASSET_SUB_TABS: Array<{ id: "images" | "videos" | "branding"; label: string }> = [
   { id: "images", label: "Images" },
   { id: "videos", label: "Videos" },
-  { id: "brand", label: "Brand" },
+  { id: "branding", label: "Branding" },
 ];
 
 const TRUSTED_SHOW_LOGO_SOURCE_HOSTS = new Set([
@@ -742,10 +757,10 @@ const CAST_REFRESH_PHASE_ORDER: CastRefreshPhaseId[] = [
 ];
 
 const SEASON_PAGE_TABS = [
-  { tab: "overview", label: "Overview" },
-  { tab: "episodes", label: "Seasons & Episodes" },
+  { tab: "overview", label: "Home" },
+  { tab: "episodes", label: "Episodes" },
   { tab: "assets", label: "Assets" },
-  { tab: "videos", label: "Videos" },
+  { tab: "news", label: "News" },
   { tab: "fandom", label: "Fandom" },
   { tab: "cast", label: "Cast" },
   { tab: "surveys", label: "Surveys" },
@@ -1274,22 +1289,26 @@ const getFeaturedShowImageKind = (asset: SeasonAsset): "poster" | "backdrop" | n
 };
 
 const buildAssetAutoCropPayload = (asset: SeasonAsset): Record<string, unknown> | null => {
-  if (
-    !isThumbnailCropMode(asset.thumbnail_crop_mode) ||
-    typeof asset.thumbnail_focus_x !== "number" ||
-    !Number.isFinite(asset.thumbnail_focus_x) ||
-    typeof asset.thumbnail_focus_y !== "number" ||
-    !Number.isFinite(asset.thumbnail_focus_y) ||
-    typeof asset.thumbnail_zoom !== "number" ||
-    !Number.isFinite(asset.thumbnail_zoom)
-  ) {
-    return null;
-  }
+  const directCrop = parseThumbnailCrop(
+    {
+      x: asset.thumbnail_focus_x,
+      y: asset.thumbnail_focus_y,
+      zoom: asset.thumbnail_zoom,
+      mode: asset.thumbnail_crop_mode,
+    },
+    { clamp: true }
+  );
+  const metadataCrop = parseThumbnailCrop(
+    (asset.metadata as Record<string, unknown> | null)?.thumbnail_crop,
+    { clamp: true }
+  );
+  const crop = directCrop ?? metadataCrop;
+  if (!crop) return null;
   return {
-    x: asset.thumbnail_focus_x,
-    y: asset.thumbnail_focus_y,
-    zoom: asset.thumbnail_zoom,
-    mode: asset.thumbnail_crop_mode,
+    x: crop.x,
+    y: crop.y,
+    zoom: crop.zoom,
+    mode: crop.mode,
   };
 };
 
@@ -1525,7 +1544,7 @@ export default function TrrShowDetailPage() {
   const [archiveFootageCast, setArchiveFootageCast] = useState<TrrCastMember[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("details");
   const [selectedSocialSeasonId, setSelectedSocialSeasonId] = useState<string | null>(null);
-  const [assetsView, setAssetsView] = useState<"images" | "videos" | "brand">("images");
+  const [assetsView, setAssetsView] = useState<"images" | "videos" | "branding">("images");
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
   const [bravoLoading, setBravoLoading] = useState(false);
   const [bravoError, setBravoError] = useState<string | null>(null);
@@ -1882,6 +1901,14 @@ export default function TrrShowDetailPage() {
   const castRefreshAbortControllerRef = useRef<AbortController | null>(null);
   const castMediaEnrichAbortControllerRef = useRef<AbortController | null>(null);
   const castLoadAbortControllerRef = useRef<AbortController | null>(null);
+  const castLoadInFlightRef = useRef<Promise<TrrCastMember[]> | null>(null);
+  const castAutoLoadAttemptedRef = useRef<string | null>(null);
+  const castAutoRecoveryAttemptedRef = useRef<string | null>(null);
+  const castSnapshotRef = useRef<{ cast: TrrCastMember[]; archive: TrrCastMember[] }>({
+    cast: [],
+    archive: [],
+  });
+  const castLoadedOnceRef = useRef(false);
   const personRefreshAbortControllersRef = useRef<Record<string, AbortController>>({});
 
   const showRouteState = useMemo(
@@ -1914,6 +1941,14 @@ export default function TrrShowDetailPage() {
   useEffect(() => {
     castRoleMembersLoadedOnceRef.current = castRoleMembersLoadedOnce;
   }, [castRoleMembersLoadedOnce]);
+
+  useEffect(() => {
+    castSnapshotRef.current = { cast, archive: archiveFootageCast };
+  }, [archiveFootageCast, cast]);
+
+  useEffect(() => {
+    castLoadedOnceRef.current = castLoadedOnce;
+  }, [castLoadedOnce]);
 
   useEffect(() => {
     setActiveTab(showRouteState.tab);
@@ -1961,6 +1996,30 @@ export default function TrrShowDetailPage() {
     });
   }, [show?.alternative_names, show?.canonical_slug, show?.slug, showRouteParam]);
 
+  const getActiveSocialSeasonNumber = useCallback((): number | null => {
+    const selectedSeason =
+      selectedSocialSeasonId != null
+        ? seasons.find((season) => season.id === selectedSocialSeasonId) ?? null
+        : null;
+    if (
+      selectedSeason &&
+      typeof selectedSeason.season_number === "number" &&
+      Number.isFinite(selectedSeason.season_number) &&
+      selectedSeason.season_number > 0
+    ) {
+      return selectedSeason.season_number;
+    }
+    const fallbackSeason = [...seasons]
+      .filter(
+        (season) =>
+          typeof season.season_number === "number" &&
+          Number.isFinite(season.season_number) &&
+          season.season_number > 0,
+      )
+      .sort((a, b) => b.season_number - a.season_number)[0];
+    return fallbackSeason?.season_number ?? null;
+  }, [seasons, selectedSocialSeasonId]);
+
   useEffect(() => {
     if (!show?.name || !showSlugForRouting) return;
     recordAdminRecentShow({
@@ -1968,6 +2027,32 @@ export default function TrrShowDetailPage() {
       label: show.name,
     });
   }, [show?.name, showSlugForRouting]);
+
+  const socialAnalyticsView = useMemo<SocialAnalyticsView>(() => {
+    const queryValue = normalizeSocialAnalyticsViewInput(searchParams.get("social_view"));
+    if (isSocialAnalyticsView(queryValue)) return queryValue;
+    const pathValue = normalizeSocialAnalyticsViewInput(parseSocialAnalyticsViewFromPath(pathname));
+    return isSocialAnalyticsView(pathValue) ? pathValue : "bravo";
+  }, [pathname, searchParams]);
+
+  const socialPathFilters = useMemo(
+    () => parseShowSocialPathFilters(pathname),
+    [pathname],
+  );
+
+  const getSocialSeasonNumberForRouting = useCallback((): number | null => {
+    if (socialPathFilters?.seasonNumber != null) {
+      return socialPathFilters.seasonNumber;
+    }
+    return getActiveSocialSeasonNumber();
+  }, [getActiveSocialSeasonNumber, socialPathFilters?.seasonNumber]);
+
+  const socialPlatformTab = useMemo<PlatformTab>(() => {
+    const value = searchParams.get("social_platform");
+    if (isSocialPlatformTab(value)) return value;
+    const fromPath = socialPathFilters?.platform;
+    return fromPath ?? "overview";
+  }, [searchParams, socialPathFilters?.platform]);
 
   const setTab = useCallback(
     (tab: TabId) => {
@@ -1980,17 +2065,38 @@ export default function TrrShowDetailPage() {
       }
       setActiveTab(tab);
       const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      const socialSeasonNumber = getSocialSeasonNumberForRouting();
       router.replace(
         buildShowAdminUrl({
           showSlug: showSlugForRouting,
           tab,
           assetsSubTab: tab === "assets" ? assetsView : undefined,
+          socialRoute:
+            tab === "social"
+              ? {
+                  seasonNumber: socialSeasonNumber,
+                  weekIndex: socialPathFilters?.weekIndex,
+                  platform:
+                    socialPathFilters?.platform ??
+                    (socialPlatformTab !== "overview" ? socialPlatformTab : undefined),
+                  handle: socialPathFilters?.handle,
+                }
+              : undefined,
           query: preservedQuery,
         }) as Route,
         { scroll: false }
       );
     },
-    [assetsView, hasUnsavedDetailsChanges, router, searchParams, showSlugForRouting]
+    [
+      assetsView,
+      getSocialSeasonNumberForRouting,
+      hasUnsavedDetailsChanges,
+      router,
+      searchParams,
+      showSlugForRouting,
+      socialPathFilters,
+      socialPlatformTab,
+    ]
   );
 
   useEffect(() => {
@@ -2036,60 +2142,66 @@ export default function TrrShowDetailPage() {
     showSlugForRouting,
   ]);
 
-  const socialAnalyticsView = useMemo<SocialAnalyticsView>(() => {
-    const queryValue = searchParams.get("social_view");
-    if (isSocialAnalyticsView(queryValue)) return queryValue;
-    const pathValue = parseSocialAnalyticsViewFromPath(pathname);
-    return isSocialAnalyticsView(pathValue) ? pathValue : "bravo";
-  }, [pathname, searchParams]);
-
-  const socialPlatformTab = useMemo<PlatformTab>(() => {
-    const value = searchParams.get("social_platform");
-    return isSocialPlatformTab(value) ? value : "overview";
-  }, [searchParams]);
-
   const setSocialAnalyticsView = useCallback(
     (view: SocialAnalyticsView) => {
       const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      nextQuery.delete("social_platform");
       if (view === "bravo") {
         nextQuery.delete("social_view");
       } else {
         nextQuery.set("social_view", view);
       }
+      const socialSeasonNumber = getSocialSeasonNumberForRouting();
       router.replace(
         buildShowAdminUrl({
           showSlug: showSlugForRouting,
           tab: "social",
           query: nextQuery,
+          socialRoute: {
+            seasonNumber: socialSeasonNumber,
+            weekIndex: socialPathFilters?.weekIndex,
+            platform: socialPathFilters?.platform ?? (socialPlatformTab !== "overview" ? socialPlatformTab : undefined),
+            handle: socialPathFilters?.handle,
+          },
         }) as Route,
         { scroll: false },
       );
     },
-    [router, searchParams, showSlugForRouting],
+    [getSocialSeasonNumberForRouting, router, searchParams, showSlugForRouting, socialPathFilters, socialPlatformTab],
   );
 
   const setSocialPlatformTab = useCallback(
     (tab: PlatformTab) => {
       const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
-      if (tab === "overview") {
-        nextQuery.delete("social_platform");
-      } else {
-        nextQuery.set("social_platform", tab);
-      }
+      nextQuery.delete("social_platform");
+      const socialSeasonNumber = getSocialSeasonNumberForRouting();
       router.replace(
         buildShowAdminUrl({
           showSlug: showSlugForRouting,
           tab: "social",
           query: nextQuery,
+          socialRoute: {
+            seasonNumber: socialSeasonNumber,
+            weekIndex: socialPathFilters?.weekIndex,
+            platform: tab !== "overview" ? tab : undefined,
+            handle: socialPathFilters?.handle,
+          },
         }) as Route,
         { scroll: false },
       );
     },
-    [router, searchParams, showSlugForRouting],
+    [
+      getSocialSeasonNumberForRouting,
+      router,
+      searchParams,
+      showSlugForRouting,
+      socialPathFilters?.handle,
+      socialPathFilters?.weekIndex,
+    ],
   );
 
   const setAssetsSubTab = useCallback(
-    (view: "images" | "videos" | "brand") => {
+    (view: "images" | "videos" | "branding") => {
       setAssetsView(view);
       const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
       router.replace(
@@ -2197,21 +2309,34 @@ export default function TrrShowDetailPage() {
 
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
     if (showRouteState.tab === "social") {
+      preservedQuery.delete("social_platform");
       if (socialAnalyticsView === "bravo") {
         preservedQuery.delete("social_view");
       } else {
         preservedQuery.set("social_view", socialAnalyticsView);
       }
     }
+    const socialSeasonNumber = getSocialSeasonNumberForRouting();
     const canonicalRouteUrl = buildShowAdminUrl({
       showSlug: showSlugForRouting,
       tab: showRouteState.tab,
       assetsSubTab: showRouteState.assetsSubTab,
       query: preservedQuery,
       socialView: showRouteState.tab === "social" ? socialAnalyticsView : undefined,
+      socialRoute:
+        showRouteState.tab === "social"
+          ? {
+              seasonNumber: socialSeasonNumber,
+              weekIndex: socialPathFilters?.weekIndex,
+              platform:
+                socialPathFilters?.platform ??
+                (socialPlatformTab !== "overview" ? socialPlatformTab : undefined),
+              handle: socialPathFilters?.handle,
+            }
+          : undefined,
     });
     const currentHasLegacyRoutingQuery =
-      searchParams.has("tab") || searchParams.has("assets");
+      searchParams.has("tab") || searchParams.has("assets") || searchParams.has("social_platform");
     const canonicalPath = canonicalRouteUrl.split("?")[0] ?? canonicalRouteUrl;
     const currentPath = pathname;
     const pathMismatch = currentPath !== canonicalPath;
@@ -2228,6 +2353,9 @@ export default function TrrShowDetailPage() {
     router,
     searchParams,
     socialAnalyticsView,
+    getSocialSeasonNumberForRouting,
+    socialPathFilters,
+    socialPlatformTab,
     showSlugForRouting,
     showRouteState.assetsSubTab,
     showRouteState.tab,
@@ -3416,8 +3544,10 @@ export default function TrrShowDetailPage() {
       photoFallbackMode?: CastPhotoFallbackMode;
       mergeMissingPhotosOnly?: boolean;
       throwOnError?: boolean;
+      force?: boolean;
       signal?: AbortSignal;
     }): Promise<TrrCastMember[]> => {
+      const force = options?.force === true;
       const rosterMode = options?.rosterMode ?? "imdb_show_membership";
       const minEpisodes =
         typeof options?.minEpisodes === "number"
@@ -3430,10 +3560,15 @@ export default function TrrShowDetailPage() {
       const mergeMissingPhotosOnly = options?.mergeMissingPhotosOnly === true;
       const requestShowId = showId;
       if (!requestShowId) return [];
+      if (castLoadInFlightRef.current && !force) {
+        return castLoadInFlightRef.current;
+      }
       const requestController = new AbortController();
       const externalSignal = options?.signal;
       const abortWithExternalSignal = () => requestController.abort();
-      castLoadAbortControllerRef.current?.abort();
+      if (force) {
+        castLoadAbortControllerRef.current?.abort();
+      }
       castLoadAbortControllerRef.current = requestController;
 
       const mergeMissingPhotoFields = (
@@ -3459,152 +3594,177 @@ export default function TrrShowDetailPage() {
         });
       };
 
-      setCastLoading(true);
-      setCastLoadError(null);
-      setCastLoadWarning(null);
-      try {
-        if (externalSignal) {
-          if (externalSignal.aborted) {
-            requestController.abort();
-          } else {
-            externalSignal.addEventListener("abort", abortWithExternalSignal, { once: true });
+      const request = (async () => {
+        setCastLoading(true);
+        setCastLoadError(null);
+        setCastLoadWarning(null);
+        try {
+          if (externalSignal) {
+            if (externalSignal.aborted) {
+              requestController.abort();
+            } else {
+              externalSignal.addEventListener("abort", abortWithExternalSignal, { once: true });
+            }
           }
-        }
-        const headers = await getAuthHeaders();
-        let response: Response | null = null;
-        let data: unknown = {};
-        let lastError: unknown = null;
-        let lastStatus = 0;
-        for (let attempt = 1; attempt <= SHOW_CAST_LOAD_MAX_ATTEMPTS; attempt += 1) {
-          try {
-            const params = new URLSearchParams();
-            params.set("limit", "500");
-            params.set("roster_mode", rosterMode);
-            params.set("photo_fallback", photoFallbackMode);
-            if (typeof minEpisodes === "number" && Number.isFinite(minEpisodes)) {
-              params.set("minEpisodes", String(minEpisodes));
-            }
-            if (excludeZeroEpisodeMembers) {
-              params.set("exclude_zero_episode_members", "1");
-            }
-            response = await fetchWithTimeout(
-              `/api/admin/trr-api/shows/${requestShowId}/cast?${params.toString()}`,
-              { headers },
-              SHOW_CAST_LOAD_TIMEOUT_MS,
-              requestController.signal
-            );
-            data = await response.json().catch(() => ({}));
-            lastStatus = response.status;
-            if (!response.ok) {
-              const retryableStatus = response.status === 502 || response.status === 503 || response.status === 504;
-              if (retryableStatus && attempt < SHOW_CAST_LOAD_MAX_ATTEMPTS) {
+          const headers = await getAuthHeaders();
+          let response: Response | null = null;
+          let data: unknown = {};
+          let lastError: unknown = null;
+          let lastStatus = 0;
+          for (let attempt = 1; attempt <= SHOW_CAST_LOAD_MAX_ATTEMPTS; attempt += 1) {
+            try {
+              const params = new URLSearchParams();
+              params.set("limit", "500");
+              params.set("roster_mode", rosterMode);
+              params.set("photo_fallback", photoFallbackMode);
+              if (typeof minEpisodes === "number" && Number.isFinite(minEpisodes)) {
+                params.set("minEpisodes", String(minEpisodes));
+              }
+              if (excludeZeroEpisodeMembers) {
+                params.set("exclude_zero_episode_members", "1");
+              }
+              response = await fetchWithTimeout(
+                `/api/admin/trr-api/shows/${requestShowId}/cast?${params.toString()}`,
+                { headers },
+                SHOW_CAST_LOAD_TIMEOUT_MS,
+                requestController.signal
+              );
+              data = await response.json().catch(() => ({}));
+              lastStatus = response.status;
+              if (!response.ok) {
+                const retryableStatus =
+                  response.status === 502 || response.status === 503 || response.status === 504;
+                if (retryableStatus && attempt < SHOW_CAST_LOAD_MAX_ATTEMPTS) {
+                  await new Promise((resolve) => setTimeout(resolve, SHOW_CAST_LOAD_RETRY_BACKOFF_MS));
+                  continue;
+                }
+                const message =
+                  typeof (data as { error?: unknown }).error === "string"
+                    ? (data as { error: string }).error
+                    : `Failed to fetch cast (HTTP ${response.status})`;
+                throw new Error(message);
+              }
+              break;
+            } catch (error) {
+              lastError = error;
+              if (requestController.signal.aborted) {
+                break;
+              }
+              const retryableError = isAbortError(error);
+              if (retryableError && attempt < SHOW_CAST_LOAD_MAX_ATTEMPTS) {
                 await new Promise((resolve) => setTimeout(resolve, SHOW_CAST_LOAD_RETRY_BACKOFF_MS));
                 continue;
               }
-              const message =
-                typeof (data as { error?: unknown }).error === "string"
-                  ? (data as { error: string }).error
-                  : `Failed to fetch cast (HTTP ${response.status})`;
-              throw new Error(message);
+              throw error;
             }
-            break;
-          } catch (error) {
-            lastError = error;
-            if (requestController.signal.aborted) {
-              break;
-            }
-            const retryableError = isAbortError(error);
-            if (retryableError && attempt < SHOW_CAST_LOAD_MAX_ATTEMPTS) {
-              await new Promise((resolve) => setTimeout(resolve, SHOW_CAST_LOAD_RETRY_BACKOFF_MS));
-              continue;
-            }
-            throw error;
           }
-        }
-        if (!response || !response.ok) {
-          if (lastError instanceof Error) {
-            throw lastError;
+          if (!response || !response.ok) {
+            if (lastError instanceof Error) {
+              throw lastError;
+            }
+            throw new Error(lastStatus > 0 ? `Failed to fetch cast (HTTP ${lastStatus})` : "Failed to fetch cast");
           }
-          throw new Error(lastStatus > 0 ? `Failed to fetch cast (HTTP ${lastStatus})` : "Failed to fetch cast");
-        }
-        const castRaw = (data as { cast?: unknown }).cast;
-        const archiveCastRaw = (data as { archive_footage_cast?: unknown }).archive_footage_cast;
-        const castSourceRaw = (data as { cast_source?: unknown }).cast_source;
-        const eligibilityWarningRaw = (data as { eligibility_warning?: unknown }).eligibility_warning;
-        const nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
-        const nextArchiveCast = Array.isArray(archiveCastRaw)
-          ? (archiveCastRaw as TrrCastMember[])
-          : [];
-        if (!isCurrentShowId(requestShowId)) return nextCast;
+          const castRaw = (data as { cast?: unknown }).cast;
+          const archiveCastRaw = (data as { archive_footage_cast?: unknown }).archive_footage_cast;
+          const castSourceRaw = (data as { cast_source?: unknown }).cast_source;
+          const eligibilityWarningRaw = (data as { eligibility_warning?: unknown }).eligibility_warning;
+          const nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
+          const nextArchiveCast = Array.isArray(archiveCastRaw)
+            ? (archiveCastRaw as TrrCastMember[])
+            : [];
+          if (!isCurrentShowId(requestShowId)) return nextCast;
 
-        let appliedCast = nextCast;
-        if (mergeMissingPhotosOnly) {
-          setCast((prev) => {
-            const merged = mergeMissingPhotoFields(prev, nextCast);
-            appliedCast = merged;
-            return merged;
-          });
-          setArchiveFootageCast((prev) => mergeMissingPhotoFields(prev, nextArchiveCast));
-        } else {
-          setCast(nextCast);
-          setArchiveFootageCast(nextArchiveCast);
-        }
+          let appliedCast = nextCast;
+          let appliedArchiveCast = nextArchiveCast;
+          if (mergeMissingPhotosOnly) {
+            setCast((prev) => {
+              const merged = mergeMissingPhotoFields(prev, nextCast);
+              appliedCast = merged;
+              return merged;
+            });
+            setArchiveFootageCast((prev) => {
+              const merged = mergeMissingPhotoFields(prev, nextArchiveCast);
+              appliedArchiveCast = merged;
+              return merged;
+            });
+          } else {
+            setCast(nextCast);
+            setArchiveFootageCast(nextArchiveCast);
+          }
 
-        setCastSource(
-          castSourceRaw === "show_fallback"
-            ? "show_fallback"
-            : castSourceRaw === "imdb_show_membership"
-              ? "imdb_show_membership"
-              : "episode_evidence"
-        );
-        setCastEligibilityWarning(
-          typeof eligibilityWarningRaw === "string" && eligibilityWarningRaw.trim()
-            ? eligibilityWarningRaw
-            : null
-        );
-        setCastLoadWarning(null);
-        setCastLoadedOnce(true);
-        return appliedCast;
-      } catch (err) {
-        if (requestController.signal.aborted) {
-          return [];
-        }
-        if (!isCurrentShowId(requestShowId)) return [];
-        const message = isAbortError(err)
-          ? `Timed out loading cast after ${Math.round(SHOW_CAST_LOAD_TIMEOUT_MS / 1000)}s`
-          : err instanceof Error
-            ? err.message
-            : "Failed to fetch cast";
-        console.warn("Failed to fetch cast:", message);
-        const hasPriorData = castLoadedOnce || cast.length > 0 || archiveFootageCast.length > 0;
-        if (hasPriorData) {
-          setCastLoadWarning(`${message}. Showing last successful cast snapshot.`);
-          setCastLoadError(null);
-        } else {
-          setCastLoadError(message);
+          castSnapshotRef.current = { cast: appliedCast, archive: appliedArchiveCast };
+          setCastSource(
+            castSourceRaw === "show_fallback"
+              ? "show_fallback"
+              : castSourceRaw === "imdb_show_membership"
+                ? "imdb_show_membership"
+                : "episode_evidence"
+          );
+          setCastEligibilityWarning(
+            typeof eligibilityWarningRaw === "string" && eligibilityWarningRaw.trim()
+              ? eligibilityWarningRaw
+              : null
+          );
           setCastLoadWarning(null);
-          setCast([]);
-          setArchiveFootageCast([]);
-          setCastSource(rosterMode === "imdb_show_membership" ? "imdb_show_membership" : "episode_evidence");
-          setCastEligibilityWarning(null);
+          setCastLoadedOnce(true);
+          castLoadedOnceRef.current = true;
+          return appliedCast;
+        } catch (err) {
+          if (requestController.signal.aborted) {
+            return [];
+          }
+          if (!isCurrentShowId(requestShowId)) return [];
+          const message = isAbortError(err)
+            ? `Timed out loading cast after ${Math.round(SHOW_CAST_LOAD_TIMEOUT_MS / 1000)}s`
+            : err instanceof Error
+              ? err.message
+              : "Failed to fetch cast";
+          console.warn("Failed to fetch cast:", message);
+          const hasPriorData =
+            castLoadedOnceRef.current ||
+            castSnapshotRef.current.cast.length > 0 ||
+            castSnapshotRef.current.archive.length > 0;
+          if (hasPriorData) {
+            setCastLoadWarning(`${message}. Showing last successful cast snapshot.`);
+            setCastLoadError(null);
+          } else {
+            setCastLoadError(message);
+            setCastLoadWarning(null);
+            setCast([]);
+            setArchiveFootageCast([]);
+            castSnapshotRef.current = { cast: [], archive: [] };
+            setCastSource(rosterMode === "imdb_show_membership" ? "imdb_show_membership" : "episode_evidence");
+            setCastEligibilityWarning(null);
+            setCastLoadedOnce(false);
+            castLoadedOnceRef.current = false;
+          }
+          if (options?.throwOnError) {
+            throw (err instanceof Error ? err : new Error(message));
+          }
+          return [];
+        } finally {
+          if (externalSignal) {
+            externalSignal.removeEventListener("abort", abortWithExternalSignal);
+          }
+          if (castLoadAbortControllerRef.current === requestController) {
+            castLoadAbortControllerRef.current = null;
+          }
+          if (castLoadAbortControllerRef.current === null && isCurrentShowId(requestShowId)) {
+            setCastLoading(false);
+          }
         }
-        if (options?.throwOnError) {
-          throw (err instanceof Error ? err : new Error(message));
-        }
-        return [];
+      })();
+
+      castLoadInFlightRef.current = request;
+      try {
+        return await request;
       } finally {
-        if (externalSignal) {
-          externalSignal.removeEventListener("abort", abortWithExternalSignal);
-        }
-        if (castLoadAbortControllerRef.current === requestController) {
-          castLoadAbortControllerRef.current = null;
-        }
-        if (castLoadAbortControllerRef.current === null && isCurrentShowId(requestShowId)) {
-          setCastLoading(false);
+        if (castLoadInFlightRef.current === request) {
+          castLoadInFlightRef.current = null;
         }
       }
     },
-    [archiveFootageCast.length, cast.length, castLoadedOnce, getAuthHeaders, isCurrentShowId, showId]
+    [getAuthHeaders, isCurrentShowId, showId]
   );
 
   const fetchShowLinks = useCallback(async () => {
@@ -6042,9 +6202,11 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "cast") return;
-    if (castLoadedOnce || castLoading) return;
-    void fetchCast();
-  }, [activeTab, castLoadedOnce, castLoading, fetchCast, hasAccess, showId]);
+    const autoLoadKey = `${showId}:cast`;
+    if (castAutoLoadAttemptedRef.current === autoLoadKey) return;
+    castAutoLoadAttemptedRef.current = autoLoadKey;
+    void fetchCast({ force: true });
+  }, [activeTab, fetchCast, hasAccess, showId]);
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "cast") return;
@@ -6054,6 +6216,47 @@ export default function TrrShowDetailPage() {
     castRoleMembersAutoLoadAttemptedRef.current = autoLoadKey;
     void fetchCastRoleMembers();
   }, [activeTab, castSeasonFilters, fetchCastRoleMembers, hasAccess, showId]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId || activeTab !== "cast") return;
+    const intelligenceSettled = !castRoleMembersLoading && !rolesLoading;
+    const intelligenceReady =
+      intelligenceSettled &&
+      !castRoleMembersError &&
+      !rolesError &&
+      (castRoleMembersLoadedOnce || showRolesLoadedOnce);
+    if (!intelligenceReady) return;
+    if (castLoading || castLoadError) return;
+    if (cast.length > 0 || archiveFootageCast.length > 0) return;
+
+    const recoveryModeKey = castLoadedOnce ? "empty-cast-recovery" : "initial-cast-recovery";
+    const recoveryKey = `${showId}:${recoveryModeKey}`;
+    if (castAutoRecoveryAttemptedRef.current === recoveryKey) return;
+    castAutoRecoveryAttemptedRef.current = recoveryKey;
+
+    if (castLoadedOnce) {
+      setCastLoadWarning("Cast list unavailable; retrying cast roster...");
+    } else {
+      setCastLoadWarning("Loading cast roster...");
+    }
+    void fetchCast({ force: true });
+  }, [
+    activeTab,
+    archiveFootageCast.length,
+    cast.length,
+    castLoadError,
+    castLoadedOnce,
+    castLoading,
+    castRoleMembersError,
+    castRoleMembersLoadedOnce,
+    castRoleMembersLoading,
+    fetchCast,
+    hasAccess,
+    rolesError,
+    rolesLoading,
+    showId,
+    showRolesLoadedOnce,
+  ]);
 
   useEffect(() => {
     castRefreshAbortControllerRef.current?.abort();
@@ -6124,6 +6327,11 @@ export default function TrrShowDetailPage() {
     setCast([]);
     setArchiveFootageCast([]);
     setCastLoadedOnce(false);
+    castLoadedOnceRef.current = false;
+    castSnapshotRef.current = { cast: [], archive: [] };
+    castLoadInFlightRef.current = null;
+    castAutoLoadAttemptedRef.current = null;
+    castAutoRecoveryAttemptedRef.current = null;
     setCastLoading(false);
     setCastLoadError(null);
     setCastLoadWarning(null);
@@ -6177,6 +6385,10 @@ export default function TrrShowDetailPage() {
     if (activeTab === "cast") return;
     castLoadAbortControllerRef.current?.abort();
     castLoadAbortControllerRef.current = null;
+    castLoadInFlightRef.current = null;
+    if (!castLoadedOnceRef.current) {
+      castAutoLoadAttemptedRef.current = null;
+    }
   }, [activeTab]);
 
   useEffect(() => () => {
@@ -6946,7 +7158,7 @@ export default function TrrShowDetailPage() {
       if (!dateToCheck) return false;
 
       const airDate = new Date(dateToCheck);
-      if (Number.isNaN(airDate.getTime())) return true;
+      if (Number.isNaN(airDate.getTime())) return false;
       airDate.setHours(0, 0, 0, 0);
       return airDate <= today;
     },
@@ -6976,56 +7188,30 @@ export default function TrrShowDetailPage() {
     [socialSeasonOptions]
   );
 
+  const requestedSocialSeasonId = useMemo(() => {
+    const seasonNumberFromPath = socialPathFilters?.seasonNumber ?? null;
+    if (seasonNumberFromPath == null) return null;
+    return (
+      socialSeasonOptions.find((season) => season.season_number === seasonNumberFromPath)?.id ?? null
+    );
+  }, [socialPathFilters?.seasonNumber, socialSeasonOptions]);
+
   useEffect(() => {
     setSelectedSocialSeasonId((prev) => {
+      if (requestedSocialSeasonId) {
+        return prev === requestedSocialSeasonId ? prev : requestedSocialSeasonId;
+      }
       if (prev && socialSeasonOptions.some((season) => season.id === prev)) {
         return prev;
       }
       return defaultSocialSeasonId;
     });
-  }, [defaultSocialSeasonId, socialSeasonOptions]);
+  }, [defaultSocialSeasonId, requestedSocialSeasonId, socialSeasonOptions]);
 
   const selectedSocialSeason = useMemo(
     () => socialSeasonOptions.find((season) => season.id === selectedSocialSeasonId) ?? null,
     [selectedSocialSeasonId, socialSeasonOptions]
   );
-
-  useEffect(() => {
-    if (activeTab !== "social") return;
-    if (!selectedSocialSeason) return;
-
-    const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
-    if (socialAnalyticsView === "bravo") {
-      nextQuery.delete("social_view");
-    } else {
-      nextQuery.set("social_view", socialAnalyticsView);
-    }
-    if (socialPlatformTab === "overview") {
-      nextQuery.delete("social_platform");
-    } else {
-      nextQuery.set("social_platform", socialPlatformTab);
-    }
-
-    const nextUrl = buildSeasonAdminUrl({
-      showSlug: showSlugForRouting,
-      seasonNumber: selectedSocialSeason.season_number,
-      tab: "social",
-      query: nextQuery,
-      socialView: socialAnalyticsView,
-    });
-    const currentUrl = searchParams.toString() ? `${pathname}?${searchParams.toString()}` : pathname;
-    if (nextUrl === currentUrl) return;
-    router.replace(nextUrl as Route, { scroll: false });
-  }, [
-    activeTab,
-    pathname,
-    router,
-    searchParams,
-    selectedSocialSeason,
-    showSlugForRouting,
-    socialAnalyticsView,
-    socialPlatformTab,
-  ]);
 
   const syncBravoPreviewSeasonOptions = useMemo(() => {
     const set = new Set<number>();
@@ -8986,7 +9172,7 @@ export default function TrrShowDetailPage() {
       loadGalleryAssets(selectedGallerySeason);
       return;
     }
-    if (assetsView === "brand") {
+    if (assetsView === "branding") {
       loadGalleryAssets("all");
     }
   }, [activeTab, assetsView, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
@@ -9651,6 +9837,12 @@ export default function TrrShowDetailPage() {
     !castRoleMembersLoading &&
     !rolesLoading &&
     (Boolean(castRoleMembersError) || Boolean(rolesError));
+  const castIntelligenceSettled = !castRoleMembersLoading && !rolesLoading;
+  const castRosterSettled =
+    !castLoading && (castLoadedOnce || Boolean(castLoadError) || Boolean(castLoadWarning));
+  const castUiTerminalReady = activeTab === "cast" && castIntelligenceSettled && castRosterSettled;
+  const shouldShowRoleCreditEmptyState =
+    castUiTerminalReady && availableCastRoleAndCreditFilters.length === 0;
   const activeRefreshTarget =
     (Object.entries(refreshingTargets).find(([, isRefreshing]) => isRefreshing)?.[0] as
       | ShowRefreshTarget
@@ -9903,8 +10095,14 @@ export default function TrrShowDetailPage() {
     showSlug: showSlugForRouting,
     tab: "social",
     socialView: socialAnalyticsView,
+    socialRoute: {
+      seasonNumber: getSocialSeasonNumberForRouting(),
+      weekIndex: socialPathFilters?.weekIndex,
+      platform: socialPathFilters?.platform ?? (socialPlatformTab !== "overview" ? socialPlatformTab : undefined),
+      handle: socialPathFilters?.handle,
+    },
   });
-  const socialHeaderNetworkLabel = `${socialAnalyticsView.charAt(0).toUpperCase()}${socialAnalyticsView.slice(1)} Analytics`;
+  const socialHeaderNetworkLabel = `${formatSocialAnalyticsViewLabel(socialAnalyticsView)} Analytics`;
   const headerBreadcrumbs =
     activeTab === "social"
       ? buildSeasonSocialBreadcrumb(show.name, selectedSocialSeason?.season_number ?? "", {
@@ -9981,108 +10179,109 @@ export default function TrrShowDetailPage() {
                   )}
                 </div>
               </div>
-              <div className="flex flex-col gap-3 sm:items-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isShowRefreshBusy) {
-                      setRefreshLogOpen((prev) => !prev);
-                      return;
-                    }
-                    void refreshAllShowData();
-                  }}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  {isShowRefreshBusy
-                    ? `Refreshing... ${refreshLogOpen ? "(Hide Health)" : "(View Health)"}`
-                    : "Refresh"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!canSyncByBravo) {
-                      setSyncBravoError(
-                        syncBravoReadinessMessage ||
-                          "Sync seasons, episodes, and cast first."
-                      );
-                      return;
-                    }
-                    setSyncBravoModePickerOpen(true);
-                    setSyncBravoOpen(false);
-                    setSyncBravoStep("preview");
-                    setSyncBravoError(null);
-                    setSyncBravoNotice(null);
-                  }}
-                  disabled={!canSyncByBravo || syncBravoLoading}
-                  title={syncBravoReadinessMessage || undefined}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Sync by Bravo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRefreshLogOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                  title="Open Health Center"
-                >
-                  <svg
-                    className="h-4 w-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
+              {activeTab !== "social" && (
+                <div className="flex flex-col gap-3 sm:items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isShowRefreshBusy) {
+                        setRefreshLogOpen((prev) => !prev);
+                        return;
+                      }
+                      void refreshAllShowData();
+                    }}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                   >
-                    <path d="M22 12h-4l-3 8-4-16-3 8H2" />
-                  </svg>
-                  Health
-                </button>
-                {syncBravoReadinessMessage && (
-                  <p className="max-w-xs text-right text-[11px] text-amber-700">
-                    {syncBravoReadinessMessage}
-                  </p>
-                )}
+                    {isShowRefreshBusy
+                      ? `Refreshing... ${refreshLogOpen ? "(Hide Health)" : "(View Health)"}`
+                      : "Refresh"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canSyncByBravo) {
+                        setSyncBravoError(
+                          syncBravoReadinessMessage ||
+                            "Sync seasons, episodes, and cast first."
+                        );
+                        return;
+                      }
+                      setSyncBravoModePickerOpen(true);
+                      setSyncBravoOpen(false);
+                      setSyncBravoStep("preview");
+                      setSyncBravoError(null);
+                      setSyncBravoNotice(null);
+                    }}
+                    disabled={!canSyncByBravo || syncBravoLoading}
+                    title={syncBravoReadinessMessage || undefined}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Sync by Bravo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRefreshLogOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                    title="Open Health Center"
+                  >
+                    <svg
+                      className="h-4 w-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M22 12h-4l-3 8-4-16-3 8H2" />
+                    </svg>
+                    Health
+                  </button>
+                  {syncBravoReadinessMessage && (
+                    <p className="max-w-xs text-right text-[11px] text-amber-700">
+                      {syncBravoReadinessMessage}
+                    </p>
+                  )}
 
-                {/* Ratings */}
-                {tmdbVoteAverageText && (
-                  <div className="flex items-center gap-1 text-sm">
-                    <span className="text-yellow-500">★</span>
-                    <span className="font-semibold">
-                      {tmdbVoteAverageText}
-                    </span>
-                    <span className="text-zinc-500">TMDB</span>
-                  </div>
-                )}
-                {imdbRatingText && (
-                  <div className="flex items-center gap-1 text-sm">
-                    <span className="text-yellow-500">★</span>
-                    <span className="font-semibold">
-                      {imdbRatingText}
-                    </span>
-                    <span className="text-zinc-500">IMDB</span>
-                  </div>
-                )}
-                {refreshAllNotice && (
-                  <p className="max-w-xs text-right text-xs text-zinc-500">{refreshAllNotice}</p>
-                )}
-                {refreshAllError && (
-                  <p className="max-w-xs text-right text-xs text-red-600">{refreshAllError}</p>
-                )}
-                {globalRefreshProgress && (
-                  <div className="w-full max-w-xs">
-                    <RefreshProgressBar
-                      show={isShowRefreshBusy}
-                      stage={globalRefreshStage}
-                      message={globalRefreshMessage}
-                      current={globalRefreshCurrent}
-                      total={globalRefreshTotal}
-                    />
-                  </div>
-                )}
-                {refreshLogOpen && (
-                  <div className="w-full max-w-xl rounded-lg border border-zinc-200 bg-white p-3 shadow-sm">
+                  {/* Ratings */}
+                  {tmdbVoteAverageText && (
+                    <div className="flex items-center gap-1 text-sm">
+                      <span className="text-yellow-500">★</span>
+                      <span className="font-semibold">
+                        {tmdbVoteAverageText}
+                      </span>
+                      <span className="text-zinc-500">TMDB</span>
+                    </div>
+                  )}
+                  {imdbRatingText && (
+                    <div className="flex items-center gap-1 text-sm">
+                      <span className="text-yellow-500">★</span>
+                      <span className="font-semibold">
+                        {imdbRatingText}
+                      </span>
+                      <span className="text-zinc-500">IMDB</span>
+                    </div>
+                  )}
+                  {refreshAllNotice && (
+                    <p className="max-w-xs text-right text-xs text-zinc-500">{refreshAllNotice}</p>
+                  )}
+                  {refreshAllError && (
+                    <p className="max-w-xs text-right text-xs text-red-600">{refreshAllError}</p>
+                  )}
+                  {globalRefreshProgress && (
+                    <div className="w-full max-w-xs">
+                      <RefreshProgressBar
+                        show={isShowRefreshBusy}
+                        stage={globalRefreshStage}
+                        message={globalRefreshMessage}
+                        current={globalRefreshCurrent}
+                        total={globalRefreshTotal}
+                      />
+                    </div>
+                  )}
+                  {refreshLogOpen && (
+                    <div className="w-full max-w-xl rounded-lg border border-zinc-200 bg-white p-3 shadow-sm">
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
                         Refresh Log
@@ -10206,9 +10405,10 @@ export default function TrrShowDetailPage() {
                         })}
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="mt-4">
               <ShowTabsNav
@@ -10301,7 +10501,7 @@ export default function TrrShowDetailPage() {
               <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  {assetsView === "images" ? "Show Gallery" : assetsView === "videos" ? "Videos" : "Brand"}
+                  {assetsView === "images" ? "Show Gallery" : assetsView === "videos" ? "Videos" : "Branding"}
                 </p>
                 <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
                 </div>
@@ -11124,8 +11324,10 @@ export default function TrrShowDetailPage() {
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                       Roles & Credit
                     </span>
-                    {availableCastRoleAndCreditFilters.length === 0 ? (
+                    {shouldShowRoleCreditEmptyState ? (
                       <span className="text-xs text-zinc-500">No role or credit filters available.</span>
+                    ) : !castUiTerminalReady ? (
+                      <span className="text-xs text-zinc-500">Loading role and credit filters...</span>
                     ) : (
                       availableCastRoleAndCreditFilters.map((option) => {
                         const active = castRoleAndCreditFilters.includes(option.key);
@@ -11163,6 +11365,11 @@ export default function TrrShowDetailPage() {
                   Loading cast members...
                 </p>
               )}
+              {castLoading && castLoadedOnce && cast.length === 0 && (
+                <p className="mb-4 text-sm text-zinc-500" aria-live="polite">
+                  Cast list unavailable; retrying cast roster...
+                </p>
+              )}
               {castRenderProgressLabel && (
                 <p className="mb-3 text-xs text-zinc-500" role="status" aria-live="polite">
                   {castRenderProgressLabel}
@@ -11174,7 +11381,11 @@ export default function TrrShowDetailPage() {
                     Cast
                   </p>
                   {castGalleryMembers.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
+                    castUiTerminalReady ? (
+                      <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
+                    ) : (
+                      <p className="text-sm text-zinc-500">Loading cast roster...</p>
+                    )
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                       {visibleCastGalleryMembers.map((member) => {
@@ -11448,11 +11659,14 @@ export default function TrrShowDetailPage() {
                   </section>
                 )}
 
-                {castGalleryMembers.length === 0 && crewGalleryMembers.length === 0 && cast.length > 0 && (
+                {castUiTerminalReady &&
+                  castGalleryMembers.length === 0 &&
+                  crewGalleryMembers.length === 0 &&
+                  cast.length > 0 && (
                   <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                 )}
 
-                {castLoadedOnce && !castLoading && cast.length === 0 && archiveFootageCast.length === 0 && (
+                {castUiTerminalReady && cast.length === 0 && archiveFootageCast.length === 0 && (
                   <p className="text-sm text-zinc-500">
                     No cast members found for this show.
                   </p>
@@ -11483,6 +11697,7 @@ export default function TrrShowDetailPage() {
               socialDependencyError={socialDependencyError}
               selectedSocialSeason={selectedSocialSeason}
               socialPlatformTab={socialPlatformTab}
+              isRedditView={socialAnalyticsView === "reddit"}
               onSelectSocialPlatformTab={setSocialPlatformTab}
               socialPlatformOptions={SHOW_SOCIAL_PLATFORM_TABS}
               socialSeasonOptions={socialSeasonOptions}

@@ -70,6 +70,11 @@ type AnalyticsPayload = {
         tiktok: number | null;
         twitter: number | null;
       };
+      youtube_content_breakdown?: {
+        videos_count: number;
+        reels_count: number;
+        total_count: number;
+      };
       last_post_at: string | null;
       last_comment_at: string | null;
       data_freshness_minutes: number | null;
@@ -310,6 +315,11 @@ const analyticsBase: AnalyticsPayload = {
         youtube: 40,
         tiktok: 40,
         twitter: 40,
+      },
+      youtube_content_breakdown: {
+        videos_count: 12,
+        reels_count: 3,
+        total_count: 15,
       },
       last_post_at: "2026-01-20T12:00:00Z",
       last_comment_at: "2026-01-20T13:00:00Z",
@@ -694,7 +704,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     (auth as unknown as { currentUser?: { getIdToken: () => Promise<string> } }).currentUser = {
       getIdToken: vi.fn().mockResolvedValue("test-token"),
     };
-    window.history.replaceState({}, "", "/shows/show-1/s6/social/bravo");
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/official");
   });
 
   afterEach(() => {
@@ -873,9 +883,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const weekOneLink = await screen.findByRole("link", { name: /Week 1/i });
     const href = weekOneLink.getAttribute("href") ?? "";
 
-    expect(href).toContain("/shows/show-1/s6/social/week/1");
-    expect(href).toContain("source_scope=bravo");
-    expect(href).toContain("season_id=season-1");
+    expect(href).toContain("/show-1/s6/social/w1/details");
+    expect(href).not.toContain("source_scope=");
+    expect(href).not.toContain("season_id=");
     expect(href).not.toContain("?tab=social/week");
   });
 
@@ -897,7 +907,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const weekOneLink = await screen.findByRole("link", { name: /Week 1/i });
     const href = weekOneLink.getAttribute("href") ?? "";
-    expect(href).toContain("social_platform=youtube");
+    expect(href).toContain("/social/w1/youtube");
+    expect(href).not.toContain("social_platform=youtube");
   });
 
   it("renders BYE WEEK labels from backend weekly payloads", async () => {
@@ -948,7 +959,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const byeWeekLink = await screen.findByRole("link", {
       name: /bye week/i,
     });
-    expect(byeWeekLink.getAttribute("href") ?? "").toContain("/social/week/2");
+    expect(byeWeekLink.getAttribute("href") ?? "").toContain("/social/w2/details");
     expect(screen.getAllByText(/BYE WEEK/i).length).toBeGreaterThan(0);
   });
 
@@ -1260,7 +1271,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     window.history.replaceState(
       {},
       "",
-      "/shows/show-1/s6/social/bravo?social_platform=youtube",
+      "/shows/show-1/s6/social/official?social_platform=youtube",
     );
     mockSeasonSocialFetch(analyticsBase);
 
@@ -1280,10 +1291,63 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(window.location.search).toContain("social_platform=instagram");
   });
 
+  it("renders YouTube Videos/Reels cards only on the YouTube tab", async () => {
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/official?social_platform=youtube");
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("YouTube Posts Schedule");
+    expect(screen.getByTestId("metric-youtube-videos-card")).toBeInTheDocument();
+    expect(screen.getByTestId("metric-youtube-videos-value")).toHaveTextContent("12");
+    expect(screen.getByTestId("metric-youtube-reels-value")).toHaveTextContent("3");
+
+    const platformTabs = screen.getByRole("navigation");
+    fireEvent.click(within(platformTabs).getByRole("button", { name: "Instagram" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("metric-youtube-videos-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("metric-youtube-reels-card")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows fallback for YouTube Videos/Reels cards when breakdown is missing", async () => {
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/official?social_platform=youtube");
+    mockSeasonSocialFetch({
+      ...analyticsBase,
+      summary: {
+        ...analyticsBase.summary,
+        data_quality: {
+          ...analyticsBase.summary.data_quality!,
+          youtube_content_breakdown: undefined,
+        },
+      },
+    });
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("YouTube Posts Schedule");
+    expect(screen.getByTestId("metric-youtube-videos-value")).toHaveTextContent("--");
+    expect(screen.getByTestId("metric-youtube-reels-value")).toHaveTextContent("--");
+  });
+
   it("supports controlled platform tabs without mutating URL and allows hiding internal tabs", async () => {
     mockSeasonSocialFetch(analyticsBase);
     const onPlatformTabChange = vi.fn();
-    window.history.replaceState({}, "", "/shows/show-1/s6/social/bravo");
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/official");
 
     const { rerender } = render(
       <SeasonSocialAnalyticsSection
@@ -1653,7 +1717,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     window.history.replaceState(
       {},
       "",
-      "/shows/show-1/s6/social/bravo?social_view=hashtags&social_metrics=posts,likes,comments",
+      "/shows/show-1/s6/social/official?social_view=hashtags&social_metrics=posts,likes,comments",
     );
     const fetchMock = mockSeasonSocialFetch(analyticsBase);
 
@@ -1680,7 +1744,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     window.history.replaceState(
       {},
       "",
-      "/shows/show-1/s6/social/bravo?social_metrics=posts,likes,comments",
+      "/shows/show-1/s6/social/official?social_metrics=posts,likes,comments",
     );
     const fetchMock = mockSeasonSocialFetch(analyticsBase);
 
@@ -2164,6 +2228,154 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.queryByRole("button", { name: "YouTube" })).not.toBeInTheDocument();
   });
 
+  it("switches from bravo to reddit even when bravo refresh requests are still pending", async () => {
+    const pendingMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics?")) return new Promise<Response>(() => {});
+      if (url.includes("/social/targets?")) return new Promise<Response>(() => {});
+      if (url.includes("/social/jobs?")) return new Promise<Response>(() => {});
+      if (url.includes("/social/runs/summary?")) return new Promise<Response>(() => {});
+      if (url.includes("/social/runs?")) return new Promise<Response>(() => {});
+      if (url.includes("/social/ingest/worker-health")) return new Promise<Response>(() => {});
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", pendingMock as unknown as typeof fetch);
+
+    const { rerender } = render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="bravo"
+      />,
+    );
+
+    const countCallsFor = (needle: string) =>
+      pendingMock.mock.calls.filter(([input]) => String(input).includes(needle)).length;
+
+    await waitFor(() => {
+      expect(countCallsFor("/social/targets?")).toBeGreaterThan(0);
+    });
+
+    const beforeSwitch = {
+      runs: countCallsFor("/social/runs?"),
+      targets: countCallsFor("/social/targets?"),
+      summaries: countCallsFor("/social/runs/summary?"),
+      workerHealth: countCallsFor("/social/ingest/worker-health"),
+      analytics: countCallsFor("/social/analytics?"),
+      jobs: countCallsFor("/social/jobs?"),
+    };
+
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="reddit"
+      />,
+    );
+
+    expect(await screen.findByTestId("reddit-sources-manager")).toBeInTheDocument();
+    expect(screen.queryByText("Current Run")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(countCallsFor("/social/runs?")).toBe(beforeSwitch.runs);
+    expect(countCallsFor("/social/targets?")).toBe(beforeSwitch.targets);
+    expect(countCallsFor("/social/runs/summary?")).toBe(beforeSwitch.summaries);
+    expect(countCallsFor("/social/ingest/worker-health")).toBe(beforeSwitch.workerHealth);
+    expect(countCallsFor("/social/analytics?")).toBe(beforeSwitch.analytics);
+    expect(countCallsFor("/social/jobs?")).toBe(beforeSwitch.jobs);
+  });
+
+  it("restarts bravo refresh pipeline when returning from reddit after stale bravo requests", async () => {
+    const callCount: Record<string, number> = {};
+    const mock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      const next = (endpoint: string) => {
+        callCount[endpoint] = (callCount[endpoint] ?? 0) + 1;
+        return callCount[endpoint];
+      };
+
+      if (url.includes("/social/analytics?")) {
+        if (next("analytics") === 1) return new Promise<Response>(() => {});
+        return jsonResponse(analyticsBase);
+      }
+      if (url.includes("/social/targets?")) {
+        if (next("targets") === 1) return new Promise<Response>(() => {});
+        return jsonResponse({ targets: [] });
+      }
+      if (url.includes("/social/jobs?")) {
+        if (next("jobs") === 1) return new Promise<Response>(() => {});
+        return jsonResponse({ jobs: [] });
+      }
+      if (url.includes("/social/runs/summary?")) {
+        if (next("summaries") === 1) return new Promise<Response>(() => {});
+        return jsonResponse({ summaries: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        if (next("runs") === 1) return new Promise<Response>(() => {});
+        return jsonResponse({ runs: [] });
+      }
+      if (url.includes("/social/ingest/worker-health")) {
+        if (next("workerHealth") === 1) return new Promise<Response>(() => {});
+        return jsonResponse({ queue_enabled: false, healthy: true });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", mock as unknown as typeof fetch);
+
+    const { rerender } = render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="bravo"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(callCount.targets).toBeGreaterThan(0);
+    });
+
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="reddit"
+      />,
+    );
+
+    expect(await screen.findByTestId("reddit-sources-manager")).toBeInTheDocument();
+
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="bravo"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(callCount.targets).toBeGreaterThan(1);
+      expect(callCount.runs).toBeGreaterThan(1);
+      expect(callCount.summaries).toBeGreaterThan(1);
+      expect(callCount.workerHealth).toBeGreaterThan(1);
+    });
+  });
+
   it("renders advanced run health and benchmark panel", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -2412,6 +2624,63 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       "src",
       "https://images.test/discussion-thumb.jpg",
     );
+  });
+
+  it("opens leaderboard media in lightbox and shows social stats in metadata", async () => {
+    const analyticsWithThumbs: AnalyticsPayload = {
+      ...analyticsBase,
+      leaderboards: {
+        bravo_content: [
+          {
+            platform: "instagram",
+            source_id: "ig-1",
+            text: "Official trailer post",
+            engagement: 25,
+            url: "https://example.com/ig-1",
+            timestamp: "2026-01-07T00:00:00Z",
+            thumbnail_url: "https://images.test/content-thumb.jpg",
+          },
+        ],
+        viewer_discussion: [
+          {
+            platform: "instagram",
+            source_id: "ig-comment-1",
+            text: "Viewer reaction",
+            engagement: 11,
+            url: "https://example.com/ig-comment-1",
+            timestamp: "2026-01-07T00:00:00Z",
+            sentiment: "positive",
+            thumbnail_url: "https://images.test/discussion-thumb.jpg",
+          },
+        ],
+      },
+    };
+    mockSeasonSocialFetch(analyticsWithThumbs);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="bravo"
+      />,
+    );
+
+    await screen.findByText("Bravo Content Leaderboard");
+    fireEvent.click(screen.getByRole("button", { name: "Open leaderboard media lightbox" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Close lightbox")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByLabelText("Show metadata"));
+    const statsHeader = screen.getByText("Social Stats");
+    const statsPanel = statsHeader.closest("div");
+    expect(statsPanel).not.toBeNull();
+    if (statsPanel) {
+      expect(within(statsPanel).getByText("Platform")).toBeInTheDocument();
+      expect(within(statsPanel).getByText("Engagement")).toBeInTheDocument();
+      expect(within(statsPanel).getByText("25")).toBeInTheDocument();
+    }
   });
 
   it("renders season hashtag analytics from week detail posts and respects platform scope", async () => {

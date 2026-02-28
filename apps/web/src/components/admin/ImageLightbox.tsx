@@ -246,6 +246,8 @@ interface ImageLightboxProps extends ImageManagementProps {
   src: string;
   fallbackSrcs?: string[];
   fallbackSrc?: string | null;
+  mediaType?: "image" | "video";
+  videoPosterSrc?: string | null;
   alt: string;
   isOpen: boolean;
   onClose: () => void;
@@ -369,6 +371,7 @@ function MetadataPanel({
     typeof metadata.s3MirrorFileName === "string" && metadata.s3MirrorFileName.trim().length > 0
       ? metadata.s3MirrorFileName.trim()
       : null;
+  const hasS3MirrorDetails = Boolean(metadata.isS3Mirrored);
   const canEditContentType = Boolean(management?.canManage && management?.onUpdateContentType);
   const formatDateLabel = (value: Date | null | undefined): string =>
     value ? value.toLocaleDateString() : "—";
@@ -384,7 +387,6 @@ function MetadataPanel({
     { label: "Source Variant", value: metadata.sourceVariant ?? "—" },
     { label: "Source Logo", value: metadata.sourceLogo ?? "—" },
     { label: "Name", value: metadata.assetName ?? "—" },
-    { label: "S3 Mirror File", value: mirrorFileName ?? "—" },
     { label: "Original URL", value: metadata.originalImageUrl ?? "—" },
     {
       label: "Content Type",
@@ -442,6 +444,9 @@ function MetadataPanel({
       value: metadata.galleryStatusCheckedAt ? metadata.galleryStatusCheckedAt.toLocaleString() : "—",
     });
   }
+  if (hasS3MirrorDetails) {
+    metadataCoverageRows.push({ label: "S3 Mirror File", value: mirrorFileName ?? "—" });
+  }
 
   const {
     actionLoading,
@@ -469,6 +474,7 @@ function MetadataPanel({
   const canSetFeaturedBackdrop = Boolean(management?.onSetFeaturedBackdrop);
   const canSetFeaturedLogo = Boolean(management?.onSetFeaturedLogo);
   const canEditTools = Boolean(extras && onToggleExtras);
+  const showExtrasInline = Boolean(extras) && !management?.canManage;
   const hasAnyActions = true;
   const refreshDisabledReason = !canRefresh
     ? disabledReasons.refresh ?? "Refresh is unavailable for this image."
@@ -684,10 +690,16 @@ function MetadataPanel({
         </div>
       </div>
 
+      {hasS3MirrorDetails && (
         <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            S3 Mirror File
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              S3 Mirror File
+            </span>
+            <span className="inline-block rounded px-2 py-0.5 text-[10px] font-medium text-white bg-blue-500/80">
+              S3 MIRROR
+            </span>
+          </div>
           <div className="mt-1 flex items-center gap-2">
             <code className="max-w-[70%] break-all rounded bg-white/10 px-2 py-1 text-xs text-white/90">
               {mirrorFileName ?? "—"}
@@ -709,43 +721,45 @@ function MetadataPanel({
               Copy
             </button>
           </div>
-            {copyMirrorFileNotice && (
-              <p
-                className={`mt-1 text-xs ${
-                  copyMirrorFileNotice === "Copied." ? "text-emerald-300" : "text-red-300"
-                }`}
-              >
-                {copyMirrorFileNotice}
-              </p>
-            )}
-            <div className="mt-3 space-y-2">
-              <div>
-                <span className="tracking-widest text-[10px] uppercase text-white/50">
-                  Original Source File URL
-                </span>
-                {originalSourceFileUrl ? (
-                  <a
-                    href={originalSourceFileUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-1 block break-all text-xs text-white/90 underline"
-                  >
-                    {originalSourceFileUrl}
-                  </a>
-                ) : (
-                  <p className="mt-1 text-xs text-white/80">Original source file URL unavailable</p>
-                )}
-              </div>
-              <div>
-                <span className="tracking-widest text-[10px] uppercase text-white/50">
-                  Found on
-                </span>
-                <p className="mt-1 break-words text-xs text-white/90">
-                  {foundOnSourceLabel} | {foundOnPageTitle}
-                </p>
-              </div>
-            </div>
-          </div>
+          {copyMirrorFileNotice && (
+            <p
+              className={`mt-1 text-xs ${
+                copyMirrorFileNotice === "Copied." ? "text-emerald-300" : "text-red-300"
+              }`}
+            >
+              {copyMirrorFileNotice}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="mb-4 space-y-2">
+        <div>
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Original Source File URL
+          </span>
+          {originalSourceFileUrl ? (
+            <a
+              href={originalSourceFileUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 block break-all text-xs text-white/90 underline"
+            >
+              {originalSourceFileUrl}
+            </a>
+          ) : (
+            <p className="mt-1 text-xs text-white/80">Original source file URL unavailable</p>
+          )}
+        </div>
+        <div>
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Found on
+          </span>
+          <p className="mt-1 break-words text-xs text-white/90">
+            {foundOnSourceLabel} | {foundOnPageTitle}
+          </p>
+        </div>
+      </div>
 
         <div className="mb-4">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -957,7 +971,8 @@ function MetadataPanel({
           )}
         </div>
 
-        {extras && showExtras && <div className="mb-4">{extras}</div>}
+        {showExtrasInline && <div className="mb-4">{extras}</div>}
+        {extras && showExtras && management?.canManage && <div className="mb-4">{extras}</div>}
 
         <div className="mb-4 rounded border border-white/10 bg-white/[0.03] p-3">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
@@ -1194,6 +1209,8 @@ export function ImageLightbox({
   src,
   fallbackSrcs,
   fallbackSrc,
+  mediaType = "image",
+  videoPosterSrc,
   alt,
   isOpen,
   onClose,
@@ -1257,6 +1274,7 @@ export function ImageLightbox({
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const overlayImageRef = useRef<HTMLDivElement>(null);
+  const isVideoMedia = mediaType === "video";
 
   useEffect(() => {
     setCurrentSrc(src);
@@ -1266,7 +1284,7 @@ export function ImageLightbox({
     setShowEditTools(false);
   }, [retryCandidates, src]);
 
-  const handleImageError = () => {
+  const handlePrimaryMediaError = () => {
     const nextCandidate = retryCandidates[retryIndex] ?? null;
     if (nextCandidate && nextCandidate !== currentSrc) {
       setCurrentSrc(nextCandidate);
@@ -1353,11 +1371,12 @@ export function ImageLightbox({
       : null);
   const faceBoxes = metadata?.faceBoxes ?? [];
   const shouldShowFaceBoxes =
-    faceBoxes.length > 1 ||
-    (faceBoxes.length === 0 &&
-      metadata?.peopleCount !== null &&
-      metadata?.peopleCount !== undefined &&
-      metadata.peopleCount > 1);
+    !isVideoMedia &&
+    (faceBoxes.length > 1 ||
+      (faceBoxes.length === 0 &&
+        metadata?.peopleCount !== null &&
+        metadata?.peopleCount !== undefined &&
+        metadata.peopleCount > 1));
   const previewCenter =
     effectivePreviewRect
       ? {
@@ -1370,7 +1389,8 @@ export function ImageLightbox({
       ? clampPercent(thumbnailCropPreview.focusX)
       : previewCenter?.xPct ?? 50;
   const canAdjustThumbnailCrop = Boolean(
-    showMetadata &&
+    !isVideoMedia &&
+      showMetadata &&
       onThumbnailCropPreviewAdjust &&
       thumbnailCropPreview &&
       effectivePreviewRect &&
@@ -1577,29 +1597,52 @@ export function ImageLightbox({
         <LightboxImageStage>
           {imageFailed ? (
             <div className="flex h-[60vh] w-[60vw] max-w-[90vw] items-center justify-center rounded-lg bg-black/40 text-sm text-white/70">
-              Image failed to load
+              Media failed to load
             </div>
           ) : (
             <div ref={overlayImageRef} className="relative inline-block">
-              <Image
-                src={currentSrc}
-                alt={alt}
-                width={800}
-                height={1200}
-                className="max-h-[80vh] w-auto object-contain shadow-2xl md:max-h-[90vh]"
-                priority
-                unoptimized
-                onError={handleImageError}
-                onLoad={(event) => {
-                  const img = event.currentTarget as HTMLImageElement;
-                  if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                    setPreviewImageSize({
-                      width: img.naturalWidth,
-                      height: img.naturalHeight,
-                    });
-                  }
-                }}
-              />
+              {isVideoMedia ? (
+                <video
+                  src={currentSrc}
+                  aria-label={alt}
+                  controls
+                  autoPlay
+                  playsInline
+                  preload="metadata"
+                  poster={videoPosterSrc ?? undefined}
+                  className="max-h-[80vh] w-auto object-contain shadow-2xl md:max-h-[90vh]"
+                  onError={handlePrimaryMediaError}
+                  onLoadedMetadata={(event) => {
+                    const video = event.currentTarget as HTMLVideoElement;
+                    if (video.videoWidth > 0 && video.videoHeight > 0) {
+                      setPreviewImageSize({
+                        width: video.videoWidth,
+                        height: video.videoHeight,
+                      });
+                    }
+                  }}
+                />
+              ) : (
+                <Image
+                  src={currentSrc}
+                  alt={alt}
+                  width={800}
+                  height={1200}
+                  className="max-h-[80vh] w-auto object-contain shadow-2xl md:max-h-[90vh]"
+                  priority
+                  unoptimized
+                  onError={handlePrimaryMediaError}
+                  onLoad={(event) => {
+                    const img = event.currentTarget as HTMLImageElement;
+                    if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                      setPreviewImageSize({
+                        width: img.naturalWidth,
+                        height: img.naturalHeight,
+                      });
+                    }
+                  }}
+                />
+              )}
               {shouldShowFaceBoxes && (
                 <div className="pointer-events-none absolute inset-0">
                   {faceBoxes.map((box, idx) => {
@@ -1625,7 +1668,7 @@ export function ImageLightbox({
                   })}
                 </div>
               )}
-              {effectivePreviewRect && (
+              {!isVideoMedia && effectivePreviewRect && (
                 <div className="pointer-events-none absolute inset-0">
                   <div
                     className="absolute bottom-0 top-0 w-px bg-white/45"

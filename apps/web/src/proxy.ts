@@ -4,6 +4,40 @@ const DEFAULT_DEV_ADMIN_ORIGIN = "http://admin.localhost:3000";
 const DEFAULT_DEV_ADMIN_API_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
 const STATIC_PATH_PREFIXES = ["/_next", "/favicon.ico", "/robots.txt", "/sitemap.xml"];
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
+  "admin",
+  "api",
+  "auth",
+  "brands",
+  "bravodle",
+  "hub",
+  "login",
+  "privacy-policy",
+  "people",
+  "profile",
+  "realations",
+  "realitease",
+  "shows",
+  "surveys",
+  "terms-of-sale",
+  "terms-of-service",
+  "test-auth",
+]);
+const ROOT_SHOW_ROUTE_SECOND_SEGMENTS = new Set([
+  "overview",
+  "details",
+  "settings",
+  "seasons",
+  "media",
+  "assets",
+  "news",
+  "cast",
+  "surveys",
+  "social",
+  "videos",
+  "fandom",
+  "people",
+]);
 
 function parseOptionalBoolean(value: string | undefined): boolean | null {
   if (typeof value !== "string") return null;
@@ -112,14 +146,37 @@ function isStaticPath(pathname: string): boolean {
   return /\.[^/]+$/.test(pathname);
 }
 
+function isSeasonToken(value: string): boolean {
+  return /^s[0-9]{1,3}$/i.test(value);
+}
+
+function isRootShowUiPath(pathname: string): boolean {
+  const segments = pathname
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.trim().toLowerCase());
+  if (segments.length === 0) return false;
+  const first = segments[0];
+  if (!first || ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS.has(first)) return false;
+  if (!/^[a-z0-9-]+$/.test(first)) return false;
+  if (segments.length === 1) return true;
+
+  const second = segments[1] ?? "";
+  if (isSeasonToken(second)) return true;
+  return ROOT_SHOW_ROUTE_SECOND_SEGMENTS.has(second);
+}
+
 function isAdminUiPath(pathname: string): boolean {
   return (
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
+    pathname === "/people" ||
+    pathname.startsWith("/people/") ||
     pathname === "/brands" ||
     pathname.startsWith("/brands/") ||
     pathname === "/shows" ||
-    pathname.startsWith("/shows/")
+    pathname.startsWith("/shows/") ||
+    isRootShowUiPath(pathname)
   );
 }
 

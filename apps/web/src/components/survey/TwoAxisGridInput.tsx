@@ -17,6 +17,7 @@ import {
 
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { TwoAxisGridConfig, MatrixRow } from "@/lib/surveys/question-config-types";
+import CastCircleToken from "./CastCircleToken";
 import {
   coercePlacements,
   coordToPercent,
@@ -460,10 +461,8 @@ function CastToken({
   void ariaPressedFromDnd;
 
   const dims = size === "bench"
-    ? "w-12 h-12 sm:w-14 sm:h-14"
-    : "w-7 h-7 sm:w-9 sm:h-9";
-
-  const ring = selected ? "ring-2 ring-indigo-500" : "ring-1 ring-gray-200 hover:ring-gray-300";
+    ? "bench"
+    : "grid";
   const opacity = isDragging || isActiveDrag ? "opacity-0" : "opacity-100";
 
   const summary = getCoordinateSummary(placement, config);
@@ -471,10 +470,14 @@ function CastToken({
 
   return (
     <div className="relative flex flex-col items-center">
-      <button
+      <CastCircleToken
         ref={setNodeRef}
-        type="button"
-        className={`${dims} ${ring} ${opacity} relative rounded-full overflow-hidden bg-white shadow-sm transition-transform motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+        sizeVariant={dims}
+        label={subject.label}
+        img={subject.img}
+        selected={selected}
+        draggable={!disabled}
+        className={opacity}
         onClick={(e) => {
           e.stopPropagation();
           onClick();
@@ -484,23 +487,7 @@ function CastToken({
         title={summary}
         {...listeners}
         {...draggableAttributes}
-      >
-        {subject.img ? (
-          <Image
-            src={subject.img}
-            alt={subject.label}
-            fill
-            className="object-cover"
-            sizes={size === "bench" ? "56px" : "36px"}
-            unoptimized={subject.img.startsWith("http")}
-            draggable={false}
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gray-100 text-[10px] font-bold text-gray-600">
-            {subject.label.split(" ").map((p) => p[0]).join("").slice(0, 3)}
-          </div>
-        )}
-      </button>
+      />
 
       {onRemove && (
         <button
