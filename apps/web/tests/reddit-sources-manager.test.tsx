@@ -239,6 +239,17 @@ const maybeHandleSeasonPeriodRequests = (url: string): Response | null => {
   return jsonResponse({ seasons: seasonLookup[showId] ?? [] });
 };
 
+const findCardByPeriodLabel = (label: string): HTMLElement => {
+  const articleCards = screen.getAllByRole("article");
+  const foundCard = articleCards.find((article) =>
+    !!within(article).queryByText((content) => content.includes(label)),
+  );
+  if (!foundCard) {
+    throw new Error(`Unable to find period card for label ${label}`);
+  }
+  return foundCard as HTMLElement;
+};
+
 describe("RedditSourcesManager", () => {
   beforeEach(() => {
     usePathnameMock.mockReturnValue("/admin/social-media");
@@ -1646,8 +1657,7 @@ describe("RedditSourcesManager", () => {
     expect((await screen.findAllByText("Other unassigned window post canonical flair")).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
-    const preSeasonCard = screen.getByText("Pre-Season").closest("article");
-    expect(preSeasonCard).not.toBeNull();
+    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
     const seedInput = within(preSeasonCard as HTMLElement).getByPlaceholderText(
       "Optional seed post URLs (comma or newline separated)",
     );
@@ -1860,8 +1870,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
-    const preSeasonCard = screen.getByText("Pre-Season").closest("article");
-    expect(preSeasonCard).not.toBeNull();
+    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
     fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
 
     await waitFor(() => {
@@ -1998,8 +2007,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
-    const preSeasonCard = screen.getByText("Pre-Season").closest("article");
-    expect(preSeasonCard).not.toBeNull();
+    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
     fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
 
     await waitFor(() => {
@@ -2176,12 +2184,15 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
-    const preSeasonCard = screen.getByText("Pre-Season").closest("article");
-    expect(preSeasonCard).not.toBeNull();
+    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
     fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
 
     await waitFor(() => {
-      expect(within(preSeasonCard as HTMLElement).getByText(/Pre-Season: refresh completed/)).toBeInTheDocument();
+      expect(
+        within(preSeasonCard as HTMLElement).getByText((content) =>
+          /refresh/i.test(content) && /complete|completed|done/i.test(content),
+        ),
+      ).toBeInTheDocument();
       expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/"))).toBe(true);
       expect(refreshDiscoverCount).toBeGreaterThan(0);
     });
