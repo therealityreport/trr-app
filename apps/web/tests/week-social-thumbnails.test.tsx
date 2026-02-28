@@ -317,8 +317,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Instagram/i }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Open post detail modal" })[0]);
+    fireEvent.click(screen.getByLabelText("Instagram platform"));
+    fireEvent.click(await screen.findByRole("button", { name: "Open post detail modal" }));
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -463,8 +463,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Instagram/i }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Open post detail modal" })[0]);
+    fireEvent.click(screen.getByLabelText("Instagram platform"));
+    fireEvent.click(await screen.findByRole("button", { name: "Open post detail modal" }));
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -663,7 +663,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Instagram/i }));
+    fireEvent.click(screen.getByLabelText("Instagram platform"));
     fireEvent.click(screen.getAllByRole("button", { name: /Post Details/i })[0]);
 
     await waitFor(() => {
@@ -768,8 +768,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Instagram/i }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Open post detail modal" })[0]);
+    fireEvent.click(screen.getByLabelText("Instagram platform"));
+    fireEvent.click(await screen.findByRole("button", { name: "Open post detail modal" }));
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
