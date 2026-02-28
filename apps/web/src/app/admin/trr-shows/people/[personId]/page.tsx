@@ -19,7 +19,7 @@ import {
   cleanLegacyPersonRoutingQuery,
   parsePersonRouteState,
 } from "@/lib/admin/show-admin-routes";
-import { readAdminRecentShows, recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
+import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
 import ShowNewsTab from "@/components/admin/show-tabs/ShowNewsTab";
@@ -88,6 +88,7 @@ import {
   applyThumbnailCropUpdateToPhotos,
 } from "./thumbnail-crop-state";
 import {
+  buildPersonRefreshDetailMessage,
   createSyncProgressTracker,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
@@ -611,7 +612,7 @@ const normalizeFaceBoxes = (value: unknown): FaceBoxTag[] => {
 
 const PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_PAGE_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
-const PERSON_PAGE_STREAM_START_DEADLINE_MS = 20_000;
+const PERSON_PAGE_STREAM_START_DEADLINE_MS = 120_000;
 const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
 const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
 const BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
@@ -887,14 +888,27 @@ function RefreshProgressBar({
   message,
   current,
   total,
+  lastEventAt,
 }: {
   show: boolean;
   phase?: string | null;
   message?: string | null;
   current?: number | null;
   total?: number | null;
+  lastEventAt?: number | null;
 }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!show) return;
+    const timer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [show]);
+
   if (!show) return null;
+
   const hasCounts =
     typeof current === "number" &&
     Number.isFinite(current) &&
@@ -924,6 +938,12 @@ function RefreshProgressBar({
     typeof message === "string" && message.trim()
       ? message.trim()
       : null;
+  const lastUpdateSeconds =
+    typeof lastEventAt === "number" && Number.isFinite(lastEventAt)
+      ? Math.max(0, Math.floor((nowMs - lastEventAt) / 1000))
+      : null;
+  const lastUpdateLabel =
+    typeof lastUpdateSeconds === "number" ? `last update ${lastUpdateSeconds}s ago` : null;
 
   return (
     <div className="w-full">
@@ -936,6 +956,9 @@ function RefreshProgressBar({
             <p className="text-[11px] tabular-nums text-zinc-500">
               {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} ({percent}%)
             </p>
+          )}
+          {!hasProgressBar && lastUpdateLabel && (
+            <p className="text-[11px] tabular-nums text-zinc-500">{lastUpdateLabel}</p>
           )}
         </div>
       )}
@@ -2242,52 +2265,28 @@ export default function PersonProfilePage() {
   const searchParams = useSearchParams();
   const personRouteParam = readRouteParamValue((params as Record<string, unknown>).personId);
   const showRouteParam = readRouteParamValue((params as Record<string, unknown>).showId);
-  const showIdParamRaw = searchParams.get("showId");
-  const legacyShowIdParam =
-    typeof showIdParamRaw === "string" && showIdParamRaw.trim().length > 0
-      ? showIdParamRaw.trim()
+  const hasShowRouteContext = typeof showRouteParam === "string" && showRouteParam.trim().length > 0;
+  const showIdQueryParamRaw = searchParams.get("showId");
+  const showIdQueryParam =
+    typeof showIdQueryParamRaw === "string" && showIdQueryParamRaw.trim().length > 0
+      ? showIdQueryParamRaw.trim()
       : null;
-  const [stickyShowParam, setStickyShowParam] = useState<string | null>(
-    showRouteParam ?? legacyShowIdParam
-  );
-  const [recentShowFallback, setRecentShowFallback] = useState<{
-    slug: string;
-    label: string;
-    href: string;
-  } | null>(null);
-  useEffect(() => {
-    const explicitShowParam = showRouteParam ?? legacyShowIdParam;
-    if (explicitShowParam) {
-      setStickyShowParam((prev) => (prev === explicitShowParam ? prev : explicitShowParam));
-      return;
+  const hasShowQueryContext = Boolean(showIdQueryParam);
+  const showIdParam = hasShowRouteContext ? showRouteParam : showIdQueryParam;
+  const personQueryContext = useMemo(() => {
+    const query = cleanLegacyPersonRoutingQuery(new URLSearchParams(searchParams.toString()));
+    if (!hasShowRouteContext && !hasShowQueryContext) {
+      query.delete("showId");
     }
-    const recent = readAdminRecentShows();
-    const recentEntry = recent[0] ?? null;
-    setRecentShowFallback((prev) => {
-      if (!recentEntry) return null;
-      if (
-        prev &&
-        prev.slug === recentEntry.slug &&
-        prev.label === recentEntry.label &&
-        prev.href === recentEntry.href
-      ) {
-        return prev;
-      }
-      return {
-        slug: recentEntry.slug,
-        label: recentEntry.label,
-        href: recentEntry.href,
-      };
-    });
-  }, [legacyShowIdParam, showRouteParam]);
-  const showIdParam =
-    showRouteParam ?? legacyShowIdParam ?? stickyShowParam ?? recentShowFallback?.slug ?? null;
+    return query;
+  }, [hasShowQueryContext, hasShowRouteContext, searchParams]);
   const [resolvedShowIdParam, setResolvedShowIdParam] = useState<string | null>(
     showIdParam && looksLikeUuid(showIdParam) ? showIdParam : null
   );
   const [resolvedShowSlugParam, setResolvedShowSlugParam] = useState<string | null>(
     showIdParam && !looksLikeUuid(showIdParam) ? showIdParam : null
   );
+  const [resolvedShowNameForRouting, setResolvedShowNameForRouting] = useState<string | null>(null);
   const [resolvedPersonIdParam, setResolvedPersonIdParam] = useState<string | null>(
     personRouteParam && looksLikeUuid(personRouteParam) ? personRouteParam : null
   );
@@ -2503,6 +2502,10 @@ export default function PersonProfilePage() {
     }
     return null;
   }, [person?.full_name, person?.id, personRouteParam, resolvedPersonSlugParam]);
+  const personRouteShowContext = useMemo(
+    () => showSlugForRouting ?? resolvedShowIdParam,
+    [resolvedShowIdParam, showSlugForRouting],
+  );
 
   useEffect(() => {
     setActiveTab(personRouteState.tab);
@@ -2564,19 +2567,17 @@ export default function PersonProfilePage() {
     (tab: TabId) => {
       setActiveTab(tab);
       if (!personSlugForRouting) return;
-      const preservedQuery = cleanLegacyPersonRoutingQuery(
-        new URLSearchParams(searchParams.toString())
-      );
       router.replace(
         buildPersonAdminUrl({
           personSlug: personSlugForRouting,
           tab,
-          query: preservedQuery,
+          showId: personRouteShowContext ?? undefined,
+          query: personQueryContext,
         }) as Route,
         { scroll: false }
       );
     },
-    [personSlugForRouting, router, searchParams]
+    [personQueryContext, personRouteShowContext, personSlugForRouting, router]
   );
 
   const advancedFilters = useMemo(
@@ -2633,89 +2634,166 @@ export default function PersonProfilePage() {
     [galleryFilterCreditsSource, showIdForApi]
   );
   const activeShowName =
-    showScopedCredits?.show_name?.trim() || activeShow?.show_name?.trim() || null;
+    showScopedCredits?.show_name?.trim() ||
+    activeShow?.show_name?.trim() ||
+    resolvedShowNameForRouting?.trim() ||
+    null;
   const activeShowAcronym = useMemo(
     () => buildShowAcronym(activeShowName),
     [activeShowName]
   );
-  const activeShowFilterLabel = activeShowAcronym ?? activeShowName ?? "This Show";
-  const otherShowOptions = useMemo(() => {
+  const activeShowFilterLabel =
+    activeShowName ??
+    activeShowAcronym ??
+    (showSlugForRouting ? humanizeSlug(showSlugForRouting) : "This Show");
+  const knownShowOptions = useMemo(() => {
     const byKey = new Map<
       string,
       { key: string; showId: string | null; showName: string; acronym: string | null }
     >();
     for (const credit of galleryFilterCreditsSource) {
-      if (showIdForApi && credit.show_id === showIdForApi) continue;
+      if (!credit.show_id) continue;
       const showName = credit.show_name?.trim() ?? "";
       if (!showName || isWwhlShowName(showName)) continue;
-      const key = credit.show_id ? `id:${credit.show_id}` : `name:${showName.toLowerCase()}`;
+      const key = `id:${credit.show_id}`;
       if (byKey.has(key)) continue;
       byKey.set(key, {
         key,
-        showId: credit.show_id ?? null,
+        showId: credit.show_id,
         showName,
         acronym: buildShowAcronym(showName),
       });
     }
     return Array.from(byKey.values()).sort((a, b) => a.showName.localeCompare(b.showName));
-  }, [galleryFilterCreditsSource, showIdForApi]);
-  const otherShowNameMatches = useMemo(
-    () => otherShowOptions.map((option) => option.showName.toLowerCase()),
-    [otherShowOptions]
+  }, [galleryFilterCreditsSource]);
+  const activeShowOption = useMemo(() => {
+    if (!activeShowName && !showIdForApi) return null;
+    const targetShowId = showIdForApi?.trim();
+    const targetShowName = activeShowName?.trim().toLowerCase() ?? null;
+    if (!targetShowId && !targetShowName) return null;
+    return (
+      knownShowOptions.find((option) => {
+        if (targetShowId && option.showId && option.showId === targetShowId) {
+          return true;
+        }
+        return targetShowName ? option.showName.toLowerCase() === targetShowName : false;
+      }) ?? null
+    );
+  }, [activeShowName, knownShowOptions, showIdForApi]);
+  const otherKnownShowOptions = useMemo(
+    () =>
+      activeShowOption
+        ? knownShowOptions.filter((option) => option.key !== activeShowOption.key)
+        : knownShowOptions,
+    [activeShowOption, knownShowOptions]
   );
-  const otherShowAcronymMatches = useMemo(() => {
+  const allKnownShowNameMatches = useMemo(
+    () => knownShowOptions.map((option) => option.showName.toLowerCase()),
+    [knownShowOptions]
+  );
+  const allKnownShowAcronymMatches = useMemo(() => {
     const acronyms = new Set<string>();
-    for (const option of otherShowOptions) {
+    for (const option of knownShowOptions) {
       if (option.acronym) acronyms.add(option.acronym.toUpperCase());
     }
     return acronyms;
-  }, [otherShowOptions]);
+  }, [knownShowOptions]);
+  const allKnownShowIds = useMemo(
+    () => knownShowOptions.map((option) => option.showId).filter((value): value is string => Boolean(value)),
+    [knownShowOptions]
+  );
+  const otherShowNameMatches = useMemo(
+    () => otherKnownShowOptions.map((option) => option.showName.toLowerCase()),
+    [otherKnownShowOptions]
+  );
+  const otherShowAcronymMatches = useMemo(() => {
+    const acronyms = new Set<string>();
+    for (const option of otherKnownShowOptions) {
+      if (option.acronym) acronyms.add(option.acronym.toUpperCase());
+    }
+    return acronyms;
+  }, [otherKnownShowOptions]);
   const selectedOtherShow = useMemo(
-    () => otherShowOptions.find((option) => option.key === selectedOtherShowKey) ?? null,
-    [otherShowOptions, selectedOtherShowKey]
+    () => knownShowOptions.find((option) => option.key === selectedOtherShowKey) ?? null,
+    [knownShowOptions, selectedOtherShowKey]
+  );
+  const hasWwhlCredit = useMemo(
+    () => galleryFilterCreditsSource.some((credit) => isWwhlShowName(credit.show_name)),
+    [galleryFilterCreditsSource]
   );
 
   useEffect(() => {
     if (selectedOtherShowKey === "all") return;
-    if (otherShowOptions.some((option) => option.key === selectedOtherShowKey)) return;
+    if (knownShowOptions.some((option) => option.key === selectedOtherShowKey)) return;
     setSelectedOtherShowKey("all");
-  }, [otherShowOptions, selectedOtherShowKey]);
+  }, [knownShowOptions, selectedOtherShowKey]);
 
-  const mediaViewAvailability = useMemo(() => {
-    if (!showIdParam) {
-      return {
-        hasWwhlMatches: false,
-        hasOtherShowMatches: false,
-        hasNonThisShowMatches: false,
-      };
-    }
-    return computePersonGalleryMediaViewAvailability({
+  const mediaViewAvailability = useMemo(() =>
+    computePersonGalleryMediaViewAvailability({
       photos,
       showIdForApi,
       activeShowName,
       activeShowAcronym,
+      allKnownShowNameMatches,
+      allKnownShowAcronymMatches,
+      allKnownShowIds,
       otherShowNameMatches,
       otherShowAcronymMatches,
-    });
-  }, [
+    }), [
     activeShowAcronym,
     activeShowName,
+    allKnownShowAcronymMatches,
+    allKnownShowIds,
+    allKnownShowNameMatches,
     otherShowAcronymMatches,
     otherShowNameMatches,
     photos,
     showIdForApi,
-    showIdParam,
   ]);
 
-  const { hasWwhlMatches, hasOtherShowMatches, hasNonThisShowMatches } = mediaViewAvailability;
+  const { hasWwhlMatches, hasOtherShowMatches, hasUnknownShowMatches, hasNonThisShowMatches } =
+    mediaViewAvailability;
+
+  const hasSelectedOtherShowMatches = useMemo(() => {
+    if (!selectedOtherShow) {
+      return false;
+    }
+    return photos.some((photo) => {
+      const bucketMatches = computePersonPhotoShowBuckets({
+        photo,
+        showIdForApi,
+        activeShowName,
+        activeShowAcronym,
+        allKnownShowNameMatches,
+        allKnownShowAcronymMatches,
+        allKnownShowIds,
+        otherShowNameMatches,
+        otherShowAcronymMatches,
+        selectedOtherShow,
+      });
+      return bucketMatches.matchesSelectedOtherShow;
+    });
+  }, [
+    activeShowAcronym,
+    activeShowName,
+    allKnownShowAcronymMatches,
+    allKnownShowIds,
+    allKnownShowNameMatches,
+    otherShowAcronymMatches,
+    otherShowNameMatches,
+    photos,
+    selectedOtherShow,
+    showIdForApi,
+  ]);
 
   useEffect(() => {
-    if (!showIdParam) return;
     const nextFilter = resolveGalleryShowFilterFallback({
       currentFilter: galleryShowFilter,
-      showContextEnabled: true,
+      showContextEnabled: Boolean(showIdParam),
       hasWwhlMatches,
       hasOtherShowMatches,
+      hasUnknownShowMatches,
+      hasSelectedOtherShowMatches,
       hasNonThisShowMatches,
     });
     if (nextFilter !== galleryShowFilter) {
@@ -2725,6 +2803,8 @@ export default function PersonProfilePage() {
     galleryShowFilter,
     hasNonThisShowMatches,
     hasOtherShowMatches,
+    hasUnknownShowMatches,
+    hasSelectedOtherShowMatches,
     hasWwhlMatches,
     showIdParam,
   ]);
@@ -2766,14 +2846,17 @@ export default function PersonProfilePage() {
   const filteredPhotos = useMemo(() => {
     let result = [...photos];
 
-    // Apply show filter (if coming from a show context)
-    if (showIdParam && galleryShowFilter !== "all") {
+    // Apply show filter
+    if (galleryShowFilter !== "all") {
       result = result.filter((photo) => {
         const bucketMatches = computePersonPhotoShowBuckets({
           photo,
           showIdForApi,
           activeShowName,
           activeShowAcronym,
+          allKnownShowNameMatches,
+          allKnownShowAcronymMatches,
+          allKnownShowIds,
           otherShowNameMatches,
           otherShowAcronymMatches,
           selectedOtherShow,
@@ -2789,6 +2872,9 @@ export default function PersonProfilePage() {
           return selectedOtherShow
             ? bucketMatches.matchesSelectedOtherShow
             : bucketMatches.matchesOtherShows;
+        }
+        if (galleryShowFilter === "other") {
+          return bucketMatches.matchesUnknownShows;
         }
         return true;
       });
@@ -2889,8 +2975,10 @@ export default function PersonProfilePage() {
     advancedFilters.contentTypes,
     advancedFilters.seeded,
     advancedFilters.sort,
-    showIdParam,
     showIdForApi,
+    allKnownShowNameMatches,
+    allKnownShowAcronymMatches,
+    allKnownShowIds,
     activeShowName,
     activeShowAcronym,
     otherShowNameMatches,
@@ -2953,11 +3041,13 @@ export default function PersonProfilePage() {
     if (!showIdParam || !hasAccess) {
       setResolvedShowIdParam(null);
       setResolvedShowSlugParam(null);
+      setResolvedShowNameForRouting(null);
       return;
     }
     if (looksLikeUuid(showIdParam)) {
       setResolvedShowIdParam(showIdParam);
       setResolvedShowSlugParam(null);
+      setResolvedShowNameForRouting(null);
       return;
     }
 
@@ -2971,7 +3061,12 @@ export default function PersonProfilePage() {
         );
         const data = (await response.json().catch(() => ({}))) as {
           error?: string;
-          resolved?: { show_id?: string | null; canonical_slug?: string | null; slug?: string | null };
+          resolved?: {
+            show_id?: string | null;
+            canonical_slug?: string | null;
+            slug?: string | null;
+            show_name?: string | null;
+          };
         };
         if (!response.ok) {
           throw new Error(data.error || "Failed to resolve show slug");
@@ -2985,6 +3080,9 @@ export default function PersonProfilePage() {
         }
         if (cancelled) return;
         setResolvedShowIdParam(resolvedId);
+        setResolvedShowNameForRouting(
+          typeof data.resolved?.show_name === "string" ? data.resolved.show_name : null
+        );
         const resolvedSlug =
           typeof data.resolved?.canonical_slug === "string" && data.resolved.canonical_slug.trim().length > 0
             ? data.resolved.canonical_slug.trim()
@@ -2996,6 +3094,7 @@ export default function PersonProfilePage() {
         if (cancelled) return;
         setResolvedShowIdParam(null);
         setResolvedShowSlugParam(null);
+        setResolvedShowNameForRouting(null);
       }
     };
     void resolveSlug();
@@ -3071,11 +3170,11 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     if (!personSlugForRouting) return;
-    const preservedQuery = cleanLegacyPersonRoutingQuery(new URLSearchParams(searchParams.toString()));
     const canonicalUrl = buildPersonAdminUrl({
       personSlug: personSlugForRouting,
       tab: personRouteState.tab,
-      query: preservedQuery,
+      showId: personRouteShowContext ?? undefined,
+      query: personQueryContext,
     });
     const currentQuery = searchParams.toString();
     const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
@@ -3087,6 +3186,8 @@ export default function PersonProfilePage() {
     personSlugForRouting,
     router,
     searchParams,
+    personQueryContext,
+    personRouteShowContext,
   ]);
 
   useEffect(() => {
@@ -4638,8 +4739,11 @@ export default function PersonProfilePage() {
     setRefreshingImages(true);
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.syncing,
-      message: mode === "sync" ? "Running sync stage..." : "Syncing person images...",
-      detailMessage: mode === "sync" ? "Running sync stage..." : "Syncing person images...",
+      message: mode === "sync" ? "Opening sync stream..." : "Opening refresh stream...",
+      detailMessage:
+        mode === "sync"
+          ? "Connecting to backend stream for sync stages..."
+          : "Connecting to backend stream for image refresh...",
       current: null,
       total: null,
       rawStage: "syncing",
@@ -4665,6 +4769,27 @@ export default function PersonProfilePage() {
         const streamController = new AbortController();
         let streamAbortReason: "max_duration" | "idle" | "start_deadline" | null = null;
         let sawFirstEvent = false;
+        const markStreamStarted = () => {
+          if (sawFirstEvent) return;
+          sawFirstEvent = true;
+          clearStreamStartTimeout();
+          setRefreshProgress((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  detailMessage: "Backend stream connected. Waiting for live stage updates...",
+                  lastEventAt: Date.now(),
+                }
+              : prev
+          );
+          appendRefreshLog({
+            source: "page_refresh",
+            stage: "stream_connected",
+            message: "Stream connected.",
+            level: "info",
+            runId: requestId,
+          });
+        };
         const streamTimeout = setTimeout(
           () => {
             streamAbortReason = "max_duration";
@@ -4738,7 +4863,7 @@ export default function PersonProfilePage() {
           if (streamAbortReason === "start_deadline") {
             throw createNamedError(
               "StreamTimeoutError",
-              `No refresh stream events received within ${Math.round(
+              `No refresh stream response received within ${Math.round(
                 PERSON_PAGE_STREAM_START_DEADLINE_MS / 1000
               )}s.`
             );
@@ -4752,8 +4877,10 @@ export default function PersonProfilePage() {
         if (!response.ok || !response.body) {
           clearStreamIdleTimeout();
           clearTimeout(streamTimeout);
-          throw new Error(await parseStreamErrorResponse(response));
+          const message = await parseStreamErrorResponse(response);
+          throw createNamedError("BackendError", `Stream request failed: ${message}`);
         }
+        markStreamStarted();
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -4763,18 +4890,23 @@ export default function PersonProfilePage() {
         let lastEventAt = Date.now();
         const staleInterval = setInterval(() => {
           const now = Date.now();
-          if (now - lastEventAt < 12000) return;
+          const staleAgeMs = now - lastEventAt;
+          if (staleAgeMs < 4000) return;
           setRefreshProgress((prev) => {
             if (!prev) return prev;
             const stageLabel = formatPersonRefreshPhaseLabel(prev.rawStage ?? prev.phase) ?? "WORKING";
+            const normalizedDetail =
+              (prev.detailMessage ?? prev.message ?? "")
+                .replace(/\s+\(last update \d+s ago\)\s*$/i, "")
+                .trim();
+            const baseMessage =
+              normalizedDetail || `Waiting for ${stageLabel} backend update...`;
             return {
               ...prev,
-              detailMessage: `Still running: ${stageLabel}`,
-              lastEventAt: now,
+              detailMessage: `${baseMessage} (last update ${Math.round(staleAgeMs / 1000)}s ago)`,
             };
           });
-          lastEventAt = now;
-        }, 2000);
+        }, 1000);
 
         try {
           while (true) {
@@ -4782,6 +4914,9 @@ export default function PersonProfilePage() {
             if (done) break;
             lastEventAt = Date.now();
             bumpStreamIdleTimeout();
+            if (value.length > 0) {
+              markStreamStarted();
+            }
             buffer += decoder.decode(value, { stream: true });
             // Normalize CRLF to LF so "\n\n" boundary splitting works in all runtimes.
             buffer = buffer.replace(/\r\n/g, "\n");
@@ -4791,15 +4926,7 @@ export default function PersonProfilePage() {
               const rawEvent = buffer.slice(0, boundaryIndex);
               buffer = buffer.slice(boundaryIndex + 2);
               if (!sawFirstEvent && rawEvent.trim().length > 0) {
-                sawFirstEvent = true;
-                clearStreamStartTimeout();
-                appendRefreshLog({
-                  source: "page_refresh",
-                  stage: "stream_connected",
-                  message: "Stream connected.",
-                  level: "info",
-                  runId: requestId,
-                });
+                markStreamStarted();
               }
 
               const lines = rawEvent.split("\n").filter(Boolean);
@@ -4868,6 +4995,41 @@ export default function PersonProfilePage() {
                   typeof current === "number" && Number.isFinite(current) ? current : null;
                 const numericTotal =
                   typeof total === "number" && Number.isFinite(total) ? total : null;
+                const source =
+                  typeof (payload as { source?: unknown }).source === "string"
+                    ? ((payload as { source: string }).source)
+                    : null;
+                const sourceTotalRaw = (payload as { source_total?: unknown }).source_total;
+                const sourceTotal =
+                  typeof sourceTotalRaw === "number"
+                    ? sourceTotalRaw
+                    : typeof sourceTotalRaw === "string"
+                      ? Number.parseInt(sourceTotalRaw, 10)
+                      : null;
+                const mirroredCountRaw = (payload as { mirrored_count?: unknown }).mirrored_count;
+                const mirroredCount =
+                  typeof mirroredCountRaw === "number"
+                    ? mirroredCountRaw
+                    : typeof mirroredCountRaw === "string"
+                      ? Number.parseInt(mirroredCountRaw, 10)
+                      : null;
+                const skipReason =
+                  typeof (payload as { skip_reason?: unknown }).skip_reason === "string"
+                    ? ((payload as { skip_reason: string }).skip_reason)
+                    : null;
+                const detail =
+                  typeof (payload as { detail?: unknown }).detail === "string"
+                    ? ((payload as { detail: string }).detail)
+                    : null;
+                const serviceUnavailable =
+                  (payload as { service_unavailable?: unknown }).service_unavailable === true;
+                const retryAfterRaw = (payload as { retry_after_s?: unknown }).retry_after_s;
+                const retryAfterS =
+                  typeof retryAfterRaw === "number"
+                    ? retryAfterRaw
+                    : typeof retryAfterRaw === "string"
+                      ? Number.parseInt(retryAfterRaw, 10)
+                      : null;
                 const syncCounts =
                   !heartbeat && mappedPhase === PERSON_REFRESH_PHASES.syncing
                     ? updateSyncProgressTracker(syncProgressTracker, {
@@ -4877,16 +5039,34 @@ export default function PersonProfilePage() {
                         total: numericTotal,
                       })
                     : null;
-                const heartbeatMessage =
-                  heartbeat && elapsedMs !== null && elapsedMs >= 0
-                    ? `Still running${rawStage ? ` (${rawStage})` : ""} · ${Math.round(elapsedMs / 1000)}s elapsed`
-                    : heartbeat
-                      ? `Still running${rawStage ? ` (${rawStage})` : ""}`
-                      : null;
+                const baseDetailMessage = buildPersonRefreshDetailMessage({
+                  rawStage,
+                  message,
+                  heartbeat,
+                  elapsedMs,
+                  source,
+                  sourceTotal:
+                    typeof sourceTotal === "number" && Number.isFinite(sourceTotal)
+                      ? sourceTotal
+                      : null,
+                  mirroredCount:
+                    typeof mirroredCount === "number" && Number.isFinite(mirroredCount)
+                      ? mirroredCount
+                      : null,
+                  current: numericCurrent,
+                  total: numericTotal,
+                  skipReason,
+                  detail,
+                  serviceUnavailable,
+                  retryAfterS:
+                    typeof retryAfterS === "number" && Number.isFinite(retryAfterS)
+                      ? retryAfterS
+                      : null,
+                });
                 const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
                 setRefreshLiveCounts(nextLiveCounts);
                 const enrichedMessage = appendLiveCountsToMessage(
-                  message ?? heartbeatMessage ?? "",
+                  baseDetailMessage ?? message ?? "",
                   nextLiveCounts
                 );
                 setRefreshProgress({
@@ -4894,8 +5074,8 @@ export default function PersonProfilePage() {
                   total: syncCounts?.total ?? numericTotal,
                   phase: mappedPhase ?? rawStage,
                   rawStage,
-                  message: enrichedMessage || message || heartbeatMessage || null,
-                  detailMessage: enrichedMessage || message || heartbeatMessage || null,
+                  message: enrichedMessage || baseDetailMessage || message || null,
+                  detailMessage: enrichedMessage || baseDetailMessage || message || null,
                   runId: resolvedRunId,
                   lastEventAt: Date.now(),
                 });
@@ -4993,7 +5173,7 @@ export default function PersonProfilePage() {
           if (streamAbortReason === "start_deadline") {
             throw createNamedError(
               "StreamTimeoutError",
-              `No refresh stream events received within ${Math.round(
+              `No refresh stream response received within ${Math.round(
                 PERSON_PAGE_STREAM_START_DEADLINE_MS / 1000
               )}s.`
             );
@@ -5038,16 +5218,22 @@ export default function PersonProfilePage() {
           break;
         } catch (streamErr) {
           // Only retry on stream-drop conditions (EOF before complete,
-          // network read errors). Explicit backend errors (auth, config,
-          // validation) should surface immediately without a retry to
-          // avoid duplicate refresh jobs.
+          // network read errors and initial connection timeouts.
+          // Explicit backend errors (auth, config, validation) should
+          // surface immediately without a retry to avoid duplicate refresh jobs.
           const isBackendError =
             streamErr instanceof Error && streamErr.name === "BackendError";
-          const isLocalTimeoutOrAbort =
+          const isConnectionTimeout =
             streamErr instanceof Error &&
-            (streamErr.name === "StreamTimeoutError" || streamErr.name === "StreamAbortError");
+            streamErr.name === "StreamTimeoutError" &&
+            streamErr.message.includes("received within");
           streamError = streamErr instanceof Error ? streamErr.message : String(streamErr);
-          if (isBackendError || isLocalTimeoutOrAbort || attempt >= 2) {
+          const isNonRetryableError =
+            streamErr instanceof Error &&
+            (streamErr.name === "BackendError" ||
+              streamErr.name === "StreamAbortError" ||
+              (streamErr.name === "StreamTimeoutError" && !isConnectionTimeout));
+          if (isBackendError || isNonRetryableError || attempt >= 2) {
             break;
           }
           setRefreshProgress((prev) =>
@@ -5181,7 +5367,8 @@ export default function PersonProfilePage() {
     setRefreshLiveCounts(null);
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.counting,
-      message: selectedStage.startMessage,
+      message: "Opening reprocess stream...",
+      detailMessage: `${selectedStage.startMessage} Connecting to backend stream...`,
       current: null,
       total: null,
       runId: requestId,
@@ -5281,6 +5468,49 @@ export default function PersonProfilePage() {
               typeof current === "number" && Number.isFinite(current) ? current : null;
             const numericTotal =
               typeof total === "number" && Number.isFinite(total) ? total : null;
+            const source =
+              typeof (payload as { source?: unknown }).source === "string"
+                ? ((payload as { source: string }).source)
+                : null;
+            const sourceTotalRaw = (payload as { source_total?: unknown }).source_total;
+            const sourceTotal =
+              typeof sourceTotalRaw === "number"
+                ? sourceTotalRaw
+                : typeof sourceTotalRaw === "string"
+                  ? Number.parseInt(sourceTotalRaw, 10)
+                  : null;
+            const mirroredCountRaw = (payload as { mirrored_count?: unknown }).mirrored_count;
+            const mirroredCount =
+              typeof mirroredCountRaw === "number"
+                ? mirroredCountRaw
+                : typeof mirroredCountRaw === "string"
+                  ? Number.parseInt(mirroredCountRaw, 10)
+                  : null;
+            const skipReason =
+              typeof (payload as { skip_reason?: unknown }).skip_reason === "string"
+                ? ((payload as { skip_reason: string }).skip_reason)
+                : null;
+            const detail =
+              typeof (payload as { detail?: unknown }).detail === "string"
+                ? ((payload as { detail: string }).detail)
+                : null;
+            const elapsedMsRaw = (payload as { elapsed_ms?: unknown }).elapsed_ms;
+            const elapsedMs =
+              typeof elapsedMsRaw === "number"
+                ? elapsedMsRaw
+                : typeof elapsedMsRaw === "string"
+                  ? Number.parseInt(elapsedMsRaw, 10)
+                  : null;
+            const heartbeat = (payload as { heartbeat?: unknown }).heartbeat === true;
+            const serviceUnavailable =
+              (payload as { service_unavailable?: unknown }).service_unavailable === true;
+            const retryAfterRaw = (payload as { retry_after_s?: unknown }).retry_after_s;
+            const retryAfterS =
+              typeof retryAfterRaw === "number"
+                ? retryAfterRaw
+                : typeof retryAfterRaw === "string"
+                  ? Number.parseInt(retryAfterRaw, 10)
+                  : null;
             const runId =
               typeof (payload as { run_id?: unknown }).run_id === "string"
                 ? ((payload as { run_id: string }).run_id)
@@ -5292,12 +5522,37 @@ export default function PersonProfilePage() {
             const resolvedRunId = payloadRequestId ?? runId ?? requestId;
             const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
             setRefreshLiveCounts(nextLiveCounts);
-            const enrichedMessage = appendLiveCountsToMessage(message ?? "", nextLiveCounts);
+            const baseDetailMessage = buildPersonRefreshDetailMessage({
+              rawStage: rawPhase,
+              message,
+              heartbeat,
+              elapsedMs,
+              source,
+              sourceTotal:
+                typeof sourceTotal === "number" && Number.isFinite(sourceTotal)
+                  ? sourceTotal
+                  : null,
+              mirroredCount:
+                typeof mirroredCount === "number" && Number.isFinite(mirroredCount)
+                  ? mirroredCount
+                  : null,
+              current: numericCurrent,
+              total: numericTotal,
+              skipReason,
+              detail,
+              serviceUnavailable,
+              retryAfterS:
+                typeof retryAfterS === "number" && Number.isFinite(retryAfterS)
+                  ? retryAfterS
+                  : null,
+            });
+            const enrichedMessage = appendLiveCountsToMessage(baseDetailMessage ?? message ?? "", nextLiveCounts);
             setRefreshProgress({
               current: numericCurrent,
               total: numericTotal,
               phase: mappedPhase ?? rawPhase,
-              message: enrichedMessage || message || null,
+              message: enrichedMessage || baseDetailMessage || message || null,
+              detailMessage: enrichedMessage || baseDetailMessage || message || null,
               runId: resolvedRunId,
               rawStage: rawPhase,
               lastEventAt: Date.now(),
@@ -5305,7 +5560,7 @@ export default function PersonProfilePage() {
             appendRefreshLog({
               source: "page_refresh",
               stage: rawPhase ?? "reprocess_progress",
-              message: enrichedMessage || message || "Count & Crop progress update",
+              message: enrichedMessage || baseDetailMessage || message || "Count & Crop progress update",
               level: "info",
               runId: resolvedRunId,
             });
@@ -5820,10 +6075,12 @@ export default function PersonProfilePage() {
   const breadcrumbShowName =
     showScopedCredits?.show_name && showScopedCredits.show_name.trim().length > 0
       ? showScopedCredits.show_name.trim()
-      : recentShowFallback?.label && recentShowFallback.label.trim().length > 0
-        ? recentShowFallback.label.trim()
+      : resolvedShowNameForRouting?.trim()
+        ? resolvedShowNameForRouting.trim()
       : showSlugForRouting
-        ? humanizeSlug(showSlugForRouting)
+        ? showIdParam
+          ? humanizeSlug(showSlugForRouting)
+          : null
         : null;
   const breadcrumbShowHref = backShowTarget
     ? buildShowAdminUrl({ showSlug: backShowTarget })
@@ -6454,15 +6711,7 @@ export default function PersonProfilePage() {
           {/* Gallery Tab */}
           {activeTab === "gallery" && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-start justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Photo Gallery
-                  </p>
-                  <h3 className="text-xl font-bold text-zinc-900">
-                    {person.full_name}
-                  </h3>
-                </div>
+              <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => void handleRefreshImages()}
@@ -6568,6 +6817,7 @@ export default function PersonProfilePage() {
                   message={refreshProgress?.detailMessage ?? refreshProgress?.message}
                   current={refreshProgress?.current}
                   total={refreshProgress?.total}
+                  lastEventAt={refreshProgress?.lastEventAt}
                 />
                 {refreshError && (
                   <p className="text-xs text-red-600">{refreshError}</p>
@@ -6577,24 +6827,43 @@ export default function PersonProfilePage() {
                 )}
               </div>
 
-              {showIdParam && (
+              {(showIdParam || knownShowOptions.length > 0 || hasWwhlMatches || hasWwhlCredit || hasUnknownShowMatches) && (
                 <div className="mb-4 flex flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Media View
+                    Shows
                   </span>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setGalleryShowFilter("this-show")}
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                        galleryShowFilter === "this-show"
-                          ? "border-zinc-900 bg-zinc-900 text-white"
-                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                      }`}
-                    >
-                      {activeShowFilterLabel}
-                    </button>
-                    {hasWwhlMatches && (
+                    {showIdParam && (
+                      <button
+                        type="button"
+                        onClick={() => setGalleryShowFilter("this-show")}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          galleryShowFilter === "this-show"
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        {activeShowFilterLabel}
+                      </button>
+                    )}
+                    {(showIdParam ? otherKnownShowOptions : knownShowOptions).map((option) => (
+                      <button
+                        type="button"
+                        key={option.key}
+                        onClick={() => {
+                          setSelectedOtherShowKey(option.key);
+                          setGalleryShowFilter("other-shows");
+                        }}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          galleryShowFilter === "other-shows" && selectedOtherShowKey === option.key
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        {option.acronym ? `${option.showName} (${option.acronym})` : option.showName}
+                      </button>
+                    ))}
+                    {(hasWwhlMatches || hasWwhlCredit) && (
                       <button
                         type="button"
                         onClick={() => setGalleryShowFilter("wwhl")}
@@ -6604,20 +6873,20 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        {WWHL_LABEL}
+                          {WWHL_LABEL}
                       </button>
                     )}
-                    {hasOtherShowMatches && (
+                    {hasUnknownShowMatches && (
                       <button
                         type="button"
-                        onClick={() => setGalleryShowFilter("other-shows")}
+                        onClick={() => setGalleryShowFilter("other")}
                         className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                          galleryShowFilter === "other-shows"
+                          galleryShowFilter === "other"
                             ? "border-zinc-900 bg-zinc-900 text-white"
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        Other Shows
+                        Other
                       </button>
                     )}
                     {hasNonThisShowMatches && (
@@ -6630,27 +6899,10 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        All Media
+                          All Media
                       </button>
                     )}
                   </div>
-                  {galleryShowFilter === "other-shows" && hasOtherShowMatches && (
-                    <select
-                      value={selectedOtherShowKey}
-                      onChange={(event) => {
-                        setSelectedOtherShowKey(event.target.value);
-                        setGalleryShowFilter("other-shows");
-                      }}
-                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700"
-                    >
-                      <option value="all">All Other Shows & Events</option>
-                      {otherShowOptions.map((option) => (
-                        <option key={option.key} value={option.key}>
-                          {option.acronym ? `${option.showName} (${option.acronym})` : option.showName}
-                        </option>
-                      ))}
-                    </select>
-                  )}
                 </div>
               )}
 

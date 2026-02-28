@@ -199,6 +199,48 @@ describe("reddit-discovery-service", () => {
     expect(result.threads[0]?.link_flair_text).toBe("Meredith Marksss");
     expect(result.threads[1]?.is_show_match).toBe(false);
     expect(result.threads[1]?.passes_flair_filter).toBe(true);
+    expect(result.totals.fetched_rows).toBeGreaterThan(0);
+    expect(result.totals.matched_rows).toBe(result.threads.length);
+    expect(result.totals.tracked_flair_rows).toBeGreaterThanOrEqual(1);
+  });
+
+  it("matches decorated flair variants via canonical flair keys", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify(
+          makeListing([
+            {
+              id: "decorated-flair-post",
+              title: "General Bravo chatter",
+              selftext: "No direct show terms.",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/decorated-flair-post/example/",
+              permalink: "/r/BravoRealHousewives/comments/decorated-flair-post/example/",
+              author: "user1",
+              score: 35,
+              num_comments: 5,
+              created_utc: 1_706_101_000,
+              link_flair_text: "Salt Lake City ❄️",
+            },
+          ]),
+        ),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverSubredditThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      analysisAllFlares: ["Salt Lake City"],
+      sortModes: ["new"],
+    });
+
+    expect(result.threads.map((thread) => thread.reddit_post_id)).toEqual(["decorated-flair-post"]);
+    expect(result.threads[0]?.passes_flair_filter).toBe(true);
+    expect(result.totals.fetched_rows).toBe(1);
+    expect(result.totals.matched_rows).toBe(1);
+    expect(result.totals.tracked_flair_rows).toBe(1);
   });
 
   it("bypasses flair gating and includes no-flair posts for show-focused communities", async () => {
@@ -239,6 +281,155 @@ describe("reddit-discovery-service", () => {
     expect(result.threads).toHaveLength(1);
     expect(result.threads[0]?.reddit_post_id).toBe("show-focused-no-flair");
     expect(result.threads[0]?.passes_flair_filter).toBe(true);
+  });
+
+  it("supports exhaustive window discovery with pagination for true flair-window totals", async () => {
+    const toEpoch = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes("/new.json")) {
+        throw new Error(`Unexpected URL: ${url}`);
+      }
+      if (url.includes("after=t3_page1")) {
+        return new Response(
+          JSON.stringify(
+            makeListing([
+              {
+                id: "inside-2",
+                title: "RHOSLC weekly flair post",
+                selftext: "Second in-window post",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/inside-2/example/",
+                permalink: "/r/BravoRealHousewives/comments/inside-2/example/",
+                author: "user2",
+                score: 55,
+                num_comments: 8,
+                created_utc: toEpoch("2026-01-10T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+              {
+                id: "too-old",
+                title: "RHOSLC older flair post",
+                selftext: "Outside start window",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/too-old/example/",
+                permalink: "/r/BravoRealHousewives/comments/too-old/example/",
+                author: "user3",
+                score: 20,
+                num_comments: 3,
+                created_utc: toEpoch("2025-12-01T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          data: {
+            children: makeListing([
+              {
+                id: "too-new",
+                title: "RHOSLC very recent flair post",
+                selftext: "Outside end window",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/too-new/example/",
+                permalink: "/r/BravoRealHousewives/comments/too-new/example/",
+                author: "user1",
+                score: 99,
+                num_comments: 18,
+                created_utc: toEpoch("2026-03-01T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+              {
+                id: "inside-1",
+                title: "RHOSLC in-window flair post",
+                selftext: "First in-window post",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/inside-1/example/",
+                permalink: "/r/BravoRealHousewives/comments/inside-1/example/",
+                author: "user4",
+                score: 77,
+                num_comments: 11,
+                created_utc: toEpoch("2026-01-15T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+            ]).data.children,
+            after: "t3_page1",
+          },
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverSubredditThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      analysisAllFlares: ["Salt Lake City"],
+      exhaustiveWindow: true,
+      periodStart: "2026-01-01T00:00:00.000Z",
+      periodEnd: "2026-01-31T23:59:59.000Z",
+    });
+
+    expect(result.collection_mode).toBe("exhaustive_window");
+    expect(result.listing_pages_fetched).toBe(2);
+    expect(result.window_exhaustive_complete).toBe(true);
+    expect(result.max_pages_applied).toBeGreaterThan(0);
+    expect(result.threads.map((thread) => thread.reddit_post_id).sort()).toEqual([
+      "inside-1",
+      "inside-2",
+    ]);
+    expect(result.totals.fetched_rows).toBe(2);
+    expect(result.totals.matched_rows).toBe(2);
+    expect(result.totals.tracked_flair_rows).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every((call) => String(call[0]).includes("/new.json"))).toBe(true);
+  });
+
+  it("forces tracked flair inclusion even when show-match terms are absent", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify(
+          makeListing([
+            {
+              id: "force-flair-1",
+              title: "General Bravo chatter",
+              selftext: "No cast names or show names in this post",
+              url: "https://www.reddit.com/r/BravoRealHousewives/comments/force-flair-1/example/",
+              permalink: "/r/BravoRealHousewives/comments/force-flair-1/example/",
+              author: "user1",
+              score: 44,
+              num_comments: 12,
+              created_utc: 1_706_001_000,
+              link_flair_text: "Salt Lake City",
+            },
+          ]),
+        ),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const baseline = await discoverSubredditThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      analysisFlares: ["Salt Lake City"],
+      analysisAllFlares: [],
+      sortModes: ["new"],
+    });
+    expect(baseline.threads).toHaveLength(0);
+
+    const forced = await discoverSubredditThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      analysisFlares: ["Salt Lake City"],
+      analysisAllFlares: [],
+      forceIncludeFlares: ["Salt Lake City"],
+      sortModes: ["new"],
+    });
+    expect(forced.threads.map((thread) => thread.reddit_post_id)).toEqual(["force-flair-1"]);
+    expect(forced.threads[0]?.passes_flair_filter).toBe(true);
   });
 
   it("throws 404 when subreddit is missing", async () => {

@@ -1,1 +1,5 @@
-export { default } from "@/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page";
+import WeekDetailPageView from "@/components/admin/social-week/WeekDetailPageView";
+
+export default function ShowSeasonWeekDetailPage() {
+  return <WeekDetailPageView />;
+}

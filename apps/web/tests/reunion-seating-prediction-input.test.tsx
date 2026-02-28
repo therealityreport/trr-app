@@ -5,6 +5,10 @@ import ReunionSeatingPredictionInput, {
   computeReunionSeatLayout,
 } from "@/components/survey/ReunionSeatingPredictionInput";
 
+function readPx(value: string): number {
+  return Number.parseFloat(value.replace("px", ""));
+}
+
 function makeQuestion() {
   return {
     id: "q-reunion",
@@ -120,5 +124,56 @@ describe("ReunionSeatingPredictionInput", () => {
       const latest = updates[updates.length - 1]!;
       expect(latest.fullTimeOrder).toContain("angie");
     });
+  });
+
+  it("keeps an extra visible full-time seat for odd casts so either side can have one more", () => {
+    render(
+      <ReunionSeatingPredictionInput
+        question={makeQuestion() as never}
+        value={null}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("fulltime-seat-7")).toBeInTheDocument();
+  });
+
+  it("places friend drop zones at the far couch ends (not next to Andy)", () => {
+    const value = {
+      fullTimeOrder: ["angie", "bronwyn", "heather", "lisa", "mary", "meredith", "whitney"],
+      friendSide: null as "left" | "right" | null,
+      completed: false,
+    };
+
+    render(
+      <ReunionSeatingPredictionInput
+        question={makeQuestion() as never}
+        value={value}
+        onChange={() => {}}
+      />,
+    );
+
+    const host = screen.getByTestId("reunion-host-seat");
+    const friendLeft = screen.getByTestId("friend-seat-left");
+    const friendRight = screen.getByTestId("friend-seat-right");
+    const hostX = readPx(host.style.left);
+    const friendLeftTop = readPx(friendLeft.style.top);
+    const friendRightTop = readPx(friendRight.style.top);
+    expect(friendLeft.style.borderStyle).toBe("solid");
+    expect(friendRight.style.borderStyle).toBe("dashed");
+
+    const leftFullTimeTops: number[] = [];
+    const rightFullTimeTops: number[] = [];
+    for (let index = 0; index <= 7; index += 1) {
+      const seat = screen.queryByTestId(`fulltime-seat-${index}`);
+      if (!seat) continue;
+      const seatX = readPx(seat.style.left);
+      const seatTop = readPx(seat.style.top);
+      if (seatX < hostX) leftFullTimeTops.push(seatTop);
+      if (seatX > hostX) rightFullTimeTops.push(seatTop);
+    }
+
+    expect(friendLeftTop).toBeLessThan(Math.max(...leftFullTimeTops));
+    expect(friendRightTop).toBeGreaterThan(Math.max(...rightFullTimeTops));
   });
 });

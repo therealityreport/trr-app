@@ -1291,6 +1291,30 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(window.location.search).toContain("social_platform=instagram");
   });
 
+  it.each(["facebook", "threads"] as const)(
+    "redirects episode social path to matching week detail route for %s",
+    async (platform) => {
+      routerReplaceMock.mockClear();
+      window.history.replaceState({}, "", `/shows/show-1/s6/e1/social/${platform}`);
+      mockSeasonSocialFetch(analyticsBase);
+
+      render(
+        <SeasonSocialAnalyticsSection
+          showId="show-1"
+          seasonNumber={6}
+          seasonId="season-1"
+          showName="Test Show"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(routerReplaceMock).toHaveBeenCalled();
+      });
+      const redirectedHref = String(routerReplaceMock.mock.calls.at(-1)?.[0] ?? "");
+      expect(redirectedHref).toContain(`/show-1/s6/social/w1/${platform}`);
+    },
+  );
+
   it("renders YouTube Videos/Reels cards only on the YouTube tab", async () => {
     window.history.replaceState({}, "", "/shows/show-1/s6/social/official?social_platform=youtube");
     mockSeasonSocialFetch(analyticsBase);
@@ -3342,7 +3366,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByText("Weekly Run");
-    fireEvent.change(screen.getByRole("combobox", { name: /Week/i }), {
+    fireEvent.change(screen.getByRole("combobox", { name: /^Week$/i }), {
       target: { value: "2" },
     });
     const platformSelects = screen.getAllByRole("combobox", { name: /Platform/i });

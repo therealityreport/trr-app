@@ -41,8 +41,6 @@ const DEFAULT_PANEL_BG = "#D9D9D9";
 const DEFAULT_HEADING_FONT = "\"Rude Slab Condensed\", var(--font-sans), sans-serif";
 const DEFAULT_HEADING_COLOR = "#111111";
 const DEFAULT_HOST_NAME = "Andy Cohen";
-const DEFAULT_HOST_IMAGE =
-  "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Andy_Cohen_2012_Shankbone_2.jpg/320px-Andy_Cohen_2012_Shankbone_2.jpg";
 
 type UnknownRecord = Record<string, unknown>;
 type CastRole = "main" | "friend_of" | "unknown";
@@ -62,11 +60,13 @@ interface SeatCenter {
 const FIGMA_REUNION_HOST_Y_RATIO = 0.086;
 const FIGMA_REUNION_SIDE_Y_START_RATIO = 0.171;
 const FIGMA_REUNION_SIDE_Y_END_RATIO = 0.914;
-const FIGMA_REUNION_SIDE_OFFSET_START_RATIO = 0.193;
-const FIGMA_REUNION_SIDE_OFFSET_END_RATIO = 0.409;
-const FIGMA_REUNION_BASE_GROUP_WIDTH = 356.5;
-const FIGMA_REUNION_BASE_GROUP_HEIGHT = 388;
-const FIGMA_REUNION_BASE_SEAT_SIZE = 66.5;
+const FIGMA_REUNION_BASE_GROUP_WIDTH = 537;
+const FIGMA_REUNION_BASE_GROUP_HEIGHT = 584.44;
+const FIGMA_REUNION_BASE_SEAT_SIZE = 100.171;
+const FIGMA_REUNION_LEFT_Y_ANCHORS = [0.1708, 0.3349, 0.5245, 0.7227, 0.9143];
+const FIGMA_REUNION_RIGHT_Y_ANCHORS = [0.1708, 0.3349, 0.5172, 0.7227, 0.9143];
+const FIGMA_REUNION_LEFT_OFFSET_ANCHORS = [0.1931, 0.3109, 0.3625, 0.3916, 0.4046];
+const FIGMA_REUNION_RIGHT_OFFSET_ANCHORS = [0.1932, 0.3083, 0.3665, 0.3903, 0.4088];
 
 export interface ReunionSeatLayout {
   arcWidth: number;
@@ -178,6 +178,23 @@ function minSeatDistance(centers: SeatCenter[]): number {
   return min;
 }
 
+function sampleAnchor(anchors: number[], index: number, count: number): number {
+  if (anchors.length === 0) return 0;
+  if (count <= anchors.length) {
+    const clampedIndex = clampNumber(index, 0, count - 1);
+    return anchors[clampedIndex] ?? anchors[anchors.length - 1] ?? 0;
+  }
+
+  const t = count === 1 ? 0 : index / (count - 1);
+  const scaled = t * (anchors.length - 1);
+  const lower = Math.floor(scaled);
+  const upper = Math.min(anchors.length - 1, lower + 1);
+  const frac = scaled - lower;
+  const lowValue = anchors[lower] ?? anchors[anchors.length - 1] ?? 0;
+  const highValue = anchors[upper] ?? lowValue;
+  return lowValue + (highValue - lowValue) * frac;
+}
+
 function buildArcSideCenters({
   count,
   centerX,
@@ -193,16 +210,13 @@ function buildArcSideCenters({
 }): SeatCenter[] {
   if (count <= 0) return [];
   const directionSign = direction === "left" ? -1 : 1;
-  const tForIndex = (index: number) => (count === 1 ? 0.5 : index / (count - 1));
-  const rowStepRatio = (FIGMA_REUNION_SIDE_Y_END_RATIO - FIGMA_REUNION_HOST_Y_RATIO) / count;
+  const yAnchors = direction === "left" ? FIGMA_REUNION_LEFT_Y_ANCHORS : FIGMA_REUNION_RIGHT_Y_ANCHORS;
+  const offsetAnchors =
+    direction === "left" ? FIGMA_REUNION_LEFT_OFFSET_ANCHORS : FIGMA_REUNION_RIGHT_OFFSET_ANCHORS;
 
   return Array.from({ length: count }, (_, index) => {
-    const t = tForIndex(index);
-    // Keep each row at a constant vertical step from host to bottom row.
-    const yRatio = FIGMA_REUNION_HOST_Y_RATIO + rowStepRatio * (index + 1);
-    const offsetRatio =
-      FIGMA_REUNION_SIDE_OFFSET_START_RATIO
-      + (FIGMA_REUNION_SIDE_OFFSET_END_RATIO - FIGMA_REUNION_SIDE_OFFSET_START_RATIO) * t;
+    const yRatio = sampleAnchor(yAnchors, index, count);
+    const offsetRatio = sampleAnchor(offsetAnchors, index, count);
     return {
       x: centerX + directionSign * arcWidth * offsetRatio,
       y: arcHeight * clampNumber(yRatio, FIGMA_REUNION_SIDE_Y_START_RATIO, FIGMA_REUNION_SIDE_Y_END_RATIO),
@@ -463,10 +477,16 @@ export default function ReunionSeatingPredictionInput({
 
   const hasSingleFriend = friends.length === 1;
   const singleFriend = hasSingleFriend ? friends[0] : null;
+  const fullTimeSideSlotCount = Math.ceil(fullTime.length / 2);
+  const fullTimeSeatSlotCount = fullTimeSideSlotCount * 2;
 
   const [selectedFullTimeId, setSelectedFullTimeId] = React.useState<string | null>(null);
   const [fullTimeOrder, setFullTimeOrder] = React.useState<string[]>(
-    () => value?.fullTimeOrder?.slice(0, fullTime.length) ?? Array(fullTime.length).fill(""),
+    () => {
+      const initial = value?.fullTimeOrder?.slice(0, fullTimeSeatSlotCount) ?? [];
+      while (initial.length < fullTimeSeatSlotCount) initial.push("");
+      return initial;
+    },
   );
   const [friendSide, setFriendSide] = React.useState<"left" | "right" | null>(
     () => value?.friendSide ?? null,
@@ -480,11 +500,11 @@ export default function ReunionSeatingPredictionInput({
       const validIds = new Set(fullTime.map((option) => option.id));
       const normalized = prev
         .map((entry) => (validIds.has(entry) ? entry : ""))
-        .slice(0, fullTime.length);
-      while (normalized.length < fullTime.length) normalized.push("");
+        .slice(0, fullTimeSeatSlotCount);
+      while (normalized.length < fullTimeSeatSlotCount) normalized.push("");
       return normalized;
     });
-  }, [fullTime]);
+  }, [fullTime, fullTimeSeatSlotCount]);
 
   const configRecord = React.useMemo(
     () => ((question.config ?? {}) as UnknownRecord),
@@ -516,9 +536,9 @@ export default function ReunionSeatingPredictionInput({
     "Which couch side should this friend sit on?";
 
   const hostName = toTrimmedString(config.hostName) ?? DEFAULT_HOST_NAME;
-  const hostImagePath = toTrimmedString(config.hostImagePath) ?? DEFAULT_HOST_IMAGE;
 
-  const fullTimeComplete = fullTimeOrder.every((entry) => entry.length > 0);
+  const assignedFullTimeCount = fullTimeOrder.filter((entry) => entry.length > 0).length;
+  const fullTimeComplete = assignedFullTimeCount >= fullTime.length;
   const stage: "full_time" | "friend_side" | "complete" = hasSingleFriend
     ? (fullTimeComplete ? (friendSide ? "complete" : "friend_side") : "full_time")
     : (fullTimeComplete ? "complete" : "full_time");
@@ -647,34 +667,83 @@ export default function ReunionSeatingPredictionInput({
   }, [disabled, question.id, stage]);
 
   const includeFriendEndSeats = hasSingleFriend && stage !== "full_time";
-  // Keep arc geometry symmetric: round odd counts up per side, then hide the extra slot.
-  const fullTimeSideSlotCount = Math.ceil(fullTime.length / 2);
-  const leftSeatCount = fullTimeSideSlotCount + (includeFriendEndSeats ? 1 : 0);
-  const rightSeatCount = fullTimeSideSlotCount + (includeFriendEndSeats ? 1 : 0);
+  const useLeftSolidFriendOption = includeFriendEndSeats && (fullTime.length % 2 === 1);
+  const leftSeatCount = useLeftSolidFriendOption
+    ? fullTimeSideSlotCount
+    : (fullTimeSideSlotCount + (includeFriendEndSeats ? 1 : 0));
+  const rightSeatCount = useLeftSolidFriendOption
+    ? (fullTimeSideSlotCount + 1)
+    : (fullTimeSideSlotCount + (includeFriendEndSeats ? 1 : 0));
   const arcSeatCount = leftSeatCount + 1 + rightSeatCount;
   const seatDescriptors = React.useMemo(() => {
     const descriptors: Array<
       | { kind: "host" }
       | { kind: "friend"; side: "left" | "right" }
-      | { kind: "full_time"; fullTimeIndex: number }
-      | { kind: "hidden_full_time" }
+      | { kind: "full_time"; fullTimeIndex: number; side: "left" | "right" }
     > = [];
-    if (includeFriendEndSeats) descriptors.push({ kind: "friend", side: "left" });
-    for (let index = 0; index < fullTimeSideSlotCount; index += 1) {
-      descriptors.push({ kind: "full_time", fullTimeIndex: index });
+
+    if (useLeftSolidFriendOption) {
+      // Use the closest left solid seat as the left friend option for odd-cast layouts.
+      descriptors.push({ kind: "full_time", fullTimeIndex: -1, side: "left" });
+      for (let index = 0; index < fullTimeSideSlotCount - 1; index += 1) {
+        descriptors.push({ kind: "full_time", fullTimeIndex: index, side: "left" });
+      }
+      descriptors.push({ kind: "host" });
+      for (let slotIndex = 0; slotIndex < fullTimeSideSlotCount; slotIndex += 1) {
+        descriptors.push({
+          kind: "full_time",
+          fullTimeIndex: (fullTimeSideSlotCount - 1) + slotIndex,
+          side: "right",
+        });
+      }
+      descriptors.push({ kind: "friend", side: "right" });
+      return descriptors;
     }
+
+    for (let index = 0; index < fullTimeSideSlotCount; index += 1) {
+      descriptors.push({ kind: "full_time", fullTimeIndex: index, side: "left" });
+    }
+    if (includeFriendEndSeats) descriptors.push({ kind: "friend", side: "left" });
     descriptors.push({ kind: "host" });
     for (let slotIndex = 0; slotIndex < fullTimeSideSlotCount; slotIndex += 1) {
-      const fullTimeIndex = fullTimeSideSlotCount + slotIndex;
-      if (fullTimeIndex < fullTime.length) {
-        descriptors.push({ kind: "full_time", fullTimeIndex });
-      } else {
-        descriptors.push({ kind: "hidden_full_time" });
-      }
+      descriptors.push({
+        kind: "full_time",
+        fullTimeIndex: fullTimeSideSlotCount + slotIndex,
+        side: "right",
+      });
     }
     if (includeFriendEndSeats) descriptors.push({ kind: "friend", side: "right" });
     return descriptors;
-  }, [includeFriendEndSeats, fullTime.length, fullTimeSideSlotCount]);
+  }, [fullTimeSideSlotCount, includeFriendEndSeats, useLeftSolidFriendOption]);
+
+  const solidFriendSeatIndexBySide = React.useMemo(() => {
+    const result: { left: number | null; right: number | null } = { left: null, right: null };
+    if (!(hasSingleFriend && stage === "friend_side")) return result;
+
+    if (useLeftSolidFriendOption) {
+      const leftSyntheticIndex = seatDescriptors.findIndex(
+        (descriptor) =>
+          descriptor?.kind === "full_time"
+          && descriptor.side === "left"
+          && descriptor.fullTimeIndex < 0,
+      );
+      result.left = leftSyntheticIndex >= 0 ? leftSyntheticIndex : null;
+      // In this mode, right option must remain the explicit far-end friend seat.
+      result.right = null;
+      return result;
+    }
+
+    for (let seatIdx = 0; seatIdx < seatDescriptors.length; seatIdx += 1) {
+      const descriptor = seatDescriptors[seatIdx];
+      if (!descriptor || descriptor.kind !== "full_time") continue;
+      const occupied = Boolean(fullTimeOrder[descriptor.fullTimeIndex]);
+      if (occupied) continue;
+      if (result[descriptor.side] === null) {
+        result[descriptor.side] = seatIdx;
+      }
+    }
+    return result;
+  }, [fullTimeOrder, hasSingleFriend, seatDescriptors, stage, useLeftSolidFriendOption]);
 
   const layout = React.useMemo(
     () => computeReunionSeatLayout(arcSeatCount, containerWidth, {
@@ -798,40 +867,26 @@ export default function ReunionSeatingPredictionInput({
             };
 
             if (!descriptor) return null;
-            if (descriptor.kind === "hidden_full_time") return null;
-
             if (descriptor.kind === "host") {
               return (
                 <div
                   key="host-seat"
-                  className="absolute rounded-full border-[3px] border-black bg-white"
+                  className="absolute rounded-full"
                   style={{
                     ...baseSeatStyle,
                     width: `${layout.hostSize}px`,
                     height: `${layout.hostSize}px`,
+                    backgroundColor: "#0A0A0A",
                   }}
                   aria-label={hostName}
                   data-testid="reunion-host-seat"
-                >
-                  {hostImagePath ? (
-                    <Image
-                      src={hostImagePath}
-                      alt={hostName}
-                      fill
-                      unoptimized={hostImagePath.startsWith("http")}
-                      className="object-cover"
-                    />
-                  ) : (
-                    <span className="flex h-full w-full items-center justify-center text-lg font-bold text-zinc-800">
-                      AC
-                    </span>
-                  )}
-                </div>
+                />
               );
             }
 
             if (descriptor.kind === "friend") {
               const side = descriptor.side;
+              if (solidFriendSeatIndexBySide[side] !== null) return null;
               const active = friendSide === side && singleFriend;
               return (
                 <DroppableSeat
@@ -871,6 +926,49 @@ export default function ReunionSeatingPredictionInput({
             const fullTimeIdx = descriptor.fullTimeIndex;
             const occupantId = fullTimeOrder[fullTimeIdx] ?? "";
             const occupant = occupantId ? optionById.get(occupantId) : undefined;
+            const canUseSolidSeatForFriend =
+              hasSingleFriend
+              && stage === "friend_side"
+              && solidFriendSeatIndexBySide[descriptor.side] === seatIdx
+              && !occupant;
+
+            if (canUseSolidSeatForFriend) {
+              const side = descriptor.side;
+              const active = friendSide === side && singleFriend;
+              return (
+                <DroppableSeat
+                  key={`friend-solid-seat-${side}-${seatIdx}`}
+                  id={`friend-seat-${side}`}
+                  label={`Friend seat ${side}`}
+                  style={{
+                    ...baseSeatStyle,
+                    borderColor: active ? "#111111" : "#000000",
+                  }}
+                  disabled={disabled || !fullTimeComplete || !hasSingleFriend}
+                  onClick={() => {
+                    if (disabled || !fullTimeComplete) return;
+                    setFriendSide((prev) => (prev === side ? null : side));
+                  }}
+                  isFriendSeat
+                  isActive={Boolean(active)}
+                >
+                  {active && singleFriend?.imagePath ? (
+                    <Image
+                      src={singleFriend.imagePath}
+                      alt={singleFriend.label}
+                      fill
+                      unoptimized={singleFriend.imagePath.startsWith("http")}
+                      className="object-cover"
+                    />
+                  ) : active && singleFriend ? (
+                    <span className="flex h-full w-full items-center justify-center text-sm font-bold text-zinc-800">
+                      {initials(singleFriend.label)}
+                    </span>
+                  ) : null}
+                </DroppableSeat>
+              );
+            }
+
             return (
               <DroppableSeat
                 key={`main-seat-${fullTimeIdx}`}

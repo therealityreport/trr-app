@@ -6,7 +6,7 @@ describe("social week detail wiring", () => {
   it("forwards season_id and timezone in week detail fetch", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -18,7 +18,7 @@ describe("social week detail wiring", () => {
   it("includes season_id in week ingest and poll requests", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -31,7 +31,7 @@ describe("social week detail wiring", () => {
   it("uses timeout-bounded fetches for week detail and sync polling", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -48,7 +48,7 @@ describe("social week detail wiring", () => {
   it("keeps transient dev-restart poll failures below retry-banner threshold", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -60,7 +60,7 @@ describe("social week detail wiring", () => {
   it("preserves social_view and social_platform in back link query", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -73,7 +73,7 @@ describe("social week detail wiring", () => {
   it("canonicalizes legacy social_platform query links to platform path URLs", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -85,7 +85,7 @@ describe("social week detail wiring", () => {
   it("canonicalizes legacy /social/week/{n} paths to /social/w{n}/{subtab}", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -97,7 +97,7 @@ describe("social week detail wiring", () => {
   it("keeps canonical platform path while mutating week-detail query params", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -108,7 +108,7 @@ describe("social week detail wiring", () => {
   it("wires deep social breadcrumbs with linked show and social ancestors", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -123,7 +123,7 @@ describe("social week detail wiring", () => {
   it("uses stable job ids for sync log row keys", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 

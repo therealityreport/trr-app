@@ -17,17 +17,40 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 import { POST } from "@/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route";
 
 const makeRequest = (requestId?: string) =>
-  new NextRequest(
-    "http://localhost/api/admin/trr-api/people/person-1/refresh-images/stream",
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(requestId ? { "x-trr-request-id": requestId } : {}),
-      },
-      body: JSON.stringify({ force_mirror: true }),
+  new NextRequest("http://localhost/api/admin/trr-api/people/person-1/refresh-images/stream", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(requestId ? { "x-trr-request-id": requestId } : {}),
     },
-  );
+    body: JSON.stringify({ force_mirror: true }),
+  });
+
+type SseEvent = {
+  event: string;
+  data: Record<string, unknown> | string | null;
+};
+
+const parseSseEvents = (payload: string): SseEvent[] => {
+  const blocks = payload.replace(/\r\n/g, "\n").split("\n\n").filter(Boolean);
+  return blocks.map((block) => {
+    const lines = block.split("\n");
+    const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim() || "message";
+    const dataRaw = lines
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .join("\n");
+    let data: Record<string, unknown> | string | null = null;
+    if (dataRaw) {
+      try {
+        data = JSON.parse(dataRaw) as Record<string, unknown>;
+      } catch {
+        data = dataRaw;
+      }
+    }
+    return { event, data };
+  });
+};
 
 describe("person refresh-images stream proxy route", () => {
   beforeEach(() => {
@@ -36,32 +59,15 @@ describe("person refresh-images stream proxy route", () => {
     vi.restoreAllMocks();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(
-      "https://backend.example.com/api/v1/admin/person/person-1/refresh-images/stream",
+      "https://backend.example.com/api/v1/admin/person/person-1/refresh-images/stream"
     );
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 
-  it("returns non-200 JSON error payload when backend responds non-OK", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("backend unavailable", { status: 502 }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await POST(makeRequest("req-person-1"), {
-      params: Promise.resolve({ personId: "person-1" }),
-    });
-    const payload = await response.json();
-
-    expect(response.status).toBe(502);
-    expect(payload.stage).toBe("backend");
-    expect(payload.error).toBe("Backend refresh failed");
-    expect(payload.request_id).toBe("req-person-1");
-  });
-
-  it("streams successful backend SSE body through unchanged", async () => {
+  it("emits immediate proxy_connecting progress and forwards backend SSE", async () => {
     const body = "event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n";
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+      new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -69,9 +75,19 @@ describe("person refresh-images stream proxy route", () => {
       params: Promise.resolve({ personId: "person-1" }),
     });
     const payload = await response.text();
+    const events = parseSseEvents(payload);
 
     expect(response.status).toBe(200);
-    expect(payload).toContain("event: progress");
+    expect(events.some((evt) => evt.event === "progress")).toBe(true);
+    expect(
+      events.some(
+        (evt) =>
+          evt.event === "progress" &&
+          typeof evt.data === "object" &&
+          evt.data !== null &&
+          evt.data.stage === "proxy_connecting"
+      )
+    ).toBe(true);
     expect(payload).toContain("\"sync_imdb\"");
   });
 
@@ -93,7 +109,7 @@ describe("person refresh-images stream proxy route", () => {
     expect(callHeaders?.["x-trr-request-id"]).toBe("req-forward-1");
   });
 
-  it("retries once on transient backend fetch failure", async () => {
+  it("retries on transient backend fetch failure and emits retry progress", async () => {
     const transientError = new Error("fetch failed");
     const fetchMock = vi
       .fn()
@@ -110,25 +126,72 @@ describe("person refresh-images stream proxy route", () => {
       params: Promise.resolve({ personId: "person-1" }),
     });
     const payload = await response.text();
+    const events = parseSseEvents(payload);
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(payload).toContain("\"sync_tmdb\"");
+    expect(
+      events.some(
+        (evt) =>
+          evt.event === "progress" &&
+          typeof evt.data === "object" &&
+          evt.data !== null &&
+          evt.data.stage === "proxy_connecting" &&
+          evt.data.retrying === true
+      )
+    ).toBe(true);
   });
 
-  it("does not leak backend URL details in proxy errors", async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new Error("fetch failed"));
+  it("surfaces backend non-OK responses as SSE error events", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("backend unavailable", { status: 502 }));
     vi.stubGlobal("fetch", fetchMock);
-    process.env.TRR_API_URL = "https://internal.example.local";
 
-    const response = await POST(makeRequest("req-person-3"), {
+    const response = await POST(makeRequest("req-person-1"), {
       params: Promise.resolve({ personId: "person-1" }),
     });
-    const payload = await response.json();
+    const payload = await response.text();
+    const events = parseSseEvents(payload);
 
-    expect(response.status).toBe(502);
-    expect(String(payload.detail ?? "")).not.toContain("TRR_API_URL");
-    expect(String(payload.detail ?? "")).not.toContain("internal.example.local");
-    expect(payload.request_id).toBe("req-person-3");
+    expect(response.status).toBe(200);
+    expect(
+      events.some(
+        (evt) =>
+          evt.event === "error" &&
+          typeof evt.data === "object" &&
+          evt.data !== null &&
+          evt.data.stage === "backend" &&
+          evt.data.error === "Backend refresh failed"
+      )
+    ).toBe(true);
+  });
+
+  it("surfaces backend fetch failures as SSE error events", async () => {
+    const fetchError = new Error("fetch failed");
+    (fetchError as Error & { cause: object }).cause = {
+      code: "ECONNREFUSED",
+      address: "127.0.0.1",
+      port: 8000,
+    };
+    const fetchMock = vi.fn().mockRejectedValue(fetchError);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest("req-person-4"), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.text();
+    const events = parseSseEvents(payload);
+
+    expect(response.status).toBe(200);
+    expect(
+      events.some(
+        (evt) =>
+          evt.event === "error" &&
+          typeof evt.data === "object" &&
+          evt.data !== null &&
+          evt.data.stage === "proxy_connecting" &&
+          evt.data.error === "Backend fetch failed"
+      )
+    ).toBe(true);
   });
 });

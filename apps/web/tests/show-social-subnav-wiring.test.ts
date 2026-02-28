@@ -16,12 +16,17 @@ describe("show social subnav wiring", () => {
 
   it("renders platform tabs above Social Scope in the social first container", () => {
     const pagePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+    const constantsPath = path.resolve(__dirname, "../src/lib/admin/show-page/constants.ts");
     const socialTabPath = path.resolve(__dirname, "../src/components/admin/show-tabs/ShowSocialTab.tsx");
     const pageContents = fs.readFileSync(pagePath, "utf8");
+    const constantsContents = fs.readFileSync(constantsPath, "utf8");
     const socialTabContents = fs.readFileSync(socialTabPath, "utf8");
 
+    expect(pageContents).toMatch(/from "@\/lib\/admin\/show-page\/constants"/);
     expect(pageContents).toMatch(/SHOW_SOCIAL_PLATFORM_TABS/);
     expect(pageContents).toMatch(/socialPlatformOptions=\{SHOW_SOCIAL_PLATFORM_TABS\}/);
+    expect(constantsContents).toMatch(/\{ key: "facebook", label: "Facebook" \}/);
+    expect(constantsContents).toMatch(/\{ key: "threads", label: "Threads" \}/);
     expect(pageContents).toMatch(/socialPlatformTab=\{socialPlatformTab\}/);
     expect(pageContents).toMatch(/isRedditView=\{socialAnalyticsView === "reddit"\}/);
     expect(pageContents).toMatch(/onSelectSocialPlatformTab=\{setSocialPlatformTab\}/);

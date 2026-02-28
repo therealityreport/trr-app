@@ -128,13 +128,16 @@ const weekPayload = {
   },
 };
 
-function clickPostDetailCardByThumbnailAlt(altText: string) {
-  const thumbnail = screen.getByAltText(altText);
-  const button = thumbnail.closest("button");
-  if (!button) {
+async function clickPostDetailCardByThumbnailAlt(altText: string) {
+  const thumbnails = await screen.findAllByRole("img");
+  const thumbnail = thumbnails.find((image) => {
+    const alt = image.getAttribute("alt") ?? "";
+    return alt.toLowerCase().includes(altText.toLowerCase());
+  });
+  if (!thumbnail) {
     throw new Error(`Post card button for thumbnail "${altText}" not found`);
   }
-  fireEvent.click(button);
+  fireEvent.click(thumbnail);
 }
 
 const byeWeekPayload = {
@@ -283,6 +286,86 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("@collab_user")).toBeInTheDocument();
   });
 
+  it("renders hashtag and mention chips for youtube/facebook/threads with text fallback when token arrays are absent", async () => {
+    const tokenPayload = JSON.parse(JSON.stringify(weekPayload)) as Record<string, any>;
+    tokenPayload.platforms.youtube.posts[0].text = "YouTube post #YTTag @yt_handle";
+    tokenPayload.platforms.youtube.posts[0].hashtags = [];
+    tokenPayload.platforms.youtube.posts[0].mentions = [];
+    tokenPayload.platforms.facebook = {
+      posts: [
+        {
+          source_id: "fb-1",
+          author: "bravo",
+          text: "Facebook post #FBTag @fb_handle",
+          url: "https://facebook.com/bravo/posts/fb-1",
+          posted_at: "2026-01-01T00:00:00.000Z",
+          engagement: 150,
+          total_comments_available: 0,
+          comments: [],
+          likes: 40,
+          comments_count: 5,
+          shares: 3,
+          views: 1000,
+          hashtags: [],
+          mentions: [],
+          thumbnail_url: "https://images.test/fb-preview.jpg",
+        },
+      ],
+      totals: { posts: 1, total_comments: 5, total_engagement: 150 },
+    };
+    tokenPayload.platforms.threads = {
+      posts: [
+        {
+          source_id: "th-1",
+          author: "bravotv",
+          text: "Threads post #THTag @th_handle",
+          url: "https://threads.com/@bravotv/post/th-1",
+          posted_at: "2026-01-01T00:00:00.000Z",
+          engagement: 170,
+          total_comments_available: 0,
+          comments: [],
+          likes: 45,
+          replies_count: 6,
+          reposts: 4,
+          quotes: 2,
+          views: 1200,
+          hashtags: [],
+          mentions: [],
+          thumbnail_url: "https://images.test/th-preview.jpg",
+        },
+      ],
+      totals: { posts: 1, total_comments: 6, total_engagement: 170 },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => tokenPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Week 1")).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText("Facebook platform")).toBeInTheDocument();
+    expect(screen.getByLabelText("Threads platform")).toBeInTheDocument();
+    expect(screen.getByText("#YTTag")).toBeInTheDocument();
+    expect(screen.getByText("@yt_handle")).toBeInTheDocument();
+    expect(screen.getByText("#FBTag")).toBeInTheDocument();
+    expect(screen.getByText("@fb_handle")).toBeInTheDocument();
+    expect(screen.getByText("#THTag")).toBeInTheDocument();
+    expect(screen.getByText("@th_handle")).toBeInTheDocument();
+  });
+
   it("opens post media lightbox and shows social stats in the metadata panel", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -327,7 +410,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -396,7 +479,7 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
-    clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -404,16 +487,91 @@ describe("WeekDetailPage thumbnails", () => {
       name: /open post media lightbox from details/i,
     });
     fireEvent.click(openLightboxButton);
-    const nextButton = screen.queryByLabelText("Next image");
-    const previousButton = screen.queryByLabelText("Previous image");
-    const mediaNavigationButton = nextButton ?? previousButton;
-    if (mediaNavigationButton) {
-      fireEvent.click(mediaNavigationButton);
-    }
     await waitFor(() => {
-      const videos = screen.getAllByLabelText("TikTok media");
-      expect(videos.some((node) => node.tagName === "VIDEO")).toBe(true);
+      const video = document.querySelector("video[aria-label='TikTok media']");
+      expect(video).not.toBeNull();
     });
+  });
+
+  it("does not fall back to source embed when mirrored media URL is an HTML wrapper", async () => {
+    const htmlMirrorPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    (
+      htmlMirrorPayload.platforms.tiktok.posts[0] as typeof htmlMirrorPayload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).source_media_urls = ["https://www.tiktok.com/@bravotv/video/7540327205503601933"];
+    (
+      htmlMirrorPayload.platforms.tiktok.posts[0] as typeof htmlMirrorPayload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).hosted_media_urls = [
+      "https://d1fmdyqfafwim3.cloudfront.net/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.html",
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => htmlMirrorPayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/tiktok/tt-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "tiktok",
+            source_id: "tt-1",
+            author: "bravotv",
+            text: "TikTok post",
+            url: "https://tiktok.com/@bravo/video/1",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: "https://images.test/tt-preview.jpg",
+            source_media_urls: ["https://www.tiktok.com/@bravotv/video/7540327205503601933"],
+            hosted_media_urls: [
+              "https://d1fmdyqfafwim3.cloudfront.net/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.html",
+            ],
+            stats: {
+              likes: 60,
+              comments_count: 12,
+              shares: 7,
+              saves: 471,
+              views: 2000,
+              engagement: 2079,
+            },
+            total_comments_in_db: 1,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Week 1")).toBeInTheDocument();
+    });
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /open post media lightbox from details/i,
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.getByAltText("TikTok media")).toBeInTheDocument();
+    });
+    expect(document.querySelector("iframe[title='TikTok media']")).toBeNull();
+    expect(document.querySelector("video[aria-label='TikTok media']")).toBeNull();
+    expect(screen.queryByText(/Media failed to load/i)).not.toBeInTheDocument();
   });
 
   it("shows S3 mirror details for social media URLs served from hosted mirror", async () => {
@@ -478,7 +636,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -681,7 +839,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -698,7 +856,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("IG post").length).toBeGreaterThan(1);
   });
 
-  it("opens the mirrored thumbnail entry first when only the thumbnail is mirrored", async () => {
+  it("opens the source video entry first when only the thumbnail is mirrored", async () => {
     const mirroredThumbUrl = "https://d111111abcdef8.cloudfront.net/social/ig/reel-thumb.jpg";
     const sourceVideoUrl = "https://instagram.fcdn.net/reel-video.mp4";
     const thumbnailOnlyPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
@@ -789,11 +947,11 @@ describe("WeekDetailPage thumbnails", () => {
     });
 
     fireEvent.click(screen.getByLabelText("Instagram platform"));
-    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const openLightboxButton = screen.getByRole("button", {
+    const openLightboxButton = await screen.findByRole("button", {
       name: "Open post media lightbox from details",
     });
     fireEvent.click(openLightboxButton);
@@ -801,8 +959,80 @@ describe("WeekDetailPage thumbnails", () => {
       name: /show metadata|hide metadata/i,
     });
     fireEvent.click(metadataToggle);
-    expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
-    expect(document.querySelector("video[aria-label='Instagram media']")).toBeNull();
+    await waitFor(() => {
+      expect(document.querySelector("video[aria-label='Instagram media']")).not.toBeNull();
+    });
+  });
+
+  it("lets album/carousel posts navigate in lightbox using Post Details media payload", async () => {
+    const carouselPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    carouselPayload.platforms.instagram.posts[0].thumbnail_url = "https://images.test/ig-carousel-1.jpg";
+    carouselPayload.platforms.instagram.posts[0].media_urls = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => carouselPayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/instagram/ig-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "instagram",
+            source_id: "ig-1",
+            author: "bravotv",
+            text: "IG carousel post",
+            url: "https://instagram.com/p/abc",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: "https://images.test/ig-carousel-1.jpg",
+            media_urls: [
+              "https://images.test/ig-carousel-1.jpg",
+              "https://images.test/ig-carousel-2.jpg",
+              "https://images.test/ig-carousel-3.jpg",
+            ],
+            stats: {
+              likes: 50,
+              comments_count: 10,
+              views: 1000,
+              engagement: 1060,
+            },
+            total_comments_in_db: 0,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Week 1")).toBeInTheDocument();
+    });
+
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /open post media lightbox from details/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("1 of 3")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByLabelText("Next image"));
+    await waitFor(() => {
+      expect(screen.getByText("2 of 3")).toBeInTheDocument();
+    });
   });
 
   it("renders hosted comment media links in the TikTok Post Details drawer", async () => {
@@ -864,7 +1094,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -965,7 +1195,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Comments & Replies" })).toBeInTheDocument();
