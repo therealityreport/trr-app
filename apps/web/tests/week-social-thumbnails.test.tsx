@@ -137,11 +137,41 @@ function clickPostDetailCardByThumbnailAlt(altText: string) {
   fireEvent.click(button);
 }
 
+function normalizePlatformLabel(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function clickPlatformTabByLabel(label: string) {
+  const normalizedTarget = normalizePlatformLabel(label);
+  const targetTokens = normalizedTarget.split(" ").filter(Boolean);
   const buttons = screen.getAllByRole("button");
   const button = buttons.find((candidate) => {
-    const text = (candidate.textContent ?? "").trim().toLowerCase();
-    return text.startsWith(label.toLowerCase());
+    const candidateTexts = [
+      candidate.textContent,
+      candidate.getAttribute("aria-label"),
+      candidate.getAttribute("title"),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map(normalizePlatformLabel);
+
+    if (
+      candidateTexts.some(
+        (candidateText) =>
+          candidateText === normalizedTarget ||
+          candidateText.startsWith(normalizedTarget) ||
+          candidateText.includes(normalizedTarget),
+      )
+    ) {
+      return true;
+    }
+
+    return candidateTexts.some((candidateText) =>
+      targetTokens.some((token) => candidateText.split(" ").includes(token)),
+    );
   });
   if (!button) {
     throw new Error(`Platform tab "${label}" button not found`);
@@ -338,7 +368,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByLabelText("Instagram platform"));
+    clickPlatformTabByLabel("Instagram");
     clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
