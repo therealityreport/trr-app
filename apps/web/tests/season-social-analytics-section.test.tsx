@@ -1564,7 +1564,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       expect(weekTwo.getByTestId("weekly-total-metrics-2")).toHaveTextContent("0 tags");
     });
     expect(weekTwo.queryByTestId("weekly-missing-metrics-2")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Sync Metrics" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Ingest Metrics" })).toHaveLength(2);
   });
 
   it("persists selected progress metrics in the social_metrics query param", async () => {
@@ -1916,7 +1916,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const weekOne = within(weekOneRow as HTMLElement);
     expect(weekOne.getByTestId("weekly-total-progress-1")).toHaveTextContent("100.0%");
     expect(weekOne.queryByTestId("weekly-missing-metrics-1")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Sync Metrics" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Ingest Metrics" })).toHaveLength(2);
   });
 
   it("flags stale active runs older than 45 minutes with pending/retrying counts", async () => {
@@ -2075,7 +2075,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     screen.getAllByRole("button", { name: "Run Week" }).forEach((button) => {
       expect(button).toBeDisabled();
     });
-    screen.getAllByRole("button", { name: "Sync Metrics" }).forEach((button) => {
+    screen.getAllByRole("button", { name: "Ingest Metrics" }).forEach((button) => {
       expect(button).toBeDisabled();
     });
   });
@@ -3460,7 +3460,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
     expect(weekOneRow).not.toBeNull();
-    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync Metrics" });
+    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Ingest Metrics" });
     fireEvent.click(syncButton);
 
     await waitFor(() => {
@@ -3510,7 +3510,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
     expect(weekOneRow).not.toBeNull();
-    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync Metrics" });
+    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Ingest Metrics" });
     fireEvent.click(syncButton);
 
     await waitFor(() => {

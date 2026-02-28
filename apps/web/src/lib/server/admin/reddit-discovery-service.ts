@@ -7,6 +7,11 @@ import {
   EPISODE_DISCUSSION_TYPE_ALIASES,
   sanitizeEpisodeTitlePatterns,
 } from "@/lib/server/admin/reddit-episode-rules";
+import {
+  getRedditFetchContext,
+  invalidateRedditToken,
+  type RedditFetchContext,
+} from "@/lib/server/admin/reddit-oauth-client";
 
 export type RedditListingSort = "new" | "hot" | "top";
 export type EpisodeDiscussionType = "live" | "post" | "weekly";
@@ -54,6 +59,27 @@ export interface DiscoverSubredditThreadsInput {
   periodEnd?: string | null;
   exhaustiveWindow?: boolean;
   maxPages?: number;
+  searchBackfill?: boolean;
+}
+
+export interface RedditDiscoverySearchBackfillQueryDiagnostics {
+  flair: string;
+  query: string;
+  pages_fetched: number;
+  rows_fetched: number;
+  rows_in_window: number;
+  reached_period_start: boolean;
+  complete: boolean;
+}
+
+export interface RedditDiscoverySearchBackfillDiagnostics {
+  enabled: boolean;
+  queries_run: number;
+  pages_fetched: number;
+  rows_fetched: number;
+  rows_in_window: number;
+  complete: boolean;
+  query_diagnostics: RedditDiscoverySearchBackfillQueryDiagnostics[];
 }
 
 export interface DiscoverSubredditThreadsResult {
@@ -74,6 +100,7 @@ export interface DiscoverSubredditThreadsResult {
   };
   window_start: string | null;
   window_end: string | null;
+  search_backfill?: RedditDiscoverySearchBackfillDiagnostics | null;
   terms: string[];
   hints: RedditDiscoveryHints;
   threads: RedditDiscoveryThread[];
@@ -165,11 +192,13 @@ export interface DiscoverEpisodeDiscussionThreadsResult {
 
 export class RedditDiscoveryError extends Error {
   status: number;
+  retryAfterMs: number | null;
 
-  constructor(message: string, status = 500) {
+  constructor(message: string, status = 500, options?: { retryAfterMs?: number | null }) {
     super(message);
     this.name = "RedditDiscoveryError";
     this.status = status;
+    this.retryAfterMs = options?.retryAfterMs ?? null;
   }
 }
 
@@ -217,11 +246,16 @@ const DEFAULT_EXHAUSTIVE_WINDOW_MAX_PAGES = 160;
 const MAX_EXHAUSTIVE_WINDOW_MAX_PAGES = 500;
 const DEFAULT_REDDIT_TIMEOUT_MS = 12_000;
 const DEFAULT_REDDIT_USER_AGENT = "TRRAdminRedditDiscovery/1.0 (+https://thereality.report)";
-const MAX_REDDIT_FETCH_RETRIES = 2;
+const MAX_REDDIT_FETCH_RETRIES = 4;
+const DEFAULT_REDDIT_RATE_LIMIT_DELAY_MS = 3_500;
+const DEFAULT_REDDIT_PAGE_COOLDOWN_MS = 250;
 const MAX_SEARCH_PAGES_PER_BROAD_QUERY = 3;
 const MAX_SEARCH_PAGES_PER_GAP_QUERY = 1;
 const MAX_GAP_FILL_QUERIES = 12;
-const SEARCH_CONCURRENCY = 3;
+const SEARCH_CONCURRENCY = 1;
+const MAX_BACKFILL_QUERIES_PER_FLAIR = 3;
+const MAX_TOTAL_BACKFILL_QUERIES = 12;
+const MAX_BACKFILL_PAGES_PER_QUERY = 8;
 const RETRYABLE_REDDIT_STATUS = new Set([429, 502, 503, 504]);
 
 const FRANCHISE_EXCLUDE_TERMS = [
@@ -256,6 +290,55 @@ const getFetchTimeoutMs = (): number => {
 
 const getRedditUserAgent = (): string =>
   (process.env.REDDIT_USER_AGENT ?? "").trim() || DEFAULT_REDDIT_USER_AGENT;
+
+const isTestEnv = (): boolean =>
+  process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+
+const getRedditRateLimitDelayMs = (): number => {
+  if (isTestEnv()) return 0;
+  const raw = process.env.REDDIT_RATE_LIMIT_DELAY_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return DEFAULT_REDDIT_RATE_LIMIT_DELAY_MS;
+};
+
+const getRedditPageCooldownMs = (): number => {
+  if (isTestEnv()) return 0;
+  const raw = process.env.REDDIT_PAGE_COOLDOWN_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return DEFAULT_REDDIT_PAGE_COOLDOWN_MS;
+};
+
+const parseRetryAfterMs = (rawValue: string | null): number | null => {
+  if (!rawValue) return null;
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+  const asSeconds = Number.parseInt(trimmed, 10);
+  if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+    return asSeconds * 1000;
+  }
+  const asDate = new Date(trimmed);
+  const msUntil = asDate.getTime() - Date.now();
+  if (!Number.isFinite(msUntil)) return null;
+  return Math.max(0, msUntil);
+};
+
+const computeRetryDelayMs = (
+  error: RedditDiscoveryError,
+  attempt: number,
+): number => {
+  if (error.status === 429) {
+    const baseline = getRedditRateLimitDelayMs();
+    const retryAfter = error.retryAfterMs ?? 0;
+    return Math.max(baseline, retryAfter) + Math.floor(Math.random() * 180);
+  }
+  return 250 * 2 ** attempt + Math.floor(Math.random() * 120);
+};
 
 const getExhaustiveWindowMaxPages = (requestedMaxPages?: number | null): number => {
   if (
@@ -475,6 +558,7 @@ const toAbsoluteRedditUrl = (value: string): string => {
 };
 
 const makeSortUrl = (
+  baseUrl: string,
   subreddit: string,
   sort: RedditListingSort,
   limit: number,
@@ -487,10 +571,11 @@ const makeSortUrl = (
   if (after) {
     params.set("after", after);
   }
-  return `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/${sort}.json?${params.toString()}`;
+  return `${baseUrl}/r/${encodeURIComponent(subreddit)}/${sort}.json?${params.toString()}`;
 };
 
 const makeSearchUrl = (
+  baseUrl: string,
   subreddit: string,
   query: string,
   limit: number,
@@ -507,7 +592,7 @@ const makeSearchUrl = (
   if (after) {
     params.set("after", after);
   }
-  return `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/search.json?${params.toString()}`;
+  return `${baseUrl}/r/${encodeURIComponent(subreddit)}/search.json?${params.toString()}`;
 };
 
 const sleep = async (ms: number): Promise<void> =>
@@ -572,30 +657,43 @@ const filterThreadsByPeriodWindow = (input: {
   });
 };
 
+const oldestPostedTimestampMs = (rows: RedditDiscoveryThread[]): number | null =>
+  rows.reduce<number | null>((oldest, row) => {
+    const posted = parseIsoDate(row.posted_at);
+    if (!posted) return oldest;
+    const postedMs = posted.getTime();
+    if (oldest === null || postedMs < oldest) return postedMs;
+    return oldest;
+  }, null);
+
 const fetchSortPage = async (
   subreddit: string,
   sort: RedditListingSort,
   limit: number,
   after: string | null,
+  ctx?: RedditFetchContext,
 ): Promise<{ rows: RedditDiscoveryThread[]; after: string | null }> => {
+  const fetchCtx = ctx ?? await getRedditFetchContext();
   for (let attempt = 0; attempt <= MAX_REDDIT_FETCH_RETRIES; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), getFetchTimeoutMs());
     try {
-      const response = await fetch(makeSortUrl(subreddit, sort, limit, after), {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": getRedditUserAgent(),
-        },
+      const response = await fetch(makeSortUrl(fetchCtx.baseUrl, subreddit, sort, limit, after), {
+        headers: fetchCtx.headers,
         signal: controller.signal,
         cache: "no-store",
       });
 
+      if (response.status === 401 && fetchCtx.headers.Authorization) {
+        invalidateRedditToken();
+      }
       if (response.status === 404) {
         throw new RedditDiscoveryError("Subreddit not found", 404);
       }
       if (response.status === 429) {
-        throw new RedditDiscoveryError("Reddit rate limit hit, try again shortly", 429);
+        throw new RedditDiscoveryError("Reddit rate limit hit, try again shortly", 429, {
+          retryAfterMs: parseRetryAfterMs(response.headers.get("retry-after")),
+        });
       }
       if (!response.ok) {
         const mappedStatus = RETRYABLE_REDDIT_STATUS.has(response.status) ? response.status : 502;
@@ -621,7 +719,7 @@ const fetchSortPage = async (
         throw mappedError;
       }
 
-      const retryDelayMs = 250 * 2 ** attempt + Math.floor(Math.random() * 120);
+      const retryDelayMs = computeRetryDelayMs(mappedError, attempt);
       await sleep(retryDelayMs);
     } finally {
       clearTimeout(timeout);
@@ -634,8 +732,9 @@ const fetchSort = async (
   subreddit: string,
   sort: RedditListingSort,
   limit: number,
+  ctx?: RedditFetchContext,
 ): Promise<RedditDiscoveryThread[]> => {
-  const page = await fetchSortPage(subreddit, sort, limit, null);
+  const page = await fetchSortPage(subreddit, sort, limit, null, ctx);
   return page.rows;
 };
 
@@ -644,6 +743,7 @@ const fetchNewWindowExhaustive = async (input: {
   periodStartDate: Date | null;
   periodEndDate: Date | null;
   maxPages: number;
+  ctx?: RedditFetchContext;
 }): Promise<{ rows: RedditDiscoveryThread[]; pages_fetched: number; window_complete: boolean }> => {
   let after: string | null = null;
   let pagesFetched = 0;
@@ -655,31 +755,30 @@ const fetchNewWindowExhaustive = async (input: {
       "new",
       MAX_SEARCH_LIMIT_PER_PAGE,
       after,
+      input.ctx,
     );
     pagesFetched += 1;
     rows.push(...page.rows);
-    after = page.after;
-    if (!after || page.rows.length === 0) {
-      break;
-    }
     if (input.periodStartDate) {
-      const oldestMsOnPage = page.rows.reduce<number | null>((oldest, row) => {
-        const posted = parseIsoDate(row.posted_at);
-        if (!posted) return oldest;
-        const postedMs = posted.getTime();
-        if (oldest === null || postedMs < oldest) return postedMs;
-        return oldest;
-      }, null);
+      const oldestMsOnPage = oldestPostedTimestampMs(page.rows);
       if (
         oldestMsOnPage !== null &&
         oldestMsOnPage < input.periodStartDate.getTime()
       ) {
         reachedPeriodStart = true;
-        break;
       }
     }
+    after = page.after;
+    const shouldStop = reachedPeriodStart || !after || page.rows.length === 0;
+    if (shouldStop) {
+      break;
+    }
+    const pageCooldownMs = getRedditPageCooldownMs();
+    if (pageCooldownMs > 0) {
+      await sleep(pageCooldownMs);
+    }
   }
-  const windowComplete = reachedPeriodStart || after === null;
+  const windowComplete = reachedPeriodStart;
   return { rows, pages_fetched: pagesFetched, window_complete: windowComplete };
 };
 
@@ -688,25 +787,29 @@ const fetchSearchPage = async (
   query: string,
   limit: number,
   after: string | null,
+  ctx?: RedditFetchContext,
 ): Promise<{ rows: RedditDiscoveryThread[]; after: string | null }> => {
+  const fetchCtx = ctx ?? await getRedditFetchContext();
   for (let attempt = 0; attempt <= MAX_REDDIT_FETCH_RETRIES; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), getFetchTimeoutMs());
     try {
-      const response = await fetch(makeSearchUrl(subreddit, query, limit, after), {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": getRedditUserAgent(),
-        },
+      const response = await fetch(makeSearchUrl(fetchCtx.baseUrl, subreddit, query, limit, after), {
+        headers: fetchCtx.headers,
         signal: controller.signal,
         cache: "no-store",
       });
 
+      if (response.status === 401 && fetchCtx.headers.Authorization) {
+        invalidateRedditToken();
+      }
       if (response.status === 404) {
         throw new RedditDiscoveryError("Subreddit not found", 404);
       }
       if (response.status === 429) {
-        throw new RedditDiscoveryError("Reddit rate limit hit, try again shortly", 429);
+        throw new RedditDiscoveryError("Reddit rate limit hit, try again shortly", 429, {
+          retryAfterMs: parseRetryAfterMs(response.headers.get("retry-after")),
+        });
       }
       if (!response.ok) {
         const mappedStatus = RETRYABLE_REDDIT_STATUS.has(response.status) ? response.status : 502;
@@ -731,7 +834,7 @@ const fetchSearchPage = async (
         throw mappedError;
       }
 
-      const retryDelayMs = 250 * 2 ** attempt + Math.floor(Math.random() * 120);
+      const retryDelayMs = computeRetryDelayMs(mappedError, attempt);
       await sleep(retryDelayMs);
     } finally {
       clearTimeout(timeout);
@@ -744,14 +847,18 @@ const fetchSortsWithDiagnostics = async (
   subreddit: string,
   sortModes: RedditListingSort[],
   limitPerMode: number,
+  ctx?: RedditFetchContext,
 ): Promise<{ rows: RedditDiscoveryThread[]; diagnostics: SortFetchDiagnostics }> => {
   const startedAt = Date.now();
-  const settled = await Promise.allSettled(
-    sortModes.map(async (sort) => {
-      const rows = await fetchSort(subreddit, sort, limitPerMode);
-      return { sort, rows };
-    }),
-  );
+  const settled: PromiseSettledResult<{ sort: RedditListingSort; rows: RedditDiscoveryThread[] }>[] = [];
+  for (const sort of sortModes) {
+    try {
+      const rows = await fetchSort(subreddit, sort, limitPerMode, ctx);
+      settled.push({ status: "fulfilled", value: { sort, rows } });
+    } catch (error) {
+      settled.push({ status: "rejected", reason: error });
+    }
+  }
 
   const diagnostics: SortFetchDiagnostics = {
     successful_sorts: [],
@@ -798,6 +905,177 @@ const fetchSortsWithDiagnostics = async (
   }
 
   return { rows, diagnostics };
+};
+
+const buildAcronymToken = (value: string): string | null => {
+  const parts = value
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length < 2) return null;
+  const acronym = parts.map((part) => part[0]).join("");
+  if (acronym.length < 2) return null;
+  return acronym;
+};
+
+const buildFlairSearchBackfillTargets = (input: {
+  flairs: string[];
+  showTerms: string[];
+}): Array<{ flair: string; query: string }> => {
+  const flairByCanonicalKey = new Map<string, string>();
+  for (const flair of input.flairs) {
+    const canonicalKey = toCanonicalFlairKey(flair);
+    if (!canonicalKey || flairByCanonicalKey.has(canonicalKey)) continue;
+    flairByCanonicalKey.set(canonicalKey, flair);
+  }
+  const showTermQueries = dedupeTerms(
+    input.showTerms.filter((term) => term.length >= 3),
+  )
+    .sort((a, b) => {
+      const aIsFranchiseAcronym = /^rho[a-z0-9]+$/i.test(a);
+      const bIsFranchiseAcronym = /^rho[a-z0-9]+$/i.test(b);
+      if (aIsFranchiseAcronym !== bIsFranchiseAcronym) {
+        return aIsFranchiseAcronym ? -1 : 1;
+      }
+      return a.length - b.length;
+    })
+    .map((term) => quoteSearchToken(term))
+    .slice(0, 2);
+
+  const targets: Array<{ flair: string; query: string }> = [];
+  for (const flair of flairByCanonicalKey.values()) {
+    const querySet = new Set<string>();
+    querySet.add(quoteSearchToken(flair));
+    const acronym = buildAcronymToken(flair);
+    if (acronym) {
+      querySet.add(quoteSearchToken(acronym));
+    }
+    for (const query of showTermQueries) {
+      querySet.add(query);
+    }
+    let queryCount = 0;
+    for (const query of querySet) {
+      targets.push({ flair, query });
+      queryCount += 1;
+      if (queryCount >= MAX_BACKFILL_QUERIES_PER_FLAIR || targets.length >= MAX_TOTAL_BACKFILL_QUERIES) {
+        break;
+      }
+    }
+    if (targets.length >= MAX_TOTAL_BACKFILL_QUERIES) {
+      break;
+    }
+  }
+  return targets;
+};
+
+const fetchFlairWindowSearchBackfill = async (input: {
+  subreddit: string;
+  flairTargets: Array<{ flair: string; query: string }>;
+  periodStartDate: Date | null;
+  periodEndDate: Date | null;
+  maxPages: number;
+}): Promise<{ rows: RedditDiscoveryThread[]; diagnostics: RedditDiscoverySearchBackfillDiagnostics }> => {
+  const diagnostics: RedditDiscoverySearchBackfillDiagnostics = {
+    enabled: true,
+    queries_run: 0,
+    pages_fetched: 0,
+    rows_fetched: 0,
+    rows_in_window: 0,
+    complete: false,
+    query_diagnostics: [],
+  };
+  if (input.flairTargets.length === 0) {
+    diagnostics.complete = true;
+    return { rows: [], diagnostics };
+  }
+
+  let pageBudgetRemaining = Math.max(1, input.maxPages);
+  const allRows: RedditDiscoveryThread[] = [];
+  const periodStartMs = input.periodStartDate?.getTime() ?? null;
+  const maxPagesPerQuery = Math.max(
+    1,
+    Math.min(
+      MAX_BACKFILL_PAGES_PER_QUERY,
+      Math.ceil(pageBudgetRemaining / Math.max(1, input.flairTargets.length)),
+    ),
+  );
+
+  for (const target of input.flairTargets) {
+    if (pageBudgetRemaining <= 0) {
+      break;
+    }
+    let after: string | null = null;
+    let pagesFetched = 0;
+    const queryRows: RedditDiscoveryThread[] = [];
+    let reachedPeriodStart = input.periodStartDate === null;
+    let queryRateLimited = false;
+
+    const queryPageBudget = Math.max(1, Math.min(pageBudgetRemaining, maxPagesPerQuery));
+    try {
+      while (pagesFetched < queryPageBudget) {
+        const page = await fetchSearchPage(
+          input.subreddit,
+          target.query,
+          MAX_SEARCH_LIMIT_PER_PAGE,
+          after,
+        );
+        pagesFetched += 1;
+        queryRows.push(...page.rows);
+        if (periodStartMs !== null) {
+          const oldestMsOnPage = oldestPostedTimestampMs(page.rows);
+          if (oldestMsOnPage !== null && oldestMsOnPage < periodStartMs) {
+            reachedPeriodStart = true;
+          }
+        }
+        after = page.after;
+        const shouldStop = reachedPeriodStart || !after || page.rows.length === 0;
+        if (shouldStop) {
+          break;
+        }
+        const pageCooldownMs = getRedditPageCooldownMs();
+        if (pageCooldownMs > 0) {
+          await sleep(pageCooldownMs);
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof RedditDiscoveryError) || error.status !== 429) {
+        throw error;
+      }
+      queryRateLimited = true;
+    }
+
+    pageBudgetRemaining = Math.max(0, pageBudgetRemaining - pagesFetched);
+    allRows.push(...queryRows);
+    const rowsInWindow = filterThreadsByPeriodWindow({
+      rows: queryRows,
+      periodStartDate: input.periodStartDate,
+      periodEndDate: input.periodEndDate,
+    });
+    const queryComplete = !queryRateLimited && (input.periodStartDate ? reachedPeriodStart : after === null);
+    diagnostics.query_diagnostics.push({
+      flair: target.flair,
+      query: target.query,
+      pages_fetched: pagesFetched,
+      rows_fetched: queryRows.length,
+      rows_in_window: rowsInWindow.length,
+      reached_period_start: reachedPeriodStart,
+      complete: queryComplete,
+    });
+    diagnostics.queries_run += 1;
+    diagnostics.pages_fetched += pagesFetched;
+    diagnostics.rows_fetched += queryRows.length;
+    diagnostics.rows_in_window += rowsInWindow.length;
+  }
+
+  diagnostics.complete =
+    diagnostics.queries_run === input.flairTargets.length &&
+    diagnostics.query_diagnostics.every((query) => query.complete);
+
+  return {
+    rows: allRows,
+    diagnostics,
+  };
 };
 
 const mergeByPostId = (rows: RedditDiscoveryThread[]): RedditDiscoveryThread[] => {
@@ -930,11 +1208,17 @@ export async function discoverSubredditThreads(
   const analysisScanFlares = sanitizeRedditFlairList(subreddit, input.analysisFlares ?? []);
   const analysisAllFlares = sanitizeRedditFlairList(subreddit, input.analysisAllFlares ?? []);
   const forcedAllPostFlares = sanitizeRedditFlairList(subreddit, input.forceIncludeFlares ?? []);
+  const trackedFlairs = [
+    ...analysisAllFlares,
+    ...analysisScanFlares,
+    ...forcedAllPostFlares,
+  ].filter((flair) => flair.trim().length > 0);
   const isShowFocused = input.isShowFocused ?? false;
   const periodStartDate = parseIsoDate(input.periodStart);
   const periodEndDate = parseIsoDate(input.periodEnd);
   const useExhaustiveWindow =
     input.exhaustiveWindow === true && Boolean(periodStartDate || periodEndDate);
+  const searchBackfillEnabled = input.searchBackfill === true;
   const maxPages = getExhaustiveWindowMaxPages(input.maxPages ?? null);
 
   if (terms.length === 0) {
@@ -953,26 +1237,70 @@ export async function discoverSubredditThreads(
   let fetchedRows: RedditDiscoveryThread[] = [];
   let listingPagesFetched = 0;
   let windowExhaustiveComplete: boolean | null = null;
+  let searchBackfillDiagnostics: RedditDiscoverySearchBackfillDiagnostics | null = null;
   const diagnostics: SortFetchDiagnostics = {
     successful_sorts: [],
     failed_sorts: [],
     rate_limited_sorts: [],
   };
   if (useExhaustiveWindow) {
-    const exhaustive = await fetchNewWindowExhaustive({
-      subreddit,
-      periodStartDate,
-      periodEndDate,
-      maxPages,
-    });
-    fetchedRows = filterThreadsByPeriodWindow({
-      rows: exhaustive.rows,
-      periodStartDate,
-      periodEndDate,
-    });
-    listingPagesFetched = exhaustive.pages_fetched;
-    windowExhaustiveComplete = exhaustive.window_complete;
-    diagnostics.successful_sorts = ["new"];
+    try {
+      const exhaustive = await fetchNewWindowExhaustive({
+        subreddit,
+        periodStartDate,
+        periodEndDate,
+        maxPages,
+      });
+      fetchedRows = filterThreadsByPeriodWindow({
+        rows: exhaustive.rows,
+        periodStartDate,
+        periodEndDate,
+      });
+      listingPagesFetched = exhaustive.pages_fetched;
+      windowExhaustiveComplete = exhaustive.window_complete;
+      diagnostics.successful_sorts = ["new"];
+    } catch (error) {
+      const canFallbackToSearchBackfill =
+        error instanceof RedditDiscoveryError &&
+        error.status === 429 &&
+        searchBackfillEnabled &&
+        trackedFlairs.length > 0;
+      if (!canFallbackToSearchBackfill) {
+        throw error;
+      }
+      console.warn("[reddit_discover_threads_exhaustive_listing_rate_limited]", {
+        subreddit,
+        status: error.status,
+        message: error.message,
+      });
+      diagnostics.failed_sorts = ["new"];
+      diagnostics.rate_limited_sorts = ["new"];
+      listingPagesFetched = 0;
+      windowExhaustiveComplete = false;
+    }
+
+    const shouldRunSearchBackfill =
+      searchBackfillEnabled && trackedFlairs.length > 0 && useExhaustiveWindow;
+    if (shouldRunSearchBackfill) {
+      const flairTargets = buildFlairSearchBackfillTargets({
+        flairs: trackedFlairs,
+        showTerms: terms,
+      });
+      const searchBackfill = await fetchFlairWindowSearchBackfill({
+        subreddit,
+        flairTargets,
+        periodStartDate,
+        periodEndDate,
+        maxPages,
+      });
+      const searchBackfillRows = filterThreadsByPeriodWindow({
+        rows: searchBackfill.rows,
+        periodStartDate,
+        periodEndDate,
+      });
+      fetchedRows = [...fetchedRows, ...searchBackfillRows];
+      searchBackfillDiagnostics = searchBackfill.diagnostics;
+    }
   } else {
     const sample = await fetchSortsWithDiagnostics(subreddit, sortModes, limitPerMode);
     fetchedRows = sample.rows;
@@ -983,7 +1311,7 @@ export async function discoverSubredditThreads(
   }
   const mergedThreads = mergeByPostId(fetchedRows);
   const trackedFlairKeySet = new Set<string>(
-    [...analysisAllFlares, ...analysisScanFlares, ...forcedAllPostFlares]
+    trackedFlairs
       .map((flair) => toCanonicalFlairKey(flair))
       .filter((flair) => flair.length > 0),
   );
@@ -1024,6 +1352,7 @@ export async function discoverSubredditThreads(
     listing_pages_fetched: listingPagesFetched,
     max_pages_applied: maxPages,
     window_exhaustive_complete: windowExhaustiveComplete,
+    search_backfill: searchBackfillDiagnostics,
     totals: {
       fetched_rows: mergedThreads.length,
       matched_rows: threads.length,
@@ -1046,6 +1375,7 @@ export async function discoverSubredditThreads(
     listing_pages_fetched: listingPagesFetched,
     max_pages_applied: maxPages,
     window_exhaustive_complete: windowExhaustiveComplete,
+    search_backfill: searchBackfillDiagnostics,
     totals: {
       fetched_rows: mergedThreads.length,
       matched_rows: threads.length,
@@ -1159,7 +1489,9 @@ const PRIMARY_DISCUSSION_SEARCH_PHRASE: Record<EpisodeDiscussionType, string> = 
   weekly: "weekly episode discussion",
 };
 
-const quoteSearchToken = (value: string): string => `"${value.replace(/"/g, '\\"')}"`;
+function quoteSearchToken(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
 
 const buildSearchShowTokens = (
   showName: string,
@@ -1223,6 +1555,10 @@ const runSearchQuery = async (
     rows.push(...page.rows);
     after = page.after;
     if (!after) break;
+    const pageCooldownMs = getRedditPageCooldownMs();
+    if (pageCooldownMs > 0) {
+      await sleep(pageCooldownMs);
+    }
   }
   return { rows, pages_fetched: pagesFetched };
 };
@@ -1422,12 +1758,35 @@ export async function discoverEpisodeDiscussionThreads(
     throw new RedditDiscoveryError("At least one episode title pattern is required", 400);
   }
 
-  const { rows: fetchedRows, diagnostics } = await fetchSortsWithDiagnostics(
-    subreddit,
-    sortModes,
-    limitPerMode,
-  );
-  const mergedListingRows = mergeByPostId(fetchedRows);
+  let mergedListingRows: RedditDiscoveryThread[] = [];
+  let diagnostics: SortFetchDiagnostics = {
+    successful_sorts: [],
+    failed_sorts: [],
+    rate_limited_sorts: [],
+  };
+  try {
+    const listingFetch = await fetchSortsWithDiagnostics(
+      subreddit,
+      sortModes,
+      limitPerMode,
+    );
+    mergedListingRows = mergeByPostId(listingFetch.rows);
+    diagnostics = listingFetch.diagnostics;
+  } catch (error) {
+    if (!(error instanceof RedditDiscoveryError) || error.status !== 429) {
+      throw error;
+    }
+    diagnostics = {
+      successful_sorts: [],
+      failed_sorts: [...sortModes],
+      rate_limited_sorts: [...sortModes],
+    };
+    console.warn("[reddit_episode_discussions_listing_rate_limited]", {
+      subreddit,
+      requested_sorts: sortModes,
+      message: error.message,
+    });
+  }
   const listingCount = mergedListingRows.length;
 
   const expectedEpisodeNumbers = normalizeExpectedEpisodeNumbers(input.seasonEpisodes);
@@ -1451,14 +1810,25 @@ export async function discoverEpisodeDiscussionThreads(
       }),
     );
 
-    const broadSearch = await runSearchQuerySet({
-      subreddit,
-      queries: broadQueries,
-      maxPagesPerQuery: MAX_SEARCH_PAGES_PER_BROAD_QUERY,
-      concurrency: SEARCH_CONCURRENCY,
-    });
-    searchRows = broadSearch.rows;
-    searchPagesFetched = broadSearch.pages_fetched;
+    try {
+      const broadSearch = await runSearchQuerySet({
+        subreddit,
+        queries: broadQueries,
+        maxPagesPerQuery: MAX_SEARCH_PAGES_PER_BROAD_QUERY,
+        concurrency: SEARCH_CONCURRENCY,
+      });
+      searchRows = broadSearch.rows;
+      searchPagesFetched = broadSearch.pages_fetched;
+    } catch (error) {
+      if (!(error instanceof RedditDiscoveryError) || error.status !== 429) {
+        throw error;
+      }
+      console.warn("[reddit_episode_discussions_search_rate_limited]", {
+        subreddit,
+        phase: "broad_search",
+        message: error.message,
+      });
+    }
   }
 
   let mergedThreads = mergeByPostId([...mergedListingRows, ...searchRows]);
@@ -1502,7 +1872,21 @@ export async function discoverEpisodeDiscussionThreads(
 
     for (const query of gapQueryQueue) {
       if (missingSlots.length === 0) break;
-      const gapResult = await runSearchQuery(subreddit, query, MAX_SEARCH_PAGES_PER_GAP_QUERY);
+      let gapResult: { rows: RedditDiscoveryThread[]; pages_fetched: number };
+      try {
+        gapResult = await runSearchQuery(subreddit, query, MAX_SEARCH_PAGES_PER_GAP_QUERY);
+      } catch (error) {
+        if (!(error instanceof RedditDiscoveryError) || error.status !== 429) {
+          throw error;
+        }
+        console.warn("[reddit_episode_discussions_search_rate_limited]", {
+          subreddit,
+          phase: "gap_fill",
+          query,
+          message: error.message,
+        });
+        break;
+      }
       gapFillQueriesRun += 1;
       searchPagesFetched += gapResult.pages_fetched;
       if (gapResult.rows.length === 0) {

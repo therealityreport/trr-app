@@ -1,4 +1,8 @@
 import { sanitizeRedditFlairList } from "@/lib/server/admin/reddit-flair-normalization";
+import {
+  getRedditFetchContext,
+  invalidateRedditToken,
+} from "@/lib/server/admin/reddit-oauth-client";
 
 export type RedditFlairSource = "api" | "listing_fallback" | "none";
 
@@ -73,17 +77,18 @@ const getRedditUserAgent = (): string =>
 const fetchJsonWithTimeout = async <T>(url: string): Promise<T> => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), getTimeoutMs());
+  const ctx = await getRedditFetchContext();
 
   try {
     const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": getRedditUserAgent(),
-      },
+      headers: ctx.headers,
       signal: controller.signal,
       cache: "no-store",
     });
 
+    if (response.status === 401 && ctx.headers.Authorization) {
+      invalidateRedditToken();
+    }
     if (!response.ok) {
       if (response.status === 404) {
         throw new Error("Subreddit not found");
@@ -134,8 +139,9 @@ const rankAndCapFlares = (subreddit: string, rawFlares: string[], cap: number): 
 };
 
 const fetchFromFlairApi = async (subreddit: string): Promise<string[]> => {
+  const ctx = await getRedditFetchContext();
   const payload = await fetchJsonWithTimeout<RedditFlairTemplate[]>(
-    `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/api/link_flair_v2.json?raw_json=1`,
+    `${ctx.baseUrl}/r/${encodeURIComponent(subreddit)}/api/link_flair_v2.json?raw_json=1`,
   );
 
   if (!Array.isArray(payload)) return [];
@@ -147,13 +153,14 @@ const fetchFromFlairApi = async (subreddit: string): Promise<string[]> => {
 
 const fetchFromListingsFallback = async (subreddit: string): Promise<string[]> => {
   const perSortLimit = getListingLimit();
+  const ctx = await getRedditFetchContext();
 
   const listingRows = await Promise.all(
     SORTS.map(async (sort) => {
       const params = new URLSearchParams({ raw_json: "1", limit: String(perSortLimit) });
       if (sort === "top") params.set("t", "month");
       const payload = await fetchJsonWithTimeout<RedditListingPayload>(
-        `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/${sort}.json?${params.toString()}`,
+        `${ctx.baseUrl}/r/${encodeURIComponent(subreddit)}/${sort}.json?${params.toString()}`,
       );
       return payload.data?.children ?? [];
     }),

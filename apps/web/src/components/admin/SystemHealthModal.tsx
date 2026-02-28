@@ -124,22 +124,25 @@ function truncate(value: string | null, max: number): string {
 // Hook: useQueueStatus
 // ---------------------------------------------------------------------------
 
-function useQueueStatus(isOpen: boolean) {
+function useQueueStatus(options: { isOpen: boolean; pollInBackground: boolean }) {
+  const { isOpen, pollInBackground } = options;
   const [data, setData] = useState<QueueStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightRef = useRef(false);
 
   const fetchStatus = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       const response = await fetchAdminWithAuth(
         QUEUE_STATUS_URL,
         { cache: "no-store", signal: controller.signal },
         { allowDevAdminBypass: true },
       );
-      clearTimeout(timeout);
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         setError((body as Record<string, string>).error ?? `HTTP ${response.status}`);
@@ -151,22 +154,41 @@ function useQueueStatus(isOpen: boolean) {
       setLastFetched(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fetch failed");
+    } finally {
+      clearTimeout(timeout);
+      inFlightRef.current = false;
     }
   }, []);
 
   useEffect(() => {
-    // Always poll in background for the header dot
-    fetchStatus();
-    intervalRef.current = setInterval(fetchStatus, POLL_INTERVAL_MS);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [fetchStatus]);
+    const shouldPoll = pollInBackground || isOpen;
+    if (!shouldPoll) {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      return;
+    }
 
-  // Fetch immediately when modal opens
-  useEffect(() => {
-    if (isOpen) fetchStatus();
-  }, [isOpen, fetchStatus]);
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) return;
+      await fetchStatus();
+      if (cancelled) return;
+      timeoutRef.current = setTimeout(() => {
+        void poll();
+      }, POLL_INTERVAL_MS);
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [fetchStatus, isOpen, pollInBackground]);
 
   return { data, error, lastFetched, refetch: fetchStatus };
 }
@@ -295,7 +317,7 @@ function RecentFailures({ failures }: { failures: FailureEntry[] }) {
 
 /** Header dot indicator — always renders, always polls. */
 export function HealthIndicator({ onClick }: { onClick: () => void }) {
-  const { data, error } = useQueueStatus(false);
+  const { data, error } = useQueueStatus({ isOpen: false, pollInBackground: true });
   const state = healthState(data, error);
 
   return (
@@ -317,7 +339,10 @@ export function HealthIndicator({ onClick }: { onClick: () => void }) {
 
 /** Full-screen AdminModal with queue/worker health details. */
 export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const { data, error, lastFetched, refetch } = useQueueStatus(isOpen);
+  const { data, error, lastFetched, refetch } = useQueueStatus({
+    isOpen,
+    pollInBackground: false,
+  });
   const state = healthState(data, error);
 
   return (

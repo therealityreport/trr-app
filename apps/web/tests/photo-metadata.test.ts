@@ -76,6 +76,42 @@ describe("mapPhotoToMetadata", () => {
     expect(result.sourceBadgeColor).toBe("#6b7280");
   });
 
+  it("parses face crops from photo payload", () => {
+    const result = mapPhotoToMetadata({
+      id: "face-crops-1",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: "https://example.com/image.jpg",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+      face_crops: [
+        {
+          index: 1,
+          x: 0.1,
+          y: 0.2,
+          width: 0.3,
+          height: 0.3,
+          variant_key: "face-crops/imdb/1.jpg",
+          variant_url: "https://cdn.example.com/face-crops/imdb/1.jpg",
+          size: 256,
+        },
+      ],
+    });
+
+    expect(result.faceCrops).toBeDefined();
+    expect(result.faceCrops?.length).toBe(1);
+    expect(result.faceCrops?.[0].variantUrl).toBe("https://cdn.example.com/face-crops/imdb/1.jpg");
+    expect(result.faceCrops?.[0].size).toBe(256);
+  });
+
   it("normalizes source case for badge colors", () => {
     // Test different casings all map to the same color
     const imdbVariants = ["imdb", "IMDB", "ImDb", "IMDb"];
@@ -467,6 +503,56 @@ describe("mapPhotoToMetadata", () => {
       "https://www.imdb.com/name/nm0169212/mediaviewer/rm1344200961/"
     );
     expect(result.originalSourceFileUrl).toBe("https://m.media-amazon.com/images/M/MV5BPATH._V1_.jpg");
+  });
+
+  it("maps show metadata fields including IMDb fallback show name", () => {
+    const inferredResult = mapPhotoToMetadata({
+      id: "imdb-show-inferred",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/M/MV5BSHOW._V1_.jpg",
+      hosted_url: "https://cdn.example.com/imdb-show.jpg",
+      caption: "Alan Cumming in The Power of the Seer (2025)",
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: ["The Power of the Seer"],
+      metadata: {
+        show_id: "show-traitors",
+        show_name: "The Traitors",
+        show_context_source: "request_context_inferred",
+      },
+      fetched_at: null,
+    });
+
+    expect(inferredResult.showId).toBe("show-traitors");
+    expect(inferredResult.showName).toBe("The Traitors");
+    expect(inferredResult.showContextSource).toBe("request_context_inferred");
+
+    const unresolvedResult = mapPhotoToMetadata({
+      id: "imdb-show-fallback",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/M/MV5BSHOW2._V1_.jpg",
+      hosted_url: "https://cdn.example.com/imdb-show2.jpg",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: ["The Power of the Seer"],
+      metadata: {
+        imdb_fallback_show_name: "The Traitors",
+      },
+      fetched_at: null,
+    });
+
+    expect(unresolvedResult.showId).toBeNull();
+    expect(unresolvedResult.showName).toBe("The Traitors");
+    expect(unresolvedResult.showContextSource).toBeNull();
   });
 
   it("derives s3 mirror filename from hosted URL", () => {

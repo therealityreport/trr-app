@@ -4,7 +4,8 @@ import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
-const BACKEND_STREAM_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS = 20_000;
+const DEFAULT_CONNECT_HEARTBEAT_INTERVAL_MS = 2_000;
 const BACKEND_FETCH_ATTEMPTS = 5;
 const BACKEND_FETCH_RETRY_BASE_DELAY_MS = 200;
 const BACKEND_FETCH_RETRY_MAX_DELAY_MS = 2_000;
@@ -23,6 +24,28 @@ const RETRYABLE_FETCH_ERROR_CODES = new Set([
 interface RouteParams {
   params: Promise<{ personId: string }>;
 }
+
+const readPositiveIntEnv = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+};
+
+const getProxyConfig = (): {
+  connectAttemptTimeoutMs: number;
+  connectHeartbeatIntervalMs: number;
+} => ({
+  connectAttemptTimeoutMs: readPositiveIntEnv(
+    "TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS",
+    DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS
+  ),
+  connectHeartbeatIntervalMs: readPositiveIntEnv(
+    "TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS",
+    DEFAULT_CONNECT_HEARTBEAT_INTERVAL_MS
+  ),
+});
 
 const buildErrorResponse = (
   payload: Record<string, unknown>,
@@ -100,10 +123,33 @@ const formatFetchErrorDetail = (error: unknown): string => {
   return `${message} (${details})`;
 };
 
+const getErrorCode = (error: unknown): string => {
+  if (error instanceof Error && error.name === "AbortError") {
+    return "CONNECT_TIMEOUT";
+  }
+  const cause = getErrorCause(error);
+  if (cause?.code) return cause.code;
+  if (cause?.errno) return cause.errno;
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    if (message.includes("fetch failed")) return "FETCH_FAILED";
+  }
+  return "UNKNOWN";
+};
+
+const getBackendHost = (backendUrl: string): string => {
+  try {
+    const url = new URL(backendUrl);
+    return `${url.hostname}${url.port ? `:${url.port}` : ""}`;
+  } catch {
+    return "unknown";
+  }
+};
+
 const getErrorDetail = (error: unknown): string => {
   if (error instanceof Error) {
     if (error.name === "AbortError") {
-      return `Timed out waiting for backend refresh stream response (${Math.round(BACKEND_STREAM_TIMEOUT_MS / 60000)}m).`;
+      return "Timed out waiting for backend refresh stream response.";
     }
     return formatFetchErrorDetail(error);
   }
@@ -182,6 +228,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         500
       );
     }
+    const proxyConfig = getProxyConfig();
+    const backendHost = getBackendHost(backendUrl);
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -196,6 +244,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         const emitProxyProgress = (payload: Record<string, unknown>) => {
           emitEvent("progress", {
             stage: "proxy_connecting",
+            stream_state: "connecting",
             ...payload,
           });
         };
@@ -209,6 +258,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           total: BACKEND_FETCH_ATTEMPTS,
           attempt: 0,
           max_attempts: BACKEND_FETCH_ATTEMPTS,
+          checkpoint: "connect_start",
+          backend_host: backendHost,
         });
 
         for (let attempt = 1; attempt <= BACKEND_FETCH_ATTEMPTS; attempt += 1) {
@@ -223,21 +274,58 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             attempt,
             max_attempts: BACKEND_FETCH_ATTEMPTS,
             retrying: attempt > 1,
+            checkpoint: "connect_attempt_start",
+            backend_host: backendHost,
           });
           const requestController = new AbortController();
-          const timeout = setTimeout(() => requestController.abort(), BACKEND_STREAM_TIMEOUT_MS);
+          const attemptStartedAt = Date.now();
+          const timeout = setTimeout(() => requestController.abort(), proxyConfig.connectAttemptTimeoutMs);
+          const fetchPromise = fetch(backendUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${serviceRoleKey}`,
+              ...(requestId ? { "x-trr-request-id": requestId } : {}),
+            },
+            body: JSON.stringify(body ?? {}),
+            signal: requestController.signal,
+            cache: "no-store",
+          });
+          let fetchSettled = false;
+          fetchPromise.then(
+            () => {
+              fetchSettled = true;
+            },
+            () => {
+              fetchSettled = true;
+            }
+          );
           try {
-            const response = await fetch(backendUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${serviceRoleKey}`,
-                ...(requestId ? { "x-trr-request-id": requestId } : {}),
-              },
-              body: JSON.stringify(body ?? {}),
-              signal: requestController.signal,
-              cache: "no-store",
-            });
+            while (!fetchSettled) {
+              await Promise.race([
+                fetchPromise.then(
+                  () => undefined,
+                  () => undefined
+                ),
+                sleep(proxyConfig.connectHeartbeatIntervalMs),
+              ]);
+              if (fetchSettled) break;
+              emitProxyProgress({
+                message: `Connecting to backend stream (attempt ${attempt}/${BACKEND_FETCH_ATTEMPTS}, ${Math.floor(
+                  (Date.now() - attemptStartedAt) / 1000
+                )}s/${Math.floor(proxyConfig.connectAttemptTimeoutMs / 1000)}s)...`,
+                current: attempt - 1,
+                total: BACKEND_FETCH_ATTEMPTS,
+                attempt,
+                max_attempts: BACKEND_FETCH_ATTEMPTS,
+                retrying: attempt > 1,
+                attempt_elapsed_ms: Date.now() - attemptStartedAt,
+                attempt_timeout_ms: proxyConfig.connectAttemptTimeoutMs,
+                checkpoint: "connect_wait",
+                backend_host: backendHost,
+              });
+            }
+            const response = await fetchPromise;
             if (response.ok || response.status < 500 || attempt >= BACKEND_FETCH_ATTEMPTS) {
               backendResponse = response;
               break;
@@ -250,11 +338,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               attempt,
               max_attempts: BACKEND_FETCH_ATTEMPTS,
               retrying: true,
+              error_code: `HTTP_${response.status}`,
+              checkpoint: "connect_retry_wait",
+              backend_host: backendHost,
             });
             await sleep(getRetryDelayMs(attempt));
           } catch (error) {
             lastError = error;
-            if (!isRetryableNetworkError(error) || attempt >= BACKEND_FETCH_ATTEMPTS) {
+            const retryable = isRetryableNetworkError(error) || (error instanceof Error && error.name === "AbortError");
+            if (!retryable || attempt >= BACKEND_FETCH_ATTEMPTS) {
               break;
             }
             emitProxyProgress({
@@ -264,6 +356,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               attempt,
               max_attempts: BACKEND_FETCH_ATTEMPTS,
               retrying: true,
+              error_code: getErrorCode(error),
+              checkpoint: "connect_retry_wait",
+              attempt_elapsed_ms: Date.now() - attemptStartedAt,
+              attempt_timeout_ms: proxyConfig.connectAttemptTimeoutMs,
+              backend_host: backendHost,
             });
             await sleep(getRetryDelayMs(attempt));
           } finally {
@@ -275,7 +372,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           emitEvent("error", {
             stage: "proxy_connecting",
             error: "Backend fetch failed",
-            detail: `${getErrorDetail(lastError)} (attempted ${attemptsUsed}x; backendUrl=${backendUrl})`,
+            detail: `${getErrorDetail(lastError)} (attempted ${attemptsUsed}x; backend_host=${backendHost})`,
+            error_code: getErrorCode(lastError),
+            backend_host: backendHost,
+            checkpoint: "connect_exhausted",
+            stream_state: "failed",
+            is_terminal: true,
+            attempts_used: attemptsUsed,
+            max_attempts: BACKEND_FETCH_ATTEMPTS,
           });
           controller.close();
           return;
@@ -287,6 +391,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             stage: "backend",
             error: "Backend refresh failed",
             detail: errorText || `HTTP ${backendResponse.status}`,
+            error_code: `HTTP_${backendResponse.status}`,
+            checkpoint: "backend_http_error",
+            stream_state: "failed",
+            is_terminal: true,
+            backend_host: backendHost,
           });
           controller.close();
           return;
@@ -296,6 +405,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           emitEvent("error", {
             stage: "backend",
             error: "No response body from backend",
+            error_code: "BACKEND_NO_BODY",
+            checkpoint: "backend_no_body",
+            stream_state: "failed",
+            is_terminal: true,
+            backend_host: backendHost,
           });
           controller.close();
           return;
@@ -308,22 +422,66 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           attempt: attemptsUsed,
           max_attempts: BACKEND_FETCH_ATTEMPTS,
           connected: true,
+          checkpoint: "proxy_connected",
+          stream_state: "connected",
+          backend_host: backendHost,
         });
 
         const reader = backendResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let rawSseBuffer = "";
+        let sawBackendComplete = false;
+        let sawFirstBackendChunk = false;
         try {
           while (true) {
             const { value, done } = await reader.read();
             if (done) break;
             if (value && value.length > 0) {
+              if (!sawFirstBackendChunk) {
+                sawFirstBackendChunk = true;
+                emitProxyProgress({
+                  message: "Backend stream connected; forwarding events...",
+                  current: attemptsUsed,
+                  total: BACKEND_FETCH_ATTEMPTS,
+                  attempt: attemptsUsed,
+                  max_attempts: BACKEND_FETCH_ATTEMPTS,
+                  checkpoint: "backend_streaming",
+                  stream_state: "streaming",
+                  backend_host: backendHost,
+                });
+              }
+              rawSseBuffer += decoder.decode(value, { stream: true });
+              if (!sawBackendComplete && /(^|\n)event:\s*complete(\n|$)/i.test(rawSseBuffer)) {
+                sawBackendComplete = true;
+              }
+              if (rawSseBuffer.length > 8_192) {
+                rawSseBuffer = rawSseBuffer.slice(-2_048);
+              }
               controller.enqueue(value);
             }
+          }
+          if (!sawBackendComplete) {
+            emitEvent("error", {
+              stage: "proxy_stream",
+              error: "Backend stream closed before complete",
+              detail: "Connection closed without event: complete from backend.",
+              error_code: "STREAM_CLOSED_BEFORE_COMPLETE",
+              checkpoint: "backend_stream_closed",
+              stream_state: "failed",
+              is_terminal: true,
+              backend_host: backendHost,
+            });
           }
         } catch (error) {
           emitEvent("error", {
             stage: "proxy_stream",
             error: "Backend stream disconnected",
             detail: getErrorDetail(error),
+            error_code: getErrorCode(error),
+            checkpoint: "backend_stream_error",
+            stream_state: "failed",
+            is_terminal: true,
+            backend_host: backendHost,
           });
         } finally {
           try {

@@ -62,6 +62,8 @@ describe("person refresh-images stream proxy route", () => {
       "https://backend.example.com/api/v1/admin/person/person-1/refresh-images/stream"
     );
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    process.env.TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS = "20000";
+    process.env.TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS = "2000";
   });
 
   it("emits immediate proxy_connecting progress and forwards backend SSE", async () => {
@@ -88,7 +90,60 @@ describe("person refresh-images stream proxy route", () => {
           evt.data.stage === "proxy_connecting"
       )
     ).toBe(true);
+    expect(
+      events.some(
+        (evt) =>
+          evt.event === "progress" &&
+          typeof evt.data === "object" &&
+          evt.data !== null &&
+          evt.data.stage === "proxy_connecting" &&
+          evt.data.checkpoint === "proxy_connected" &&
+          evt.data.stream_state === "connected"
+      )
+    ).toBe(true);
     expect(payload).toContain("\"sync_imdb\"");
+  });
+
+  it("emits connect heartbeat progress while backend connect is pending", async () => {
+    process.env.TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS = "500";
+    process.env.TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS = "20";
+
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve(
+                new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
+                  status: 200,
+                  headers: { "content-type": "text/event-stream" },
+                })
+              ),
+            80
+          );
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest("req-heartbeat"), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.text();
+    const events = parseSseEvents(payload);
+
+    expect(response.status).toBe(200);
+    expect(
+      events.some(
+        (evt) =>
+          evt.event === "progress" &&
+          typeof evt.data === "object" &&
+          evt.data !== null &&
+          evt.data.stage === "proxy_connecting" &&
+          evt.data.checkpoint === "connect_wait" &&
+          typeof evt.data.attempt_elapsed_ms === "number" &&
+          evt.data.attempt_timeout_ms === 500
+      )
+    ).toBe(true);
   });
 
   it("forwards x-trr-request-id to backend", async () => {
@@ -190,8 +245,11 @@ describe("person refresh-images stream proxy route", () => {
           typeof evt.data === "object" &&
           evt.data !== null &&
           evt.data.stage === "proxy_connecting" &&
-          evt.data.error === "Backend fetch failed"
+          evt.data.error === "Backend fetch failed" &&
+          evt.data.checkpoint === "connect_exhausted" &&
+          evt.data.is_terminal === true
       )
     ).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 });

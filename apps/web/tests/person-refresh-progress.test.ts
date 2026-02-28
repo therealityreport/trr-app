@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildProxyConnectDetailMessage,
+  buildProxyTerminalErrorMessage,
   buildPersonRefreshDetailMessage,
+  createPersonRefreshPipelineSteps,
   createSyncProgressTracker,
+  finalizePersonRefreshPipelineSteps,
   formatRefreshSourceLabel,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
   PERSON_REFRESH_PHASES,
+  updatePersonRefreshPipelineSteps,
   updateSyncProgressTracker,
 } from "@/app/admin/trr-shows/people/[personId]/refresh-progress";
 
@@ -101,5 +106,99 @@ describe("person refresh progress mapping", () => {
         source: "tmdb",
       }),
     ).toBe("SYNCING in progress · source: TMDb · 3s elapsed");
+  });
+
+  it("formats proxy connect heartbeat detail with attempt timing", () => {
+    expect(
+      buildProxyConnectDetailMessage({
+        stage: "proxy_connecting",
+        attempt: 2,
+        maxAttempts: 5,
+        attemptElapsedMs: 14_500,
+        attemptTimeoutMs: 20_000,
+      }),
+    ).toBe("Connecting to backend stream (attempt 2/5, 14s/20s)...");
+  });
+
+  it("formats terminal proxy connect errors with code + host context", () => {
+    expect(
+      buildProxyTerminalErrorMessage({
+        stage: "proxy_connecting",
+        error: "Backend fetch failed",
+        detail: "Timed out waiting for backend refresh stream response.",
+        errorCode: "CONNECT_TIMEOUT",
+        backendHost: "127.0.0.1:8000",
+        maxAttempts: 5,
+      }),
+    ).toBe(
+      "Backend stream connect failed after 5 attempts (code: CONNECT_TIMEOUT, host: 127.0.0.1:8000). Timed out waiting for backend refresh stream response.",
+    );
+  });
+
+  it("tracks per-step pipeline status from stage progress events", () => {
+    const initial = createPersonRefreshPipelineSteps("refresh");
+
+    const running = updatePersonRefreshPipelineSteps(initial, {
+      rawStage: "auto_count",
+      message: "Auto-counting people in images...",
+      current: 3,
+      total: 20,
+    });
+
+    const autoCountRunning = running.find((step) => step.id === "auto_count");
+    expect(autoCountRunning?.status).toBe("running");
+    expect(autoCountRunning?.current).toBe(3);
+    expect(autoCountRunning?.total).toBe(20);
+
+    const completed = updatePersonRefreshPipelineSteps(running, {
+      rawStage: "auto_count",
+      message: "Auto-count complete.",
+      current: 20,
+      total: 20,
+    });
+    expect(completed.find((step) => step.id === "auto_count")?.status).toBe("completed");
+
+    const skipped = updatePersonRefreshPipelineSteps(completed, {
+      rawStage: "word_id",
+      message: "Skipping word detection (not configured).",
+      current: 0,
+      total: 0,
+    });
+    expect(skipped.find((step) => step.id === "word_id")?.status).toBe("skipped");
+  });
+
+  it("finalizes step summaries with completed vs failed details", () => {
+    const initial = createPersonRefreshPipelineSteps("refresh");
+    const finalized = finalizePersonRefreshPipelineSteps(initial, "refresh", {
+      photos_fetched: 12,
+      photos_upserted: 10,
+      photos_mirrored: 8,
+      photos_failed: 1,
+      auto_counts_attempted: 9,
+      auto_counts_succeeded: 7,
+      auto_counts_failed: 2,
+      text_overlay_attempted: 8,
+      text_overlay_succeeded: 8,
+      text_overlay_unknown: 0,
+      text_overlay_failed: 0,
+      centering_attempted: 7,
+      centering_succeeded: 7,
+      centering_failed: 0,
+      centering_skipped_manual: 1,
+      resize_attempted: 9,
+      resize_succeeded: 8,
+      resize_failed: 1,
+      resize_crop_attempted: 9,
+      resize_crop_succeeded: 8,
+      resize_crop_failed: 1,
+    });
+
+    const sourceSync = finalized.find((step) => step.id === "source_sync");
+    const autoCount = finalized.find((step) => step.id === "auto_count");
+    const mirroring = finalized.find((step) => step.id === "mirroring");
+
+    expect(sourceSync?.result).toContain("Fetched 12 photos");
+    expect(autoCount?.result).toContain("Saved people tags for 7/9 images");
+    expect(mirroring?.status).toBe("failed");
   });
 });

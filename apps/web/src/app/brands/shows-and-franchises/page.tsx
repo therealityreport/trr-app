@@ -87,6 +87,7 @@ export default function BrandsShowsAndFranchisesPage() {
   const fetchWithAuth = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
       fetchAdminWithAuth(input, init, {
+        allowDevAdminBypass: true,
         preferredUser: user,
       }),
     [user],

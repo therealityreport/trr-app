@@ -306,4 +306,32 @@ describe("person gallery media view helpers", () => {
     expect(buckets.matchesThisShow).toBe(true);
     expect(buckets.matchesWwhl).toBe(false);
   });
+
+  it("treats request-context inferred IMDb metadata as trusted for this-show", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Alan Cumming in The Power of the Seer (2025)",
+        title_names: ["The Power of the Seer"],
+        metadata: {
+          episode_title: "The Power of the Seer",
+          show_id: "show-traitors",
+          show_name: "The Traitors",
+          show_context_source: "request_context_inferred",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "T",
+      allKnownShowNameMatches: ["the traitors", "watch what happens live with andy cohen"],
+      allKnownShowAcronymMatches: new Set(["T", "WWHL"]),
+      allKnownShowIds: ["show-traitors", "show-wwhl"],
+      otherShowNameMatches: ["watch what happens live with andy cohen"],
+      otherShowAcronymMatches: new Set(["WWHL"]),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(true);
+    expect(buckets.matchesUnknownShows).toBe(false);
+  });
 });

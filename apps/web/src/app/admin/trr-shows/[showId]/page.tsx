@@ -392,12 +392,6 @@ type RefreshLogEntry = {
   provider?: string | null;
 };
 
-type LinkEditDraft = {
-  linkId: string;
-  label: string;
-  url: string;
-};
-
 type RoleRenameDraft = {
   roleId: string;
   originalName: string;
@@ -424,7 +418,7 @@ type ShowRefreshRunOptions = {
 type PersonRefreshMode = "full" | "ingest_only" | "profile_only";
 
 type HealthStatus = "ready" | "missing" | "stale";
-type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "knowledge" | "fandom";
+type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "wikipedia" | "wikidata" | "fandom";
 type PersonLinkSourceState = "found" | "missing" | "pending" | "rejected";
 
 type PersonLinkSourceSummary = {
@@ -432,6 +426,7 @@ type PersonLinkSourceSummary = {
   label: string;
   state: PersonLinkSourceState;
   url: string | null;
+  urls: string[];
   link: EntityLink | null;
 };
 
@@ -440,6 +435,18 @@ type PersonLinkCoverageCard = {
   personName: string;
   seasons: number[];
   sources: PersonLinkSourceSummary[];
+};
+
+type SeasonCoverageLinkPill = {
+  id: string;
+  url: string;
+  text: string;
+};
+
+type SeasonUrlCoverageRow = {
+  seasonNumber: number;
+  totalLinks: number;
+  links: SeasonCoverageLinkPill[];
 };
 
 type ShowGalleryVisibleBySection = Partial<Record<AssetSectionKey, number>>;
@@ -621,7 +628,8 @@ const PERSON_LINK_SOURCE_DEFINITIONS: Array<{ key: PersonLinkSourceKey; label: s
   { key: "bravo", label: "Bravo" },
   { key: "imdb", label: "IMDb" },
   { key: "tmdb", label: "TMDb" },
-  { key: "knowledge", label: "Knowledge Graph" },
+  { key: "wikipedia", label: "Wikipedia" },
+  { key: "wikidata", label: "Wikidata" },
   { key: "fandom", label: "Fandom/Wikia" },
 ];
 
@@ -704,7 +712,8 @@ const EMPTY_NEWS_FACETS: UnifiedNewsFacets = {
   topics: [],
   seasons: [],
 };
-const SHOW_CORE_LOAD_TIMEOUT_MS = 15_000;
+// Dev cold starts can spend tens of seconds compiling API routes before the first response.
+const SHOW_CORE_LOAD_TIMEOUT_MS = process.env.NODE_ENV === "development" ? 60_000 : 15_000;
 const SHOW_CAST_LOAD_TIMEOUT_MS = 90_000;
 const SHOW_CAST_LOAD_MAX_ATTEMPTS = 2;
 const SHOW_CAST_LOAD_RETRY_BACKOFF_MS = 250;
@@ -714,6 +723,8 @@ const CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS = 125_000;
 const SEASON_EPISODE_SUMMARY_TIMEOUT_MS = 12_000;
 const SEASON_EPISODE_SUMMARY_CONCURRENCY = 4;
 const SETTINGS_MUTATION_TIMEOUT_MS = 30_000;
+// Settings read path may be slow on cold starts / large environments in local dev.
+const SETTINGS_READ_TIMEOUT_MS = process.env.NODE_ENV === "development" ? 60_000 : 30_000;
 const CAST_MATRIX_SYNC_TIMEOUT_MS = 90_000;
 const COVERAGE_MUTATION_TIMEOUT_MS = 20_000;
 
@@ -792,7 +803,8 @@ const classifyPersonLinkSource = (linkKind: string): PersonLinkSourceKey | null 
   if (kind === "bravo_profile" || kind.includes("bravo")) return "bravo";
   if (kind.includes("imdb")) return "imdb";
   if (kind.includes("tmdb")) return "tmdb";
-  if (kind === "wikidata" || kind === "wikipedia" || kind.includes("knowledge")) return "knowledge";
+  if (kind === "wikipedia") return "wikipedia";
+  if (kind === "wikidata" || kind.includes("knowledge")) return "wikidata";
   if (kind === "fandom" || kind === "wikia") return "fandom";
   return null;
 };
@@ -827,10 +839,9 @@ const parsePersonNameFromLink = (link: EntityLink): string | null => {
 
 const getPersonSourceKindPriority = (sourceKey: PersonLinkSourceKey, linkKind: string): number => {
   const kind = linkKind.trim().toLowerCase();
-  if (sourceKey !== "knowledge") return 99;
-  if (kind === "wikidata") return 0;
-  if (kind === "wikipedia") return 1;
-  return 2;
+  if (sourceKey === "wikidata") return kind === "wikidata" ? 0 : 99;
+  if (sourceKey === "wikipedia") return kind === "wikipedia" ? 0 : 99;
+  return 99;
 };
 
 const pickPreferredPersonSourceLink = (
@@ -867,8 +878,11 @@ function PersonSourceLogo({ sourceKey }: { sourceKey: PersonLinkSourceKey }) {
   if (sourceKey === "bravo") {
     return <span className={`${baseClass} border-zinc-300 bg-zinc-900 text-white`}>Bravo</span>;
   }
-  if (sourceKey === "knowledge") {
-    return <span className={`${baseClass} border-zinc-300 bg-sky-600 text-white`}>KG</span>;
+  if (sourceKey === "wikipedia") {
+    return <span className={`${baseClass} border-zinc-300 bg-sky-600 text-white`}>Wiki</span>;
+  }
+  if (sourceKey === "wikidata") {
+    return <span className={`${baseClass} border-zinc-300 bg-cyan-700 text-white`}>WD</span>;
   }
   return <span className={`${baseClass} border-zinc-300 bg-[#f3f4f6] text-zinc-800`}>Fandom</span>;
 }
@@ -1529,6 +1543,7 @@ export default function TrrShowDetailPage() {
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
   const [castRoleMembersWarning, setCastRoleMembersWarning] = useState<string | null>(null);
+  const [castRoleMembersLoadTimedOut, setCastRoleMembersLoadTimedOut] = useState(false);
   const [castMatrixSyncLoading, setCastMatrixSyncLoading] = useState(false);
   const [castMatrixSyncError, setCastMatrixSyncError] = useState<string | null>(null);
   const [castMatrixSyncResult, setCastMatrixSyncResult] = useState<CastMatrixSyncResult | null>(
@@ -1674,10 +1689,13 @@ export default function TrrShowDetailPage() {
 
   const [showLinks, setShowLinks] = useState<EntityLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
+  const [linksRefreshing, setLinksRefreshing] = useState(false);
+  const [linksRefreshProgress, setLinksRefreshProgress] = useState<string | null>(null);
   const [linksError, setLinksError] = useState<string | null>(null);
+  const [linksLoadTimedOut, setLinksLoadTimedOut] = useState(false);
   const [linksNotice, setLinksNotice] = useState<string | null>(null);
-  const [linkEditDraft, setLinkEditDraft] = useState<LinkEditDraft | null>(null);
-  const [linkEditSaving, setLinkEditSaving] = useState(false);
+  const [linkBulkInput, setLinkBulkInput] = useState("");
+  const [linkBulkSaving, setLinkBulkSaving] = useState(false);
   const [googleNewsLinkId, setGoogleNewsLinkId] = useState<string | null>(null);
   const [googleNewsUrl, setGoogleNewsUrl] = useState("");
   const [googleNewsSaving, setGoogleNewsSaving] = useState(false);
@@ -1692,6 +1710,7 @@ export default function TrrShowDetailPage() {
   const [showRolesLoadedOnce, setShowRolesLoadedOnce] = useState(false);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
+  const [rolesLoadTimedOut, setRolesLoadTimedOut] = useState(false);
   const [rolesWarning, setRolesWarning] = useState<string | null>(null);
   const [castRoleEditorDeepLinkWarning, setCastRoleEditorDeepLinkWarning] = useState<string | null>(
     null
@@ -3764,6 +3783,7 @@ export default function TrrShowDetailPage() {
     if (!showId) return;
     setLinksLoading(true);
     setLinksError(null);
+    setLinksLoadTimedOut(false);
     try {
       const headers = await getAuthHeaders();
       const response = await fetchWithTimeout(
@@ -3772,7 +3792,7 @@ export default function TrrShowDetailPage() {
           headers,
           cache: "no-store",
         },
-        SETTINGS_MUTATION_TIMEOUT_MS
+        SETTINGS_READ_TIMEOUT_MS
       );
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
@@ -3781,119 +3801,199 @@ export default function TrrShowDetailPage() {
         throw new Error(data.error || "Failed to load links");
       }
       setShowLinks(Array.isArray(data) ? (data as EntityLink[]) : []);
+      setLinksLoadTimedOut(false);
     } catch (err) {
-      setLinksError(err instanceof Error ? err.message : "Failed to load links");
+      const isTimeout = isAbortError(err) || (err instanceof Error && /timed out|aborted/i.test(err.message));
+      setLinksLoadTimedOut(isTimeout);
+      setLinksError(
+        isTimeout
+          ? `Timed out loading links after ${Math.round(SETTINGS_READ_TIMEOUT_MS / 1000)}s.`
+          : err instanceof Error
+            ? err.message
+            : "Failed to load links"
+      );
     } finally {
       setLinksLoading(false);
     }
   }, [getAuthHeaders, showId]);
 
-  const discoverShowLinks = useCallback(async () => {
+  const runShowLinkDiscovery = useCallback(
+    async () => {
+      if (!showId || linksRefreshing) return;
+      setLinksNotice(null);
+      setLinksError(null);
+      setLinksLoadTimedOut(false);
+      setLinksRefreshing(true);
+      setLinksRefreshProgress("Refreshing links: scanning show, season, and cast sources...");
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/links/discover`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ include_seasons: true, include_people: true }),
+          },
+          SETTINGS_MUTATION_TIMEOUT_MS
+        );
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          discovered?: number;
+          pending_person_source_links_promoted?: number;
+          invalid_people_links_deleted?: number;
+          invalid_people_links_validation_failures?: number;
+          counts_by_kind?: Record<string, number>;
+          counts_by_entity_type?: Record<string, number>;
+          fandom_domains_used?: string[];
+          fandom_links_by_entity?: Record<string, number>;
+          tmdb_season_links_discovered?: number;
+          stage_counts?: {
+            show_scanned?: number;
+            season_scanned?: number;
+            people_scanned?: number;
+            legacy_rows_normalized?: number;
+            links_validated?: number;
+            links_promoted?: number;
+          };
+        };
+        if (!response.ok) throw new Error(data.error || "Failed to discover links");
+
+        const discovered = typeof data.discovered === "number" ? data.discovered : 0;
+        const promoted =
+          typeof data.pending_person_source_links_promoted === "number"
+            ? data.pending_person_source_links_promoted
+            : 0;
+        const deleted =
+          typeof data.invalid_people_links_deleted === "number" ? data.invalid_people_links_deleted : 0;
+        const validationFailures =
+          typeof data.invalid_people_links_validation_failures === "number"
+            ? data.invalid_people_links_validation_failures
+            : 0;
+        const countsByKind = typeof data.counts_by_kind === "object" && data.counts_by_kind ? data.counts_by_kind : {};
+        const countsByEntity =
+          typeof data.counts_by_entity_type === "object" && data.counts_by_entity_type ? data.counts_by_entity_type : {};
+        const fandomByEntity =
+          typeof data.fandom_links_by_entity === "object" && data.fandom_links_by_entity
+            ? data.fandom_links_by_entity
+            : {};
+        const fandomDomains = Array.isArray(data.fandom_domains_used)
+          ? data.fandom_domains_used.filter((value): value is string => typeof value === "string" && value.length > 0)
+          : [];
+        const tmdbSeasonLinks =
+          typeof data.tmdb_season_links_discovered === "number" ? data.tmdb_season_links_discovered : 0;
+        const stageCounts = typeof data.stage_counts === "object" && data.stage_counts ? data.stage_counts : {};
+        const showScanned = Number(stageCounts.show_scanned ?? 0);
+        const seasonScanned = Number(stageCounts.season_scanned ?? 0);
+        const peopleScanned = Number(stageCounts.people_scanned ?? 0);
+        const legacyRowsNormalized = Number(stageCounts.legacy_rows_normalized ?? 0);
+        const linksValidated = Number(stageCounts.links_validated ?? 0);
+        const linksPromoted = Number(stageCounts.links_promoted ?? 0);
+        const seasonLinks = Number(countsByEntity.season ?? 0);
+        const personLinks = Number(countsByEntity.person ?? 0);
+        const showLinksDiscovered = Number(countsByEntity.show ?? 0);
+        const fandomSeasonLinks = Number(fandomByEntity.season ?? 0);
+        const fandomPersonLinks = Number(fandomByEntity.person ?? 0);
+
+        const actionLabel = "Refreshed";
+        const messageParts = [
+          `${actionLabel} ${discovered} link${discovered === 1 ? "" : "s"}.`,
+          `Scanned show ${showScanned}, seasons ${seasonScanned}, cast ${peopleScanned}.`,
+          `Show ${showLinksDiscovered}, seasons ${seasonLinks}, cast ${personLinks}.`,
+          `Season TMDb links ${tmdbSeasonLinks}; Fandom season links ${fandomSeasonLinks}; Fandom cast links ${fandomPersonLinks}.`,
+          fandomDomains.length > 0 ? `Fandom domains used: ${fandomDomains.join(", ")}.` : "No valid Fandom domains were used.",
+          `Cast-member source validation: promoted ${promoted}, removed ${deleted}, fetch failures ${validationFailures}.`,
+          `Legacy kinds normalized ${legacyRowsNormalized}; validated ${linksValidated}; promoted ${linksPromoted}.`,
+        ];
+        const kindParts = Object.entries(countsByKind)
+          .filter((entry) => Number(entry[1]) > 0)
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+          .map(([kind, count]) => `${kind} ${count}`);
+        if (kindParts.length > 0) {
+          messageParts.push(`Kinds: ${kindParts.join(", ")}.`);
+        }
+        setLinksNotice(messageParts.join(" "));
+        await fetchShowLinks();
+    } catch (err) {
+      setLinksLoadTimedOut(false);
+      setLinksError(err instanceof Error ? err.message : "Failed to discover links");
+    } finally {
+        setLinksRefreshProgress(null);
+        setLinksRefreshing(false);
+      }
+    },
+    [fetchShowLinks, getAuthHeaders, linksRefreshing, showId]
+  );
+
+  const addShowLinks = useCallback(async () => {
     if (!showId) return;
-    setLinksNotice(null);
+    const inputs = Array.from(
+      new Set(
+        linkBulkInput
+          .split(/[\n,;]+/)
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0)
+      )
+    );
+    if (inputs.length === 0) {
+      setLinksLoadTimedOut(false);
+      setLinksError("Enter at least one URL or social handle.");
+      return;
+    }
+
     setLinksError(null);
+    setLinksLoadTimedOut(false);
+    setLinksNotice(null);
+    setLinkBulkSaving(true);
     try {
       const headers = await getAuthHeaders();
       const response = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${showId}/links/discover`,
+        `/api/admin/trr-api/shows/${showId}/links/add`,
         {
           method: "POST",
           headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ include_seasons: true, include_people: true }),
+          body: JSON.stringify({ inputs }),
         },
         SETTINGS_MUTATION_TIMEOUT_MS
       );
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
-        discovered?: number;
+        added?: number;
+        connected_links_added?: number;
+        errors?: Array<{ input?: string; error?: string }>;
       };
-      if (!response.ok) throw new Error(data.error || "Failed to discover links");
+      if (!response.ok) throw new Error(data.error || "Failed to add links");
+      const added = typeof data.added === "number" ? data.added : 0;
+      const connected = typeof data.connected_links_added === "number" ? data.connected_links_added : 0;
+      const errorRows = Array.isArray(data.errors) ? data.errors : [];
       setLinksNotice(
-        `Discovered ${typeof data.discovered === "number" ? data.discovered : 0} links. Validated person sources were auto-approved; review any remaining pending items before publish.`
+        `Added ${added} link${added === 1 ? "" : "s"}${
+          connected > 0 ? ` (${connected} connected Wikipedia/Wikidata companion link${connected === 1 ? "" : "s"})` : ""
+        }.`
       );
-      await fetchShowLinks();
-    } catch (err) {
-      setLinksError(err instanceof Error ? err.message : "Failed to discover links");
-    }
-  }, [fetchShowLinks, getAuthHeaders, showId]);
-
-  const patchShowLink = useCallback(
-    async (linkId: string, payload: Record<string, unknown>) => {
-      if (!showId) return false;
-      const headers = await getAuthHeaders();
-      const response = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${showId}/links/${linkId}`,
-        {
-          method: "PATCH",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-        SETTINGS_MUTATION_TIMEOUT_MS
-      );
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error || "Failed to update link");
-      return true;
-    },
-    [getAuthHeaders, showId]
-  );
-
-  const setShowLinkStatus = useCallback(
-    async (linkId: string, status: EntityLinkStatus) => {
-      setLinksError(null);
-      try {
-        await patchShowLink(linkId, { status });
-        await fetchShowLinks();
-      } catch (err) {
-        setLinksError(err instanceof Error ? err.message : "Failed to update link");
+      if (errorRows.length > 0) {
+        const preview = errorRows
+          .slice(0, 2)
+          .map((item) => item.error || "Unknown classification error")
+          .join(" | ");
+        setLinksError(
+          `${errorRows.length} input${errorRows.length === 1 ? "" : "s"} failed classification. ${preview}`
+        );
       }
-    },
-    [fetchShowLinks, patchShowLink]
-  );
-
-  const editShowLink = useCallback(
-    (link: EntityLink) => {
-      setLinksError(null);
-      setLinkEditDraft({
-        linkId: link.id,
-        label: link.label ?? "",
-        url: link.url,
-      });
-    },
-    []
-  );
-
-  const saveEditedShowLink = useCallback(async () => {
-    if (!linkEditDraft) return;
-    const nextUrl = linkEditDraft.url.trim();
-    if (!nextUrl) {
-      setLinksError("Link URL is required.");
-      return;
-    }
-    setLinksError(null);
-    setLinkEditSaving(true);
-    try {
-      await patchShowLink(linkEditDraft.linkId, {
-        label: linkEditDraft.label.trim() || null,
-        url: nextUrl,
-      });
+      setLinkBulkInput("");
       await fetchShowLinks();
-      setLinkEditDraft(null);
     } catch (err) {
-      setLinksError(err instanceof Error ? err.message : "Failed to edit link");
+      setLinksLoadTimedOut(false);
+      setLinksError(err instanceof Error ? err.message : "Failed to add links");
     } finally {
-      setLinkEditSaving(false);
+      setLinkBulkSaving(false);
     }
-  }, [fetchShowLinks, linkEditDraft, patchShowLink]);
-
-  const cancelShowLinkEdit = useCallback(() => {
-    if (linkEditSaving) return;
-    setLinkEditDraft(null);
-  }, [linkEditSaving]);
+  }, [fetchShowLinks, getAuthHeaders, linkBulkInput, showId]);
 
   const deleteShowLink = useCallback(
     async (linkId: string) => {
       if (!showId) return;
       setLinksError(null);
+      setLinksLoadTimedOut(false);
       try {
         const headers = await getAuthHeaders();
         const response = await fetchWithTimeout(
@@ -3908,6 +4008,7 @@ export default function TrrShowDetailPage() {
         if (!response.ok) throw new Error(data.error || "Failed to delete link");
         await fetchShowLinks();
       } catch (err) {
+        setLinksLoadTimedOut(false);
         setLinksError(err instanceof Error ? err.message : "Failed to delete link");
       }
     },
@@ -4007,6 +4108,7 @@ export default function TrrShowDetailPage() {
         setRolesLoading(true);
         setRolesError(null);
         setRolesWarning(null);
+        setRolesLoadTimedOut(false);
         const headers = await getAuthHeaders();
         let lastError: unknown = null;
         try {
@@ -4024,6 +4126,7 @@ export default function TrrShowDetailPage() {
               showRolesLoadedOnceRef.current = true;
               showRolesSnapshotRef.current = Array.isArray(data) ? (data as ShowRole[]) : [];
               setLastSuccessfulRolesAt(Date.now());
+              setRolesLoadTimedOut(false);
               setRolesWarning(null);
               return;
             } catch (error) {
@@ -4035,11 +4138,13 @@ export default function TrrShowDetailPage() {
             }
           }
 
-          const message = isAbortError(lastError)
+          const isTimeout = isAbortError(lastError) || (lastError instanceof Error && /timed out|aborted/i.test(lastError.message));
+          const message = isTimeout
             ? `Timed out loading roles after ${Math.round(ROLE_LOAD_TIMEOUT_MS / 1000)}s`
             : lastError instanceof Error
               ? lastError.message
               : "Failed to load roles";
+          setRolesLoadTimedOut(isTimeout);
           const hasPriorData =
             showRolesLoadedOnceRef.current || showRolesSnapshotRef.current.length > 0;
           if (hasPriorData) {
@@ -4074,6 +4179,7 @@ export default function TrrShowDetailPage() {
     if (!roleName || !showId) return;
     setRolesError(null);
     setRolesWarning(null);
+    setRolesLoadTimedOut(false);
     try {
       const headers = await getAuthHeaders();
       const response = await fetchWithTimeout(
@@ -4136,6 +4242,7 @@ export default function TrrShowDetailPage() {
         setCastRoleMembersLoading(true);
         setCastRoleMembersError(null);
         setCastRoleMembersWarning(null);
+        setCastRoleMembersLoadTimedOut(false);
         try {
           const headers = await getAuthHeaders();
           const params = new URLSearchParams();
@@ -4188,13 +4295,16 @@ export default function TrrShowDetailPage() {
           setCastRoleMembersLoadedOnce(true);
           castRoleMembersLoadedOnceRef.current = true;
           setLastSuccessfulCastRoleMembersAt(Date.now());
+          setCastRoleMembersLoadTimedOut(false);
           setCastRoleMembersWarning(null);
         } catch (err) {
-          const message = isAbortError(err)
+          const isTimeout = isAbortError(err) || (err instanceof Error && /timed out|aborted/i.test(err.message));
+          const message = isTimeout
             ? `Timed out loading cast role members after ${Math.round(CAST_ROLE_MEMBERS_LOAD_TIMEOUT_MS / 1000)}s`
             : err instanceof Error
               ? err.message
               : "Failed to load cast role members";
+          setCastRoleMembersLoadTimedOut(isTimeout);
           const hasPriorData =
             castRoleMembersLoadedOnceRef.current || castRoleMembersSnapshotRef.current.length > 0;
           if (hasPriorData) {
@@ -4335,6 +4445,7 @@ export default function TrrShowDetailPage() {
     try {
       setRolesError(null);
       setRolesWarning(null);
+      setRolesLoadTimedOut(false);
       await patchShowRole(roleRenameDraft.roleId, { name: nextName });
       await fetchShowRoles({ force: true });
       await fetchCastRoleMembers({ force: true });
@@ -4358,6 +4469,7 @@ export default function TrrShowDetailPage() {
       setRolesError(null);
       setRolesWarning(null);
       setCastRoleMembersError(null);
+      setCastRoleMembersLoadTimedOut(false);
       setCastRoleEditDraft({
         personId,
         personName,
@@ -4429,6 +4541,7 @@ export default function TrrShowDetailPage() {
       try {
         setRolesError(null);
         setRolesWarning(null);
+        setRolesLoadTimedOut(false);
         await patchShowRole(role.id, { is_active: !role.is_active });
         await fetchShowRoles({ force: true });
         await fetchCastRoleMembers({ force: true });
@@ -4453,7 +4566,9 @@ export default function TrrShowDetailPage() {
       try {
         setRolesError(null);
         setRolesWarning(null);
+        setRolesLoadTimedOut(false);
         setCastRoleMembersError(null);
+        setCastRoleMembersLoadTimedOut(false);
         const headers = await getAuthHeaders();
         let nextRoles = [...showRoles];
         const existingRoleNames = new Set(nextRoles.map((role) => role.name.trim().toLowerCase()));
@@ -6348,6 +6463,7 @@ export default function TrrShowDetailPage() {
     castRoleMembersLoadKeyRef.current = null;
     setCastRoleMembersError(null);
     setCastRoleMembersWarning(null);
+    setCastRoleMembersLoadTimedOut(false);
     setLastSuccessfulCastRoleMembersAt(null);
     setCastRoleEditorDeepLinkWarning(null);
     setCastMatrixSyncError(null);
@@ -6366,7 +6482,11 @@ export default function TrrShowDetailPage() {
     setCastRunFailedMembers([]);
     setCastFailedMembersOpen(false);
     setLinksError(null);
+    setLinksLoadTimedOut(false);
     setLinksNotice(null);
+    setRolesLoadTimedOut(false);
+    setLinkBulkInput("");
+    setLinkBulkSaving(false);
     setGoogleNewsLinkId(null);
     setGoogleNewsUrl("");
     setGoogleNewsNotice(null);
@@ -6753,10 +6873,7 @@ export default function TrrShowDetailPage() {
     crewRenderLimit,
   ]);
 
-  const pendingLinkCount = useMemo(
-    () => showLinks.filter((link) => link.status === "pending").length,
-    [showLinks]
-  );
+  const showIsBravo = (show?.networks ?? []).some((network) => isBravoNetworkName(network));
 
   const newsSourceOptions = useMemo(() => newsFacets.sources, [newsFacets.sources]);
 
@@ -6819,11 +6936,13 @@ export default function TrrShowDetailPage() {
       {
         key: "cast-member-pages",
         title: "Cast Member Pages",
-        description: "Cast-member profile links (BravoTV, Fandom, Wikipedia, IMDb, TMDb, and related pages).",
+        description: showIsBravo
+          ? "Cast-member profile links (BravoTV, Fandom, Wikipedia, IMDb, TMDb, and related pages)."
+          : "Cast-member profile links (Fandom, Wikipedia, IMDb, TMDb, and related pages). Bravo appears only when a Bravo profile link exists.",
         links: sortLinks(castMemberLinks),
       },
     ] as const;
-  }, [showLinks]);
+  }, [showIsBravo, showLinks]);
 
   const overviewExternalIdLinks = useMemo(() => {
     return showLinks
@@ -6848,29 +6967,62 @@ export default function TrrShowDetailPage() {
       .sort((a, b) => (a.label || a.url).localeCompare(b.label || b.url));
   }, [showLinks]);
 
-  const seasonUrlCoverageRows = useMemo(() => {
-    return [...seasons]
-      .sort((a, b) => b.season_number - a.season_number)
-      .map((season) => {
-        const seasonLinks = showLinks.filter(
-          (link) =>
-            Number(link.season_number || 0) === season.season_number ||
-            (link.entity_type === "season" && String(link.entity_id || "") === season.id)
-        );
-        const pills = Array.from(
-          new Set(
-            seasonLinks.map((link) => {
-              const host = getHostnameFromUrl(link.url);
-              return host ? `${link.link_kind} · ${host}` : link.link_kind;
-            })
-          )
-        ).sort((a, b) => a.localeCompare(b));
-        return {
-          seasonNumber: season.season_number,
-          totalLinks: seasonLinks.length,
-          pills,
-        };
+  const seasonUrlCoverageRows = useMemo<SeasonUrlCoverageRow[]>(() => {
+    const seasonNumberById = new Map<string, number>();
+    const seasonNumbers = new Set<number>();
+    for (const season of seasons) {
+      if (season.season_number > 0) {
+        seasonNumberById.set(season.id, season.season_number);
+        seasonNumbers.add(season.season_number);
+      }
+    }
+
+    const linksBySeasonNumber = new Map<number, EntityLink[]>();
+    for (const link of showLinks) {
+      if (normalizeEntityLinkStatus(link.status) !== "approved") continue;
+      let seasonNumber = Number(link.season_number || 0);
+      if (seasonNumber <= 0 && link.entity_type === "season") {
+        seasonNumber = seasonNumberById.get(String(link.entity_id || "")) ?? 0;
+      }
+      if (seasonNumber <= 0) continue;
+      seasonNumbers.add(seasonNumber);
+      const existing = linksBySeasonNumber.get(seasonNumber);
+      if (existing) {
+        existing.push(link);
+      } else {
+        linksBySeasonNumber.set(seasonNumber, [link]);
+      }
+    }
+
+    const sortedSeasonNumbers = [...seasonNumbers].sort((a, b) => b - a);
+    return sortedSeasonNumbers.map((seasonNumber) => {
+      const seasonLinks = linksBySeasonNumber.get(seasonNumber) ?? [];
+      const sortedLinks = [...seasonLinks].sort((a, b) => {
+        const aLabel = String(a.label || a.link_kind || "").trim().toLowerCase();
+        const bLabel = String(b.label || b.link_kind || "").trim().toLowerCase();
+        if (aLabel !== bLabel) return aLabel.localeCompare(bLabel);
+        return a.url.localeCompare(b.url);
       });
+      const seen = new Set<string>();
+      const links: SeasonCoverageLinkPill[] = [];
+      for (const link of sortedLinks) {
+        const dedupeKey = `${link.link_kind.toLowerCase()}::${link.url.trim().toLowerCase()}`;
+        if (!link.url || seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        const label = String(link.label || link.link_kind || "Link").trim();
+        const host = getHostnameFromUrl(link.url);
+        links.push({
+          id: link.id,
+          url: link.url,
+          text: host ? `${label} · ${host}` : label,
+        });
+      }
+      return {
+        seasonNumber,
+        totalLinks: links.length,
+        links,
+      };
+    });
   }, [seasons, showLinks]);
 
   const castMemberLinkCoverageCards = useMemo<PersonLinkCoverageCard[]>(() => {
@@ -6923,23 +7075,33 @@ export default function TrrShowDetailPage() {
       const sources = PERSON_LINK_SOURCE_DEFINITIONS.map<PersonLinkSourceSummary>((definition) => {
         const sourceLinks = linksBySource.get(definition.key) ?? [];
         const selected = pickPreferredPersonSourceLink(definition.key, sourceLinks);
+        const approvedUrls = Array.from(
+          new Set(
+            sourceLinks
+              .filter((link) => normalizeEntityLinkStatus(link.status) === "approved")
+              .map((link) => String(link.url || "").trim())
+              .filter((value) => value.length > 0)
+          )
+        );
         if (!selected) {
           return {
             key: definition.key,
             label: definition.label,
             state: "missing",
             url: null,
+            urls: [],
             link: null,
           };
         }
 
         const normalizedStatus = normalizeEntityLinkStatus(selected.status);
-        if (normalizedStatus === "approved" && selected.url) {
+        if (normalizedStatus === "approved" && approvedUrls.length > 0) {
           return {
             key: definition.key,
             label: definition.label,
             state: "found",
-            url: selected.url,
+            url: approvedUrls[0] ?? null,
+            urls: approvedUrls,
             link: selected,
           };
         }
@@ -6954,6 +7116,7 @@ export default function TrrShowDetailPage() {
           label: definition.label,
           state: fallbackState,
           url: null,
+          urls: [],
           link: selected,
         };
       });
@@ -6963,17 +7126,21 @@ export default function TrrShowDetailPage() {
         parsePersonNameFromLink(links[0]) ||
         "Unknown Person";
 
+      const visibleSources = showIsBravo
+        ? sources
+        : sources.filter((source) => source.key !== "bravo" || source.state !== "missing");
+
       cards.push({
         personId,
         personName,
         seasons: [...seasonSet].sort((a, b) => a - b),
-        sources,
+        sources: visibleSources,
       });
     }
 
     cards.sort((a, b) => a.personName.localeCompare(b.personName));
     return cards;
-  }, [cast, showLinks]);
+  }, [cast, showIsBravo, showLinks]);
 
   const showGalleryAllowedSectionSet = useMemo(
     () => new Set<AssetSectionKey>(SHOW_GALLERY_ALLOWED_SECTIONS),
@@ -11745,18 +11912,42 @@ export default function TrrShowDetailPage() {
               </div>
 
               {(linksError || linksNotice || rolesError || rolesWarning || googleNewsError || googleNewsNotice) && (
-                <p
-                  className={`mb-4 text-sm ${
-                    linksError || rolesError || googleNewsError ? "text-red-600" : "text-zinc-500"
-                  }`}
-                >
-                  {linksError ||
-                    rolesError ||
-                    googleNewsError ||
-                    rolesWarning ||
-                    linksNotice ||
-                    googleNewsNotice}
-                </p>
+                <div className="mb-4 text-sm space-y-2">
+                  <p
+                    className={`${
+                      linksError || rolesError || googleNewsError
+                        ? linksLoadTimedOut || rolesLoadTimedOut
+                          ? "text-amber-700"
+                          : "text-red-600"
+                        : "text-zinc-500"
+                    }`}
+                  >
+                    {linksError ||
+                      rolesError ||
+                      googleNewsError ||
+                      rolesWarning ||
+                      linksNotice ||
+                      googleNewsNotice}
+                  </p>
+                  {linksError && linksLoadTimedOut && (
+                    <button
+                      type="button"
+                      onClick={() => void fetchShowLinks()}
+                      className="inline-flex items-center rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
+                    >
+                      Retry links
+                    </button>
+                  )}
+                  {rolesError && rolesLoadTimedOut && (
+                    <button
+                      type="button"
+                      onClick={() => void fetchShowRoles({ force: true })}
+                      className="inline-flex items-center rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
+                    >
+                      Retry roles
+                    </button>
+                  )}
+                </div>
               )}
 
               <div className="space-y-6">
@@ -11857,26 +12048,49 @@ export default function TrrShowDetailPage() {
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <h4 className="text-sm font-semibold text-zinc-700">Links</h4>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">
-                        Pending {pendingLinkCount}
-                      </span>
                       <button
                         type="button"
-                        onClick={discoverShowLinks}
+                        onClick={() => void runShowLinkDiscovery()}
+                        disabled={linksRefreshing}
                         className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
                       >
-                        Discover
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void fetchShowLinks()}
-                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                      >
-                        Refresh
+                        {linksRefreshing ? "Refreshing Links..." : "Refresh Links"}
                       </button>
                     </div>
                   </div>
+                  {linksRefreshing && linksRefreshProgress && (
+                    <p className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">
+                      {"Refresh in progress: "}
+                      {linksRefreshProgress}
+                    </p>
+                  )}
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    <div className="mb-4 rounded-lg border border-zinc-200 bg-white p-3">
+                      <p className="text-xs text-zinc-500">
+                        Paste one or more URLs or handles. The classifier auto-assigns show vs season vs cast-member
+                        links and routes social handles (Instagram/TikTok/X/YouTube/Threads/Facebook/Reddit) into
+                        social links.
+                      </p>
+                      <textarea
+                        value={linkBulkInput}
+                        onChange={(event) => setLinkBulkInput(event.target.value)}
+                        rows={4}
+                        placeholder={
+                          "https://thetraitors.fandom.com/wiki/The_Traitors_(US)\nhttps://www.themoviedb.org/tv/204761/season/2\ninstagram:@thetraitorsus"
+                        }
+                        className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
+                      />
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => void addShowLinks()}
+                          disabled={linkBulkSaving}
+                          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                        >
+                          {linkBulkSaving ? "Adding..." : "Add Link(s)"}
+                        </button>
+                      </div>
+                    </div>
                     {linksLoading ? (
                       <p className="text-sm text-zinc-500">Loading links...</p>
                     ) : showLinks.length === 0 ? (
@@ -11895,7 +12109,7 @@ export default function TrrShowDetailPage() {
                               castMemberLinkCoverageCards.length === 0 ? (
                                 <p className="text-sm text-zinc-500">No cast-member links in this category yet.</p>
                               ) : (
-                                <div className="grid gap-3 lg:grid-cols-2">
+                                <div className="space-y-3">
                                   {castMemberLinkCoverageCards.map((card) => (
                                     <div
                                       key={`person-link-coverage-${card.personId}`}
@@ -11916,7 +12130,7 @@ export default function TrrShowDetailPage() {
                                             source.state === "found"
                                               ? "Found"
                                               : source.state === "pending"
-                                                ? "Pending"
+                                                ? "Missing"
                                                 : source.state === "rejected"
                                                   ? "Rejected"
                                                   : "Missing";
@@ -11947,48 +12161,31 @@ export default function TrrShowDetailPage() {
                                                 </span>
                                               </div>
 
-                                              {isFound && source.url ? (
-                                                <a
-                                                  href={source.url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="block truncate text-xs font-medium text-emerald-700 hover:underline"
-                                                >
-                                                  {source.url}
-                                                </a>
+                                              {isFound && source.urls.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1">
+                                                  {source.urls.map((approvedUrl) => (
+                                                    <a
+                                                      key={`person-link-source-url-${card.personId}-${source.key}-${approvedUrl}`}
+                                                      href={approvedUrl}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="max-w-full truncate rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100"
+                                                      title={approvedUrl}
+                                                    >
+                                                      {approvedUrl}
+                                                    </a>
+                                                  ))}
+                                                </div>
                                               ) : (
                                                 <p className="truncate text-xs text-red-700">
-                                                  {source.state === "pending"
-                                                    ? "Pending review or validation"
-                                                    : source.state === "rejected"
-                                                      ? "Rejected source URL"
-                                                      : "No source URL found"}
+                                                  {source.state === "rejected"
+                                                    ? "Rejected source URL"
+                                                    : "No validated source URL found"}
                                                 </p>
                                               )}
 
                                               {source.link && (
                                                 <div className="mt-2 flex flex-wrap gap-1">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => void setShowLinkStatus(source.link!.id, "approved")}
-                                                    className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"
-                                                  >
-                                                    Approve
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => void setShowLinkStatus(source.link!.id, "rejected")}
-                                                    className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
-                                                  >
-                                                    Reject
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => void editShowLink(source.link!)}
-                                                    className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-700"
-                                                  >
-                                                    Edit
-                                                  </button>
                                                   <button
                                                     type="button"
                                                     onClick={() => void deleteShowLink(source.link!.id)}
@@ -12002,6 +12199,41 @@ export default function TrrShowDetailPage() {
                                           );
                                         })}
                                       </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )
+                            ) : section.key === "season-pages" ? (
+                              seasonUrlCoverageRows.length === 0 ? (
+                                <p className="text-sm text-zinc-500">No season-scoped validated links yet.</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {seasonUrlCoverageRows.map((row) => (
+                                    <div
+                                      key={`settings-season-pages-${row.seasonNumber}`}
+                                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2"
+                                    >
+                                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                                        Season {row.seasonNumber}
+                                      </p>
+                                      {row.links.length === 0 ? (
+                                        <p className="mt-1 text-sm text-zinc-500">No validated season links yet.</p>
+                                      ) : (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                          {row.links.map((link) => (
+                                            <a
+                                              key={`settings-season-link-pill-${row.seasonNumber}-${link.id}`}
+                                              href={link.url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                              title={link.url}
+                                            >
+                                              {link.text}
+                                            </a>
+                                          ))}
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -12058,30 +12290,6 @@ export default function TrrShowDetailPage() {
                                         </div>
                                       </div>
                                       <div className="flex flex-wrap items-center gap-1">
-                                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                          {link.status}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => void setShowLinkStatus(link.id, "approved")}
-                                          className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                                        >
-                                          Approve
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => void setShowLinkStatus(link.id, "rejected")}
-                                          className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
-                                        >
-                                          Reject
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => void editShowLink(link)}
-                                          className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                        >
-                                          Edit
-                                        </button>
                                         <button
                                           type="button"
                                           onClick={() => void deleteShowLink(link.id)}
@@ -12337,17 +12545,21 @@ export default function TrrShowDetailPage() {
                           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                             Season {row.seasonNumber}
                           </p>
-                          {row.pills.length === 0 ? (
-                            <p className="mt-1 text-sm text-zinc-500">No season-scoped URLs discovered.</p>
+                          {row.links.length === 0 ? (
+                            <p className="mt-1 text-sm text-zinc-500">No validated season-scoped URLs discovered.</p>
                           ) : (
                             <div className="mt-2 flex flex-wrap gap-2">
-                              {row.pills.map((pill) => (
-                                <span
-                                  key={`overview-season-url-pill-${row.seasonNumber}-${pill}`}
-                                  className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700"
+                              {row.links.map((link) => (
+                                <a
+                                  key={`overview-season-url-pill-${row.seasonNumber}-${link.id}`}
+                                  href={link.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                  title={link.url}
                                 >
-                                  {pill}
-                                </span>
+                                  {link.text}
+                                </a>
                               ))}
                             </div>
                           )}
@@ -14017,68 +14229,6 @@ export default function TrrShowDetailPage() {
               {batchJobsRunning ? "Running..." : "Run Batch Jobs"}
             </button>
           </div>
-        </AdminModal>
-
-        <AdminModal
-          isOpen={Boolean(linkEditDraft)}
-          onClose={cancelShowLinkEdit}
-          disableClose={linkEditSaving}
-          closeLabel="Close link editor"
-          ariaLabel="Edit link"
-          panelClassName="max-w-lg"
-        >
-          {linkEditDraft && (
-            <>
-              <h4 className="text-lg font-semibold text-zinc-900">Edit Link</h4>
-              <div className="mt-4 space-y-3">
-                <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                  Label
-                  <input
-                    value={linkEditDraft.label}
-                    onChange={(event) =>
-                      setLinkEditDraft((prev) =>
-                        prev ? { ...prev, label: event.target.value } : prev,
-                      )
-                    }
-                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
-                    placeholder="Link label"
-                  />
-                </label>
-                <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                  URL
-                  <input
-                    value={linkEditDraft.url}
-                    onChange={(event) =>
-                      setLinkEditDraft((prev) =>
-                        prev ? { ...prev, url: event.target.value } : prev,
-                      )
-                    }
-                    className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
-                    placeholder="https://..."
-                    required
-                  />
-                </label>
-              </div>
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={cancelShowLinkEdit}
-                  disabled={linkEditSaving}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void saveEditedShowLink()}
-                  disabled={linkEditSaving}
-                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                >
-                  {linkEditSaving ? "Saving..." : "Save Link"}
-                </button>
-              </div>
-            </>
-          )}
         </AdminModal>
 
         <AdminModal

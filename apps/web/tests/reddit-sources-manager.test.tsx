@@ -796,9 +796,15 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
 
     await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).includes("/flares/refresh")),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
       expect(screen.getAllByText("Episode Thread").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Live Discussion").length).toBeGreaterThan(0);
-    });
+    }, { timeout: 5000 });
   });
 
   it("keeps community when flair refresh returns empty and shows helper text", async () => {
@@ -1024,6 +1030,64 @@ describe("RedditSourcesManager", () => {
     });
   });
 
+  it("surfaces a warning when refresh discovery fails instead of silently swallowing errors", async () => {
+    const communityWithSaltLakeFlair = {
+      ...baseCommunity,
+      post_flares: ["Salt Lake City"],
+      analysis_flares: ["Salt Lake City"],
+      analysis_all_flares: ["Salt Lake City"],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse({
+          community: communityWithSaltLakeFlair,
+          candidates: [],
+          episode_matrix: [],
+          meta: {
+            fetched_at: "2026-02-24T12:00:00.000Z",
+            total_found: 0,
+            season_context: { season_id: "season-1", season_number: 6 },
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        return jsonResponse({ error: "Discovery endpoint unavailable" }, 500);
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithSaltLakeFlair, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    const refreshButton = await screen.findByRole("button", {
+      name: /Refresh (Episode )?Discussions/,
+    });
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => {
+      const discoverUrl = String(
+        fetchMock.mock.calls.find((call) => String(call[0]).includes("/discover"))?.[0] ?? "",
+      );
+      expect(discoverUrl).toContain("/discover");
+      expect(discoverUrl).toContain("search_backfill=true");
+      expect(discoverUrl).not.toContain("refresh=true");
+    });
+  });
+
   it("includes sync=true for inline community refresh and shows sync summary", async () => {
     const refreshPayload = {
       community: baseCommunity,
@@ -1161,8 +1225,8 @@ describe("RedditSourcesManager", () => {
   it("renders episode pills and opens modal with linked + unassigned posts on demand", async () => {
     const communityWithSaltLakeFlair = {
       ...baseCommunity,
-      post_flares: ["Salt Lake City"],
-      analysis_flares: ["Salt Lake City"],
+      post_flares: ["Salt Lake City", "Shitpost"],
+      analysis_flares: ["Shitpost"],
       analysis_all_flares: ["Salt Lake City"],
     };
     const refreshPayload = {
@@ -1317,14 +1381,15 @@ describe("RedditSourcesManager", () => {
                 author: "other-user",
                 score: 77,
                 num_comments: 22,
-                posted_at: "2025-09-16T20:00:00.000Z",
-                link_flair_text: "Salt Lake City ❄️",
+                posted_at: "2025-09-16T23:30:00.000Z",
+                link_flair_text: "Shitpost",
                 source_sorts: ["hot"],
                 matched_terms: ["rhoslc"],
                 matched_cast_terms: [],
                 cross_show_terms: [],
                 is_show_match: true,
                 passes_flair_filter: true,
+                flair_mode: "scan_term",
                 match_score: 1,
                 suggested_include_terms: [],
                 suggested_exclude_terms: [],
@@ -1359,7 +1424,7 @@ describe("RedditSourcesManager", () => {
     expect(screen.getByText("Live Discussion")).toBeInTheDocument();
     expect(screen.getByText("Post Episode Discussion")).toBeInTheDocument();
     expect(screen.queryByText("Weekly Discussion")).not.toBeInTheDocument();
-    expect(screen.getByText(/Air date/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Air date/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Pre-Season")).toBeInTheDocument();
     expect(screen.getByText("Post-Season")).toBeInTheDocument();
     expect(screen.getAllByText(/flair posts/i).length).toBeGreaterThan(0);
@@ -1372,8 +1437,14 @@ describe("RedditSourcesManager", () => {
     );
     expect(exhaustiveDiscoverUrl).toContain("exhaustive=true");
     expect(exhaustiveDiscoverUrl).toContain("max_pages=500");
-    expect(exhaustiveDiscoverUrl).toContain("force_flair=Salt+Lake+City");
-    const viewAllPostsButton = screen.getByRole("button", { name: "View All Posts (4)" });
+    expect(exhaustiveDiscoverUrl).not.toContain("force_flair=");
+    expect(exhaustiveDiscoverUrl).toContain("search_backfill=true");
+    expect(exhaustiveDiscoverUrl).not.toContain("refresh=true");
+    const episodeOneCard = screen.getByText("Episode 1").closest("article");
+    expect(episodeOneCard).not.toBeNull();
+    const viewAllPostsButton = within(episodeOneCard as HTMLElement).getByRole("button", {
+      name: /View All Posts/i,
+    });
     fireEvent.click(viewAllPostsButton);
     expect(await screen.findByRole("dialog", { name: "Episode 1 posts" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Episode Discussions" })).toBeInTheDocument();
@@ -1396,8 +1467,10 @@ describe("RedditSourcesManager", () => {
       .filter((url) => url.includes("/discover"));
     expect(discoverUrls.some((url) => url.includes("period_start="))).toBe(true);
     expect(discoverUrls.some((url) => url.includes("period_end="))).toBe(true);
-    expect(discoverUrls.some((url) => url.includes("force_flair=Salt+Lake+City"))).toBe(true);
+    expect(discoverUrls.some((url) => url.includes("force_flair="))).toBe(false);
     expect(discoverUrls.some((url) => url.includes("max_pages=500"))).toBe(true);
+    expect(discoverUrls.some((url) => url.includes("search_backfill=true"))).toBe(true);
+    expect(discoverUrls.some((url) => url.includes("refresh=true"))).toBe(false);
     expect(screen.queryByRole("columnheader", { name: "Live" })).not.toBeInTheDocument();
   });
 
@@ -1556,8 +1629,17 @@ describe("RedditSourcesManager", () => {
     expect(await screen.findByText("Episode 1")).toBeInTheDocument();
     expect(screen.getByText("Pre-Season")).toBeInTheDocument();
     expect(screen.getByText("Post-Season")).toBeInTheDocument();
+    const preSeasonHeading = screen.getByText("Pre-Season");
+    const episodeOneHeading = screen.getByText("Episode 1");
+    const postSeasonHeading = screen.getByText("Post-Season");
     expect(
-      screen.getByText("1 Salt Lake City flair posts in window · 1 unassigned"),
+      preSeasonHeading.compareDocumentPosition(episodeOneHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      preSeasonHeading.compareDocumentPosition(postSeasonHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByText("1 tracked flair posts in window · 1 unassigned tracked posts"),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Episode 1" }));
@@ -1567,6 +1649,16 @@ describe("RedditSourcesManager", () => {
 
     const preSeasonCard = screen.getByText("Pre-Season").closest("article");
     expect(preSeasonCard).not.toBeNull();
+    const seedInput = within(preSeasonCard as HTMLElement).getByPlaceholderText(
+      "Optional seed post URLs (comma or newline separated)",
+    );
+    fireEvent.change(seedInput, {
+      target: {
+        value:
+          "https://www.reddit.com/r/BravoRealHousewives/comments/1neufq0/example/,\nhttps://www.reddit.com/r/BravoRealHousewives/comments/1mr9pb8/example/",
+      },
+    });
+    fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
     fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: /View All Posts/i }));
 
     await waitFor(() => {
@@ -1575,12 +1667,12 @@ describe("RedditSourcesManager", () => {
         .filter((url) => url.includes("/discover"));
       expect(
         discoverUrls.some((url) =>
-          url.includes(`period_start=${encodeURIComponent("2025-09-16T18:30:00.000Z")}`),
+          url.includes(`period_start=${encodeURIComponent("2025-09-16T23:01:01.000Z")}`),
         ),
       ).toBe(true);
       expect(
         discoverUrls.some((url) =>
-          url.includes(`period_end=${encodeURIComponent("2025-09-23T18:15:00.000Z")}`),
+          url.includes(`period_end=${encodeURIComponent("2025-09-23T23:01:10.000Z")}`),
         ),
       ).toBe(true);
       expect(
@@ -1588,6 +1680,526 @@ describe("RedditSourcesManager", () => {
           url.includes(`period_start=${encodeURIComponent("2025-08-14T00:00:00.000Z")}`),
         ),
       ).toBe(true);
+      expect(
+        discoverUrls.some((url) =>
+          url.includes(`period_end=${encodeURIComponent("2025-09-16T23:00:00.000Z")}`),
+        ),
+      ).toBe(true);
+      expect(discoverUrls.some((url) => url.includes("search_backfill=true"))).toBe(true);
+      expect(discoverUrls.some((url) => url.includes("refresh=true"))).toBe(true);
+      expect(
+        discoverUrls.some((url) =>
+          url.includes(
+            `seed_post_url=${encodeURIComponent(
+              "https://www.reddit.com/r/BravoRealHousewives/comments/1neufq0/example/",
+            )}`,
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        discoverUrls.some((url) =>
+          url.includes(
+            `seed_post_url=${encodeURIComponent(
+              "https://www.reddit.com/r/BravoRealHousewives/comments/1mr9pb8/example/",
+            )}`,
+          ),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("falls back to cached window posts when per-container refresh times out", async () => {
+    const communityWithSaltLakeFlair = {
+      ...baseCommunity,
+      post_flares: ["Salt Lake City"],
+      analysis_flares: ["Salt Lake City"],
+      analysis_all_flares: ["Salt Lake City"],
+    };
+    const refreshPayload = {
+      community: communityWithSaltLakeFlair,
+      candidates: [
+        {
+          reddit_post_id: "episode-1-live",
+          title: "Episode 1 Live",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-1-live/test/",
+          permalink: "/r/BravoRealHousewives/comments/episode-1-live/test/",
+          author: "AutoModerator",
+          score: 168,
+          num_comments: 2700,
+          posted_at: "2025-09-16T19:01:01.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 1,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [
+        {
+          episode_number: 1,
+          live: {
+            post_count: 1,
+            total_comments: 2700,
+            total_upvotes: 168,
+            top_post_id: "episode-1-live",
+            top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-1-live/test/",
+          },
+          post: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          weekly: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          total_posts: 1,
+          total_comments: 2700,
+          total_upvotes: 168,
+        },
+      ],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 1,
+        season_context: { season_id: "season-1", season_number: 6 },
+      },
+    };
+    const customAnalyticsPayload = {
+      weekly: [
+        {
+          week_index: 1,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00.000Z",
+          end: "2025-09-16T18:59:59.000Z",
+        },
+        {
+          week_index: 2,
+          label: "Episode 1",
+          start: "2025-09-16T18:30:00.000Z",
+          end: "2025-09-23T18:15:00.000Z",
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics")) {
+        return jsonResponse(customAnalyticsPayload);
+      }
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        if (
+          url.includes(`period_start=${encodeURIComponent("2025-08-14T00:00:00.000Z")}`) &&
+          url.includes("refresh=true")
+        ) {
+          throw new Error("Request timed out. Please try again.");
+        }
+        return jsonResponse({
+          discovery: {
+            ...discoveryPayload.discovery,
+            totals: {
+              fetched_rows: 1,
+              matched_rows: 1,
+              tracked_flair_rows: 1,
+            },
+            threads: [
+              {
+                reddit_post_id: "cached-preseason-post",
+                title: "Cached preseason post",
+                text: "Loaded from cache after timeout.",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/cached-preseason-post/test/",
+                permalink: "/r/BravoRealHousewives/comments/cached-preseason-post/test/",
+                author: "cached-user",
+                score: 44,
+                num_comments: 12,
+                posted_at: "2025-09-01T00:00:00.000Z",
+                link_flair_text: "Salt Lake City",
+                source_sorts: ["hot"],
+                matched_terms: ["rhoslc"],
+                matched_cast_terms: [],
+                cross_show_terms: [],
+                is_show_match: true,
+                passes_flair_filter: true,
+                match_score: 1,
+                suggested_include_terms: [],
+                suggested_exclude_terms: [],
+              },
+            ],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithSaltLakeFlair, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
+
+    const preSeasonCard = screen.getByText("Pre-Season").closest("article");
+    expect(preSeasonCard).not.toBeNull();
+    fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
+
+    expect(
+      await screen.findByText("Live refresh timed out for Pre-Season; showing cached posts from Supabase."),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      const discoverUrls = fetchMock.mock.calls
+        .map((call) => String(call[0]))
+        .filter((url) => url.includes("/discover"));
+      const preSeasonUrls = discoverUrls.filter((url) =>
+        url.includes(`period_start=${encodeURIComponent("2025-08-14T00:00:00.000Z")}`),
+      );
+      expect(preSeasonUrls.some((url) => url.includes("refresh=true"))).toBe(true);
+      expect(
+        preSeasonUrls.some((url) => !url.includes("refresh=true")),
+      ).toBe(true);
+    });
+  });
+
+  it("shows queued spinner and queue depth while backend refresh is pending", async () => {
+    const communityWithSaltLakeFlair = {
+      ...baseCommunity,
+      post_flares: ["Salt Lake City"],
+      analysis_flares: ["Salt Lake City"],
+      analysis_all_flares: ["Salt Lake City"],
+    };
+    const refreshPayload = {
+      community: communityWithSaltLakeFlair,
+      candidates: [],
+      episode_matrix: [
+        {
+          episode_number: 1,
+          live: {
+            post_count: 1,
+            total_comments: 2700,
+            total_upvotes: 168,
+            top_post_id: "episode-1-live",
+            top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-1-live/test/",
+          },
+          post: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          weekly: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          total_posts: 1,
+          total_comments: 2700,
+          total_upvotes: 168,
+        },
+      ],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 1,
+        season_context: { season_id: "season-1", season_number: 6 },
+      },
+    };
+    const customAnalyticsPayload = {
+      weekly: [
+        {
+          week_index: 1,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00.000Z",
+          end: "2025-09-16T18:59:59.000Z",
+        },
+        {
+          week_index: 2,
+          label: "Episode 1",
+          start: "2025-09-16T18:30:00.000Z",
+          end: "2025-09-23T18:15:00.000Z",
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics")) {
+        return jsonResponse(customAnalyticsPayload);
+      }
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/runs/")) {
+        return new Promise<Response>(() => {});
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        if (url.includes("refresh=true")) {
+          return jsonResponse({
+            run: {
+              run_id: "63a7be5d-0000-4000-8000-000000000000",
+              status: "queued",
+              queue: {
+                running_total: 2,
+                queued_total: 5,
+                other_running: 2,
+                other_queued: 4,
+                queued_ahead: 3,
+              },
+            },
+          });
+        }
+        return jsonResponse({
+          discovery: {
+            ...discoveryPayload.discovery,
+            totals: {
+              fetched_rows: 0,
+              matched_rows: 0,
+              tracked_flair_rows: 0,
+            },
+            threads: [],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithSaltLakeFlair, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
+
+    const preSeasonCard = screen.getByText("Pre-Season").closest("article");
+    expect(preSeasonCard).not.toBeNull();
+    fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
+
+    expect(
+      await within(preSeasonCard as HTMLElement).findByText(
+        "Pre-Season: queued in backend (run 63a7be5d) · 2 other running · 3 ahead",
+      ),
+    ).toBeInTheDocument();
+    expect(within(preSeasonCard as HTMLElement).getByRole("status")).toHaveTextContent(
+      "Refresh queued in backend…",
+    );
+  });
+
+  it("continues polling run status when cached discovery is returned with an active run", async () => {
+    const communityWithSaltLakeFlair = {
+      ...baseCommunity,
+      post_flares: ["Salt Lake City"],
+      analysis_flares: ["Salt Lake City"],
+      analysis_all_flares: ["Salt Lake City"],
+    };
+    const refreshPayload = {
+      community: communityWithSaltLakeFlair,
+      candidates: [],
+      episode_matrix: [
+        {
+          episode_number: 1,
+          live: {
+            post_count: 1,
+            total_comments: 2700,
+            total_upvotes: 168,
+            top_post_id: "episode-1-live",
+            top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-1-live/test/",
+          },
+          post: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          weekly: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          total_posts: 1,
+          total_comments: 2700,
+          total_upvotes: 168,
+        },
+      ],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 1,
+        season_context: { season_id: "season-1", season_number: 6 },
+      },
+    };
+    const customAnalyticsPayload = {
+      weekly: [
+        {
+          week_index: 1,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00.000Z",
+          end: "2025-09-16T18:59:59.000Z",
+        },
+        {
+          week_index: 2,
+          label: "Episode 1",
+          start: "2025-09-16T18:30:00.000Z",
+          end: "2025-09-23T18:15:00.000Z",
+        },
+      ],
+    };
+    let refreshDiscoverCount = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics")) {
+        return jsonResponse(customAnalyticsPayload);
+      }
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/runs/")) {
+        return jsonResponse({
+          run_id: "11111111-2222-4333-8444-555555555555",
+          status: "completed",
+          totals: {
+            fetched_rows: 2,
+            matched_rows: 2,
+            tracked_flair_rows: 2,
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        const isRefreshCall = url.includes("refresh=true");
+        if (isRefreshCall) {
+          refreshDiscoverCount += 1;
+          return jsonResponse({
+            discovery: {
+              ...discoveryPayload.discovery,
+              totals: {
+                fetched_rows: 1,
+                matched_rows: 1,
+                tracked_flair_rows: 1,
+              },
+              threads: [
+                {
+                  ...discoveryPayload.discovery.threads[0],
+                  reddit_post_id: "cached-preseason-post",
+                  title: "Cached preseason post",
+                  posted_at: "2025-09-01T00:00:00.000Z",
+                  link_flair_text: "Salt Lake City",
+                },
+              ],
+            },
+            run: {
+              run_id: "11111111-2222-4333-8444-555555555555",
+              status: "queued",
+              queue: {
+                running_total: 1,
+                queued_total: 1,
+                other_running: 1,
+                other_queued: 0,
+                queued_ahead: 0,
+              },
+            },
+          });
+        }
+        return jsonResponse({
+          discovery: {
+            ...discoveryPayload.discovery,
+            totals: {
+              fetched_rows: 2,
+              matched_rows: 2,
+              tracked_flair_rows: 2,
+            },
+            threads: [
+              {
+                ...discoveryPayload.discovery.threads[0],
+                reddit_post_id: "cached-preseason-post",
+                title: "Cached preseason post",
+                posted_at: "2025-09-01T00:00:00.000Z",
+                link_flair_text: "Salt Lake City",
+              },
+              {
+                ...discoveryPayload.discovery.threads[0],
+                reddit_post_id: "new-preseason-post",
+                title: "New preseason post",
+                posted_at: "2025-09-10T00:00:00.000Z",
+                link_flair_text: "Salt Lake City",
+              },
+            ],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithSaltLakeFlair, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
+
+    const preSeasonCard = screen.getByText("Pre-Season").closest("article");
+    expect(preSeasonCard).not.toBeNull();
+    fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
+
+    await waitFor(() => {
+      expect(within(preSeasonCard as HTMLElement).getByText(/Pre-Season: refresh completed/)).toBeInTheDocument();
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/"))).toBe(true);
+      expect(refreshDiscoverCount).toBeGreaterThan(0);
     });
   });
 
