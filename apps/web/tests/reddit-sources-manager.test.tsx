@@ -310,7 +310,7 @@ describe("RedditSourcesManager", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
 
-    expect(screen.getByText("Community")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /reddit communities/i })).toBeInTheDocument();
     expect(screen.queryByText("Selected Community")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(

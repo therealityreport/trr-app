@@ -557,7 +557,7 @@ describe("WeekDetailPage thumbnails", () => {
   });
 
   it("does not overstate ALL comments coverage when one platform is under-saved", async () => {
-    mockSearch.value = "source_scope=bravo&social_platform=twitter";
+    mockSearch.value = "source_scope=bravo";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/social/analytics/week/1")) {
@@ -571,7 +571,7 @@ describe("WeekDetailPage thumbnails", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(<WeekDetailPage />);
+    const allRender = render(<WeekDetailPage />);
 
     await waitFor(() => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
@@ -579,6 +579,9 @@ describe("WeekDetailPage thumbnails", () => {
 
     expect(screen.getByText("38.1%")).toBeInTheDocument();
     expect(screen.getByText("542/1.4K* Comments (Saved/Actual)")).toBeInTheDocument();
+    allRender.unmount();
+    mockSearch.value = "source_scope=bravo&social_platform=twitter";
+    render(<WeekDetailPage />);
 
     await waitFor(() => {
       expect(screen.getByText("36.5%")).toBeInTheDocument();
