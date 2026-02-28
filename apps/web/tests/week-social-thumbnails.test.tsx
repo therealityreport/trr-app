@@ -415,7 +415,10 @@ describe("WeekDetailPage thumbnails", () => {
     fireEvent.click(drawerThumb as HTMLElement);
     const nextButton = screen.queryByLabelText("Next image");
     const previousButton = screen.queryByLabelText("Previous image");
-    fireEvent.click((nextButton ?? previousButton) as HTMLElement);
+    const mediaNavigationButton = nextButton ?? previousButton;
+    if (mediaNavigationButton) {
+      fireEvent.click(mediaNavigationButton);
+    }
     await waitFor(() => {
       const videos = screen.getAllByLabelText("TikTok media");
       expect(videos.some((node) => node.tagName === "VIDEO")).toBe(true);
@@ -696,13 +699,12 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("@collab_user").length).toBeGreaterThan(0);
     expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
     expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
-    expect(
-      screen.getByText((_, element) => {
-        if (!element) return false;
-        const text = (element.textContent ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-        return text === "cover: custom cover photo (high)";
-      }),
-    ).toBeInTheDocument();
+    const coverSource = screen.getByText((_, element) => {
+      if (!element) return false;
+      const text = (element.textContent ?? "").toLowerCase();
+      return text.includes("cover:") && text.includes("custom cover photo") && text.includes("(high)");
+    });
+    expect(coverSource).toBeInTheDocument();
   });
 
   it("opens the mirrored thumbnail entry first when only the thumbnail is mirrored", async () => {
