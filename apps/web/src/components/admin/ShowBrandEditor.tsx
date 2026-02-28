@@ -1,5 +1,6 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -1422,7 +1423,6 @@ export default function ShowBrandEditor({
                           className="block"
                           title="Set as show icon"
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={icon.hosted_url}
                             alt={icon.filename}

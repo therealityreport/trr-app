@@ -17,6 +17,17 @@ export interface PhotoFaceBox {
   label?: string;
 }
 
+export interface PhotoFaceCrop {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  variantKey?: string;
+  variantUrl?: string;
+  size?: number;
+}
+
 export interface PhotoMetadata {
   source: string;
   sourceBadgeColor: string;
@@ -41,7 +52,11 @@ export interface PhotoMetadata {
   sourceVariant?: string | null;
   sourcePageTitle?: string | null;
   sourceUrl?: string | null;
+  showName?: string | null;
+  showId?: string | null;
+  showContextSource?: string | null;
   faceBoxes?: PhotoFaceBox[];
+  faceCrops?: PhotoFaceCrop[];
   peopleCount?: number | null;
   caption: string | null;
   dimensions: { width: number; height: number } | null;
@@ -363,6 +378,55 @@ const parseFaceBoxes = (value: unknown): PhotoFaceBox[] => {
     });
   }
   return boxes;
+};
+
+const parseFaceCrops = (value: unknown): PhotoFaceCrop[] => {
+  if (!Array.isArray(value)) return [];
+  const crops: PhotoFaceCrop[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? clampFaceCoord(candidate.x) : null;
+    const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? clampFaceCoord(candidate.y) : null;
+    const width =
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? clampFaceCoord(candidate.width)
+        : null;
+    const height =
+      typeof candidate.height === "number" && Number.isFinite(candidate.height)
+        ? clampFaceCoord(candidate.height)
+        : null;
+    if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+      continue;
+    }
+    const index =
+      typeof candidate.index === "number" && Number.isFinite(candidate.index)
+        ? Math.max(1, Math.floor(candidate.index))
+        : crops.length + 1;
+    const variantKey =
+      typeof candidate.variant_key === "string" && candidate.variant_key.trim().length > 0
+        ? candidate.variant_key.trim()
+        : undefined;
+    const variantUrl =
+      typeof candidate.variant_url === "string" && candidate.variant_url.trim().length > 0
+        ? candidate.variant_url.trim()
+        : undefined;
+    const size =
+      typeof candidate.size === "number" && Number.isFinite(candidate.size) && candidate.size > 0
+        ? Math.floor(candidate.size)
+        : undefined;
+    crops.push({
+      index,
+      x,
+      y,
+      width,
+      height,
+      ...(variantKey ? { variantKey } : {}),
+      ...(variantUrl ? { variantUrl } : {}),
+      ...(size ? { size } : {}),
+    });
+  }
+  return crops;
 };
 
 const inferFandomSectionTag = (value: string | null | undefined): string | null => {
@@ -803,6 +867,9 @@ export function mapPhotoToMetadata(
   const faceBoxes = parseFaceBoxes(
     (photo as { face_boxes?: unknown }).face_boxes ?? metadata.face_boxes
   );
+  const faceCrops = parseFaceCrops(
+    (photo as { face_crops?: unknown }).face_crops ?? metadata.face_crops
+  );
   const peopleFromPhoto = (photo.people_names ?? []).filter(
     (name): name is string => typeof name === "string" && name.trim().length > 0
   );
@@ -918,6 +985,19 @@ export function mapPhotoToMetadata(
   const galleryStatusCheckedAt = parseDateValue(
     metadata.gallery_status_checked_at ?? metadata.gallery_status_checkedAt ?? null
   );
+  const showName = getMetadataString(
+    metadata,
+    "show_name",
+    "showName",
+    "imdb_fallback_show_name",
+    "imdbFallbackShowName"
+  );
+  const showId = getMetadataString(metadata, "show_id", "showId");
+  const showContextSource = getMetadataString(
+    metadata,
+    "show_context_source",
+    "showContextSource"
+  );
 
   return {
     source: photo.source,
@@ -943,7 +1023,11 @@ export function mapPhotoToMetadata(
     sourceVariant,
     sourcePageTitle,
     sourceUrl,
+    showName,
+    showId,
+    showContextSource,
     faceBoxes,
+    faceCrops,
     peopleCount,
     caption: photo.caption,
     dimensions:
@@ -1094,6 +1178,7 @@ export function mapSeasonAssetToMetadata(
   const normalizedHostedUrl = normalizeUrl(asset.hosted_url ?? null);
   const isS3Mirrored = normalizedHostedUrl ? isLikelyHostedMirrorUrl(normalizedHostedUrl) : false;
   const faceBoxes = parseFaceBoxes(metadata.face_boxes);
+  const faceCrops = parseFaceCrops(metadata.face_crops);
   const peopleCount =
     toPeopleCount((asset as { people_count?: unknown }).people_count) ??
     toPeopleCount((metadata as Record<string, unknown>).people_count) ??
@@ -1250,6 +1335,7 @@ export function mapSeasonAssetToMetadata(
     sourcePageTitle,
     sourceUrl,
     faceBoxes,
+    faceCrops,
     peopleCount,
     caption: asset.caption,
     dimensions:

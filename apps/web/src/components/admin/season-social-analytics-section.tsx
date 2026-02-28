@@ -548,7 +548,16 @@ const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
-const WEEK_SYNC_ACTION_LABEL = SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Sync + Mirror" : "Sync Metrics";
+const getWeekSyncActionLabel = (platformFilter: "all" | Platform): string => {
+  const selectedPlatform = platformFilter === "all" ? null : platformFilter;
+  const platformLabel = selectedPlatform ? PLATFORM_LABELS[selectedPlatform] : null;
+  if (SOCIAL_FULL_SYNC_MIRROR_ENABLED) {
+    return selectedPlatform
+      ? `Full Ingest ${platformLabel} + Mirror`
+      : "Full Ingest + Mirror";
+  }
+  return selectedPlatform ? `Ingest ${platformLabel} Metrics` : "Ingest Metrics";
+};
 const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter", "facebook", "threads"];
 const STALE_RUN_THRESHOLD_DEFAULT_MINUTES = 45;
 const MAX_COMMENT_ANCHOR_SOURCE_IDS_PER_PLATFORM = 5000;
@@ -1807,13 +1816,16 @@ export default function SeasonSocialAnalyticsSection({
   );
 
   useLayoutEffect(() => {
+    const viewActuallyChanged = activeAnalyticsViewRef.current !== analyticsView;
     activeAnalyticsViewRef.current = analyticsView;
-    refreshGenerationRef.current += 1;
-    inFlightRef.current.refreshAllByView.clear();
-    inFlightRef.current.analyticsByKey.clear();
-    inFlightRef.current.runsByKey.clear();
-    inFlightRef.current.targetsByKey.clear();
-    inFlightRef.current.jobsByKey.clear();
+    if (viewActuallyChanged) {
+      refreshGenerationRef.current += 1;
+      inFlightRef.current.refreshAllByView.clear();
+      inFlightRef.current.analyticsByKey.clear();
+      inFlightRef.current.runsByKey.clear();
+      inFlightRef.current.targetsByKey.clear();
+      inFlightRef.current.jobsByKey.clear();
+    }
     if (analyticsView !== "reddit") {
       return;
     }
@@ -2611,7 +2623,7 @@ export default function SeasonSocialAnalyticsSection({
       return existingRequest;
     }
 
-    const requestId = ++refreshGenerationRef.current;
+    const requestId = refreshGenerationRef.current;
     const isCurrentRequest = () => isCurrentRefreshRequest(requestView, requestId);
 
     const request = (async () => {
@@ -3998,7 +4010,7 @@ export default function SeasonSocialAnalyticsSection({
     return `Worker health check failed: ${workerHealthError}`;
   }, [workerHealthError]);
   const ingestActionsBlockedReason = workerHealthWarning
-    ? `${workerHealthWarning} Run Week and ${WEEK_SYNC_ACTION_LABEL} are disabled until workers recover.`
+          ? `${workerHealthWarning} Run Week and ${getWeekSyncActionLabel(platformFilter)} are disabled until workers recover.`
     : null;
   const staleRuns = useMemo<StaleRunState[]>(() => {
     const thresholdMs = staleThresholdMinutes * 60_000;
@@ -5883,7 +5895,7 @@ export default function SeasonSocialAnalyticsSection({
                               disabled={runningIngest || Boolean(ingestActionsBlockedReason)}
                               className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {WEEK_SYNC_ACTION_LABEL}
+                              {getWeekSyncActionLabel(platformFilter)}
                             </button>
                           </div>
                         </td>

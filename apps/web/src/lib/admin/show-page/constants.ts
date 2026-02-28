@@ -110,7 +110,8 @@ export const PERSON_LINK_SOURCE_DEFINITIONS: Array<{ key: PersonLinkSourceKey; l
   { key: "bravo", label: "Bravo" },
   { key: "imdb", label: "IMDb" },
   { key: "tmdb", label: "TMDb" },
-  { key: "knowledge", label: "Knowledge Graph" },
+  { key: "wikipedia", label: "Wikipedia" },
+  { key: "wikidata", label: "Wikidata" },
   { key: "fandom", label: "Fandom/Wikia" },
 ];
 

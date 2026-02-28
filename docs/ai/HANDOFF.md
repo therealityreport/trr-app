@@ -2,6 +2,235 @@
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
 
+## Latest Update (2026-02-28) — Guard threaded comment recursion in Week Detail post drawer
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `social week details rendering stability`
+    deliverable: `identified threaded comment recursion as the regression vector and validated existing week detail data paths`
+    verification_command: `rg -n "ThreadedCommentItem|nested replies skipped due to thread cycle|Max thread depth reached" apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `thread recursion guard regression coverage`
+    deliverable: `added a week social thumbnail test for cyclic threaded replies in post details`
+    verification_command: `N/A (not run yet in this turn)`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `TRR backend contract usage`
+    deliverable: `no backend contract changes`
+    verification_command: `n/a`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `runtime regression guard`
+    deliverable: `added assertion that cycle suppression message renders for self-referential comment payloads`
+    verification_command: `N/A (not run yet in this turn)`
+    status: `completed`
+- risk_class: `low`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added regression test that mocks post detail threaded comments with a reply cycle and asserts cycle-warning rendering.
+  - The new test protects against the recursive render path in `ThreadedCommentItem` that previously could exhaust call stack.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/week-social-thumbnails.test.tsx` (not run in this turn)
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-28) — Reddit discovery cache persistence + incomplete-window period sweep
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Reddit episode refresh undercount + 429 resilience`
+    deliverable: `identified failure mode as incomplete season-wide exhaustive crawl (max_pages=500) and transient Reddit rate limiting`
+    verification_command: `rg -n "window_exhaustive_complete|max_pages|search_backfill" apps/web/src/components/admin/reddit-sources-manager.tsx apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `dedicated refresh flow in Reddit sources manager`
+    deliverable: `added incomplete-window period sweep with per-period cooldown and merged totals from period discover calls`
+    verification_command: `pnpm -C apps/web exec vitest run tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover route + durable cache persistence`
+    deliverable: `added admin cache table/repository, persisted discovered rows on successful discover, and used cache fallback for 429 period-window requests`
+    verification_command: `pnpm -C apps/web exec eslint src/lib/server/admin/reddit-discovery-cache-repository.ts 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts'`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression verification for discovery + manager`
+    deliverable: `validated discovery service and manager behavior after cache/pacing changes`
+    verification_command: `pnpm -C apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `integration`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/db/migrations/031_create_admin_reddit_discovery_posts_cache.sql` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-discovery-cache-repository.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added persistent Supabase/Postgres cache table `admin.reddit_discovery_posts` for discovered Reddit posts keyed by `(community_id, reddit_post_id)`.
+  - Added server repository for bulk upsert/query of discovered posts and canonical flair filtering.
+  - `/api/admin/reddit/communities/[communityId]/discover` now:
+    - persists discovered rows after successful live discovery,
+    - falls back to cached window rows when Reddit returns `429` and window bounds are provided.
+  - Dedicated episode refresh flow now performs period-by-period discovery retries (with short cooldown) when season-wide exhaustive discovery is incomplete, and merges period totals for the displayed tracked-flair counts.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx` (pass; `2 files, 53 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/server/admin/reddit-discovery-cache-repository.ts 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx` (pass)
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-28) — Brands shows/franchises admin page debug + proxy regression coverage
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-backend`
+  - `senior-qa`
+  - `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.mcp__playwright__browser_*`, `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `brands/shows-and-franchises runtime behavior`
+    deliverable: `validated route-level failure causes (missing backend endpoints + local bypass option mismatch)`
+    verification_command: `rg -n \"allowDevAdminBypass|shows-franchises|franchise-rules\" apps/web/src/app/brands/shows-and-franchises/page.tsx apps/web/src/app/api/admin/trr-api/brands`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `shows-and-franchises page auth helper`
+    deliverable: `set allowDevAdminBypass=true in page-level fetchAdminWithAuth calls`
+    verification_command: `pnpm -C apps/web exec vitest run tests/brands-shows-franchises-page-auth-bypass.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `brands proxy routes to backend`
+    deliverable: `validated backend URL construction, auth call, and upstream status passthrough via route tests`
+    verification_command: `pnpm -C apps/web exec vitest run tests/brands-franchise-proxy-routes.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression verification`
+    deliverable: `targeted vitest + eslint + runtime page check`
+    verification_command: `pnpm -C apps/web exec vitest run tests/brands-franchise-proxy-routes.test.ts tests/brands-shows-franchises-page-auth-bypass.test.tsx`
+    status: `completed`
+- risk_class: `integration`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/brands/shows-and-franchises/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brands-franchise-proxy-routes.test.ts` (new)
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brands-shows-franchises-page-auth-bypass.test.tsx` (new)
+- behavior_summary:
+  - Client page fetch helper now opts into dev admin bypass for localhost/admin.localhost local sessions, preventing pre-dispatch `Not authenticated` failures.
+  - Added route-level regression tests for all four brands proxy surfaces (`shows-franchises`, `franchise-rules` GET, rule PUT, apply POST) including auth invocation, backend URL wiring, and status passthrough.
+  - Added page-level regression test that fails when `allowDevAdminBypass` is omitted and passes with the new option.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/brands-franchise-proxy-routes.test.ts tests/brands-shows-franchises-page-auth-bypass.test.tsx` (pass; `2 files, 5 tests`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/brands/shows-and-franchises/page.tsx' 'tests/brands-franchise-proxy-routes.test.ts' 'tests/brands-shows-franchises-page-auth-bypass.test.tsx'` (pass)
+  - Playwright MCP runtime check on `http://admin.localhost:3000/brands/shows-and-franchises`: page renders and reaches `Shows & Franchises` state; observed backend-data errors in this environment were `500 connection pool exhausted` (not missing-route `404`).
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-backend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+
+## Latest Update (2026-02-28) — IMDb inferred show-context trust + lightbox Show field
+
+- Updated IMDb show-bucket trust logic for person gallery:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/person-gallery-media-view.ts`
+  - `TRUSTED_IMDB_SHOW_CONTEXT_SOURCES` now includes `request_context_inferred`, allowing backend-inferred strong matches to be treated as trusted show metadata instead of routing to `Other`.
+
+- Extended lightbox metadata model and mapping:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/photo-metadata.ts`
+  - `PhotoMetadata` now includes additive fields:
+    - `showName`
+    - `showId`
+    - `showContextSource`
+  - `mapPhotoToMetadata(...)` now maps these from source metadata with fallback support for `imdb_fallback_show_name`.
+
+- Added explicit `Show` row to image details metadata panel:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/ImageLightbox.tsx`
+  - metadata coverage table now displays `Show` (`showName` or `—`).
+
+- Added regression tests:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-media-view.test.ts`
+    - validates `request_context_inferred` IMDb rows remain in `this-show`.
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/photo-metadata.test.ts`
+    - validates `showId/showName/showContextSource` mapping and unresolved fallback show-name mapping.
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/image-lightbox-metadata.test.tsx`
+    - validates `Show` field rendering in lightbox metadata.
+
+- Files changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/person-gallery-media-view.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/photo-metadata.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/ImageLightbox.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-media-view.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/photo-metadata.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/image-lightbox-metadata.test.tsx`
+
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web run lint` (pass with pre-existing warnings only; no errors)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run -c vitest.config.ts tests/person-gallery-media-view.test.ts tests/photo-metadata.test.ts tests/image-lightbox-metadata.test.tsx` (pass; `3 files, 62 tests`)
+
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+- risk_class: `integration`
+
 ## Latest Update (2026-02-28) — App Router week-detail entry stabilization (DevTools freeze/chunk fallout)
 
 - primary_skill: `senior-frontend`
@@ -13219,3 +13448,1340 @@ Continuation (same session, 2026-02-28) — week-detail route-tree decoupling; r
 - residual_risks:
   - In dev mode, stale `.next` graph artifacts can temporarily re-surface recursion symptoms even after structural fix; use `WORKSPACE_CLEAN_NEXT_CACHE=1 make dev-lite` before regression triage.
   - Emergency fallback only if production-blocking regression appears: temporarily reintroduce dynamic wrapper in admin `[platform]` entry while keeping shared module outside route tree, then continue root-cause follow-up.
+
+Continuation (same session, 2026-02-28) — reliable Salt Lake City flair-window refresh via exhaustive completion fix + search backfill.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `dedicated refresh correctness for period-window Salt Lake City flair totals`
+    deliverable: `locked acceptance around exhaustive window truthfulness, deep flair backfill, and explicit operator-facing discover failure signal`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `admin reddit manager refresh calls + warning surface`
+    deliverable: `wired search_backfill=true for dedicated season refresh and modal period calls, and surfaced discover failures in UI instead of silent swallow`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover service + discover route contract`
+    deliverable: `fixed exhaustive window completion semantics, added additive searchBackfill input and search_backfill diagnostics output, and enabled route parsing for search_backfill query param`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/server/admin/reddit-discovery-service.ts 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' tests/reddit-discovery-service.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression coverage for discover completeness/backfill + manager request wiring/error UX`
+    deliverable: `added tests for terminal-page false-complete regression, historical flair post recovery from search backfill, conservative backfill diagnostics, search_backfill query propagation, and discover failure visibility`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-backend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-discovery-service.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `fetchNewWindowExhaustive(...)` now evaluates oldest timestamps on every page (including terminal page) and only reports `window_exhaustive_complete=true` when `period_start` is actually reached.
+  - Added deep flair-window search backfill in subreddit discovery for exhaustive window mode when `searchBackfill=true` and tracked flairs exist; backfill rows merge with listing rows before metadata/totals.
+  - Discover response now includes additive `search_backfill` diagnostics (queries/pages/rows/completeness + per-query diagnostics) to explain coverage depth.
+  - Discover route now accepts additive query param `search_backfill=1|true|yes` and maps to service input `searchBackfill`.
+  - Dedicated refresh + period modal discover calls now include `search_backfill=true` with existing `exhaustive=true`, `force_flair`, and `max_pages=500`.
+  - Discover refresh failures are no longer silent; UI now surfaces explicit error/warning text and clears stale discovery totals.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx` (pass, `2 files / 52 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/server/admin/reddit-discovery-service.ts 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Backfill remains bounded by Reddit search/listing limits and index behavior; `search_backfill.complete=false` should be treated as partial-coverage signal.
+  - `search_backfill` diagnostics are additive; downstream consumers should avoid strict required-field assumptions until all views adopt the new diagnostics object.
+
+Continuation (same session, 2026-02-28) — face-crop metadata plumbing + circular chips in people admin tag panel and lightbox.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `face-crop chip presentation in existing admin and lightbox metadata surfaces`
+    deliverable: `preserved existing rectangular debug overlays while adding circular chip rendering from persisted face crop contracts`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/image-lightbox-metadata.test.tsx tests/photo-metadata.test.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `person gallery page + lightbox metadata UI`
+    deliverable: `rendered circular face chips with graceful fallback when crop URL is missing`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `TRR API repository and metadata parser contract updates`
+    deliverable: `added face_crops parsing from cast-photo metadata and media-link context without breaking existing response handling`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/photo-metadata.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `parser and UI regression coverage`
+    deliverable: `added/updated tests for metadata parsing and lightbox chip rendering`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/photo-metadata.test.ts tests/image-lightbox-metadata.test.tsx`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-backend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `yes`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/photo-metadata.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/ImageLightbox.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/photo-metadata.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/image-lightbox-metadata.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added `face_crops` contract parsing in repository and metadata utilities.
+  - Wired person-gallery state updates so recount/refresh results propagate `face_crops` to both panel and lightbox views.
+  - Added circular face chips in admin Face Boxes section and lightbox metadata panel while retaining rectangular overlay boxes for debug/manual assignment.
+  - Added graceful UI fallback when crop URL is missing.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/photo-metadata.test.ts tests/image-lightbox-metadata.test.tsx` (pass, `51 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec tsc --noEmit` (pass)
+- residual_risks:
+  - When crop generation is skipped/unavailable for a face, chips render fallback initials/labels; no blocking UX regression expected.
+
+Continuation (same session, 2026-02-28) — person gallery Refresh Images progress UI upgraded to phase-by-phase completion tracking.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `refresh progress UX clarity for completed vs pending work`
+    deliverable: `converted single-line progress display into explicit per-step status panel with done/skipped/failed states`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-progress.test.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `people admin gallery refresh/reprocess progress bar rendering`
+    deliverable: `wired stream events into pipeline step state and rendered stage cards with status + step-level detail`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/refresh-progress.ts'`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `SSE event interpretation for refresh/reprocess stream payloads`
+    deliverable: `mapped stage/message/current/total/skip/error payload fields to deterministic UI pipeline-state updates`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `progress mapping and summary finalization regression coverage`
+    deliverable: `added tests for per-step running/completed/skipped transitions and completion-summary synthesis`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-progress.test.ts`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/refresh-progress.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-progress.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added explicit refresh pipeline step model for `refresh` and `reprocess` modes, including step ordering and stage-to-step mapping.
+  - Progress events now update step states (`pending`, `running`, `completed`, `skipped`, `failed`) using backend stage/message/current/total and skip/error signals.
+  - Completion events now finalize step summaries with concrete saved/done metrics (fetched, saved, mirrored, auto-counted, text-detected, centered, resized) so UI shows what completed vs what did not run/failed.
+  - Refresh progress UI now renders a per-step status panel under the bar with clear status labels and step detail text.
+  - Progress panel remains visible after run completion/failure so operators can review results before the next run.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/person-refresh-progress.test.ts` (pass, `10 tests`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/refresh-progress.ts' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'tests/person-refresh-progress.test.ts'` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec tsc --noEmit` (pass)
+- residual_risks:
+  - Step completion/failure interpretation relies on current backend stage/message conventions; if backend wording changes materially, UI status inference may need a follow-up mapping update.
+
+
+Continuation (same session, 2026-02-28) — Reddit refresh hardening for 429 resilience + queue-status polling de-amplification.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `stability under Reddit and backend contention while preserving period-window discovery behavior`
+    deliverable: `defined acceptance as no hard 429 abort for episode-refresh path, reduced queue-status request amplification, and discover returning payloads under partial backfill`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `system health polling behavior`
+    deliverable: `converted to single-flight timeout-loop polling and disabled modal background polling when closed`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/SystemHealthModal.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `reddit discovery + social queue-status proxy`
+    deliverable: `added rate-limit aware retry/backoff/pacing, capped backfill fanout, non-fatal per-query 429 handling, episode listing-429 search fallback, and removed extra queue-status proxy retry`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/server/admin/reddit-discovery-service.ts src/app/api/admin/trr-api/social/ingest/queue-status/route.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression and live validation`
+    deliverable: `validated discovery service tests and live pre-season discover/refresh calls after service restart`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts`
+    status: `completed`
+- risk_class: `high`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-backend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-discovery-service.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SystemHealthModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/social/ingest/queue-status/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Queue-status UI polling now avoids overlapping fetches and no longer runs duplicate background loops from the modal when closed.
+  - Queue-status TRR proxy no longer performs an extra automatic retry per poll (`retries: 0`) to reduce backend fanout during contention.
+  - Discovery now applies stronger Reddit 429-aware backoff (`Retry-After` support), inter-page cooldown pacing, and sequential sort fetching to reduce burst limits.
+  - Flair backfill fanout is now capped (prioritized small query set + per-query page cap), and per-query 429s no longer abort the entire discover request.
+  - Episode discussion refresh now degrades from listing-sort 429 into search path instead of returning immediate 429.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts` (pass, `25 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/server/admin/reddit-discovery-service.ts src/components/admin/SystemHealthModal.tsx src/app/api/admin/trr-api/social/ingest/queue-status/route.ts` (pass)
+  - Workspace restart to activate fixes: `cd /Users/thomashulihan/Projects/TRR && make stop && make dev-lite` (pass)
+  - Queue-status burst check after restart: `20` parallel calls to `/api/admin/trr-api/social/ingest/queue-status` all returned `ok` and backend log showed no pool-exhaustion queue-status failures.
+  - Live pre-season discover call (`2025-08-14T00:00:00Z` to `2025-09-16T23:59:59Z`, exhaustive + search_backfill + forced Salt Lake City flair) returned payload successfully (no 429) with `matched_rows=20` on successful run and partial runs marked `window_exhaustive_complete=false` when rate-limited.
+- residual_risks:
+  - Reddit still enforces external rate limits; results can vary run-to-run during throttling windows, but calls now return partial diagnostics instead of hard-failing in most cases.
+  - `window_exhaustive_complete=false` / `search_backfill.complete=false` remains an active signal that totals are conservative, not final.
+
+Continuation (same session, 2026-02-28) — fixed spurious social dependency timeout warning on `/rhoslc/social/s6` during dev cold starts.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.mcp__chrome-devtools__new_page` / `functions.mcp__chrome-devtools__take_snapshot`
+  - fallback: `functions.exec_command`, `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `runtime warning behavior on social admin tab`
+    deliverable: `isolated warning trigger path to seasons core-load timeout and validated UI symptom on admin.localhost`
+    verification_command: `tail -n 120 /Users/thomashulihan/Projects/TRR/.logs/workspace/trr-app.log`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `show admin page timeout policy`
+    deliverable: `changed core-load timeout to be environment-aware (60s in development, 15s in production) to avoid false timeout warnings from cold route compilation`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `show seasons admin route + backend call timing`
+    deliverable: `confirmed seasons endpoint was returning 200 but exceeded prior client timeout during compile-heavy dev cold starts (evidence up to ~39s)`
+    verification_command: `rg -n "shows/.*/seasons\\?limit=50" /Users/thomashulihan/Projects/TRR/.logs/workspace/trr-app.log`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression verification for warning presence`
+    deliverable: `validated social page renders without dependency-warning banner after change and confirmed seasons request succeeds within adjusted timeout window`
+    verification_command: `DevTools snapshot + network trace at http://admin.localhost:3000/rhoslc/social/s6`
+    status: `completed`
+- risk_class: `low`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Root cause was a frontend timeout budget mismatch in dev: `SHOW_CORE_LOAD_TIMEOUT_MS` was `15_000ms`, while cold API-route compilation for `GET /api/admin/trr-api/shows/{showId}/seasons?limit=50` can exceed that (observed up to `39.4s`) before eventually returning `200`.
+  - Because the fetch aborted client-side at 15s, `socialDependencyError` was set to `Request timed out`, which surfaced as `Social dependency warning: Request timed out. Showing available social data.`
+  - Updated the timeout to `60_000ms` in development only; production remains `15_000ms`.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass)
+  - DevTools snapshot of `http://admin.localhost:3000/rhoslc/social/s6` after patch shows no social dependency warning banner.
+  - DevTools/network + app log confirm seasons request success on affected route and no post-change timeout warning emission for that dependency path.
+- residual_risks:
+  - Separate social analytics endpoints still show intermittent upstream timeout/unreachable errors (`queue-status`, some weekly analytics requests) in current local environment; those are backend/connectivity issues and independent of this specific warning fix.
+
+Continuation (same session, 2026-02-28) — refresh stream connect-phase hardening + actionable terminal errors in person refresh UI.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `refresh connect/retry UX semantics`
+    deliverable: `defined connect-state checkpoints and terminal failure expectations (attempt timing, timeout bound, host/error code context)`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-progress.test.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `person refresh stream parser + progress state`
+    deliverable: `mapped proxy checkpoint/state/error fields into refresh progress, added explicit connect detail text, and surfaced actionable terminal connect failures`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/refresh-progress.ts'`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `Next.js refresh stream proxy route`
+    deliverable: `added per-attempt timeout + heartbeat connect events, explicit connect success/failure checkpoints, terminal error payloads, and fast settle handling for immediate fetch failures`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-images-stream-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `connect-phase regressions + error formatting`
+    deliverable: `added/updated route + progress tests for connect heartbeat payloads, proxy connected checkpoint, terminal connect exhaustion payload, and formatted connect messaging`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-images-stream-route.test.ts tests/person-refresh-progress.test.ts`
+    status: `completed`
+- risk_class: `high`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/refresh-progress.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-images-stream-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-progress.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Proxy connect phase now emits heartbeat `progress` events every interval while backend `fetch` is pending, with `checkpoint`, `stream_state`, `attempt_elapsed_ms`, `attempt_timeout_ms`, and host context.
+  - Connect attempts are bounded by per-attempt timeout (default `20s`) and now fail fast without artificial heartbeat sleep penalties when `fetch` settles quickly.
+  - Proxy emits explicit transition checkpoints (`connect_start`, `connect_wait`, `proxy_connected`, `backend_streaming`) and always emits terminal `error` on connect exhaustion with `is_terminal=true` and `checkpoint=connect_exhausted`.
+  - Page stream handler now parses/connects new proxy fields and displays informative connect detail text (`attempt X/Y, Ns/Ms`) instead of ambiguous waiting text.
+  - Terminal proxy connect failures now surface as actionable user-facing errors that include attempt count, error code, and backend host when available.
+  - Generic `Failed to fetch` errors are wrapped with checkpoint context when available.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/person-refresh-images-stream-route.test.ts tests/person-refresh-progress.test.ts` (pass, `18 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route.ts' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/refresh-progress.ts'` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec tsc --noEmit` (pass)
+- residual_risks:
+  - Reconnect logic in page remains single retry after stream-drop (`attempt <= 2`) by design; if network instability continues, additional retry policy tuning may still be required.
+
+Continuation (same session, 2026-02-28) — per-container Refresh Posts controls + Pre-Season/Episode 1 cutover windows.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`, `functions.apply_patch`
+  - fallback: `none`
+- delegation_map:
+  - role: `UI Implementer`
+    scope: `episode/period container actions`
+    deliverable: `added per-container Refresh Posts button and loading state on each episode and seasonal-period card`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+  - role: `Window Logic Owner`
+    scope: `season boundary window semantics`
+    deliverable: `enforced Pre-Season and Episode 1 ET cutovers (Pre-Season end 7:00:00 PM ET, Episode 1 start 7:01:01 PM ET, Episode 1 end 7:01:10 PM ET next episode date)`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression + contract verification`
+    deliverable: `updated/extended tests for pre-season ordering, cutover windows, and per-card Refresh Posts action`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added `Refresh Posts` action to every episode card and seasonal boundary card in Episode Discussions matrix.
+  - Added container-scoped discover refresh path (`exhaustive=true`, `search_backfill=true`, `force_flair=<tracked flair>`, `max_pages=500`) so operators can refresh a single period/week instead of full-season sweeps.
+  - Updated seasonal boundary ordering to force `Pre-Season` first.
+  - Added ET wall-clock cutover normalization for season windows to support explicit premiere boundaries:
+    - `Pre-Season` ends at `7:00:00 PM ET` on episode 1 air date.
+    - `Episode 1` starts at `7:01:01 PM ET` on episode 1 air date.
+    - `Episode 1` ends at `7:01:10 PM ET` on episode 2 air date (or +7 days fallback).
+  - Added date-key normalization for date-like air_date values (e.g., `YYYY-MM-DD` / `T00:00:00Z`) to avoid unintended prior-day ET shifts.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx` (pass, `28 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-discovery-service.test.ts tests/reddit-sources-manager.test.tsx` (pass, `53 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Live Reddit `/discover` requests can still exceed client timeout windows under sustained upstream 429 pressure; this change improves operator control via per-container refresh but does not yet add server-side hard timeout + partial-response fallback for long-running discover requests.
+
+Continuation (same session, 2026-02-28) — show Settings `Add Link(s)` action with backend classifier routing.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `show settings link-management UX and existing discovery surface`
+    deliverable: `confirmed links were already listed in Settings and identified missing single-action manual add/classifier workflow`
+    verification_command: `rg -n "Links and Cast Role Catalog|Discover|Settings" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `settings tab controls`
+    deliverable: `added multiline URL/handle input and one "Add Link(s)" button in Settings > Links, wired to refresh + notices`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `admin proxy route to TRR-Backend`
+    deliverable: `added /api/admin/trr-api/shows/[showId]/links/add proxy route forwarding authenticated payloads to backend classifier endpoint`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression + new settings controls`
+    deliverable: `updated static settings-links test assertions and validated full web test suite`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run test:ci -- show-settings-links-fandom-visibility.test.ts`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-backend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/links/add/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added one `Add Link(s)` entry point in show Settings that accepts multiple URLs/handles and delegates classification/assignment to backend.
+  - Kept existing categorized link visibility in Settings, now with a direct manual ingest path for IMDb/TMDb/Wikipedia/Wikidata/Fandom/social URLs and handles.
+  - Added new app proxy route so Settings can call backend classifier without exposing backend auth to the client.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web run lint` (pass; existing unrelated `no-img-element` warnings remain)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web run test:ci -- show-settings-links-fandom-visibility.test.ts` (pass; full suite executed, `219 passed`)
+- residual_risks:
+  - Settings page file already has unrelated in-flight edits in this workspace; this change touched only the links Settings workflow and proxy route, but broader page behavior should still be validated in a dedicated QA pass before release.
+
+Continuation (same session, 2026-02-28) — discover route switched to cache-first with explicit refresh override.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`, `functions.apply_patch`
+  - fallback: `none`
+- delegation_map:
+  - role: `API Integration Owner`
+    scope: `reddit discover cache/read-write semantics`
+    deliverable: `implemented period-window cache-first reads and additive refresh override (`refresh=true`) in discover route`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `discover caller flags`
+    deliverable: `wired `refresh=true` only for explicit user refresh actions (season refresh + per-container Refresh Posts)`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `cache-hit/forced-refresh/429-fallback coverage`
+    deliverable: `added discover route tests for cache-hit, forced-refresh live scrape, and 429 cached fallback`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx tests/reddit-discovery-service.test.ts`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-discover-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Discover route now checks Supabase cache first for period-window requests and returns cached rows immediately when available.
+  - Live Reddit scrape is now opt-in via `refresh=true` query param.
+  - Existing 429 fallback behavior remains, now with explicit cache metadata fields: `hit_used`, `fallback_used`, `forced_refresh`.
+  - UI explicit refresh paths now send `refresh=true` so button clicks still force re-scrape, while non-refresh reads (e.g. modal/open window checks) use cached data by default.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx tests/reddit-discovery-service.test.ts` (pass, `56 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass)
+  - Live verification: `GET /api/admin/reddit/communities/{id}/discover?...` (no `refresh`) returned in ~4s with `cache.hit_used=true`, `fallback_used=false`, and expected totals from `admin.reddit_discovery_posts`.
+- residual_risks:
+  - Forced refresh (`refresh=true`) can still be slow or timeout under heavy Reddit throttling; expected behavior is now isolated to explicit refresh actions.
+
+Continuation (same session, 2026-02-28) — person refresh UI no longer appears stalled at `RESIZING 0/1` after backend completion.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `person refresh progress behavior at stream completion`
+    deliverable: `identified that UI kept stale resizing counters while post-stream data reloads were running`
+    verification_command: `rg -n \"eventType === \\\"complete\\\"|setRefreshProgress\\(|lastEventAt\" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `refresh + reprocess stream completion state updates`
+    deliverable: `set explicit completed/reloading progress state on complete events, cleared stale counters, and removed stale-age timer by nulling lastEventAt`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx'`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `stream contract continuity`
+    deliverable: `kept proxy contract unchanged; verified proxy route tests still pass with completion-state UI changes`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-images-stream-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `type/lint/test regression checks`
+    deliverable: `validated page compile and stream proxy tests after progress-state changes`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes` (paired resize heartbeat improvements consumed by this UI)
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - On refresh/reprocess `event: complete`, the page now sets a terminal progress state (`phase: COMPLETED`, `rawStage: complete`, `current/total: null`) with a clear `"Reloading ..."` message.
+  - This prevents the UI from remaining pinned to stale `RESIZING 0/1` counters while follow-up data reload calls run.
+  - `lastEventAt` is cleared on completion state to avoid misleading `"last update Xs ago"` growth after stream completion.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx'` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/person-refresh-images-stream-route.test.ts` (pass, `6 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec tsc --noEmit` (pass)
+- residual_risks:
+  - If downstream `fetchPerson/fetchPhotos/...` calls are slow, the run will still remain in `"Reloading ..."` state until those requests finish; this is expected and now explicit rather than appearing as stalled resize work.
+
+Continuation (same session, 2026-02-28) — show Settings cast-link layout + non-Bravo Bravo-source handling + links refresh now runs discovery/validation.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Settings > Links cast-member coverage table and links action buttons`
+    deliverable: `identified two-column cast-member card layout and refresh action that only reloaded rows`
+    verification_command: `rg -n "Cast Member Pages|Discover|Refresh|runShowLinkDiscovery" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `cast-member coverage layout and per-source visibility rules`
+    deliverable: `switched cast-member cards to one-person-per-row and hid Bravo as a missing source for non-Bravo shows while still displaying existing Bravo links`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `settings links refresh behavior`
+    deliverable: `updated Refresh/Discover actions to call backend links discovery (include seasons/people) so refresh re-tests existing cast-member sources and updates list`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit --pretty false`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `lint/type regression on changed Settings page`
+    deliverable: `validated changed page compiles and lints after links workflow + cast layout updates`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc --noEmit --pretty false`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Cast Member Pages now render one person per row in Settings (instead of two-column card layout).
+  - For non-Bravo shows, the Bravo source requirement is removed from cast-member coverage when missing; existing Bravo links still appear if present.
+  - Links `Refresh` now runs backend discovery/validation (same backend pipeline as Discover) and then reloads list data, so it updates with newly added links and re-tests existing cast-member sources.
+  - Links notices now include validation outcome counts (`promoted`, `removed`, `fetch failures`) from discovery response.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+- residual_risks:
+  - Refresh-driven validation currently reports cast-member source outcomes returned by backend discovery; show/season link validation remains limited to existing discovery heuristics.
+
+Continuation (same session, 2026-02-28) — Pre-Season refresh reliability hardening (timeouts + cache semantics).
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Pre-Season/Episode window refresh behavior and warning semantics`
+    deliverable: `identified two user-facing failure points: forced refresh timeout at 45s and cache responses marked as exhaustive-incomplete`
+    verification_command: `rg -n "discover: 45_000|window_exhaustive_complete|buildCachedDiscoveryResult|handleRefreshPostsForContainer" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `refresh timeout behavior and season-level fallback`
+    deliverable: `added longer timeout for explicit live refreshes and season-level timeout fallback to cached Supabase discovery payloads`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover route cache payload semantics`
+    deliverable: `cache-hit/fallback payloads now report unknown completeness (`window_exhaustive_complete: null`) and `max_pages_applied: 0` to prevent false max-page warnings`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `targeted regression checks`
+    deliverable: `updated route tests for cache-completeness semantics and re-ran manager + route tests with lint`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-discover-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Explicit forced discovery refreshes now use a longer timeout (`discoverRefresh: 180_000ms`) to reduce false timeout fallbacks on long exhaustive windows.
+  - Season-level discover failure path now attempts cached fallback for the same season window when timeout-like errors occur.
+  - Discover cache-hit/fallback responses no longer pretend exhaustive crawl incompleteness; UI will not show the max-pages warning purely due cached results.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass, `32 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Truly long live exhaustive refreshes can still timeout under heavy Reddit throttling; fallback now degrades to cached Supabase data with clearer semantics.
+
+Continuation (same session, 2026-02-28) — force_flair now enforces flair-only scope in discover route.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `discover totals mismatch (mixed flairs with force_flair)`
+    deliverable: `identified that force_flair was additive and still included community analysis flares`
+    verification_command: `rg -n "force_flair|analysisFlares|analysisAllFlares" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `n/a (route-level contract behavior)`
+    deliverable: `n/a`
+    verification_command: `n/a`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover route input shaping`
+    deliverable: `when force_flair is present, route now sends analysisAllFlares=forceIncludeFlares and analysisFlares=[]`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `route + manager regression checks`
+    deliverable: `added assertion for force-flair-only discovery input and reran test/lint`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-discover-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `force_flair` queries now operate in flair-only mode for live discover, preventing unrelated tracked flairs from inflating/obscuring totals.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass, `32 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Historical coverage still depends on Reddit listing/search depth and rate-limit conditions; cache behavior now degrades more predictably when live refresh is slow.
+
+Continuation (same session, 2026-02-28) — Settings cast-link coverage now separates Wikipedia vs Wikidata instead of collapsing both into "Knowledge Graph".
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Settings > Cast Member Pages source-bucket labeling`
+    deliverable: `identified that classifyPersonLinkSource mapped both wikipedia and wikidata to "knowledge" and rendered as KG/Knowledge Graph`
+    verification_command: `rg -n "PersonLinkSourceKey|classifyPersonLinkSource|PERSON_LINK_SOURCE_DEFINITIONS|PersonSourceLogo" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `cast-link coverage source definitions and badges`
+    deliverable: `split source keys into wikipedia + wikidata, updated labels and badges, and adjusted source-kind priority logic to keep deterministic selection`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `n/a (UI classification only; no backend contract changes)`
+    deliverable: `confirmed existing backend link_kind values (wikipedia/wikidata) are now displayed as separate sources`
+    verification_command: `n/a`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `targeted UI regression sanity`
+    deliverable: `reran lint for modified page and an existing Settings links test`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'`
+    status: `completed`
+- risk_class: `low`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Cast-member link coverage cards in Settings now show separate sources for `Wikipedia` and `Wikidata`.
+  - Wikipedia links no longer appear under `KG / Knowledge Graph`; they now display under the `Wikipedia` source row.
+  - Wikidata remains its own distinct source row.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts` (pass, `2 tests`)
+- residual_risks:
+  - This change affects Settings coverage display semantics only; existing link records and statuses are unchanged.
+
+Continuation (same session, 2026-02-28) — Reddit discover route cut over to TRR-Backend async runs/cache and season-aware requests.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Reddit refresh/discover route behavior + timeout fallback semantics`
+    deliverable: `mapped current discover/cache/refresh call sites and identified cutover point at community discover route`
+    verification_command: `rg -n "fetchDiscoveryForCommunity|/api/admin/reddit/communities/.*/discover|search_backfill" /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `season-aware discover calls`
+    deliverable: `discovery requests now include season_id from current context when calling discover route`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover route backend cutover`
+    deliverable: `replaced in-app scraping/cache logic with backend run start/poll/cache usage via social admin proxy`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `discover route + manager regression validation`
+    deliverable: `updated route tests for backend flow and validated manager regression suite`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `high`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-backend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-discover-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `/api/admin/reddit/communities/[communityId]/discover` now uses TRR-Backend Reddit endpoints instead of app-local scraping:
+    - checks backend cache first when eligible and `refresh != true`
+    - starts backend async run when needed
+    - polls run status and returns backend discovery payload
+    - falls back to backend cached payload on polling timeout/failure when available
+  - Discovery route now requires a season context for backend refresh and resolves it from `season_id` query or community `trr_season_id`.
+  - Frontend discovery fetch helper now includes `season_id` automatically from current selected season context.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-community-discover-route.test.ts` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass, `32 tests`)
+- residual_risks:
+  - Discover route currently polls backend from the app route request lifecycle; very long backend runs may still trigger app-route timeout and rely on cache fallback.
+  - Full UI-native job polling (start run then client poll status directly) remains a future hardening path.
+
+Continuation (same session, 2026-02-28) — Reddit period refreshes now queue asynchronously by default (no long blocking wait), and UI keeps cached totals while runs complete.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Refresh Posts timeout path and discover proxy wait behavior`
+    deliverable: `identified blocking poll in discover proxy as primary timeout source`
+    verification_command: `rg -n "waitForRunCompletion|refresh=true|search_backfill" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `RedditSourcesManager async refresh UX`
+    deliverable: `fetch helper now handles queued run metadata and warning text; container refresh keeps existing cached totals when run is queued`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover route async wait toggle + post-only refresh payload`
+    deliverable: `discover route now supports `wait` query behavior and includes `fetch_comments=false` in backend run start payload`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `route/component regression for async refresh behavior`
+    deliverable: `updated discover route tests for queued default + explicit wait mode and validated manager test suite`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `high`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-backend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-discover-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `refresh=true` discover requests now queue backend runs and return immediately with latest cached period payload when available (no forced long server-side poll by default).
+  - Explicit waiting is still supported via `wait=true` for flows that need synchronous completion.
+  - `RedditSourcesManager` now handles queued/no-payload refresh responses without hard-failing; it keeps current cached totals and surfaces operator warning text.
+  - Backend start payload from discover now sends `fetch_comments=false` to prioritize fast post-level period refreshes.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass, `33 tests`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+- residual_risks:
+  - First-time windows with no cached payload will show queued state until backend run completes; immediate counts are only available once cache is populated.
+
+Continuation (same session, 2026-02-28) — disable automatic season-wide Reddit discovery refresh in episode discussion flow.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `dedicated community auto-refresh and season-wide discovery side effects`
+    deliverable: `identified automatic `handleRefreshEpisodeDiscussions()` invocation and season-wide discover refresh path as source of automatic full-season scraping`
+    verification_command: `rg -n "autoLoadedEpisodeMatrixKeyRef|handleRefreshEpisodeDiscussions|periodStart: seasonDiscoveryWindow" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `episode discussions refresh behavior`
+    deliverable: `removed auto-triggered season refresh and changed episode-discussion refresh to cached discover reads only; live scraping remains manual per period container via Refresh Posts`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover route expectations in tests`
+    deliverable: `updated tests to reflect no `refresh=true` discover call during episode-discussion refresh`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `regression validation for reddit manager/discover route`
+    deliverable: `fixed/updated assertions and reran targeted test suite`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Removed dedicated-view auto invocation of episode discussion refresh that could trigger season-wide activity on page load.
+  - `Refresh Episode Discussions` now performs episode candidate refresh and only reads cached discovery payload (`refresh=false`) for totals.
+  - Live Reddit scraping is now operator-controlled via per-container `Refresh Posts` actions (week-by-week testing flow).
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint src/components/admin/reddit-sources-manager.tsx tests/reddit-sources-manager.test.tsx 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' tests/reddit-community-discover-route.test.ts` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts` (pass, `33 tests`)
+- residual_risks:
+  - Episode discussion refresh no longer proactively refreshes season totals; period totals update when each window is manually refreshed.
+
+Continuation (same session, 2026-02-28) — auto-load cached period rows only (no implicit scrape), with manual Refresh Posts per container.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `period container auto-load behavior`
+    deliverable: `defined cache-only auto-load semantics for each episode/period container and preserved manual live refresh via Refresh Posts`
+    verification_command: `rg -n "canUsePeriodWindowCache|Refresh Posts|refresh: false|resolveSeasonIdForRequests" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `reddit manager container hydration`
+    deliverable: `added cache hydration effect for period windows, merged cached payloads into discovery state, and ensured season id resolution for refresh/discover calls`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover route cache behavior`
+    deliverable: `period-window discover requests with refresh=false now return cached payload/null+warning and do not trigger live scraping`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `manager + route regressions`
+    deliverable: `fixed callback ordering regression and validated updated request-season resolution + cache-only path`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Period/episode container data now auto-loads from existing Supabase-backed cache only.
+  - No automatic live scrape runs are triggered by container auto-load.
+  - `Refresh Posts` remains the explicit action that starts live update/backfill for a selected container window.
+  - Season resolution for refresh/discover calls now prefers the eligible season context and prevents wrong-season requests.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts` (pass, `33 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts'` (pass)
+- residual_risks:
+  - First-time windows with no prior cache still show empty results until operator runs `Refresh Posts` for that container.
+
+Continuation (same session, 2026-02-28) — Settings Season Pages now render one row per season with validated URL pills.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Settings `Season Pages` now uses season-level aggregation (one card/row per season) instead of rendering every link as a separate row.
+  - Each season row shows clickable pills for approved/validated links only (`status=approved`) with label + hostname.
+  - Unvalidated rows (`pending`/`rejected`) are excluded from season coverage pills.
+  - Overview `Season URL Coverage` now uses the same validated-link aggregation and clickable pill UI for consistency.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass)
+- residual_risks:
+  - Pending season links are intentionally hidden from coverage pills; operators should still use the full Links list when debugging newly submitted links before validation.
+
+Continuation (same session, 2026-02-28) — show episode/time-window containers before any refresh/cache exists.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `initial dedicated community render when episode matrix is empty`
+    deliverable: `identified hard dependency on `episodeMatrix.length > 0` as reason rows/windows were hidden before refresh`
+    verification_command: `rg -n "episodeMatrix.length|episodeMatrixRowsForDisplay" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `episode rows fallback rendering`
+    deliverable: `added season-episode derived zero-state matrix rows and switched dedicated/inline rendering + window-bounds derivation to use fallback rows`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `n/a (UI rendering-only patch)`
+    deliverable: `no backend/API contract changes`
+    verification_command: `true`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `reddit manager regression`
+    deliverable: `updated assertion expecting multiple Air date rows in new zero-state display`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+- risk_class: `low`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Dedicated community view now renders episode rows + date windows immediately from season episode metadata.
+  - Rows show zero discussion counts until refresh/cache data is present.
+  - `Refresh Posts` remains per-container and populates/updates cached posts without requiring full-season auto-scrape.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts` (pass, `33 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx tests/reddit-sources-manager.test.tsx 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts'` (pass)
+- residual_risks:
+  - If season episode metadata itself is unavailable, row synthesis cannot occur and UI falls back to existing no-row empty state.
+
+Continuation (same session, 2026-02-28) — fixed reddit refresh-run start failure from oversized period_key.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Refresh Posts backend start failure`
+    deliverable: `identified that period_key generated in app route exceeded backend request validation limit (160 chars), causing /reddit/runs to fail with generic fallback error`
+    verification_command: `python - <<'PY'
+community='fdc23901-a682-4f96-9a40-bdc6b3a92297'
+season='e9161955-6ee4-4985-865e-3386a0f670fb'
+start='2025-08-14T00:00:00.000Z'
+end='2025-09-16T23:00:00.000Z'
+f='salt lake city'
+legacy=f'community:{community}:season:{season}:window:{start}:{end}:flares:{f}'
+print(len(legacy))
+PY`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `discover proxy period key generation`
+    deliverable: `replaced verbose period_key with deterministic SHA1-based key under max-length limit`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts'`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `backend run-start contract compatibility`
+    deliverable: `kept stable semantic uniqueness (community/season/window/flares) while encoding long window inputs into bounded key length`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `reddit manager + route regression`
+    deliverable: `validated that refresh/discover tests still pass after key format change`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-backend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `Refresh Posts` no longer fails due oversized period_key for long windows (like Pre-Season).
+  - Key remains deterministic per community/season/window/flair set, preserving cache/run grouping semantics.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/reddit-sources-manager.test.tsx` (pass, `33 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' src/components/admin/reddit-sources-manager.tsx tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Existing cached payloads created under any legacy key format are not consulted by the new key format; first refresh repopulates cache under new deterministic key.
+
+Continuation (same session, 2026-02-28) — Links Discover/Refresh now shows active progress text and richer completion details.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added active in-flight progress status text during Discover/Refresh with staged messages (show scan -> season validation -> cast validation -> save).
+  - On completion, links notice now includes richer backend metrics:
+    - discovered totals by show/season/person,
+    - Fandom domains used,
+    - Fandom season/cast counts,
+    - TMDb season link count,
+    - kind-level discovered breakdown.
+  - Progress timers/intervals are properly cleaned up after completion/unmount.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass)
+- residual_risks:
+  - In-flight progress remains client-estimated (time/stage based) because discover endpoint is synchronous and does not stream step-by-step backend events.
+
+Continuation (same session, 2026-02-28) — per-container refresh progress + legacy cache-key fallback.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-backend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Refresh Posts UX/observability`
+    deliverable: `identified that queued async runs were not polled in UI, so users only saw static queue warning`
+    verification_command: `rg -n "pollContainerRefreshRun|refreshProgressByContainer|/api/admin/reddit/runs" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx' '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/runs/[runId]/route.ts'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `per-period refresh feedback`
+    deliverable: `added container-level progress messages (queued/running/completed/partial/failed), polling backend run status, and cache fetch on completion`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `run status proxy + cache compatibility`
+    deliverable: `added `/api/admin/reddit/runs/[runId]` proxy and discover-route fallback to legacy period_key cache lookup to surface previously saved windows`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `reddit manager/discover regressions`
+    deliverable: `validated full reddit manager + discover route test suites after polling/progress changes`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-backend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/runs/[runId]/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `Refresh Posts` now actively reports run state for that exact period container (queued/running/completed/partial/failed).
+  - UI now polls backend run status while refresh is active and updates messages in the period card.
+  - On terminal completion, UI fetches that period's cached posts and merges results without needing page reload.
+  - Discover route now checks both new hashed `period_key` and legacy key format for cache reads, so older previously-saved windows can still appear.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts` (pass, `33 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' 'src/app/api/admin/reddit/runs/[runId]/route.ts' tests/reddit-sources-manager.test.tsx tests/reddit-community-discover-route.test.ts` (pass)
+- residual_risks:
+  - Backend currently exposes limited live diagnostics while status is `running`, so progress detail may be coarse until completion.
+
+Continuation (same session, 2026-02-28) — Links controls simplified to a single Refresh button to remove dual Discover/Refresh confusion.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Replaced separate `Discover` and `Refresh` buttons in Settings > Links with one `Refresh Links` button.
+  - Removed mode-based dual-loading labels (`Discovering...` + `Refreshing...`) and unified to a single in-flight state (`Refreshing Links...`).
+  - `runShowLinkDiscovery` now executes one refresh path and always reports `Refreshed ...` in notices.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'` (pass)
+- residual_risks:
+  - Functional behavior is unchanged (same backend discover endpoint); this is a UX/state cleanup to prevent conflicting button states.
+
+Continuation (same session, 2026-02-28) — Per-episode/per-period refresh cards now show active spinner and backend queue depth.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added in-card loading indicator (`role=status` spinner + text) for queued/running container refreshes in both Pre/Post-Season boundary cards and episode cards.
+  - Extended refresh progress message formatting to include backend queue depth context (e.g., `other running`, `ahead`).
+  - Wired additive backend queue payload through run parsing in refresh/discover paths.
+  - Added regression test ensuring queued run state renders queue-depth message + loading status in the Pre-Season card.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx` (pass, `30 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Queue depth is best-effort at poll time; message can lag briefly between polls under heavy queue churn.
+
+Continuation (same session, 2026-02-28) — Fix stale queued state when cached rows return before async run completes.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - When `Refresh Posts` returns cached discovery plus an active backend run (`queued`/`running`), UI now continues polling run status instead of stopping at the initial queued message.
+  - Card progress now transitions to terminal status (`completed`/`partial`/`failed`) and refreshes cached rows after run completion.
+  - Removed misleading stale global warning behavior in this path by relying on live per-card status updates.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx` (pass, `31 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Polling cadence remains 3 seconds; very short jobs may complete between updates, but terminal state is now always fetched.
+
+Continuation (same session, 2026-02-28) — Pre-Season card count/progress fixes and multi-variant flair forcing.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `View All Posts` count in period/episode cards now uses tracked window post totals (from cached discovery) instead of only linked discussion rows.
+  - Refresh now submits all canonical variants of the tracked Salt Lake City flair via repeated `force_flair` params, improving backfill coverage when subreddit flair labels differ (`Salt Lake City` vs variants).
+  - Non-timeout refresh failures now mark container progress as `failed` instead of leaving stale `queued` text.
+  - Cached+active-run path now continues polling to terminal status.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx` (pass, `31 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Discovery volume is still bounded by Reddit listing/search API behavior; this improves variant coverage and UI correctness but cannot bypass Reddit index limits alone.
+
+Continuation (same session, 2026-02-28) — Settings Links panel now uses single refresh flow, stage-count progress summary, and source-clean cast/season URL rendering.
+- primary_skill: `senior-fullstack`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `Settings > Links UX simplification`
+    deliverable: `consolidated to one Refresh Links action and one progress stream`
+    verification_command: `rg -n "Refresh Links|linksRefreshing|linksRefreshProgress" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx'`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `links panel and cast/season rendering`
+    deliverable: `delete-only link rows, season one-row-per-season pills, one-person-per-row cast with multi-URL source pills`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-bravo-fandom-integration-wiring.test.ts tests/show-bravo-cast-only-wiring.test.ts tests/show-social-subnav-wiring.test.ts`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `discover response parsing`
+    deliverable: `UI now consumes backend additive stage_counts and reports normalized/validated/promoted outcomes`
+    verification_command: `rg -n "stage_counts|legacy_rows_normalized|links_validated|links_promoted" '/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx'`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `lint/test regression scan`
+    deliverable: `targeted links-related tests passed; documented unrelated pre-existing full-suite failures`
+    verification_command: `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP run test:ci`
+    status: `completed`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-page/types.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-page/constants.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Settings > Links uses one `Refresh Links` button and one active progress state, removing dual discover/refresh messaging.
+  - Refresh notice now reports show/season/people scan counts and normalization/validation/promotion counts from backend `stage_counts`.
+  - Pending emphasis was removed from links header; rows remain delete-only for validated links flow.
+  - Season Pages render as one row per season with pills for approved, deduped URLs.
+  - Cast-member Pages render one person per row with per-source pills for all approved URLs, including multiple fandom URLs.
+  - Source labeling now keeps `Wikipedia` and `Wikidata` distinct and removes generic `Knowledge Graph` bucket in shared types/constants.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass with warnings only; no errors)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-bravo-fandom-integration-wiring.test.ts tests/show-bravo-cast-only-wiring.test.ts tests/show-social-subnav-wiring.test.ts` (pass, `11 tests`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run test:ci` (fails due existing unrelated reddit/week-social suites; links-panel tests above pass)
+- residual_risks:
+  - Full frontend test suite currently has unrelated baseline failures; links-panel changes are covered by targeted passing tests.
+
+Continuation (same session, 2026-02-28) — Reddit period refresh UI cutover to tracked-flair totals + seed URL forwarding.
+- primary_skill: `senior-frontend`
+- supporting_skills: `orchestrate-plan-execution`, `senior-fullstack`, `senior-frontend`, `senior-qa`, `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used: `orchestrate-plan-execution -> senior-fullstack -> senior-frontend -> senior-qa -> code-reviewer`
+- default_skill_chain_exception_reason: `n/a`
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes`
+  - `screenalytics`: `no`
+  - `TRR-APP`: `yes`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Removed per-window single-flair forcing from manager refresh/cache fetch flows (no `force_flair` dependency for normal period operations).
+  - `Refresh Posts` requests now support optional per-container URL seed input (comma/newline) and forward as repeated `seed_post_url` query params.
+  - Admin discover proxy route now parses/forwards `seed_post_urls` to backend run-start payload.
+  - Card/pill copy updated to tracked-total language:
+    - `tracked flair posts` and `unassigned tracked posts` (not single `Salt Lake City` label wording).
+  - Tracked window filtering now respects backend `passes_flair_filter` and selected flair keys, so scan-flair term-matched posts are included while scan flair non-matches are excluded.
+  - Discovery cards now surface backend `flair_mode` diagnostics label (`all`, `scan_term`, `forced`, `show_match`).
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/reddit-sources-manager.test.tsx` (pass, `31 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/reddit-sources-manager.tsx tests/reddit-sources-manager.test.tsx` (pass)
+- residual_risks:
+  - Per-card seed URL input is intentionally lightweight text input; no URL-format hard validation is enforced client-side.
+  - Existing backend queue depth/timing still determines whether refresh completes immediately vs queued/running status.

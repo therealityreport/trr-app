@@ -13,6 +13,7 @@ export const WWHL_LABEL = "WWHL";
 const TRUSTED_IMDB_SHOW_CONTEXT_SOURCES = new Set([
   "episode_table",
   "imdb_title_fallback",
+  "request_context_inferred",
 ]);
 
 const SHOW_ACRONYM_RE = /\bRH[A-Z0-9]{2,6}\b/g;

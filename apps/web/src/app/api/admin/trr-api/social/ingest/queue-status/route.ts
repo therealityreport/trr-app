@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
     const data = await fetchSocialBackendJson("/ingest/queue-status", {
       fallbackError: "Failed to fetch queue status",
-      retries: 1,
+      retries: 0,
       timeoutMs: 15_000,
     });
     return NextResponse.json(data);

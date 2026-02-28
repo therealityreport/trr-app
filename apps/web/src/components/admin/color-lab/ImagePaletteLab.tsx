@@ -573,6 +573,7 @@ export default function ImagePaletteLab({
             </div>
           ) : (
             <div className="relative overflow-hidden rounded-lg border border-zinc-200 bg-black/70">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 ref={imageRef}
                 src={imageUrl}

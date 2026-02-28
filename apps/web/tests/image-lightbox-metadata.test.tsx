@@ -127,6 +127,25 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getByText("EXAMPLE.COM | Unknown Page")).toBeInTheDocument();
   });
 
+  it("renders explicit Show field in metadata coverage", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          showName: "The Traitors",
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByText("Show")).toBeInTheDocument();
+    expect(screen.getByText("The Traitors")).toBeInTheDocument();
+  });
+
   it("shows unified Content Type control with Profile Picture option", () => {
     render(
       <ImageLightbox
@@ -220,6 +239,47 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getAllByText("Section").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Caption").length).toBeGreaterThan(0);
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("renders circular face crop chips in metadata when face crops are available", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.1,
+              y: 0.1,
+              width: 0.2,
+              height: 0.2,
+              person_name: "Alan Cumming",
+            },
+          ],
+          faceCrops: [
+            {
+              index: 1,
+              x: 0.08,
+              y: 0.06,
+              width: 0.26,
+              height: 0.26,
+              variantUrl: "https://cdn.example.com/face-crops/alan.jpg",
+              size: 256,
+            },
+          ],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getAllByText("Face Crops").length).toBeGreaterThan(0);
+    expect(screen.getByText("Alan Cumming")).toBeInTheDocument();
+    expect(screen.getByAltText("Alan Cumming")).toBeInTheDocument();
   });
 
   it("renders Edit and Star/Flag labels in manage mode", () => {

@@ -88,12 +88,19 @@ import {
   applyThumbnailCropUpdateToPhotos,
 } from "./thumbnail-crop-state";
 import {
+  buildProxyConnectDetailMessage,
+  buildProxyTerminalErrorMessage,
   buildPersonRefreshDetailMessage,
+  createPersonRefreshPipelineSteps,
   createSyncProgressTracker,
+  finalizePersonRefreshPipelineSteps,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
   PERSON_REFRESH_PHASES,
+  type PersonRefreshPipelineMode,
+  type PersonRefreshPipelineStepState,
   updateSyncProgressTracker,
+  updatePersonRefreshPipelineSteps,
 } from "./refresh-progress";
 
 // Types
@@ -246,6 +253,7 @@ interface TrrPersonPhoto {
   people_count?: number | null;
   people_count_source?: "auto" | "manual" | null;
   face_boxes?: FaceBoxTag[] | null;
+  face_crops?: FaceCropTag[] | null;
   ingest_status?: string | null;
   title_names: string[] | null;
   metadata: Record<string, unknown> | null;
@@ -273,6 +281,17 @@ interface FaceBoxTag {
   person_id?: string;
   person_name?: string;
   label?: string;
+}
+
+interface FaceCropTag {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  variant_key?: string;
+  variant_url?: string;
+  size?: number;
 }
 
 type GallerySortOption = "newest" | "oldest" | "source" | "season-asc" | "season-desc";
@@ -610,6 +629,55 @@ const normalizeFaceBoxes = (value: unknown): FaceBoxTag[] => {
   return boxes;
 };
 
+const normalizeFaceCrops = (value: unknown): FaceCropTag[] => {
+  if (!Array.isArray(value)) return [];
+  const crops: FaceCropTag[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? clampFaceCoord(candidate.x) : null;
+    const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? clampFaceCoord(candidate.y) : null;
+    const width =
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? clampFaceCoord(candidate.width)
+        : null;
+    const height =
+      typeof candidate.height === "number" && Number.isFinite(candidate.height)
+        ? clampFaceCoord(candidate.height)
+        : null;
+    if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+      continue;
+    }
+    const index =
+      typeof candidate.index === "number" && Number.isFinite(candidate.index)
+        ? Math.max(1, Math.floor(candidate.index))
+        : crops.length + 1;
+    const variantKey =
+      typeof candidate.variant_key === "string" && candidate.variant_key.trim().length > 0
+        ? candidate.variant_key.trim()
+        : undefined;
+    const variantUrl =
+      typeof candidate.variant_url === "string" && candidate.variant_url.trim().length > 0
+        ? candidate.variant_url.trim()
+        : undefined;
+    const size =
+      typeof candidate.size === "number" && Number.isFinite(candidate.size) && candidate.size > 0
+        ? Math.floor(candidate.size)
+        : undefined;
+    crops.push({
+      index,
+      x,
+      y,
+      width,
+      height,
+      ...(variantKey ? { variant_key: variantKey } : {}),
+      ...(variantUrl ? { variant_url: variantUrl } : {}),
+      ...(size ? { size } : {}),
+    });
+  }
+  return crops;
+};
+
 const PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_PAGE_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
 const PERSON_PAGE_STREAM_START_DEADLINE_MS = 120_000;
@@ -889,6 +957,7 @@ function RefreshProgressBar({
   current,
   total,
   lastEventAt,
+  steps,
 }: {
   show: boolean;
   phase?: string | null;
@@ -896,6 +965,7 @@ function RefreshProgressBar({
   current?: number | null;
   total?: number | null;
   lastEventAt?: number | null;
+  steps?: PersonRefreshPipelineStepState[] | null;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -926,13 +996,27 @@ function RefreshProgressBar({
       )
     : null;
   const hasProgressBar = safeCurrent !== null && safeTotal !== null && safeTotal > 0;
+  const stepStates = Array.isArray(steps) ? steps : [];
+  const completedStepCount = stepStates.filter(
+    (step) => step.status === "completed" || step.status === "skipped",
+  ).length;
+  const failedStepCount = stepStates.filter((step) => step.status === "failed").length;
+  const runningStep = stepStates.find((step) => step.status === "running") ?? null;
+  const hasStepProgress = stepStates.length > 0;
+  const stepPercent = hasStepProgress ? Math.round((completedStepCount / stepStates.length) * 100) : 0;
   const percent = hasProgressBar
     ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100))
-    : 0;
+    : hasStepProgress
+      ? stepPercent
+      : 0;
   const phaseLabel = formatPersonRefreshPhaseLabel(phase);
   const countLabel =
     safeCurrent !== null && safeTotal !== null
       ? `${safeCurrent.toLocaleString()}/${safeTotal.toLocaleString()}`
+      : null;
+  const stepLabel =
+    hasStepProgress
+      ? `${completedStepCount.toLocaleString()}/${stepStates.length.toLocaleString()} phases complete`
       : null;
   const detailMessage =
     typeof message === "string" && message.trim()
@@ -945,16 +1029,45 @@ function RefreshProgressBar({
   const lastUpdateLabel =
     typeof lastUpdateSeconds === "number" ? `last update ${lastUpdateSeconds}s ago` : null;
 
+  const renderStepStatus = (step: PersonRefreshPipelineStepState): string => {
+    if (step.status === "running") {
+      if (typeof step.current === "number" && typeof step.total === "number") {
+        return `${step.current.toLocaleString()}/${step.total.toLocaleString()}`;
+      }
+      return "In progress";
+    }
+    if (step.status === "completed") return "Done";
+    if (step.status === "skipped") return "Skipped";
+    if (step.status === "failed") return "Failed";
+    return "Pending";
+  };
+
+  const stepToneClass = (status: PersonRefreshPipelineStepState["status"]): string => {
+    if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    if (status === "running") return "border-blue-200 bg-blue-50 text-blue-800";
+    if (status === "failed") return "border-red-200 bg-red-50 text-red-800";
+    if (status === "skipped") return "border-zinc-200 bg-zinc-100 text-zinc-600";
+    return "border-zinc-200 bg-white text-zinc-500";
+  };
+
   return (
     <div className="w-full">
-      {(phaseLabel || message || hasCounts) && (
+      {(phaseLabel || message || hasCounts || hasStepProgress) && (
         <div className="mb-1 flex items-center justify-between gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
-            {countLabel ? `${phaseLabel || "WORKING"} ${countLabel}` : phaseLabel || "WORKING"}
+            {countLabel
+              ? `${phaseLabel || runningStep?.label?.toUpperCase() || "WORKING"} ${countLabel}`
+              : phaseLabel || runningStep?.label?.toUpperCase() || "WORKING"}
           </p>
           {hasProgressBar && safeCurrent !== null && safeTotal !== null && (
             <p className="text-[11px] tabular-nums text-zinc-500">
               {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} ({percent}%)
+            </p>
+          )}
+          {!hasProgressBar && stepLabel && (
+            <p className="text-[11px] tabular-nums text-zinc-500">
+              {stepLabel}
+              {failedStepCount > 0 ? ` · ${failedStepCount.toLocaleString()} failed` : ""}
             </p>
           )}
           {!hasProgressBar && lastUpdateLabel && (
@@ -966,7 +1079,7 @@ function RefreshProgressBar({
         <p className="mb-1 text-[11px] text-zinc-500">{detailMessage}</p>
       )}
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
-        {hasProgressBar ? (
+        {hasProgressBar || hasStepProgress ? (
           <div
             className="h-full rounded-full bg-zinc-700 transition-all"
             style={{ width: `${percent}%` }}
@@ -975,6 +1088,33 @@ function RefreshProgressBar({
           <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-zinc-700/70" />
         )}
       </div>
+      {hasStepProgress && (
+        <div className="mt-2 grid gap-1 sm:grid-cols-2">
+          {stepStates.map((step) => {
+            const detail = step.result || step.message;
+            return (
+              <div
+                key={step.id}
+                className={`rounded-md border px-2 py-1.5 ${stepToneClass(step.status)}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em]">
+                    {step.label}
+                  </p>
+                  <p className="text-[11px] font-semibold tabular-nums">
+                    {renderStepStatus(step)}
+                  </p>
+                </div>
+                {detail && (
+                  <p className="mt-0.5 text-[11px] leading-tight">
+                    {detail}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1159,6 +1299,7 @@ function TagPeoplePanel({
     peopleCount: number | null;
     peopleCountSource: "auto" | "manual" | null;
     faceBoxes: FaceBoxTag[];
+    faceCrops: FaceCropTag[];
   }) => void;
   onMirrorUpdated: (payload: {
     mediaAssetId: string | null;
@@ -1191,6 +1332,7 @@ function TagPeoplePanel({
   const isEditable = (isMediaLink && Boolean(photo.link_id)) || (isCastPhoto && !hasSourceTags);
   const [taggedPeople, setTaggedPeople] = useState<TagPerson[]>([]);
   const [faceBoxes, setFaceBoxes] = useState<FaceBoxTag[]>([]);
+  const [faceCrops, setFaceCrops] = useState<FaceCropTag[]>([]);
   const [readonlyNames, setReadonlyNames] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TrrPerson[]>([]);
@@ -1267,12 +1409,14 @@ function TagPeoplePanel({
         : ""
     );
     setFaceBoxes(normalizeFaceBoxes(photo.face_boxes));
+    setFaceCrops(normalizeFaceCrops(photo.face_crops));
   }, [
     currentPeopleCount,
     defaultPersonTag?.id,
     defaultPersonTag?.name,
     isEditable,
     photo.face_boxes,
+    photo.face_crops,
     photo.id,
     photo.people_ids,
     photo.people_names,
@@ -1468,6 +1612,7 @@ function TagPeoplePanel({
           peopleCount,
           peopleCountSource,
           faceBoxes: nextFaceBoxes,
+          faceCrops,
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to update tags");
@@ -1481,6 +1626,7 @@ function TagPeoplePanel({
       isMediaLink,
       isCastPhoto,
       faceBoxes,
+      faceCrops,
       faceBoxesEnabled,
       onTagsUpdated,
       photo.id,
@@ -1551,6 +1697,25 @@ function TagPeoplePanel({
   const faceBoxTagOptions = useMemo(
     () => [...new Set([...taggedPeople.map((person) => person.name), ...readonlyNames])],
     [readonlyNames, taggedPeople]
+  );
+  const faceCropItems = useMemo(
+    () =>
+      faceCrops
+        .slice()
+        .sort((a, b) => a.index - b.index)
+        .map((crop) => {
+          const matchingBox = faceBoxes.find((box) => box.index === crop.index);
+          const label = matchingBox?.person_name || matchingBox?.label || `Face ${crop.index}`;
+          return {
+            index: crop.index,
+            label,
+            url:
+              typeof crop.variant_url === "string" && crop.variant_url.trim().length > 0
+                ? crop.variant_url
+                : null,
+          };
+        }),
+    [faceBoxes, faceCrops]
   );
 
   const handleFaceBoxAssignment = (faceIndex: number, personName: string) => {
@@ -1692,7 +1857,9 @@ function TagPeoplePanel({
       const peopleCountSource =
         (data.people_count_source as "auto" | "manual" | null) ?? "auto";
       const nextFaceBoxes = normalizeFaceBoxes(data.face_boxes);
+      const nextFaceCrops = normalizeFaceCrops(data.face_crops);
       setFaceBoxes(nextFaceBoxes);
+      setFaceCrops(nextFaceCrops);
       setPeopleCountInput(
         peopleCount !== null && peopleCount !== undefined
           ? String(peopleCount)
@@ -1706,6 +1873,7 @@ function TagPeoplePanel({
         peopleCount,
         peopleCountSource,
         faceBoxes: nextFaceBoxes,
+        faceCrops: nextFaceCrops,
       });
     };
 
@@ -2050,6 +2218,32 @@ function TagPeoplePanel({
           <span className="tracking-widest text-[10px] uppercase text-white/50">
             Face Boxes
           </span>
+          {faceCropItems.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {faceCropItems.map((crop) => (
+                <div
+                  key={`face-crop-chip-${crop.index}`}
+                  className="relative h-16 w-16 overflow-hidden rounded-full border border-white/20 bg-white/10"
+                  title={crop.label}
+                >
+                  {crop.url ? (
+                    <Image
+                      src={crop.url}
+                      alt={crop.label}
+                      fill
+                      sizes="64px"
+                      className="object-cover"
+                      unoptimized
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white/80">
+                      {crop.label.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {faceBoxes.length === 0 ? (
             <p className="mt-2 text-xs text-white/60">
               No face boxes detected yet. Use Recount to detect faces for multi-person tagging.
@@ -2428,10 +2622,17 @@ export default function PersonProfilePage() {
     detailMessage?: string | null;
     runId?: string | null;
     lastEventAt?: number | null;
+    checkpoint?: string | null;
+    streamState?: "connecting" | "connected" | "streaming" | "failed" | "completed" | null;
+    errorCode?: string | null;
+    attemptElapsedMs?: number | null;
+    attemptTimeoutMs?: number | null;
+    backendHost?: string | null;
   } | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshLiveCounts, setRefreshLiveCounts] = useState<JobLiveCounts | null>(null);
+  const [refreshPipelineSteps, setRefreshPipelineSteps] = useState<PersonRefreshPipelineStepState[] | null>(null);
   const [photosError, setPhotosError] = useState<string | null>(null);
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
@@ -4107,6 +4308,7 @@ export default function PersonProfilePage() {
       peopleCount: number | null;
       peopleCountSource: "auto" | "manual" | null;
       faceBoxes: FaceBoxTag[];
+      faceCrops: FaceCropTag[];
     }) => {
       setPhotos((prev) =>
         prev.map((photo) =>
@@ -4118,6 +4320,7 @@ export default function PersonProfilePage() {
                 people_count: payload.peopleCount,
                 people_count_source: payload.peopleCountSource,
                 face_boxes: payload.faceBoxes,
+                face_crops: payload.faceCrops,
               }
             : payload.castPhotoId && photo.id === payload.castPhotoId
               ? {
@@ -4127,6 +4330,7 @@ export default function PersonProfilePage() {
                   people_count: payload.peopleCount,
                   people_count_source: payload.peopleCountSource,
                   face_boxes: payload.faceBoxes,
+                  face_crops: payload.faceCrops,
                 }
               : photo
         )
@@ -4146,6 +4350,7 @@ export default function PersonProfilePage() {
               people_count: payload.peopleCount,
               people_count_source: payload.peopleCountSource,
               face_boxes: payload.faceBoxes,
+              face_crops: payload.faceCrops,
             },
           };
         }
@@ -4159,6 +4364,7 @@ export default function PersonProfilePage() {
               people_count: payload.peopleCount,
               people_count_source: payload.peopleCountSource,
               face_boxes: payload.faceBoxes,
+              face_crops: payload.faceCrops,
             },
           };
         }
@@ -4712,6 +4918,7 @@ export default function PersonProfilePage() {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
     const requestId = buildPersonRefreshRequestId();
+    const pipelineMode: PersonRefreshPipelineMode = "refresh";
     const refreshBody =
       mode === "sync"
         ? {
@@ -4737,6 +4944,7 @@ export default function PersonProfilePage() {
           };
 
     setRefreshingImages(true);
+    setRefreshPipelineSteps(createPersonRefreshPipelineSteps(pipelineMode));
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.syncing,
       message: mode === "sync" ? "Opening sync stream..." : "Opening refresh stream...",
@@ -5030,6 +5238,55 @@ export default function PersonProfilePage() {
                     : typeof retryAfterRaw === "string"
                       ? Number.parseInt(retryAfterRaw, 10)
                       : null;
+                const checkpoint =
+                  typeof (payload as { checkpoint?: unknown }).checkpoint === "string"
+                    ? ((payload as { checkpoint: string }).checkpoint)
+                    : null;
+                const streamStateRaw = (payload as { stream_state?: unknown }).stream_state;
+                const streamState =
+                  streamStateRaw === "connecting" ||
+                  streamStateRaw === "connected" ||
+                  streamStateRaw === "streaming" ||
+                  streamStateRaw === "failed" ||
+                  streamStateRaw === "completed"
+                    ? streamStateRaw
+                    : null;
+                const errorCode =
+                  typeof (payload as { error_code?: unknown }).error_code === "string"
+                    ? ((payload as { error_code: string }).error_code)
+                    : null;
+                const attemptRaw = (payload as { attempt?: unknown }).attempt;
+                const attempt =
+                  typeof attemptRaw === "number"
+                    ? attemptRaw
+                    : typeof attemptRaw === "string"
+                      ? Number.parseInt(attemptRaw, 10)
+                      : null;
+                const maxAttemptsRaw = (payload as { max_attempts?: unknown }).max_attempts;
+                const maxAttempts =
+                  typeof maxAttemptsRaw === "number"
+                    ? maxAttemptsRaw
+                    : typeof maxAttemptsRaw === "string"
+                      ? Number.parseInt(maxAttemptsRaw, 10)
+                      : null;
+                const attemptElapsedRaw = (payload as { attempt_elapsed_ms?: unknown }).attempt_elapsed_ms;
+                const attemptElapsedMs =
+                  typeof attemptElapsedRaw === "number"
+                    ? attemptElapsedRaw
+                    : typeof attemptElapsedRaw === "string"
+                      ? Number.parseInt(attemptElapsedRaw, 10)
+                      : null;
+                const attemptTimeoutRaw = (payload as { attempt_timeout_ms?: unknown }).attempt_timeout_ms;
+                const attemptTimeoutMs =
+                  typeof attemptTimeoutRaw === "number"
+                    ? attemptTimeoutRaw
+                    : typeof attemptTimeoutRaw === "string"
+                      ? Number.parseInt(attemptTimeoutRaw, 10)
+                      : null;
+                const backendHost =
+                  typeof (payload as { backend_host?: unknown }).backend_host === "string"
+                    ? ((payload as { backend_host: string }).backend_host)
+                    : null;
                 const syncCounts =
                   !heartbeat && mappedPhase === PERSON_REFRESH_PHASES.syncing
                     ? updateSyncProgressTracker(syncProgressTracker, {
@@ -5039,30 +5296,48 @@ export default function PersonProfilePage() {
                         total: numericTotal,
                       })
                     : null;
-                const baseDetailMessage = buildPersonRefreshDetailMessage({
-                  rawStage,
+                const connectDetailMessage = buildProxyConnectDetailMessage({
+                  stage: rawStage,
                   message,
-                  heartbeat,
-                  elapsedMs,
-                  source,
-                  sourceTotal:
-                    typeof sourceTotal === "number" && Number.isFinite(sourceTotal)
-                      ? sourceTotal
+                  attempt:
+                    typeof attempt === "number" && Number.isFinite(attempt) ? attempt : null,
+                  maxAttempts:
+                    typeof maxAttempts === "number" && Number.isFinite(maxAttempts) ? maxAttempts : null,
+                  attemptElapsedMs:
+                    typeof attemptElapsedMs === "number" && Number.isFinite(attemptElapsedMs)
+                      ? attemptElapsedMs
                       : null,
-                  mirroredCount:
-                    typeof mirroredCount === "number" && Number.isFinite(mirroredCount)
-                      ? mirroredCount
-                      : null,
-                  current: numericCurrent,
-                  total: numericTotal,
-                  skipReason,
-                  detail,
-                  serviceUnavailable,
-                  retryAfterS:
-                    typeof retryAfterS === "number" && Number.isFinite(retryAfterS)
-                      ? retryAfterS
+                  attemptTimeoutMs:
+                    typeof attemptTimeoutMs === "number" && Number.isFinite(attemptTimeoutMs)
+                      ? attemptTimeoutMs
                       : null,
                 });
+                const baseDetailMessage =
+                  connectDetailMessage ??
+                  buildPersonRefreshDetailMessage({
+                    rawStage,
+                    message,
+                    heartbeat,
+                    elapsedMs,
+                    source,
+                    sourceTotal:
+                      typeof sourceTotal === "number" && Number.isFinite(sourceTotal)
+                        ? sourceTotal
+                        : null,
+                    mirroredCount:
+                      typeof mirroredCount === "number" && Number.isFinite(mirroredCount)
+                        ? mirroredCount
+                        : null,
+                    current: numericCurrent,
+                    total: numericTotal,
+                    skipReason,
+                    detail,
+                    serviceUnavailable,
+                    retryAfterS:
+                      typeof retryAfterS === "number" && Number.isFinite(retryAfterS)
+                        ? retryAfterS
+                        : null,
+                  });
                 const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
                 setRefreshLiveCounts(nextLiveCounts);
                 const enrichedMessage = appendLiveCountsToMessage(
@@ -5078,7 +5353,34 @@ export default function PersonProfilePage() {
                   detailMessage: enrichedMessage || baseDetailMessage || message || null,
                   runId: resolvedRunId,
                   lastEventAt: Date.now(),
+                  checkpoint,
+                  streamState,
+                  errorCode,
+                  attemptElapsedMs:
+                    typeof attemptElapsedMs === "number" && Number.isFinite(attemptElapsedMs)
+                      ? attemptElapsedMs
+                      : null,
+                  attemptTimeoutMs:
+                    typeof attemptTimeoutMs === "number" && Number.isFinite(attemptTimeoutMs)
+                      ? attemptTimeoutMs
+                      : null,
+                  backendHost,
                 });
+                setRefreshPipelineSteps((prev) =>
+                  updatePersonRefreshPipelineSteps(
+                    prev ?? createPersonRefreshPipelineSteps(pipelineMode),
+                    {
+                      rawStage,
+                      message: enrichedMessage || baseDetailMessage || message,
+                      current: syncCounts?.current ?? numericCurrent,
+                      total: syncCounts?.total ?? numericTotal,
+                      heartbeat,
+                      skipReason,
+                      serviceUnavailable,
+                      detail,
+                    },
+                  ),
+                );
                 if (!heartbeat) {
                   appendRefreshLog({
                     source: "page_refresh",
@@ -5101,6 +5403,35 @@ export default function PersonProfilePage() {
                   : payload;
                 const summaryText = formatPersonRefreshSummary(summary);
                 const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+                const completionMessage =
+                  summaryText
+                    ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}. Reloading page data...`
+                    : liveCountSuffix
+                      ? `Images refreshed. ${liveCountSuffix}. Reloading page data...`
+                      : "Images refreshed. Reloading page data...";
+                setRefreshPipelineSteps((prev) =>
+                  finalizePersonRefreshPipelineSteps(
+                    prev ?? createPersonRefreshPipelineSteps(pipelineMode),
+                    pipelineMode,
+                    summary,
+                  ),
+                );
+                setRefreshProgress((prev) => ({
+                  current: null,
+                  total: null,
+                  phase: "COMPLETED",
+                  rawStage: "complete",
+                  message: completionMessage,
+                  detailMessage: completionMessage,
+                  runId: payloadRequestId,
+                  lastEventAt: null,
+                  checkpoint: "complete",
+                  streamState: "completed",
+                  errorCode: null,
+                  attemptElapsedMs: prev?.attemptElapsedMs ?? null,
+                  attemptTimeoutMs: prev?.attemptTimeoutMs ?? null,
+                  backendHost: prev?.backendHost ?? null,
+                }));
                 setRefreshNotice(
                   summaryText
                     ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}`
@@ -5120,23 +5451,112 @@ export default function PersonProfilePage() {
               } else if (eventType === "error") {
                 const errorPayload =
                   payload && typeof payload === "object"
-                    ? (payload as { stage?: string; error?: string; detail?: string; request_id?: string })
+                    ? (payload as {
+                        stage?: string;
+                        error?: string;
+                        detail?: string;
+                        request_id?: string;
+                        checkpoint?: string;
+                        stream_state?: string;
+                        error_code?: string;
+                        is_terminal?: boolean;
+                        backend_host?: string;
+                        attempts_used?: number | string;
+                        max_attempts?: number | string;
+                      })
                     : null;
                 const stage = errorPayload?.stage ? `[${errorPayload.stage}] ` : "";
                 const payloadRequestId =
                   typeof errorPayload?.request_id === "string" ? errorPayload.request_id : requestId;
-                const errorText =
-                  errorPayload?.error && errorPayload?.detail
+                const attemptUsedRaw = errorPayload?.attempts_used;
+                const maxAttemptsRaw = errorPayload?.max_attempts;
+                const attemptsUsed =
+                  typeof attemptUsedRaw === "number"
+                    ? attemptUsedRaw
+                    : typeof attemptUsedRaw === "string"
+                      ? Number.parseInt(attemptUsedRaw, 10)
+                      : null;
+                const maxAttempts =
+                  typeof maxAttemptsRaw === "number"
+                    ? maxAttemptsRaw
+                    : typeof maxAttemptsRaw === "string"
+                      ? Number.parseInt(maxAttemptsRaw, 10)
+                      : null;
+                const isTerminal = errorPayload?.is_terminal === true;
+                const terminalProxyConnectError =
+                  isTerminal &&
+                  errorPayload?.stage === "proxy_connecting" &&
+                  (errorPayload?.checkpoint === "connect_exhausted" ||
+                    errorPayload?.stream_state === "failed");
+                const formattedErrorText = terminalProxyConnectError
+                  ? buildProxyTerminalErrorMessage({
+                      stage: errorPayload?.stage ?? null,
+                      error: errorPayload?.error ?? null,
+                      detail: errorPayload?.detail ?? null,
+                      errorCode: errorPayload?.error_code ?? null,
+                      backendHost: errorPayload?.backend_host ?? null,
+                      attemptsUsed:
+                        typeof attemptsUsed === "number" && Number.isFinite(attemptsUsed)
+                          ? attemptsUsed
+                          : null,
+                      maxAttempts:
+                        typeof maxAttempts === "number" && Number.isFinite(maxAttempts)
+                          ? maxAttempts
+                          : null,
+                    })
+                  : errorPayload?.error && errorPayload?.detail
                     ? `${stage}${errorPayload.error}: ${errorPayload.detail}`
                     : `${stage}${errorPayload?.error || "Failed to refresh images"}`;
+                setRefreshPipelineSteps((prev) =>
+                  updatePersonRefreshPipelineSteps(
+                    prev ?? createPersonRefreshPipelineSteps(pipelineMode),
+                    {
+                      rawStage: errorPayload?.stage ?? null,
+                      message: errorPayload?.error ?? "Failed to refresh images",
+                      detail: errorPayload?.detail ?? null,
+                      current: null,
+                      total: null,
+                      forceStatus: "failed",
+                    },
+                  ),
+                );
+                setRefreshProgress((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        checkpoint:
+                          typeof errorPayload?.checkpoint === "string" ? errorPayload.checkpoint : prev.checkpoint,
+                        streamState:
+                          errorPayload?.stream_state === "connecting" ||
+                          errorPayload?.stream_state === "connected" ||
+                          errorPayload?.stream_state === "streaming" ||
+                          errorPayload?.stream_state === "failed" ||
+                          errorPayload?.stream_state === "completed"
+                            ? errorPayload.stream_state
+                            : prev.streamState,
+                        errorCode:
+                          typeof errorPayload?.error_code === "string"
+                            ? errorPayload.error_code
+                            : prev.errorCode,
+                        backendHost:
+                          typeof errorPayload?.backend_host === "string"
+                            ? errorPayload.backend_host
+                            : prev.backendHost,
+                        detailMessage: formattedErrorText,
+                        lastEventAt: Date.now(),
+                      }
+                    : prev,
+                );
                 // Mark as a backend error so the retry loop does NOT retry.
-                const backendErr = new Error(errorText);
+                const backendErr = new Error(formattedErrorText);
                 backendErr.name = "BackendError";
                 appendRefreshLog({
                   source: "page_refresh",
                   stage: errorPayload?.stage ?? "error",
-                  message: errorPayload?.error || "Failed to refresh images",
-                  detail: errorPayload?.detail,
+                  message: terminalProxyConnectError
+                    ? "Backend stream connect failed"
+                    : errorPayload?.error || "Failed to refresh images",
+                  detail: formattedErrorText,
                   level: "error",
                   runId: payloadRequestId,
                 });
@@ -5271,9 +5691,32 @@ export default function PersonProfilePage() {
       ]);
     } catch (err) {
       console.error("Failed to refresh images:", err);
+      const baseErrorMessage = err instanceof Error ? err.message : "Failed to refresh images";
+      const checkpoint = refreshProgress?.checkpoint;
+      const streamState = refreshProgress?.streamState;
+      const backendHost = refreshProgress?.backendHost;
+      const contextualErrorMessage =
+        (/^failed to fetch$/i.test(baseErrorMessage) || /fetch failed/i.test(baseErrorMessage)) &&
+        checkpoint
+          ? `Refresh stream failed during ${checkpoint}${backendHost ? ` (${backendHost})` : ""}. ${baseErrorMessage}`
+          : baseErrorMessage;
       const errorMessage =
-        err instanceof Error ? err.message : "Failed to refresh images";
+        streamState === "failed" && checkpoint && contextualErrorMessage === "Failed to refresh images"
+          ? `Refresh stream failed during ${checkpoint}.`
+          : contextualErrorMessage;
       setRefreshError(errorMessage);
+      setRefreshPipelineSteps((prev) =>
+        updatePersonRefreshPipelineSteps(
+          prev ?? createPersonRefreshPipelineSteps(pipelineMode),
+          {
+            rawStage: null,
+            message: errorMessage,
+            current: null,
+            total: null,
+            forceStatus: "failed",
+          },
+        ),
+      );
       appendRefreshLog({
         source: "page_refresh",
         stage: "refresh_error",
@@ -5284,7 +5727,6 @@ export default function PersonProfilePage() {
       });
     } finally {
       setRefreshingImages(false);
-      setRefreshProgress(null);
       setRefreshLiveCounts(null);
     }
   }, [
@@ -5300,6 +5742,7 @@ export default function PersonProfilePage() {
     fetchCoverPhoto,
     getAuthHeaders,
     personId,
+    refreshProgress,
     refreshLiveCounts,
     showIdForApi,
     activeShowName,
@@ -5310,6 +5753,7 @@ export default function PersonProfilePage() {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
     const requestId = buildPersonRefreshRequestId();
+    const pipelineMode: PersonRefreshPipelineMode = "reprocess";
     const stageRequest: Record<
       ReprocessStageKey,
       {
@@ -5364,6 +5808,7 @@ export default function PersonProfilePage() {
     const selectedStage = stageRequest[stage];
 
     setReprocessingImages(true);
+    setRefreshPipelineSteps(createPersonRefreshPipelineSteps(pipelineMode));
     setRefreshLiveCounts(null);
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.counting,
@@ -5557,6 +6002,21 @@ export default function PersonProfilePage() {
               rawStage: rawPhase,
               lastEventAt: Date.now(),
             });
+            setRefreshPipelineSteps((prev) =>
+              updatePersonRefreshPipelineSteps(
+                prev ?? createPersonRefreshPipelineSteps(pipelineMode),
+                {
+                  rawStage: rawPhase,
+                  message: enrichedMessage || baseDetailMessage || message,
+                  current: numericCurrent,
+                  total: numericTotal,
+                  heartbeat,
+                  skipReason,
+                  serviceUnavailable,
+                  detail,
+                },
+              ),
+            );
             appendRefreshLog({
               source: "page_refresh",
               stage: rawPhase ?? "reprocess_progress",
@@ -5577,6 +6037,29 @@ export default function PersonProfilePage() {
               : payload;
             const summaryText = formatPersonRefreshSummary(summary);
             const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+            const completionMessage =
+              summaryText
+                ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}. Reloading photos...`
+                : liveCountSuffix
+                  ? `Reprocessing complete. ${liveCountSuffix}. Reloading photos...`
+                  : "Reprocessing complete. Reloading photos...";
+            setRefreshPipelineSteps((prev) =>
+              finalizePersonRefreshPipelineSteps(
+                prev ?? createPersonRefreshPipelineSteps(pipelineMode),
+                pipelineMode,
+                summary,
+              ),
+            );
+            setRefreshProgress({
+              current: null,
+              total: null,
+              phase: "COMPLETED",
+              rawStage: "complete",
+              message: completionMessage,
+              detailMessage: completionMessage,
+              runId: payloadRequestId,
+              lastEventAt: null,
+            });
             setRefreshNotice(
               summaryText
                 ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}`
@@ -5605,6 +6088,22 @@ export default function PersonProfilePage() {
                 ? `${message.error}: ${message.detail}`
                 : message?.error || "Failed to reprocess images";
             setRefreshError(errorText);
+            setRefreshPipelineSteps((prev) =>
+              updatePersonRefreshPipelineSteps(
+                prev ?? createPersonRefreshPipelineSteps(pipelineMode),
+                {
+                  rawStage:
+                    payload && typeof payload === "object" && typeof payload.stage === "string"
+                      ? payload.stage
+                      : null,
+                  message: message?.error ?? "Failed to reprocess images",
+                  detail: message?.detail ?? null,
+                  current: null,
+                  total: null,
+                  forceStatus: "failed",
+                },
+              ),
+            );
             appendRefreshLog({
               source: "page_refresh",
               stage: "reprocess_error",
@@ -5621,6 +6120,16 @@ export default function PersonProfilePage() {
 
       if (!sawComplete && !hadError) {
         setRefreshNotice(selectedStage.defaultSuccessMessage);
+        setRefreshProgress({
+          current: null,
+          total: null,
+          phase: "COMPLETED",
+          rawStage: "complete",
+          message: `${selectedStage.defaultSuccessMessage} Reloading photos...`,
+          detailMessage: `${selectedStage.defaultSuccessMessage} Reloading photos...`,
+          runId: requestId,
+          lastEventAt: null,
+        });
         appendRefreshLog({
           source: "page_refresh",
           stage: "reprocess_complete",
@@ -5637,6 +6146,18 @@ export default function PersonProfilePage() {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to reprocess images";
       setRefreshError(errorMessage);
+      setRefreshPipelineSteps((prev) =>
+        updatePersonRefreshPipelineSteps(
+          prev ?? createPersonRefreshPipelineSteps(pipelineMode),
+          {
+            rawStage: null,
+            message: errorMessage,
+            current: null,
+            total: null,
+            forceStatus: "failed",
+          },
+        ),
+      );
       appendRefreshLog({
         source: "page_refresh",
         stage: "reprocess_error",
@@ -5647,7 +6168,6 @@ export default function PersonProfilePage() {
       });
     } finally {
       setReprocessingImages(false);
-      setRefreshProgress(null);
       setRefreshLiveCounts(null);
     }
   }, [
@@ -6812,12 +7332,18 @@ export default function PersonProfilePage() {
               </div>
               <div className="mb-4 space-y-2">
                 <RefreshProgressBar
-                  show={refreshingImages || reprocessingImages}
+                  show={
+                    refreshingImages ||
+                    reprocessingImages ||
+                    Boolean(refreshProgress) ||
+                    Boolean(refreshPipelineSteps?.length)
+                  }
                   phase={refreshProgress?.phase}
                   message={refreshProgress?.detailMessage ?? refreshProgress?.message}
                   current={refreshProgress?.current}
                   total={refreshProgress?.total}
                   lastEventAt={refreshProgress?.lastEventAt}
+                  steps={refreshPipelineSteps}
                 />
                 {refreshError && (
                   <p className="text-xs text-red-600">{refreshError}</p>

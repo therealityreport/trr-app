@@ -385,6 +385,305 @@ describe("reddit-discovery-service", () => {
     expect(fetchMock.mock.calls.every((call) => String(call[0]).includes("/new.json"))).toBe(true);
   });
 
+  it("marks exhaustive window incomplete when pagination ends before period start is reached", async () => {
+    const toEpoch = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes("/new.json")) {
+        throw new Error(`Unexpected URL: ${url}`);
+      }
+      return new Response(
+        JSON.stringify({
+          data: {
+            children: makeListing([
+              {
+                id: "window-row-1",
+                title: "RHOSLC within window 1",
+                selftext: "Inside period",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/window-row-1/example/",
+                permalink: "/r/BravoRealHousewives/comments/window-row-1/example/",
+                author: "user1",
+                score: 50,
+                num_comments: 9,
+                created_utc: toEpoch("2026-01-20T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+              {
+                id: "window-row-2",
+                title: "RHOSLC within window 2",
+                selftext: "Inside period",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/window-row-2/example/",
+                permalink: "/r/BravoRealHousewives/comments/window-row-2/example/",
+                author: "user2",
+                score: 40,
+                num_comments: 7,
+                created_utc: toEpoch("2026-01-15T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+            ]).data.children,
+            after: null,
+          },
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverSubredditThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      analysisAllFlares: ["Salt Lake City"],
+      exhaustiveWindow: true,
+      periodStart: "2026-01-01T00:00:00.000Z",
+      periodEnd: "2026-01-31T23:59:59.000Z",
+    });
+
+    expect(result.collection_mode).toBe("exhaustive_window");
+    expect(result.window_exhaustive_complete).toBe(false);
+    expect(result.listing_pages_fetched).toBe(1);
+    expect(result.threads).toHaveLength(2);
+  });
+
+  it("uses flair search backfill to recover historical in-window posts missing from listing crawl", async () => {
+    const toEpoch = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/new.json")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              children: makeListing([
+                {
+                  id: "listing-only",
+                  title: "Listing only RHOSLC post",
+                  selftext: "In window from listing",
+                  url: "https://www.reddit.com/r/BravoRealHousewives/comments/listing-only/example/",
+                  permalink: "/r/BravoRealHousewives/comments/listing-only/example/",
+                  author: "user1",
+                  score: 80,
+                  num_comments: 10,
+                  created_utc: toEpoch("2026-01-20T12:00:00.000Z"),
+                  link_flair_text: "Salt Lake City",
+                },
+              ]).data.children,
+              after: null,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/search.json")) {
+        if (url.includes("%22salt+lake+city%22")) {
+          return new Response(
+            JSON.stringify(makeSearchListing([])),
+            { status: 200 },
+          );
+        }
+        if (url.includes("%22rhoslc%22")) {
+          return new Response(
+            JSON.stringify(
+              makeSearchListing([
+                {
+                  id: "backfill-historical",
+                  title: "Recovered historical SLC post",
+                  selftext: "In-window post from alias/acronym search",
+                  url: "https://www.reddit.com/r/BravoRealHousewives/comments/backfill-historical/example/",
+                  permalink: "/r/BravoRealHousewives/comments/backfill-historical/example/",
+                  author: "user2",
+                  score: 65,
+                  num_comments: 14,
+                  created_utc: toEpoch("2026-01-05T12:00:00.000Z"),
+                  link_flair_text: "Salt Lake City ❄️",
+                },
+                {
+                  id: "older-than-window",
+                  title: "Older RHOSLC flair post",
+                  selftext: "Outside start window but used for completeness boundary",
+                  url: "https://www.reddit.com/r/BravoRealHousewives/comments/older-than-window/example/",
+                  permalink: "/r/BravoRealHousewives/comments/older-than-window/example/",
+                  author: "user3",
+                  score: 12,
+                  num_comments: 1,
+                  created_utc: toEpoch("2025-12-15T12:00:00.000Z"),
+                  link_flair_text: "Salt Lake City",
+                },
+              ]),
+            ),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify(makeSearchListing([])),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverSubredditThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      analysisAllFlares: ["Salt Lake City"],
+      exhaustiveWindow: true,
+      searchBackfill: true,
+      periodStart: "2026-01-01T00:00:00.000Z",
+      periodEnd: "2026-01-31T23:59:59.000Z",
+    });
+
+    expect(result.threads.map((thread) => thread.reddit_post_id).sort()).toEqual([
+      "backfill-historical",
+      "listing-only",
+    ]);
+    expect(result.totals.fetched_rows).toBe(2);
+    expect(result.totals.tracked_flair_rows).toBe(2);
+    expect(result.search_backfill?.enabled).toBe(true);
+    expect(result.search_backfill?.queries_run).toBeGreaterThan(0);
+    expect(
+      (result.search_backfill?.query_diagnostics ?? []).some(
+        (query) => query.query === "\"rhoslc\"" && query.rows_fetched > 0,
+      ),
+    ).toBe(true);
+  });
+
+  it("reports conservative search backfill completeness diagnostics when page budget ends early", async () => {
+    const toEpoch = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/new.json")) {
+        return new Response(
+          JSON.stringify(
+            makeSearchListing([
+              {
+                id: "listing-row",
+                title: "Listing row",
+                selftext: "Listing content",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/listing-row/example/",
+                permalink: "/r/BravoRealHousewives/comments/listing-row/example/",
+                author: "user1",
+                score: 11,
+                num_comments: 2,
+                created_utc: toEpoch("2026-01-20T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/search.json")) {
+        return new Response(
+          JSON.stringify(
+            makeSearchListing(
+              [
+                {
+                  id: "search-row",
+                  title: "Search row",
+                  selftext: "Search content",
+                  url: "https://www.reddit.com/r/BravoRealHousewives/comments/search-row/example/",
+                  permalink: "/r/BravoRealHousewives/comments/search-row/example/",
+                  author: "user2",
+                  score: 22,
+                  num_comments: 3,
+                  created_utc: toEpoch("2026-01-18T12:00:00.000Z"),
+                  link_flair_text: "Salt Lake City",
+                },
+              ],
+              "t3_next_page",
+            ),
+          ),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverSubredditThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      analysisAllFlares: ["Salt Lake City"],
+      exhaustiveWindow: true,
+      searchBackfill: true,
+      maxPages: 1,
+      periodStart: "2026-01-01T00:00:00.000Z",
+      periodEnd: "2026-01-31T23:59:59.000Z",
+    });
+
+    expect(result.search_backfill).not.toBeNull();
+    expect(result.search_backfill?.queries_run).toBe(1);
+    expect(result.search_backfill?.pages_fetched).toBe(1);
+    expect(result.search_backfill?.complete).toBe(false);
+    expect(result.search_backfill?.query_diagnostics[0]?.complete).toBe(false);
+    expect(result.search_backfill?.query_diagnostics[0]?.reached_period_start).toBe(false);
+  });
+
+  it("falls back to search backfill when exhaustive listing is rate-limited", async () => {
+    const toEpoch = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/new.json")) {
+        return new Response("rate limited", { status: 429 });
+      }
+      if (url.includes("/search.json")) {
+        return new Response(
+          JSON.stringify(
+            makeSearchListing([
+              {
+                id: "backfill-only-row",
+                title: "SLC trailer thread",
+                selftext: "Recovered via search fallback",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/backfill-only-row/example/",
+                permalink: "/r/BravoRealHousewives/comments/backfill-only-row/example/",
+                author: "user1",
+                score: 30,
+                num_comments: 5,
+                created_utc: toEpoch("2025-08-20T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+              {
+                id: "older-than-window-fallback",
+                title: "Older SLC row",
+                selftext: "Used for start boundary",
+                url: "https://www.reddit.com/r/BravoRealHousewives/comments/older-than-window-fallback/example/",
+                permalink: "/r/BravoRealHousewives/comments/older-than-window-fallback/example/",
+                author: "user2",
+                score: 10,
+                num_comments: 1,
+                created_utc: toEpoch("2024-08-20T12:00:00.000Z"),
+                link_flair_text: "Salt Lake City",
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverSubredditThreads({
+      subreddit: "BravoRealHousewives",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      analysisAllFlares: ["Salt Lake City"],
+      exhaustiveWindow: true,
+      searchBackfill: true,
+      maxPages: 6,
+      periodStart: "2025-08-14T00:00:00.000Z",
+      periodEnd: "2025-09-16T23:59:59.000Z",
+    });
+
+    expect(result.failed_sorts).toEqual(["new"]);
+    expect(result.rate_limited_sorts).toEqual(["new"]);
+    expect(result.window_exhaustive_complete).toBe(false);
+    expect(result.threads.map((thread) => thread.reddit_post_id)).toContain("backfill-only-row");
+    expect(result.search_backfill?.queries_run).toBeGreaterThan(0);
+  });
+
   it("forces tracked flair inclusion even when show-match terms are absent", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(

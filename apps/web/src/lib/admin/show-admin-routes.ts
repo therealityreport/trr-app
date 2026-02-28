@@ -232,6 +232,16 @@ const toCanonicalWeekToken = (value: string | number | null | undefined): string
   return `w${parsed}`;
 };
 
+const parseLegacyHandleToken = (value: string | null | undefined): string | null => {
+  const normalized = normalizeSegment(value);
+  if (!normalized) return null;
+  if (normalized === "details" || normalized === "overview" || normalized === "account") {
+    return null;
+  }
+  if (toSocialPlatform(normalized)) return null;
+  return normalizeHandleSlug(normalized);
+};
+
 const toSocialPlatform = (value: string | null | undefined): SocialPlatformSlug | null => {
   const normalized = normalizeSegment(value);
   if (
@@ -511,11 +521,11 @@ const parseSocialPathFilters = (
         handle = nextHandle;
       }
     } else {
-      const legacyHandle = normalizeHandleSlug(remaining[cursor]);
-      if (legacyHandle) {
-        handle = legacyHandle;
-      }
+    const legacyHandle = parseLegacyHandleToken(remaining[cursor]);
+    if (legacyHandle) {
+      handle = legacyHandle;
     }
+  }
   }
 
   const canonicalSegments = ["social"];

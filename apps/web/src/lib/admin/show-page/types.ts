@@ -90,7 +90,7 @@ export type ShowRefreshRunOptions = {
 export type PersonRefreshMode = "full" | "ingest_only" | "profile_only";
 
 export type HealthStatus = "ready" | "missing" | "stale";
-export type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "knowledge" | "fandom";
+export type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "wikipedia" | "wikidata" | "fandom";
 export type PersonLinkSourceState = "found" | "missing" | "pending" | "rejected";
 
 export type PersonLinkSourceSummary<TLink = unknown> = {

@@ -1985,6 +1985,7 @@ export interface TrrPersonPhoto {
   people_count?: number | null;
   people_count_source?: "auto" | "manual" | null;
   face_boxes?: FaceBoxTag[] | null;
+  face_crops?: FaceCropTag[] | null;
   ingest_status?: string | null;
   title_names: string[] | null;
   metadata: Record<string, unknown> | null;
@@ -2012,6 +2013,17 @@ export interface FaceBoxTag {
   person_id?: string;
   person_name?: string;
   label?: string;
+}
+
+export interface FaceCropTag {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  variant_key?: string;
+  variant_url?: string;
+  size?: number;
 }
 
 export interface TrrPersonCredit {
@@ -2218,6 +2230,55 @@ const toFaceBoxes = (value: unknown): FaceBoxTag[] | null => {
     });
   }
   return boxes;
+};
+
+const toFaceCrops = (value: unknown): FaceCropTag[] | null => {
+  if (!Array.isArray(value)) return null;
+  const crops: FaceCropTag[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? clampFaceCoord(candidate.x) : null;
+    const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? clampFaceCoord(candidate.y) : null;
+    const width =
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? clampFaceCoord(candidate.width)
+        : null;
+    const height =
+      typeof candidate.height === "number" && Number.isFinite(candidate.height)
+        ? clampFaceCoord(candidate.height)
+        : null;
+    if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+      continue;
+    }
+    const index =
+      typeof candidate.index === "number" && Number.isFinite(candidate.index)
+        ? Math.max(1, Math.floor(candidate.index))
+        : crops.length + 1;
+    const variantKey =
+      typeof candidate.variant_key === "string" && candidate.variant_key.trim().length > 0
+        ? candidate.variant_key.trim()
+        : undefined;
+    const variantUrl =
+      typeof candidate.variant_url === "string" && candidate.variant_url.trim().length > 0
+        ? candidate.variant_url.trim()
+        : undefined;
+    const size =
+      typeof candidate.size === "number" && Number.isFinite(candidate.size) && candidate.size > 0
+        ? Math.floor(candidate.size)
+        : undefined;
+    crops.push({
+      index,
+      x,
+      y,
+      width,
+      height,
+      ...(variantKey ? { variant_key: variantKey } : {}),
+      ...(variantUrl ? { variant_url: variantUrl } : {}),
+      ...(size ? { size } : {}),
+    });
+  }
+  return crops;
 };
 
 type PersonPhotoVariantUrls = Pick<
@@ -2559,6 +2620,7 @@ export async function getPhotosByPersonId(
     const mdPeopleCountSource =
       typeof mdPeopleCountSourceRaw === "string" ? mdPeopleCountSourceRaw : null;
     const faceBoxes = toFaceBoxes(md.face_boxes);
+    const faceCrops = toFaceCrops(md.face_crops);
     const thumbnailCropFields = toThumbnailCropFields(md.thumbnail_crop);
     const variantUrls = resolvePersonPhotoVariantUrls(
       normalizedFandom.metadata,
@@ -2577,6 +2639,7 @@ export async function getPhotosByPersonId(
       people_count: mdPeopleCount,
       people_count_source: mdPeopleCountSource as "auto" | "manual" | null,
       face_boxes: faceBoxes,
+      face_crops: faceCrops,
       ingest_status: null,
       origin: "cast_photos" as const,
       link_id: null,
@@ -2694,6 +2757,9 @@ export async function getPhotosByPersonId(
         const contextFaceBoxes = toFaceBoxes(
           (context as { face_boxes?: unknown } | null)?.face_boxes
         );
+        const contextFaceCrops = toFaceCrops(
+          (context as { face_crops?: unknown } | null)?.face_crops
+        );
         const metadataPeopleNames = Array.isArray((row.metadata as { people_names?: unknown } | null)?.people_names)
           ? ((row.metadata as { people_names: unknown }).people_names as string[])
           : null;
@@ -2747,6 +2813,9 @@ export async function getPhotosByPersonId(
         const metadataFaceBoxes = toFaceBoxes(
           (normalizedFandom.metadata as { face_boxes?: unknown } | null)?.face_boxes
         );
+        const metadataFaceCrops = toFaceCrops(
+          (normalizedFandom.metadata as { face_crops?: unknown } | null)?.face_crops
+        );
 
         return {
           id: row.link_id,
@@ -2769,6 +2838,7 @@ export async function getPhotosByPersonId(
           people_count: contextPeopleCount,
           people_count_source: contextPeopleCountSource,
           face_boxes: contextFaceBoxes ?? metadataFaceBoxes,
+          face_crops: contextFaceCrops ?? metadataFaceCrops,
           ingest_status: row.ingest_status ?? null,
           title_names: null,
           metadata: normalizedFandom.metadata,

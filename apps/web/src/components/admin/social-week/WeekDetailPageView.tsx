@@ -2383,6 +2383,7 @@ export default function WeekDetailPage() {
   }, [
     hasValidNumericPathParams,
     pathname,
+    canonicalCurrentRoute,
     resolvedShowSlug,
     router,
     searchParamsString,
@@ -2412,6 +2413,7 @@ export default function WeekDetailPage() {
   }, [
     hasValidNumericPathParams,
     pathname,
+    canonicalCurrentRoute,
     router,
     searchParamsString,
     seasonNumber,
@@ -2440,6 +2442,7 @@ export default function WeekDetailPage() {
   }, [
     hasValidNumericPathParams,
     isOverviewSubTabPath,
+    canonicalCurrentRoute,
     router,
     searchParamsString,
     seasonNumber,
@@ -2466,6 +2469,7 @@ export default function WeekDetailPage() {
     });
     compareAndReplace(router, canonicalCurrentRoute, nextRoute);
   }, [
+    canonicalCurrentRoute,
     hasValidNumericPathParams,
     router,
     searchParamsString,
@@ -3387,7 +3391,15 @@ export default function WeekDetailPage() {
       const boundedIndex = Math.max(0, Math.min(initialIndex, entries.length - 1));
       setMediaLightbox({ entries, index: boundedIndex });
     },
-    [displayData?.season.show_name, displayData?.season.show_slug, seasonNumberInt, sourceScope, weekIndexInt],
+    [
+      displayData?.platforms,
+      displayData?.season.show_name,
+      displayData?.season.show_slug,
+      displayData?.week.label,
+      seasonNumberInt,
+      sourceScope,
+      weekIndexInt,
+    ],
   );
 
   const closeMediaLightbox = useCallback(() => {

@@ -425,6 +425,23 @@ function MetadataPanel({
   const dimensionsLabel = effectiveDimensions
     ? `${effectiveDimensions.width} × ${effectiveDimensions.height}`
     : "—";
+  const faceCropChips = useMemo(() => {
+    const crops = Array.isArray(metadata.faceCrops) ? metadata.faceCrops : [];
+    const boxes = Array.isArray(metadata.faceBoxes) ? metadata.faceBoxes : [];
+    return crops
+      .slice()
+      .sort((a, b) => a.index - b.index)
+      .map((crop) => {
+        const matchingBox = boxes.find((box) => box.index === crop.index);
+        const label = matchingBox?.person_name || matchingBox?.label || `Face ${crop.index}`;
+        const url = typeof crop.variantUrl === "string" && crop.variantUrl.length > 0 ? crop.variantUrl : null;
+        return {
+          index: crop.index,
+          label,
+          url,
+        };
+      });
+  }, [metadata.faceBoxes, metadata.faceCrops]);
   const metadataCoverageRows: Array<{ label: string; value: string }> = [
     { label: "Source", value: metadata.source || "—" },
     { label: "Original Source", value: sourceBadgeLabel || "—" },
@@ -439,6 +456,7 @@ function MetadataPanel({
       value: formatContentTypeLabel(metadata.contentType ?? metadata.sectionTag ?? "OTHER"),
     },
     { label: "Section", value: metadata.sectionLabel ?? "—" },
+    { label: "Show", value: metadata.showName ?? "—" },
     { label: "Episode", value: metadata.episodeLabel ?? "—" },
     { label: "Season", value: metadata.season ? `Season ${metadata.season}` : "—" },
     { label: "Dimensions", value: dimensionsLabel },
@@ -467,6 +485,10 @@ function MetadataPanel({
         Array.isArray(metadata.faceBoxes) && metadata.faceBoxes.length > 0
           ? String(metadata.faceBoxes.length)
           : "—",
+    },
+    {
+      label: "Face Crops",
+      value: faceCropChips.length > 0 ? String(faceCropChips.length) : "—",
     },
     {
       label: "People",
@@ -1016,6 +1038,41 @@ function MetadataPanel({
             <p className="mt-1 text-sm text-white/90">—</p>
           )}
         </div>
+
+        {faceCropChips.length > 0 && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Face Crops
+            </span>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {faceCropChips.map((chip) => (
+                <div
+                  key={`face-crop-chip-${chip.index}`}
+                  className="relative h-20 w-20 overflow-hidden rounded-full border border-white/20 bg-white/10"
+                  title={chip.label}
+                >
+                  {chip.url ? (
+                    <Image
+                      src={chip.url}
+                      alt={chip.label}
+                      fill
+                      sizes="80px"
+                      className="object-cover"
+                      unoptimized
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-black/30 text-xs font-semibold text-white/80">
+                      {chip.label.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                    {chip.label}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {showExtrasInline && <div className="mb-4">{extras}</div>}
         {extras && showExtras && management?.canManage && <div className="mb-4">{extras}</div>}
