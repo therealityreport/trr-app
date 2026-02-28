@@ -948,7 +948,7 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const openLightboxButton = screen.getByRole("button", {
+    const openLightboxButton = await screen.findByRole("button", {
       name: "Open post media lightbox from details",
     });
     fireEvent.click(openLightboxButton);
