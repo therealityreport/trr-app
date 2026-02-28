@@ -33,6 +33,45 @@ const parseLimit = (value: string | null): number => {
   return Math.min(parsed, 80);
 };
 
+const parseIsoDateParam = (
+  value: string | null,
+  field: "period_start" | "period_end",
+): { value: string | null; error?: string } => {
+  if (!value) return { value: null };
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return { value: null, error: `${field} must be a valid ISO datetime` };
+  }
+  return { value: parsed.toISOString() };
+};
+
+const parseBoolean = (value: string | null): boolean => {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const parseMaxPages = (value: string | null): number | null => {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.min(parsed, 500);
+};
+
+const parseForceFlares = (values: string[]): string[] => {
+  const deduped = new Map<string, string>();
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (deduped.has(key)) continue;
+    deduped.set(key, normalized);
+  }
+  return [...deduped.values()];
+};
+
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     await requireAdmin(request);
@@ -57,6 +96,35 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .filter((name): name is string => name.trim().length > 0);
     const sortModes = parseSortModes(request.nextUrl.searchParams.get("sort"));
     const limitPerMode = parseLimit(request.nextUrl.searchParams.get("limit"));
+    const parsedPeriodStart = parseIsoDateParam(
+      request.nextUrl.searchParams.get("period_start"),
+      "period_start",
+    );
+    if (parsedPeriodStart.error) {
+      return NextResponse.json({ error: parsedPeriodStart.error }, { status: 400 });
+    }
+    const parsedPeriodEnd = parseIsoDateParam(
+      request.nextUrl.searchParams.get("period_end"),
+      "period_end",
+    );
+    if (parsedPeriodEnd.error) {
+      return NextResponse.json({ error: parsedPeriodEnd.error }, { status: 400 });
+    }
+    if (
+      parsedPeriodStart.value &&
+      parsedPeriodEnd.value &&
+      new Date(parsedPeriodStart.value).getTime() > new Date(parsedPeriodEnd.value).getTime()
+    ) {
+      return NextResponse.json(
+        { error: "period_start must be before period_end" },
+        { status: 400 },
+      );
+    }
+    const exhaustiveWindow = parseBoolean(request.nextUrl.searchParams.get("exhaustive"));
+    const maxPages = parseMaxPages(request.nextUrl.searchParams.get("max_pages"));
+    const forceIncludeFlares = parseForceFlares(
+      request.nextUrl.searchParams.getAll("force_flair"),
+    );
 
     const discovery = await discoverSubredditThreads({
       subreddit: community.subreddit,
@@ -68,6 +136,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       analysisAllFlares: community.analysis_all_flares ?? [],
       sortModes,
       limitPerMode,
+      periodStart: parsedPeriodStart.value,
+      periodEnd: parsedPeriodEnd.value,
+      exhaustiveWindow,
+      maxPages: maxPages ?? undefined,
+      forceIncludeFlares,
     });
 
     return NextResponse.json({

@@ -385,6 +385,18 @@ const buildCanonicalQuery = (query: URLSearchParams | undefined, opts?: { remove
   return next;
 };
 
+const buildCanonicalPersonQuery = (
+  query: URLSearchParams | undefined,
+  showContext: string | undefined,
+): URLSearchParams => {
+  const next = buildCanonicalQuery(query);
+  const normalized = showContext?.trim();
+  if (normalized) {
+    next.set("showId", normalized);
+  }
+  return next;
+};
+
 export function parseSocialAnalyticsViewFromPath(pathname: string): SocialAnalyticsViewSlug | null {
   const showSegments = getShowBaseSegments(pathname);
   if (showSegments && normalizeSegment(showSegments[0]) === "social") {
@@ -548,7 +560,6 @@ export function cleanLegacyRoutingQuery(searchParams: URLSearchParams): URLSearc
 export function cleanLegacyPersonRoutingQuery(searchParams: URLSearchParams): URLSearchParams {
   const next = new URLSearchParams(searchParams.toString());
   next.delete("tab");
-  next.delete("showId");
   return next;
 }
 
@@ -754,6 +765,7 @@ export function buildShowAdminUrl(input: {
 
 export function buildPersonAdminUrl(input: {
   showSlug?: string;
+  showId?: string;
   personSlug: string;
   tab?: PersonAdminTab;
   query?: URLSearchParams;
@@ -762,7 +774,8 @@ export function buildPersonAdminUrl(input: {
   const tab = input.tab ?? "overview";
   const base = `/people/${personSlug}`;
   const path = tab === "overview" ? base : `${base}/${tab}`;
-  return appendQuery(path, input.query);
+  const showContext = input.showId ?? input.showSlug;
+  return appendQuery(path, buildCanonicalPersonQuery(input.query, showContext));
 }
 
 export function buildSeasonAdminUrl(input: {

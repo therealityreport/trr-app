@@ -5,14 +5,18 @@ import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
 const BACKEND_STREAM_TIMEOUT_MS = 10 * 60 * 1000;
-const BACKEND_FETCH_ATTEMPTS = 2;
+const BACKEND_FETCH_ATTEMPTS = 5;
+const BACKEND_FETCH_RETRY_BASE_DELAY_MS = 200;
+const BACKEND_FETCH_RETRY_MAX_DELAY_MS = 2_000;
 const RETRYABLE_FETCH_ERROR_CODES = new Set([
   "ECONNRESET",
   "ECONNREFUSED",
+  "ECONNABORTED",
   "ETIMEDOUT",
   "EPIPE",
   "ENETUNREACH",
   "EHOSTUNREACH",
+  "ENOTFOUND",
   "UND_ERR_CONNECT_TIMEOUT",
 ]);
 
@@ -46,17 +50,82 @@ const isRetryableNetworkError = (error: unknown): boolean => {
   return RETRYABLE_FETCH_ERROR_CODES.has(code);
 };
 
+type FetchErrorCause = {
+  code?: string;
+  errno?: string;
+  address?: string;
+  port?: number;
+  syscall?: string;
+};
+
+const getErrorCause = (error: unknown): FetchErrorCause | null => {
+  if (!(error instanceof Error)) return null;
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (!cause || typeof cause !== "object") {
+    return null;
+  }
+  const candidate = cause as {
+    code?: unknown;
+    errno?: unknown;
+    address?: unknown;
+    port?: unknown;
+    syscall?: unknown;
+  };
+  const code = typeof candidate.code === "string" ? candidate.code : undefined;
+  const errno = typeof candidate.errno === "string" ? candidate.errno : undefined;
+  const address = typeof candidate.address === "string" ? candidate.address : undefined;
+  const port = typeof candidate.port === "number" ? candidate.port : undefined;
+  const syscall = typeof candidate.syscall === "string" ? candidate.syscall : undefined;
+  if (!code && !errno && !address && !syscall) return null;
+  return { code, errno, address, port, syscall };
+};
+
+const formatFetchErrorDetail = (error: unknown): string => {
+  if (!(error instanceof Error)) return "unknown error";
+  const message = error.message?.trim() || error.name || "unknown error";
+  const cause = getErrorCause(error);
+  if (!cause) return message;
+
+  const details = Object.entries({
+    code: cause.code || cause.errno,
+    syscall: cause.syscall,
+    address: cause.address,
+    port: cause.port,
+  })
+    .filter(([, value]) => value !== undefined && value !== null && `${value}`.trim().length > 0)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
+
+  if (!details) return message;
+  return `${message} (${details})`;
+};
+
 const getErrorDetail = (error: unknown): string => {
   if (error instanceof Error) {
     if (error.name === "AbortError") {
       return `Timed out waiting for backend refresh stream response (${Math.round(BACKEND_STREAM_TIMEOUT_MS / 60000)}m).`;
     }
-    if (error.message?.trim()) return error.message.trim();
-    return error.name || "unknown error";
+    return formatFetchErrorDetail(error);
   }
   if (typeof error === "string" && error.trim()) return error.trim();
   return "unknown error";
 };
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const getRetryDelayMs = (attempt: number): number => {
+  const exponent = Math.max(attempt - 1, 0);
+  const delay = BACKEND_FETCH_RETRY_BASE_DELAY_MS * 2 ** exponent;
+  return Math.min(delay, BACKEND_FETCH_RETRY_MAX_DELAY_MS);
+};
+
+const SSE_TEXT_ENCODER = new TextEncoder();
+
+const toSseChunk = (eventType: string, payload: Record<string, unknown>): Uint8Array =>
+  SSE_TEXT_ENCODER.encode(`event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`);
 
 /**
  * POST /api/admin/trr-api/people/[personId]/refresh-images/stream
@@ -114,74 +183,160 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    let backendResponse: Response | null = null;
-    let lastError: unknown = null;
-    for (let attempt = 1; attempt <= BACKEND_FETCH_ATTEMPTS; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), BACKEND_STREAM_TIMEOUT_MS);
-      try {
-        const response = await fetch(backendUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${serviceRoleKey}`,
-            ...(requestId ? { "x-trr-request-id": requestId } : {}),
-          },
-          body: JSON.stringify(body ?? {}),
-          signal: controller.signal,
-          cache: "no-store",
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const emitEvent = (eventType: "progress" | "error", payload: Record<string, unknown>) => {
+          controller.enqueue(
+            toSseChunk(eventType, {
+              ...(requestId ? { request_id: requestId } : {}),
+              ...payload,
+            })
+          );
+        };
+        const emitProxyProgress = (payload: Record<string, unknown>) => {
+          emitEvent("progress", {
+            stage: "proxy_connecting",
+            ...payload,
+          });
+        };
+
+        let backendResponse: Response | null = null;
+        let lastError: unknown = null;
+        let attemptsUsed = 0;
+        emitProxyProgress({
+          message: "Connecting to backend refresh stream...",
+          current: 0,
+          total: BACKEND_FETCH_ATTEMPTS,
+          attempt: 0,
+          max_attempts: BACKEND_FETCH_ATTEMPTS,
         });
-        if (response.ok || response.status < 500 || attempt >= BACKEND_FETCH_ATTEMPTS) {
-          backendResponse = response;
-          break;
+
+        for (let attempt = 1; attempt <= BACKEND_FETCH_ATTEMPTS; attempt += 1) {
+          attemptsUsed = attempt;
+          emitProxyProgress({
+            message:
+              attempt === 1
+                ? "Connecting to backend refresh stream..."
+                : `Retrying backend stream connection (attempt ${attempt}/${BACKEND_FETCH_ATTEMPTS})...`,
+            current: attempt - 1,
+            total: BACKEND_FETCH_ATTEMPTS,
+            attempt,
+            max_attempts: BACKEND_FETCH_ATTEMPTS,
+            retrying: attempt > 1,
+          });
+          const requestController = new AbortController();
+          const timeout = setTimeout(() => requestController.abort(), BACKEND_STREAM_TIMEOUT_MS);
+          try {
+            const response = await fetch(backendUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceRoleKey}`,
+                ...(requestId ? { "x-trr-request-id": requestId } : {}),
+              },
+              body: JSON.stringify(body ?? {}),
+              signal: requestController.signal,
+              cache: "no-store",
+            });
+            if (response.ok || response.status < 500 || attempt >= BACKEND_FETCH_ATTEMPTS) {
+              backendResponse = response;
+              break;
+            }
+            lastError = new Error(`HTTP ${response.status}`);
+            emitProxyProgress({
+              message: `Backend stream returned HTTP ${response.status}; retrying...`,
+              current: attempt,
+              total: BACKEND_FETCH_ATTEMPTS,
+              attempt,
+              max_attempts: BACKEND_FETCH_ATTEMPTS,
+              retrying: true,
+            });
+            await sleep(getRetryDelayMs(attempt));
+          } catch (error) {
+            lastError = error;
+            if (!isRetryableNetworkError(error) || attempt >= BACKEND_FETCH_ATTEMPTS) {
+              break;
+            }
+            emitProxyProgress({
+              message: `Backend stream connect failed, retrying... (${getErrorDetail(error)})`,
+              current: attempt,
+              total: BACKEND_FETCH_ATTEMPTS,
+              attempt,
+              max_attempts: BACKEND_FETCH_ATTEMPTS,
+              retrying: true,
+            });
+            await sleep(getRetryDelayMs(attempt));
+          } finally {
+            clearTimeout(timeout);
+          }
         }
-      } catch (error) {
-        lastError = error;
-        if (!isRetryableNetworkError(error) || attempt >= BACKEND_FETCH_ATTEMPTS) {
-          break;
+
+        if (!backendResponse) {
+          emitEvent("error", {
+            stage: "proxy_connecting",
+            error: "Backend fetch failed",
+            detail: `${getErrorDetail(lastError)} (attempted ${attemptsUsed}x; backendUrl=${backendUrl})`,
+          });
+          controller.close();
+          return;
         }
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
 
-    if (!backendResponse) {
-      return buildErrorResponse(
-        {
-          stage: "proxy",
-          error: "Backend fetch failed",
-          detail: getErrorDetail(lastError),
-          ...(requestId ? { request_id: requestId } : {}),
-        },
-        502
-      );
-    }
+        if (!backendResponse.ok) {
+          const errorText = await backendResponse.text();
+          emitEvent("error", {
+            stage: "backend",
+            error: "Backend refresh failed",
+            detail: errorText || `HTTP ${backendResponse.status}`,
+          });
+          controller.close();
+          return;
+        }
 
-    if (!backendResponse.ok) {
-      const errorText = await backendResponse.text();
-      return buildErrorResponse(
-        {
-          stage: "backend",
-          error: "Backend refresh failed",
-          detail: errorText || `HTTP ${backendResponse.status}`,
-          ...(requestId ? { request_id: requestId } : {}),
-        },
-        backendResponse.status
-      );
-    }
+        if (!backendResponse.body) {
+          emitEvent("error", {
+            stage: "backend",
+            error: "No response body from backend",
+          });
+          controller.close();
+          return;
+        }
 
-    if (!backendResponse.body) {
-      return buildErrorResponse(
-        {
-          stage: "backend",
-          error: "No response body from backend",
-          ...(requestId ? { request_id: requestId } : {}),
-        },
-        502
-      );
-    }
+        emitProxyProgress({
+          message: "Connected to backend refresh stream.",
+          current: attemptsUsed,
+          total: BACKEND_FETCH_ATTEMPTS,
+          attempt: attemptsUsed,
+          max_attempts: BACKEND_FETCH_ATTEMPTS,
+          connected: true,
+        });
 
-    return new Response(backendResponse.body, {
+        const reader = backendResponse.body.getReader();
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value && value.length > 0) {
+              controller.enqueue(value);
+            }
+          }
+        } catch (error) {
+          emitEvent("error", {
+            stage: "proxy_stream",
+            error: "Backend stream disconnected",
+            detail: getErrorDetail(error),
+          });
+        } finally {
+          try {
+            await reader.cancel();
+          } catch {
+            // no-op
+          }
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-store, max-age=0",

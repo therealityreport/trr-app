@@ -7,6 +7,7 @@ import {
   buildShowRedditCommunityUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
+import { toCanonicalFlairKey } from "@/lib/reddit/flair-key";
 
 type ManagerMode = "season" | "global";
 
@@ -88,6 +89,17 @@ interface DiscoveryThread {
 interface DiscoveryPayload {
   subreddit: string;
   fetched_at: string;
+  collection_mode?: "sample" | "exhaustive_window";
+  listing_pages_fetched?: number;
+  max_pages_applied?: number;
+  window_exhaustive_complete?: boolean | null;
+  totals?: {
+    fetched_rows: number;
+    matched_rows: number;
+    tracked_flair_rows: number;
+  };
+  window_start?: string | null;
+  window_end?: string | null;
   sources_fetched: Array<"new" | "hot" | "top">;
   terms: string[];
   hints: {
@@ -120,16 +132,26 @@ interface EpisodeDiscussionMatrixCell {
   total_upvotes: number;
   top_post_id: string | null;
   top_post_url: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
 }
 
 interface EpisodeDiscussionMatrixRow {
   episode_number: number;
+  episode_air_date?: string | null;
   live: EpisodeDiscussionMatrixCell;
   post: EpisodeDiscussionMatrixCell;
   weekly: EpisodeDiscussionMatrixCell;
   total_posts: number;
   total_comments: number;
   total_upvotes: number;
+}
+
+interface SeasonEpisodeRow {
+  id: string;
+  episode_number: number;
+  title: string | null;
+  air_date: string | null;
 }
 
 type SyncCandidateStatus = "auto_saved" | "skipped_conflict" | "not_eligible";
@@ -263,6 +285,14 @@ interface CommunityFlaresRefreshResponse {
   error?: string;
 }
 
+interface DiscoveryFetchOptions {
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  exhaustive?: boolean;
+  forceFlair?: string | null;
+  maxPages?: number;
+}
+
 export interface RedditSourcesManagerProps {
   mode: ManagerMode;
   showId?: string;
@@ -290,6 +320,50 @@ const fmtNum = (value: number): string => {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return value.toLocaleString();
+};
+
+const fmtDate = (value: string | null | undefined): string => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleDateString();
+};
+
+const addDaysIso = (value: string | null | undefined, days: number): string | null => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setDate(parsed.getDate() + days);
+  return parsed.toISOString();
+};
+
+const parseDateMs = (value: string | null | undefined): number | null => {
+  if (!value || typeof value !== "string") return null;
+  const parsed = new Date(value);
+  const ms = parsed.getTime();
+  if (!Number.isFinite(ms)) return null;
+  return ms;
+};
+
+const normalizeFlairKey = (value: string | null | undefined): string => toCanonicalFlairKey(value);
+
+type SlotDiscussionType = "live" | "post" | "weekly";
+const buildEpisodeSlotKey = (episodeNumber: number, discussionType: SlotDiscussionType): string =>
+  `${episodeNumber}:${discussionType}`;
+
+const EPISODE_FILTER_CATEGORY_RULES: Array<{ label: string; pattern: RegExp }> = [
+  { label: "Live Episode Discussion", pattern: /\blive\b/i },
+  { label: "Post Episode Discussion", pattern: /\bpost\b/i },
+  { label: "Weekly Episode Discussion", pattern: /\bweekly\b/i },
+  { label: "Pre-Season", pattern: /\b(pre[\s-]?season|trailer|premiere)\b/i },
+  { label: "Post-Season", pattern: /\b(post[\s-]?season|reunion|finale)\b/i },
+];
+
+const resolveEpisodeFilterCategoryLabel = (pattern: string): string => {
+  const trimmed = pattern.trim();
+  if (!trimmed) return "General";
+  const matched = EPISODE_FILTER_CATEGORY_RULES.find((rule) => rule.pattern.test(trimmed));
+  return matched?.label ?? "General";
 };
 
 const REQUEST_TIMEOUT_DEFAULT_MS = 60_000;
@@ -475,14 +549,6 @@ const toTitleCase = (value: string): string =>
     .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
     .join(" ");
 
-const parseDateMs = (value: string | null | undefined): number | null => {
-  if (!value || typeof value !== "string") return null;
-  const parsed = new Date(value);
-  const ms = parsed.getTime();
-  if (!Number.isFinite(ms)) return null;
-  return ms;
-};
-
 const isSeasonEligibleForRedditSelection = (
   season: ShowSeasonOption,
   options?: { maxSeasonNumber?: number | null; nowMs?: number },
@@ -515,7 +581,7 @@ const isSeasonEligibleForRedditSelection = (
 
 const getRelevantPostFlares = (community: RedditCommunity): string[] => {
   const selectedFlairKeys = new Set(
-    [...community.analysis_all_flares, ...community.analysis_flares].map((value) => value.toLowerCase()),
+    [...community.analysis_all_flares, ...community.analysis_flares].map((value) => normalizeFlairKey(value)),
   );
   if (selectedFlairKeys.size === 0) return [];
 
@@ -523,14 +589,14 @@ const getRelevantPostFlares = (community: RedditCommunity): string[] => {
   const seen = new Set<string>();
 
   for (const flair of community.post_flares) {
-    const key = flair.toLowerCase();
+    const key = normalizeFlairKey(flair);
     if (!selectedFlairKeys.has(key) || seen.has(key)) continue;
     relevant.push(flair);
     seen.add(key);
   }
 
   for (const flair of [...community.analysis_all_flares, ...community.analysis_flares]) {
-    const key = flair.toLowerCase();
+    const key = normalizeFlairKey(flair);
     if (seen.has(key)) continue;
     relevant.push(flair);
     seen.add(key);
@@ -551,15 +617,148 @@ const formatDiscussionPeriodLabel = (type: "live" | "post" | "weekly"): string =
   return "Weekly Discussion";
 };
 
-const formatAdditionalPostsWithFlair = (postCount: number): string => {
-  const additionalPostCount = Math.max(0, Math.trunc(postCount) - 1);
-  if (additionalPostCount === 1) {
-    return "1 additional post with flair";
+const resolveDiscussionSlotDate = (
+  episodeAirDate: string | null | undefined,
+  discussionType: SlotDiscussionType,
+): string | null => {
+  if (!episodeAirDate) return null;
+  if (discussionType === "weekly") {
+    return addDaysIso(episodeAirDate, 1);
   }
-  return `${fmtNum(additionalPostCount)} additional posts with flair`;
+  return episodeAirDate;
 };
 
-const renderEpisodeMatrixCards = (rows: EpisodeDiscussionMatrixRow[]) => (
+const resolveMediaPreviewType = (value: string | null | undefined): "image" | "video" | null => {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    const pathname = parsed.pathname.toLowerCase();
+    if (/\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(pathname)) {
+      return "image";
+    }
+    if (/\.(mp4|mov|webm|m3u8|gifv)$/i.test(pathname)) {
+      return "video";
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (host === "i.redd.it" || host.endsWith(".redd.it")) {
+      return "image";
+    }
+    if (host === "v.redd.it") {
+      return "video";
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const EASTERN_TIMEZONE = "America/New_York";
+
+const getEasternDateParts = (value: Date): { year: number; month: number; day: number; hour: number; minute: number } | null => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(value);
+  const getPart = (type: Intl.DateTimeFormatPartTypes): number | null => {
+    const raw = parts.find((part) => part.type === type)?.value;
+    if (!raw) return null;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const year = getPart("year");
+  const month = getPart("month");
+  const day = getPart("day");
+  const hour = getPart("hour");
+  const minute = getPart("minute");
+  if (year === null || month === null || day === null || hour === null || minute === null) return null;
+  return { year, month, day, hour, minute };
+};
+
+const toEasternDateKey = (value: string | null | undefined): string | null => {
+  const ms = parseDateMs(value);
+  if (ms === null) return null;
+  const parts = getEasternDateParts(new Date(ms));
+  if (!parts) return null;
+  return `${String(parts.year).padStart(4, "0")}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+};
+
+const toEasternMidnightIso = (value: string | null | undefined): string | null => {
+  const dateKey = toEasternDateKey(value);
+  if (!dateKey) return null;
+  const [yearRaw, monthRaw, dayRaw] = dateKey.split("-");
+  const year = Number.parseInt(yearRaw ?? "", 10);
+  const month = Number.parseInt(monthRaw ?? "", 10);
+  const day = Number.parseInt(dayRaw ?? "", 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  for (let utcHour = 0; utcHour <= 12; utcHour += 1) {
+    const candidate = new Date(Date.UTC(year, month - 1, day, utcHour, 0, 0));
+    const parts = getEasternDateParts(candidate);
+    if (!parts) continue;
+    if (parts.year === year && parts.month === month && parts.day === day && parts.hour === 0 && parts.minute === 0) {
+      return candidate.toISOString();
+    }
+  }
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0)).toISOString();
+};
+
+const addDaysUtc = (value: string | null | undefined, days: number): string | null => {
+  const ms = parseDateMs(value);
+  if (ms === null) return null;
+  return new Date(ms + days * 24 * 60 * 60 * 1000).toISOString();
+};
+
+interface EpisodeWindowBounds {
+  key: string;
+  label: string;
+  start: string | null;
+  end: string | null;
+  type: "episode" | "period";
+  source?: "period" | "fallback";
+  episodeNumber?: number;
+}
+
+interface EpisodeWindowPostItem {
+  redditPostId: string;
+  title: string;
+  text: string | null;
+  url: string;
+  score: number;
+  numComments: number;
+  postedAt: string | null;
+  flair: string | null;
+  discussionType?: SlotDiscussionType;
+}
+
+const renderEpisodeMatrixCards = (
+  rows: EpisodeDiscussionMatrixRow[],
+  options?: {
+    episodeAirDateByNumber?: Map<number, string | null>;
+    episodeWindowByContainer?: Map<string, EpisodeWindowBounds>;
+    unassignedFlairLabel?: string | null;
+    totalsLoading?: boolean;
+    totalTrackedFlairCountByContainer?: Map<string, number>;
+    unassignedFlairCountByContainer?: Map<string, number>;
+    unassignedFlairCountBySlot?: Map<string, number>;
+    totalTrackedFlairCountBySlot?: Map<string, number>;
+    seasonalBoundaryPeriods?: Array<{
+      key: string;
+      label: string;
+      start: string | null;
+      end: string | null;
+      source?: "period" | "fallback";
+    }>;
+    unassignedFlairCountBySeasonBoundaryPeriod?: Map<string, number>;
+    totalTrackedFlairCountBySeasonBoundaryPeriod?: Map<string, number>;
+    linkedPostsByContainer?: Map<string, EpisodeDiscussionCandidate[]>;
+    onOpenContainerPosts?: (containerKey: string) => void;
+  },
+) => (
   <div className="space-y-2">
     {rows.map((row) => {
       const cells: Array<["live" | "post" | "weekly", EpisodeDiscussionMatrixCell]> = [
@@ -567,40 +766,147 @@ const renderEpisodeMatrixCards = (rows: EpisodeDiscussionMatrixRow[]) => (
         ["post", row.post],
         ["weekly", row.weekly],
       ];
+      const containerKey = `episode-${row.episode_number}`;
+      const containerPosts = options?.linkedPostsByContainer?.get(containerKey) ?? [];
+      const episodeWindow = options?.episodeWindowByContainer?.get(containerKey) ?? null;
+      const totalTrackedCount = options?.totalTrackedFlairCountByContainer?.get(containerKey);
+      const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
+      const visibleCells = cells.filter(([, cell]) => cell.post_count > 0);
+      const episodeAirDate =
+        row.episode_air_date ??
+        options?.episodeAirDateByNumber?.get(row.episode_number) ??
+        null;
       return (
         <article
           key={`episode-matrix-${row.episode_number}`}
           className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-zinc-800">Episode {row.episode_number}</p>
-            <p className="text-[11px] text-zinc-600">
-              {fmtNum(row.total_posts)} posts · {fmtNum(row.total_comments)} comments
-            </p>
+            <div>
+              <button
+                type="button"
+                onClick={() => options?.onOpenContainerPosts?.(containerKey)}
+                className="text-left text-sm font-semibold text-zinc-800 underline-offset-4 hover:underline"
+              >
+                Episode {row.episode_number}
+              </button>
+              {episodeAirDate && (
+                <p className="text-[11px] text-zinc-500">Air date {fmtDate(episodeAirDate)}</p>
+              )}
+              {episodeWindow && (
+                <p className="text-[11px] text-zinc-500">
+                  Window {fmtDateTime(episodeWindow.start)} to {fmtDateTime(episodeWindow.end)}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {options?.totalsLoading ? (
+                <p className="text-[11px] text-zinc-600">Refreshing flair totals…</p>
+              ) : options?.unassignedFlairLabel && typeof totalTrackedCount === "number" ? (
+                <p className="text-[11px] text-zinc-600">
+                  {fmtNum(totalTrackedCount)} {options.unassignedFlairLabel} flair posts in window ·{" "}
+                  {fmtNum(unassignedTrackedCount ?? 0)} unassigned
+                </p>
+              ) : (
+                <p className="text-[11px] text-zinc-600">
+                  {fmtNum(row.total_posts)} discussion posts · {fmtNum(row.total_comments)} comments
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => options?.onOpenContainerPosts?.(containerKey)}
+                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                {`View All Posts (${fmtNum(containerPosts.length)})`}
+              </button>
+            </div>
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
-            {cells.map(([cellKey, cell]) => (
-              <div
-                key={`episode-matrix-pill-${row.episode_number}-${cellKey}`}
-                className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700"
-              >
-                <span className="font-semibold">{formatDiscussionPeriodLabel(cellKey)}</span>
-                <span> · {fmtNum(cell.post_count)} posts</span>
-                <span> · {fmtNum(cell.total_comments)} comments</span>
-                <span> · {formatAdditionalPostsWithFlair(cell.post_count)}</span>
-                {cell.top_post_url && (
-                  <a
-                    href={cell.top_post_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-1 font-semibold text-blue-700 hover:underline"
-                  >
-                    Top post
-                  </a>
-                )}
-              </div>
-            ))}
+            {visibleCells.length === 0 ? (
+              <p className="text-xs text-zinc-500">No linked discussion posts found.</p>
+            ) : (
+              visibleCells.map(([cellKey, cell]) => {
+              const slotDate = resolveDiscussionSlotDate(episodeAirDate, cellKey);
+              const slotKey = buildEpisodeSlotKey(row.episode_number, cellKey);
+              const unassignedCount = options?.unassignedFlairCountBySlot?.get(slotKey);
+              const totalTrackedCount = options?.totalTrackedFlairCountBySlot?.get(slotKey);
+              return (
+                <div
+                  key={`episode-matrix-pill-${row.episode_number}-${cellKey}`}
+                  className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700"
+                >
+                  <span className="font-semibold">{formatDiscussionPeriodLabel(cellKey)}</span>
+                  {slotDate && <span> · {fmtDate(slotDate)}</span>}
+                  <span> · {fmtNum(cell.post_count)} posts</span>
+                  <span> · {fmtNum(cell.total_comments)} comments</span>
+                  {options?.unassignedFlairLabel && typeof totalTrackedCount === "number" && (
+                    <span> · {fmtNum(totalTrackedCount)} {options.unassignedFlairLabel} flair posts</span>
+                  )}
+                  {options?.unassignedFlairLabel && (
+                    <span>
+                      {" "}
+                      · {fmtNum(unassignedCount ?? 0)} unassigned {options.unassignedFlairLabel} posts
+                    </span>
+                  )}
+                  {cell.top_post_url && (
+                    <a
+                      href={cell.top_post_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-1 font-semibold text-blue-700 hover:underline"
+                    >
+                      Top post
+                    </a>
+                  )}
+                </div>
+              );
+            })
+            )}
           </div>
+        </article>
+      );
+    })}
+    {(options?.seasonalBoundaryPeriods ?? []).map((period) => {
+      const containerKey = `period-${period.key}`;
+      const containerPosts = options?.linkedPostsByContainer?.get(containerKey) ?? [];
+      const totalTrackedCount = options?.totalTrackedFlairCountByContainer?.get(containerKey);
+      const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
+      return (
+        <article key={`episode-boundary-${period.key}`} className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-zinc-800">{period.label}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[11px] text-zinc-600">
+                {fmtDateTime(period.start)} to {fmtDateTime(period.end)}
+              </p>
+              <button
+                type="button"
+                onClick={() => options?.onOpenContainerPosts?.(containerKey)}
+                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                {`View All Posts (${fmtNum(containerPosts.length)})`}
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-zinc-600">
+            {options?.totalsLoading ? (
+              "Refreshing flair totals…"
+            ) : options?.unassignedFlairLabel ? (
+              <>
+                {fmtNum(totalTrackedCount ?? options.totalTrackedFlairCountBySeasonBoundaryPeriod?.get(period.key) ?? 0)}{" "}
+                {options.unassignedFlairLabel} flair posts ·{" "}
+                {fmtNum(unassignedTrackedCount ?? options.unassignedFlairCountBySeasonBoundaryPeriod?.get(period.key) ?? 0)}{" "}
+                unassigned {options.unassignedFlairLabel} posts
+              </>
+            ) : (
+              "No flair tracking configured for this period."
+            )}
+          </p>
+          {period.source === "fallback" && (
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Using fallback period window (season social period data unavailable).
+            </p>
+          )}
         </article>
       );
     })}
@@ -691,6 +997,20 @@ const buildPeriodOptions = (weeklyRows: SocialAnalyticsPeriodRow[]): EpisodePeri
     ...weekly,
   ];
 };
+
+const parseEpisodeNumberFromPeriodLabel = (label: string): number | null => {
+  const episodeMatch = label.match(/\bepisode\s*(\d{1,3})\b/i);
+  if (!episodeMatch?.[1]) return null;
+  const parsed = Number.parseInt(episodeMatch[1], 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
+const isPreSeasonPeriodLabel = (label: string): boolean =>
+  /\b(pre[\s-]?season|trailer|premiere)\b/i.test(label);
+
+const isPostSeasonPeriodLabel = (label: string): boolean =>
+  /\b(post[\s-]?season|reunion|finale)\b/i.test(label);
 
 const toCommunityModel = (community: RedditCommunityResponse): RedditCommunity => ({
   ...community,
@@ -839,6 +1159,7 @@ export default function RedditSourcesManager({
   const [selectedFranchiseTargetInput, setSelectedFranchiseTargetInput] = useState("");
   const [episodePatternInput, setEpisodePatternInput] = useState("");
   const [seasonOptions, setSeasonOptions] = useState<ShowSeasonOption[]>([]);
+  const [seasonEpisodes, setSeasonEpisodes] = useState<SeasonEpisodeRow[]>([]);
   const [episodeSeasonId, setEpisodeSeasonId] = useState<string | null>(seasonId ?? null);
   const [periodOptions, setPeriodOptions] = useState<EpisodePeriodOption[]>([]);
   const [selectedPeriodKey, setSelectedPeriodKey] = useState<string>("all-periods");
@@ -861,6 +1182,10 @@ export default function RedditSourcesManager({
   const [syncReasonCodeFilter, setSyncReasonCodeFilter] = useState<"all" | SyncCandidateReasonCode>(
     "all",
   );
+  const [episodeWindowModalContainerKey, setEpisodeWindowModalContainerKey] = useState<string | null>(null);
+  const [episodeWindowModalLoading, setEpisodeWindowModalLoading] = useState(false);
+  const [episodeWindowModalError, setEpisodeWindowModalError] = useState<string | null>(null);
+  const [episodeWindowModalOtherPosts, setEpisodeWindowModalOtherPosts] = useState<EpisodeWindowPostItem[]>([]);
   const isBusy = busyAction !== null;
   const seasonOptionsCacheRef = useRef<Map<string, ShowSeasonOption[]>>(new Map());
   const periodOptionsCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
@@ -871,6 +1196,7 @@ export default function RedditSourcesManager({
   const autoLoadedEpisodeMatrixKeyRef = useRef<string | null>(null);
   const episodeContextRequestTokenRef = useRef(0);
   const episodeContextAbortRef = useRef<AbortController | null>(null);
+  const episodeWindowModalRequestTokenRef = useRef(0);
   const routeShowSlugFromPath = useMemo(
     () => resolveRouteShowSlugFromPath(pathname),
     [pathname],
@@ -1085,6 +1411,7 @@ export default function RedditSourcesManager({
     setEpisodeSelectedPostIds([]);
     setEpisodeMeta(null);
     setSeasonOptions([]);
+    setSeasonEpisodes([]);
     setPeriodOptions([]);
     setSelectedPeriodKey("all-periods");
     setEpisodeSeasonId(null);
@@ -1097,6 +1424,10 @@ export default function RedditSourcesManager({
     setSelectedShowSlug(null);
     setSyncStatusFilter("all");
     setSyncReasonCodeFilter("all");
+    setEpisodeWindowModalContainerKey(null);
+    setEpisodeWindowModalLoading(false);
+    setEpisodeWindowModalError(null);
+    setEpisodeWindowModalOtherPosts([]);
     autoLoadedEpisodeMatrixKeyRef.current = null;
   }, [selectedCommunityId]);
 
@@ -1163,6 +1494,268 @@ export default function RedditSourcesManager({
     [syncCandidateResults],
   );
 
+  const episodeAirDateByNumber = useMemo(() => {
+    const map = new Map<number, string | null>();
+    for (const episode of seasonEpisodes) {
+      map.set(episode.episode_number, episode.air_date ?? null);
+    }
+    return map;
+  }, [seasonEpisodes]);
+
+  const trackedUnassignedFlairLabel = useMemo(() => {
+    if (selectedRelevantPostFlares.length === 0) return null;
+    const slcFlair = selectedRelevantPostFlares.find((flair) => /salt lake city/i.test(flair));
+    return slcFlair ?? selectedRelevantPostFlares[0] ?? null;
+  }, [selectedRelevantPostFlares]);
+
+  const unassignedFlairCountBySlot = useMemo(() => {
+    const counts = new Map<string, number>();
+    const targetFlairKey = normalizeFlairKey(trackedUnassignedFlairLabel);
+    if (!targetFlairKey) return counts;
+    for (const candidate of episodeCandidates) {
+      const candidateFlairKey = normalizeFlairKey(candidate.link_flair_text);
+      if (candidateFlairKey !== targetFlairKey) continue;
+      const syncStatus = syncCandidateResultByPostId.get(candidate.reddit_post_id)?.status ?? null;
+      if (syncStatus === "auto_saved") continue;
+      const key = buildEpisodeSlotKey(candidate.episode_number, candidate.discussion_type);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [episodeCandidates, syncCandidateResultByPostId, trackedUnassignedFlairLabel]);
+
+  const linkedDiscussionPostsByContainer = useMemo(() => {
+    const byContainer = new Map<string, EpisodeDiscussionCandidate[]>();
+    for (const candidate of episodeCandidates) {
+      const key = `episode-${candidate.episode_number}`;
+      const list = byContainer.get(key) ?? [];
+      list.push(candidate);
+      byContainer.set(key, list);
+    }
+    for (const [key, list] of byContainer.entries()) {
+      byContainer.set(
+        key,
+        [...list].sort((a, b) => {
+          const postedDiff = (parseDateMs(b.posted_at) ?? 0) - (parseDateMs(a.posted_at) ?? 0);
+          if (postedDiff !== 0) return postedDiff;
+          if (b.num_comments !== a.num_comments) return b.num_comments - a.num_comments;
+          return b.score - a.score;
+        }),
+      );
+    }
+    return byContainer;
+  }, [episodeCandidates]);
+
+  const episodeWindowBoundsByContainer = useMemo(() => {
+    const bounds = new Map<string, EpisodeWindowBounds>();
+    const rows = [...episodeMatrix].sort((a, b) => a.episode_number - b.episode_number);
+
+    const livePostedAtByEpisode = new Map<number, string>();
+    for (const candidate of episodeCandidates) {
+      if (candidate.discussion_type !== "live") continue;
+      const postedMs = parseDateMs(candidate.posted_at);
+      if (postedMs === null) continue;
+      const existing = livePostedAtByEpisode.get(candidate.episode_number);
+      if (!existing || postedMs < (parseDateMs(existing) ?? Number.POSITIVE_INFINITY)) {
+        livePostedAtByEpisode.set(candidate.episode_number, candidate.posted_at as string);
+      }
+    }
+
+    if (rows.length > 0) {
+      const firstRow = rows[0];
+      const lastRow = rows[rows.length - 1];
+      const firstEpisodeAirDate = firstRow
+        ? (firstRow.episode_air_date ?? episodeAirDateByNumber.get(firstRow.episode_number) ?? null)
+        : null;
+      const lastEpisodeAirDate = lastRow
+        ? (lastRow.episode_air_date ?? episodeAirDateByNumber.get(lastRow.episode_number) ?? null)
+        : null;
+      const firstEpisodeAirMidnight = toEasternMidnightIso(firstEpisodeAirDate);
+      const lastEpisodeAirMidnight = toEasternMidnightIso(lastEpisodeAirDate);
+
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index];
+        if (!row) continue;
+        const nextRow = rows[index + 1];
+        const rowAirMidnight = toEasternMidnightIso(
+          row.episode_air_date ?? episodeAirDateByNumber.get(row.episode_number) ?? null,
+        );
+        const nextAirMidnight = nextRow
+          ? toEasternMidnightIso(nextRow.episode_air_date ?? episodeAirDateByNumber.get(nextRow.episode_number) ?? null)
+          : null;
+        const start = livePostedAtByEpisode.get(row.episode_number) ?? rowAirMidnight ?? null;
+        const end =
+          (nextRow ? (livePostedAtByEpisode.get(nextRow.episode_number) ?? nextAirMidnight ?? null) : null) ??
+          addDaysUtc(lastEpisodeAirMidnight ?? rowAirMidnight, 7);
+        bounds.set(`episode-${row.episode_number}`, {
+          key: `episode-${row.episode_number}`,
+          label: `Episode ${row.episode_number}`,
+          start,
+          end,
+          type: "episode",
+          source: "fallback",
+          episodeNumber: row.episode_number,
+        });
+      }
+
+      const preseasonStart = firstEpisodeAirMidnight ?? null;
+      const preseasonEnd =
+        (firstRow ? (livePostedAtByEpisode.get(firstRow.episode_number) ?? firstEpisodeAirMidnight) : null) ?? null;
+      if (preseasonStart || preseasonEnd) {
+        bounds.set("period-preseason", {
+          key: "period-preseason",
+          label: "Pre-Season",
+          start: preseasonStart,
+          end: preseasonEnd,
+          type: "period",
+          source: "fallback",
+        });
+      }
+
+      const postseasonStart = lastEpisodeAirMidnight ?? null;
+      const postseasonEnd = addDaysUtc(postseasonStart, 7);
+      if (postseasonStart || postseasonEnd) {
+        bounds.set("period-postseason", {
+          key: "period-postseason",
+          label: "Post-Season",
+          start: postseasonStart,
+          end: postseasonEnd,
+          type: "period",
+          source: "fallback",
+        });
+      }
+    }
+
+    for (const period of periodOptions) {
+      if (period.key === "all-periods") continue;
+      const label = period.label.trim();
+      const episodeNumber = parseEpisodeNumberFromPeriodLabel(label);
+      if (episodeNumber !== null) {
+        bounds.set(`episode-${episodeNumber}`, {
+          key: `episode-${episodeNumber}`,
+          label: `Episode ${episodeNumber}`,
+          start: period.start,
+          end: period.end,
+          type: "episode",
+          source: "period",
+          episodeNumber,
+        });
+        continue;
+      }
+      if (isPreSeasonPeriodLabel(label)) {
+        bounds.set("period-preseason", {
+          key: "period-preseason",
+          label: "Pre-Season",
+          start: period.start,
+          end: period.end,
+          type: "period",
+          source: "period",
+        });
+        continue;
+      }
+      if (isPostSeasonPeriodLabel(label)) {
+        bounds.set("period-postseason", {
+          key: "period-postseason",
+          label: "Post-Season",
+          start: period.start,
+          end: period.end,
+          type: "period",
+          source: "period",
+        });
+      }
+    }
+    return bounds;
+  }, [episodeAirDateByNumber, episodeCandidates, episodeMatrix, periodOptions]);
+
+  const seasonalBoundaryPeriods = useMemo(
+    () =>
+      [...episodeWindowBoundsByContainer.values()]
+        .filter((bounds): bounds is EpisodeWindowBounds => bounds.type === "period")
+        .map((bounds) => ({
+          key: bounds.key.replace(/^period-/, ""),
+          label: bounds.label,
+          start: bounds.start,
+          end: bounds.end,
+          source: bounds.source,
+        })),
+    [episodeWindowBoundsByContainer],
+  );
+
+  const seasonDiscoveryWindow = useMemo(() => {
+    const windows = [...episodeWindowBoundsByContainer.values()];
+    const startCandidates = windows
+      .map((window) => parseDateMs(window.start))
+      .filter((value): value is number => value !== null);
+    const endCandidates = windows
+      .map((window) => parseDateMs(window.end))
+      .filter((value): value is number => value !== null);
+    if (startCandidates.length > 0 || endCandidates.length > 0) {
+      const minStart = startCandidates.length > 0 ? Math.min(...startCandidates) : null;
+      const maxEnd = endCandidates.length > 0 ? Math.max(...endCandidates) : null;
+      return {
+        start: minStart !== null ? new Date(minStart).toISOString() : null,
+        end: maxEnd !== null ? new Date(maxEnd).toISOString() : null,
+      };
+    }
+    const datedEpisodes = seasonEpisodes
+      .filter((episode) => parseDateMs(episode.air_date) !== null)
+      .sort((a, b) => a.episode_number - b.episode_number);
+    if (datedEpisodes.length === 0) {
+      return { start: null, end: null };
+    }
+    const firstEpisode = datedEpisodes[0];
+    const lastEpisode = datedEpisodes[datedEpisodes.length - 1];
+    const preSeasonOption = periodOptions.find((period) =>
+      /pre[\s-]?season|trailer/i.test(period.label),
+    );
+    const firstEpisodeMidnight = toEasternMidnightIso(firstEpisode?.air_date ?? null);
+    const lastEpisodeMidnight = toEasternMidnightIso(lastEpisode?.air_date ?? null);
+    return {
+      start: preSeasonOption?.start ?? firstEpisodeMidnight ?? null,
+      end: addDaysUtc(lastEpisodeMidnight, 7),
+    };
+  }, [episodeWindowBoundsByContainer, periodOptions, seasonEpisodes]);
+
+  const unassignedFlairCountBySeasonBoundaryPeriod = useMemo(() => {
+    const counts = new Map<string, number>();
+    const targetFlairKey = normalizeFlairKey(trackedUnassignedFlairLabel);
+    if (!targetFlairKey || seasonalBoundaryPeriods.length === 0) return counts;
+
+    for (const period of seasonalBoundaryPeriods) {
+      const periodStartMs = parseDateMs(period.start);
+      const periodEndMs = parseDateMs(period.end);
+      let count = 0;
+      for (const candidate of episodeCandidates) {
+        const candidateFlairKey = normalizeFlairKey(candidate.link_flair_text);
+        if (candidateFlairKey !== targetFlairKey) continue;
+        const syncStatus = syncCandidateResultByPostId.get(candidate.reddit_post_id)?.status ?? null;
+        if (syncStatus === "auto_saved") continue;
+        const postedMs = parseDateMs(candidate.posted_at);
+        if (postedMs === null) continue;
+        if (periodStartMs !== null && postedMs < periodStartMs) continue;
+        if (periodEndMs !== null && postedMs > periodEndMs) continue;
+        count += 1;
+      }
+      counts.set(period.key, count);
+    }
+    return counts;
+  }, [episodeCandidates, seasonalBoundaryPeriods, syncCandidateResultByPostId, trackedUnassignedFlairLabel]);
+
+  const savedRedditPostIds = useMemo(
+    () => new Set((selectedCommunity?.assigned_threads ?? []).map((thread) => thread.reddit_post_id)),
+    [selectedCommunity],
+  );
+
+  const linkedDiscussionPostIdsByContainer = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const [containerKey, posts] of linkedDiscussionPostsByContainer.entries()) {
+      map.set(
+        containerKey,
+        new Set(posts.map((post) => post.reddit_post_id)),
+      );
+    }
+    return map;
+  }, [linkedDiscussionPostsByContainer]);
+
   const availableSyncReasonCodes = useMemo(() => {
     const codes = new Set<SyncCandidateReasonCode>();
     for (const item of syncCandidateResults) {
@@ -1196,6 +1789,208 @@ export default function RedditSourcesManager({
       }),
     [episodeCandidates, syncCandidateResultByPostId, syncReasonCodeFilter, syncStatusFilter],
   );
+
+  const selectedEpisodeWindowBounds = useMemo(
+    () =>
+      episodeWindowModalContainerKey
+        ? episodeWindowBoundsByContainer.get(episodeWindowModalContainerKey) ?? null
+        : null,
+    [episodeWindowBoundsByContainer, episodeWindowModalContainerKey],
+  );
+
+  const selectedEpisodeWindowDiscussionPosts = useMemo<EpisodeWindowPostItem[]>(() => {
+    if (!episodeWindowModalContainerKey) return [];
+    const linkedPosts = linkedDiscussionPostsByContainer.get(episodeWindowModalContainerKey) ?? [];
+    return linkedPosts.map((post) => ({
+      redditPostId: post.reddit_post_id,
+      title: post.title,
+      text: post.text,
+      url: post.url,
+      score: post.score,
+      numComments: post.num_comments,
+      postedAt: post.posted_at,
+      flair: post.link_flair_text,
+      discussionType: post.discussion_type,
+    }));
+  }, [episodeWindowModalContainerKey, linkedDiscussionPostsByContainer]);
+
+  const filterTrackedDiscoveryPostsForContainer = useCallback(
+    (threads: DiscoveryThread[], containerKey: string): EpisodeWindowPostItem[] => {
+      const bounds = episodeWindowBoundsByContainer.get(containerKey);
+      if (!bounds) return [];
+      const relevantFlairKeys = new Set(
+        selectedRelevantPostFlares
+          .map((flair) => normalizeFlairKey(flair))
+          .filter((value) => value.length > 0),
+      );
+      const preferredTrackedFlairKey = normalizeFlairKey(trackedUnassignedFlairLabel);
+      const startMs = parseDateMs(bounds.start);
+      const endMs = parseDateMs(bounds.end);
+      const filtered: EpisodeWindowPostItem[] = [];
+
+      for (const thread of threads) {
+        const postedMs = parseDateMs(thread.posted_at);
+        if (postedMs === null) continue;
+        if (startMs !== null && postedMs < startMs) continue;
+        if (endMs !== null && postedMs >= endMs) continue;
+
+        const flairKey = normalizeFlairKey(thread.link_flair_text);
+        if (preferredTrackedFlairKey) {
+          if (flairKey !== preferredTrackedFlairKey) continue;
+        } else if (relevantFlairKeys.size > 0 && !relevantFlairKeys.has(flairKey)) {
+          continue;
+        }
+
+        filtered.push({
+          redditPostId: thread.reddit_post_id,
+          title: thread.title,
+          text: thread.text,
+          url: thread.url,
+          score: thread.score,
+          numComments: thread.num_comments,
+          postedAt: thread.posted_at,
+          flair: thread.link_flair_text,
+        });
+      }
+
+      filtered.sort((a, b) => {
+        const postedDiff = (parseDateMs(b.postedAt) ?? 0) - (parseDateMs(a.postedAt) ?? 0);
+        if (postedDiff !== 0) return postedDiff;
+        if (b.numComments !== a.numComments) return b.numComments - a.numComments;
+        return b.score - a.score;
+      });
+      return filtered;
+    },
+    [
+      episodeWindowBoundsByContainer,
+      selectedRelevantPostFlares,
+      trackedUnassignedFlairLabel,
+    ],
+  );
+
+  const filterUnassignedDiscoveryPostsForContainer = useCallback(
+    (threads: DiscoveryThread[], containerKey: string): EpisodeWindowPostItem[] => {
+      const linkedIds = linkedDiscussionPostIdsByContainer.get(containerKey) ?? new Set<string>();
+      return filterTrackedDiscoveryPostsForContainer(threads, containerKey).filter((post) => {
+        if (savedRedditPostIds.has(post.redditPostId)) return false;
+        if (linkedIds.has(post.redditPostId)) return false;
+        return true;
+      });
+    },
+    [
+      filterTrackedDiscoveryPostsForContainer,
+      linkedDiscussionPostIdsByContainer,
+      savedRedditPostIds,
+    ],
+  );
+
+  const trackedFlairTotalCountByContainerWindow = useMemo(() => {
+    const map = new Map<string, number>();
+    const threads = discovery?.threads ?? [];
+    if (threads.length === 0) return map;
+    for (const key of episodeWindowBoundsByContainer.keys()) {
+      map.set(key, filterTrackedDiscoveryPostsForContainer(threads, key).length);
+    }
+    return map;
+  }, [discovery?.threads, episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer]);
+
+  const unassignedFlairCountByContainerWindow = useMemo(() => {
+    const map = new Map<string, number>();
+    const threads = discovery?.threads ?? [];
+    if (threads.length === 0) return map;
+    for (const key of episodeWindowBoundsByContainer.keys()) {
+      map.set(key, filterUnassignedDiscoveryPostsForContainer(threads, key).length);
+    }
+    return map;
+  }, [discovery?.threads, episodeWindowBoundsByContainer, filterUnassignedDiscoveryPostsForContainer]);
+
+  const matrixUnassignedFlairCountBySlot = useMemo(() => {
+    if (unassignedFlairCountByContainerWindow.size === 0) {
+      return unassignedFlairCountBySlot;
+    }
+    const merged = new Map(unassignedFlairCountBySlot);
+    for (const row of episodeMatrix) {
+      const containerCount = unassignedFlairCountByContainerWindow.get(`episode-${row.episode_number}`);
+      if (typeof containerCount !== "number") continue;
+      merged.set(buildEpisodeSlotKey(row.episode_number, "live"), containerCount);
+      merged.set(buildEpisodeSlotKey(row.episode_number, "post"), containerCount);
+      merged.set(buildEpisodeSlotKey(row.episode_number, "weekly"), containerCount);
+    }
+    return merged;
+  }, [episodeMatrix, unassignedFlairCountByContainerWindow, unassignedFlairCountBySlot]);
+
+  const matrixTrackedFlairTotalCountBySlot = useMemo(() => {
+    const totals = new Map<string, number>();
+    if (trackedFlairTotalCountByContainerWindow.size === 0) {
+      return totals;
+    }
+    for (const row of episodeMatrix) {
+      const containerCount = trackedFlairTotalCountByContainerWindow.get(`episode-${row.episode_number}`);
+      if (typeof containerCount !== "number") continue;
+      totals.set(buildEpisodeSlotKey(row.episode_number, "live"), containerCount);
+      totals.set(buildEpisodeSlotKey(row.episode_number, "post"), containerCount);
+      totals.set(buildEpisodeSlotKey(row.episode_number, "weekly"), containerCount);
+    }
+    return totals;
+  }, [episodeMatrix, trackedFlairTotalCountByContainerWindow]);
+
+  const matrixUnassignedFlairCountBySeasonBoundaryPeriod = useMemo(() => {
+    if (unassignedFlairCountByContainerWindow.size === 0) {
+      return unassignedFlairCountBySeasonBoundaryPeriod;
+    }
+    const merged = new Map(unassignedFlairCountBySeasonBoundaryPeriod);
+    for (const period of seasonalBoundaryPeriods) {
+      const containerCount = unassignedFlairCountByContainerWindow.get(`period-${period.key}`);
+      if (typeof containerCount !== "number") continue;
+      merged.set(period.key, containerCount);
+    }
+    return merged;
+  }, [
+    seasonalBoundaryPeriods,
+    unassignedFlairCountByContainerWindow,
+    unassignedFlairCountBySeasonBoundaryPeriod,
+  ]);
+
+  const matrixTrackedFlairTotalCountBySeasonBoundaryPeriod = useMemo(() => {
+    const totals = new Map<string, number>();
+    if (trackedFlairTotalCountByContainerWindow.size === 0) {
+      return totals;
+    }
+    for (const period of seasonalBoundaryPeriods) {
+      const containerCount = trackedFlairTotalCountByContainerWindow.get(`period-${period.key}`);
+      if (typeof containerCount !== "number") continue;
+      totals.set(period.key, containerCount);
+    }
+    return totals;
+  }, [seasonalBoundaryPeriods, trackedFlairTotalCountByContainerWindow]);
+
+  const trackedFlairWindowPostCount = useMemo(() => {
+    const threads = discovery?.threads ?? [];
+    if (threads.length === 0 || episodeWindowBoundsByContainer.size === 0) return 0;
+    const postIds = new Set<string>();
+    for (const key of episodeWindowBoundsByContainer.keys()) {
+      const posts = filterTrackedDiscoveryPostsForContainer(threads, key);
+      for (const post of posts) {
+        postIds.add(post.redditPostId);
+      }
+    }
+    return postIds.size;
+  }, [discovery?.threads, episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer]);
+
+  useEffect(() => {
+    if (!episodeWindowModalContainerKey) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setEpisodeWindowModalContainerKey(null);
+      setEpisodeWindowModalError(null);
+      setEpisodeWindowModalLoading(false);
+      setEpisodeWindowModalOtherPosts([]);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [episodeWindowModalContainerKey]);
 
   useEffect(() => {
     if (syncStatusFilter === "no_sync_result" && syncReasonCodeFilter !== "all") {
@@ -1373,6 +2168,75 @@ export default function RedditSourcesManager({
     [fetchWithTimeout, getAuthHeaders, isEpisodeContextRequestActive],
   );
 
+  const loadSeasonEpisodesForSeason = useCallback(
+    async (seasonIdToLoad: string, options?: { signal?: AbortSignal; requestToken?: number }) => {
+      const seasonIdValue = seasonIdToLoad.trim();
+      if (!seasonIdValue) {
+        if (isEpisodeContextRequestActive(options?.requestToken ?? 0, options?.signal)) {
+          setSeasonEpisodes([]);
+        }
+        return;
+      }
+      const headers = await getAuthHeaders();
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/seasons/${seasonIdValue}/episodes?limit=250&offset=0`,
+        {
+          headers,
+          cache: "no-store",
+          signal: options?.signal,
+          timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Failed to load season episodes for discussion dates");
+      }
+      const payload = (await response.json().catch(() => ({}))) as {
+        episodes?: Array<{
+          id?: string | null;
+          episode_number?: number | string | null;
+          name?: string | null;
+          title?: string | null;
+          air_date?: string | null;
+        }>;
+      };
+      const normalizedEpisodes = (Array.isArray(payload.episodes) ? payload.episodes : [])
+        .map((episode) => {
+          const parsedEpisodeNumber =
+            typeof episode.episode_number === "number"
+              ? Math.trunc(episode.episode_number)
+              : typeof episode.episode_number === "string"
+                ? Number.parseInt(episode.episode_number, 10)
+                : Number.NaN;
+          if (!Number.isFinite(parsedEpisodeNumber) || parsedEpisodeNumber <= 0) {
+            return null;
+          }
+          return {
+            id: typeof episode.id === "string" && episode.id.trim().length > 0
+              ? episode.id
+              : `episode-${parsedEpisodeNumber}`,
+            episode_number: parsedEpisodeNumber,
+            title:
+              typeof episode.name === "string" && episode.name.trim().length > 0
+                ? episode.name
+                : typeof episode.title === "string" && episode.title.trim().length > 0
+                  ? episode.title
+                  : null,
+            air_date:
+              typeof episode.air_date === "string" && episode.air_date.trim().length > 0
+                ? episode.air_date
+                : null,
+          } satisfies SeasonEpisodeRow;
+        })
+        .filter((episode): episode is SeasonEpisodeRow => Boolean(episode))
+        .sort((a, b) => a.episode_number - b.episode_number);
+
+      if (isEpisodeContextRequestActive(options?.requestToken ?? 0, options?.signal)) {
+        setSeasonEpisodes(normalizedEpisodes);
+      }
+    },
+    [fetchWithTimeout, getAuthHeaders, isEpisodeContextRequestActive],
+  );
+
   const loadSeasonAndPeriodContext = useCallback(
     async (community: RedditCommunity, options?: { signal?: AbortSignal; requestToken?: number }) => {
       const requestToken = options?.requestToken ?? episodeContextRequestTokenRef.current;
@@ -1449,7 +2313,10 @@ export default function RedditSourcesManager({
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           setEpisodeSeasonId(resolvedSeason.id);
         }
-        await loadPeriodOptionsForSeason(community, resolvedSeason, options);
+        await Promise.all([
+          loadSeasonEpisodesForSeason(resolvedSeason.id, options),
+          loadPeriodOptionsForSeason(community, resolvedSeason, options),
+        ]);
       } finally {
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           setPeriodsLoading(false);
@@ -1460,6 +2327,7 @@ export default function RedditSourcesManager({
       fetchWithTimeout,
       getAuthHeaders,
       isEpisodeContextRequestActive,
+      loadSeasonEpisodesForSeason,
       loadShowMetadataForCommunity,
       loadPeriodOptionsForSeason,
       seasonId,
@@ -1798,8 +2666,11 @@ export default function RedditSourcesManager({
     for (const thread of nonEpisodeDiscoveryThreads) {
       const flairLabel = thread.link_flair_text?.trim();
       if (!flairLabel) continue;
-      if (isBravoRealHousewivesCommunity && flairLabel.toLowerCase() !== "salt lake city") continue;
-      const flairKey = flairLabel.toLowerCase();
+      const flairKey = normalizeFlairKey(flairLabel);
+      if (!flairKey) continue;
+      if (isBravoRealHousewivesCommunity && flairKey !== normalizeFlairKey("Salt Lake City")) {
+        continue;
+      }
       const existing = groups.get(flairKey);
       if (existing) {
         existing.threads.push(thread);
@@ -2112,37 +2983,94 @@ export default function RedditSourcesManager({
     }
   };
 
-  const handleDiscover = async (communityOverride?: RedditCommunity) => {
-    const community = communityOverride ?? selectedCommunity;
-    if (!community) return;
-    setBusyAction("discover");
-    setBusyLabel("Discovering threads...");
-    setError(null);
-    try {
+  const fetchDiscoveryForCommunity = useCallback(
+    async (
+      communityId: string,
+      options?: DiscoveryFetchOptions,
+    ): Promise<DiscoveryPayload | null> => {
       const headers = await getAuthHeaders();
-      const response = await fetchWithTimeout(
-        `/api/admin/reddit/communities/${community.id}/discover`,
-        {
-          headers,
-          cache: "no-store",
-          timeoutMs: REQUEST_TIMEOUT_MS.discover,
-        },
-      );
+      const params = new URLSearchParams();
+      if (options?.periodStart) {
+        params.set("period_start", options.periodStart);
+      }
+      if (options?.periodEnd) {
+        params.set("period_end", options.periodEnd);
+      }
+      if (options?.exhaustive) {
+        params.set("exhaustive", "true");
+      }
+      if (options?.forceFlair) {
+        params.set("force_flair", options.forceFlair);
+      }
+      if (typeof options?.maxPages === "number" && Number.isFinite(options.maxPages)) {
+        params.set("max_pages", String(Math.max(1, Math.trunc(options.maxPages))));
+      }
+      const qs = params.toString();
+      const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}/discover${qs ? `?${qs}` : ""}`, {
+        headers,
+        cache: "no-store",
+        timeoutMs: REQUEST_TIMEOUT_MS.discover,
+      });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? "Failed to discover threads");
       }
       const payload = (await response.json()) as { discovery?: DiscoveryPayload };
-      setDiscovery(payload.discovery ?? null);
-      setSelectedCommunityId(community.id);
-      void refreshCommunityFlares(community.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to discover threads");
-    } finally {
-      setBusyAction(null);
-      setBusyLabel(null);
-    }
-  };
+      return payload.discovery ?? null;
+    },
+    [fetchWithTimeout, getAuthHeaders],
+  );
+
+  const closeEpisodeWindowModal = useCallback(() => {
+    episodeWindowModalRequestTokenRef.current += 1;
+    setEpisodeWindowModalContainerKey(null);
+    setEpisodeWindowModalError(null);
+    setEpisodeWindowModalLoading(false);
+    setEpisodeWindowModalOtherPosts([]);
+  }, []);
+
+  const openEpisodeWindowModal = useCallback(
+    async (containerKey: string) => {
+      if (!selectedCommunity) return;
+      if (!episodeWindowBoundsByContainer.has(containerKey)) return;
+      setEpisodeWindowModalContainerKey(containerKey);
+      setEpisodeWindowModalLoading(true);
+      setEpisodeWindowModalError(null);
+      setEpisodeWindowModalOtherPosts([]);
+      const requestToken = episodeWindowModalRequestTokenRef.current + 1;
+      episodeWindowModalRequestTokenRef.current = requestToken;
+      try {
+        const bounds = episodeWindowBoundsByContainer.get(containerKey);
+        const discovered = await fetchDiscoveryForCommunity(selectedCommunity.id, {
+          periodStart: bounds?.start ?? null,
+          periodEnd: bounds?.end ?? null,
+          exhaustive: true,
+          forceFlair: trackedUnassignedFlairLabel,
+          maxPages: 500,
+        });
+        const otherPosts = filterUnassignedDiscoveryPostsForContainer(
+          discovered?.threads ?? [],
+          containerKey,
+        );
+        if (episodeWindowModalRequestTokenRef.current !== requestToken) return;
+        setEpisodeWindowModalOtherPosts(otherPosts);
+      } catch (err) {
+        if (episodeWindowModalRequestTokenRef.current !== requestToken) return;
+        setEpisodeWindowModalError(toErrorMessage(err, "Failed to load window posts"));
+      } finally {
+        if (episodeWindowModalRequestTokenRef.current === requestToken) {
+          setEpisodeWindowModalLoading(false);
+        }
+      }
+    },
+    [
+      episodeWindowBoundsByContainer,
+      fetchDiscoveryForCommunity,
+      filterUnassignedDiscoveryPostsForContainer,
+      selectedCommunity,
+      trackedUnassignedFlairLabel,
+    ],
+  );
 
   const saveDiscoveredThread = async (thread: DiscoveryThread) => {
     if (!selectedCommunity) return;
@@ -2234,6 +3162,18 @@ export default function RedditSourcesManager({
       if (typeof resolvedSeasonId === "string" && resolvedSeasonId.trim().length > 0) {
         setEpisodeSeasonId(resolvedSeasonId);
       }
+      try {
+        const discoveryPayload = await fetchDiscoveryForCommunity(selectedCommunity.id, {
+          periodStart: seasonDiscoveryWindow.start,
+          periodEnd: seasonDiscoveryWindow.end,
+          exhaustive: true,
+          forceFlair: trackedUnassignedFlairLabel,
+          maxPages: 500,
+        });
+        setDiscovery(discoveryPayload);
+      } catch {
+        // Discovery refresh is best-effort and must not block episode refresh.
+      }
       if ((payload.meta?.sync_auto_saved_count ?? 0) > 0) {
         await fetchCommunities();
       }
@@ -2245,14 +3185,18 @@ export default function RedditSourcesManager({
   }, [
     enableEpisodeSync,
     episodeSeasonId,
+    fetchDiscoveryForCommunity,
     fetchCommunities,
     fetchWithTimeout,
     getAuthHeaders,
     isDedicatedCommunityView,
     mergeCommunityPatch,
+    seasonDiscoveryWindow.end,
+    seasonDiscoveryWindow.start,
     selectedPeriod,
     selectedCommunity,
     seasonId,
+    trackedUnassignedFlairLabel,
   ]);
 
   useEffect(() => {
@@ -2282,21 +3226,25 @@ export default function RedditSourcesManager({
       setEpisodeContextWarning(null);
       const season = seasonOptions.find((item) => item.id === nextSeasonId);
       if (season) {
-        if (isDedicatedCommunityView) {
-          setPeriodOptions([]);
-          setSelectedPeriodKey("all-periods");
-          return;
-        }
         const requestToken = episodeContextRequestTokenRef.current + 1;
         episodeContextRequestTokenRef.current = requestToken;
         episodeContextAbortRef.current?.abort();
         const controller = new AbortController();
         episodeContextAbortRef.current = controller;
-        setPeriodsLoading(true);
-        void loadPeriodOptionsForSeason(selectedCommunity, season, {
-          signal: controller.signal,
-          requestToken,
-        })
+        if (!isDedicatedCommunityView) {
+          setPeriodsLoading(true);
+        }
+        setSelectedPeriodKey("all-periods");
+        void Promise.all([
+          loadSeasonEpisodesForSeason(season.id, {
+            signal: controller.signal,
+            requestToken,
+          }),
+          loadPeriodOptionsForSeason(selectedCommunity, season, {
+            signal: controller.signal,
+            requestToken,
+          }),
+        ])
           .catch((err) => {
             setEpisodeContextWarning(
               toErrorMessage(err, "Failed to load social periods for selected season"),
@@ -2311,10 +3259,17 @@ export default function RedditSourcesManager({
             }
           });
       } else {
+        setSeasonEpisodes([]);
         setPeriodOptions([]);
       }
     },
-    [isDedicatedCommunityView, loadPeriodOptionsForSeason, seasonOptions, selectedCommunity],
+    [
+      isDedicatedCommunityView,
+      loadPeriodOptionsForSeason,
+      loadSeasonEpisodesForSeason,
+      seasonOptions,
+      selectedCommunity,
+    ],
   );
 
   const handleSaveSelectedEpisodeDiscussions = useCallback(async () => {
@@ -2544,19 +3499,102 @@ export default function RedditSourcesManager({
     );
   };
 
+  const renderEpisodeWindowPostCard = (
+    post: EpisodeWindowPostItem,
+    options?: { showDiscussionType?: boolean },
+  ) => {
+    const mediaPreviewType = resolveMediaPreviewType(post.url);
+    return (
+      <article
+        key={`episode-window-post-${post.redditPostId}`}
+        className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <a
+            href={post.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-semibold text-zinc-900 hover:underline"
+          >
+            {post.title}
+          </a>
+          {options?.showDiscussionType && post.discussionType && (
+            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+              {formatDiscussionTypeLabel(post.discussionType)}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-zinc-600">
+          Upvotes {fmtNum(post.score)} · Downvotes n/a · {fmtNum(post.numComments)} comments
+        </p>
+        {post.postedAt && <p className="mt-1 text-xs text-zinc-500">{fmtDateTime(post.postedAt)}</p>}
+        {post.flair && (
+          <p className="mt-1 text-xs text-zinc-500">
+            Flair: <span className="font-semibold text-zinc-700">{post.flair}</span>
+          </p>
+        )}
+        {post.text && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-700">{post.text}</p>}
+        <p className="mt-1 text-xs">
+          <a
+            href={post.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-700 hover:underline"
+          >
+            Original URL
+          </a>
+        </p>
+        {mediaPreviewType === "image" && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={post.url}
+            alt={`Image preview for ${post.title}`}
+            loading="lazy"
+            className="mt-2 max-h-56 rounded-lg border border-zinc-200 object-contain"
+          />
+        )}
+        {mediaPreviewType === "video" && (
+          <video
+            src={post.url}
+            controls
+            preload="metadata"
+            className="mt-2 max-h-56 w-full rounded-lg border border-zinc-200 bg-black"
+          />
+        )}
+      </article>
+    );
+  };
+
   const renderEpisodeTitlePhraseSettings = () => {
     if (!selectedCommunity) return null;
+    const categorizedPatterns = selectedCommunity.episode_title_patterns.map((pattern) => ({
+      pattern,
+      category: resolveEpisodeFilterCategoryLabel(pattern),
+    }));
 
     return (
       <div className="rounded-lg border border-zinc-200 p-3">
         <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-          Title Phrases
+          Discussion Filters
+        </p>
+        <p className="mb-2 text-xs text-zinc-500">
+          These keyword filters drive episode-discussion matching by category.
         </p>
         <div className="mb-2 flex flex-wrap gap-1.5">
-          {selectedCommunity.episode_title_patterns.length === 0 && (
-            <span className="text-xs text-zinc-500">No episode title patterns.</span>
+          {EPISODE_FILTER_CATEGORY_RULES.map((rule) => (
+            <span
+              key={`episode-filter-category-${rule.label}`}
+              className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-600"
+            >
+              {rule.label}
+            </span>
+          ))}
+        </div>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {categorizedPatterns.length === 0 && (
+            <span className="text-xs text-zinc-500">No discussion filters configured.</span>
           )}
-          {selectedCommunity.episode_title_patterns.map((pattern) => (
+          {categorizedPatterns.map(({ pattern, category }) => (
             <button
               key={`episode-pattern-${selectedCommunity.id}-${pattern}`}
               type="button"
@@ -2571,7 +3609,7 @@ export default function RedditSourcesManager({
               }}
               className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60"
             >
-              {pattern} ×
+              {category}: {pattern} ×
             </button>
           ))}
         </div>
@@ -2660,35 +3698,29 @@ export default function RedditSourcesManager({
           </div>
         )}
 
-        <div
-          className={`mb-3 grid gap-2 ${
-            isDedicatedCommunityView
-              ? "lg:grid-cols-[minmax(0,1fr)_auto]"
-              : "lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
-          }`}
-        >
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-              Season
-            </span>
-            <select
-              value={episodeSeasonId ?? ""}
-              disabled={isBusy || periodsLoading || seasonOptions.length === 0}
-              onChange={(event) => handleEpisodeSeasonChange(event.target.value || null)}
-              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
-            >
-              {seasonOptions.length === 0 ? (
-                <option value="">No seasons</option>
-              ) : (
-                seasonOptions.map((season) => (
-                  <option key={season.id} value={season.id}>
-                    Season {season.season_number}
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
-          {!isDedicatedCommunityView && (
+        {!isDedicatedCommunityView && (
+          <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                Season
+              </span>
+              <select
+                value={episodeSeasonId ?? ""}
+                disabled={isBusy || periodsLoading || seasonOptions.length === 0}
+                onChange={(event) => handleEpisodeSeasonChange(event.target.value || null)}
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
+              >
+                {seasonOptions.length === 0 ? (
+                  <option value="">No seasons</option>
+                ) : (
+                  seasonOptions.map((season) => (
+                    <option key={season.id} value={season.id}>
+                      Season {season.season_number}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
                 Period
@@ -2710,20 +3742,16 @@ export default function RedditSourcesManager({
                 )}
               </select>
             </label>
-          )}
-          <button
-            type="button"
-            disabled={isBusy || periodsLoading || episodeRefreshing}
-            onClick={() => void handleRefreshEpisodeDiscussions()}
-            className="self-end rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
-          >
-            {episodeRefreshing
-              ? "Refreshing..."
-              : isDedicatedCommunityView
-                ? "Refresh Discussions"
-                : "Refresh Episode Discussions"}
-          </button>
-        </div>
+            <button
+              type="button"
+              disabled={isBusy || periodsLoading || episodeRefreshing}
+              onClick={() => void handleRefreshEpisodeDiscussions()}
+              className="self-end rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+            >
+              {episodeRefreshing ? "Refreshing..." : "Refresh Episode Discussions"}
+            </button>
+          </div>
+        )}
 
         {episodeMeta?.auto_seeded_required_flares && (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
@@ -2733,13 +3761,16 @@ export default function RedditSourcesManager({
 
         {episodeMeta?.sync_requested && (
           <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-700">
-            Auto-synced {episodeMeta.sync_auto_saved_count ?? 0} posts
+            Episode discussions auto-synced {episodeMeta.sync_auto_saved_count ?? 0} posts
             {episodeMeta.sync_skipped_conflicts && episodeMeta.sync_skipped_conflicts.length > 0
               ? ` · skipped conflicts: ${episodeMeta.sync_skipped_conflicts.length}`
               : ""}
             {typeof episodeMeta.sync_skipped_ineligible_count === "number"
               ? ` · skipped ineligible: ${episodeMeta.sync_skipped_ineligible_count}`
               : ""}
+            <div className="mt-1 text-[11px] text-emerald-700/90">
+              This count covers episode-discussion sync candidates only, not all tracked-flair posts.
+            </div>
           </div>
         )}
 
@@ -2758,7 +3789,7 @@ export default function RedditSourcesManager({
         {episodeMeta && (
           <div className="mb-3 space-y-1">
             <p className="text-xs text-zinc-500">
-              Found {episodeMeta.total_found ?? 0} candidates ·{" "}
+              Found {episodeMeta.total_found ?? 0} episode-discussion candidates ·{" "}
               {typeof episodeMeta.fetched_at === "string" ? fmtDateTime(episodeMeta.fetched_at) : "-"}
               {episodeMeta.season_context?.season_number
                 ? ` · Season ${episodeMeta.season_context.season_number}`
@@ -2788,14 +3819,57 @@ export default function RedditSourcesManager({
                 queries: {episodeMeta.discovery_source_summary.gap_fill_queries_run ?? 0}
               </p>
             )}
+            {trackedUnassignedFlairLabel && (
+              <p className="text-xs text-zinc-500">
+                {episodeRefreshing ? (
+                  "Refreshing tracked flair totals across episode windows..."
+                ) : (
+                  <>
+                    Season total tracked flair posts across episode windows (
+                    {discovery?.collection_mode === "exhaustive_window" ? "exhaustive" : "sample"}) ·{" "}
+                    {trackedUnassignedFlairLabel}: {fmtNum(trackedFlairWindowPostCount)}
+                  </>
+                )}
+              </p>
+            )}
+            {discovery?.totals && (
+              <p className="text-xs text-zinc-500">
+                Discover totals · fetched {fmtNum(discovery.totals.fetched_rows)} · matched{" "}
+                {fmtNum(discovery.totals.matched_rows)} · tracked flair{" "}
+                {fmtNum(discovery.totals.tracked_flair_rows)}
+              </p>
+            )}
+            {discovery?.collection_mode === "exhaustive_window" &&
+              discovery.window_exhaustive_complete === false && (
+                <p className="text-xs text-amber-700">
+                  Exhaustive crawl hit max pages ({fmtNum(discovery.max_pages_applied ?? 0)}); totals may be incomplete.
+                </p>
+              )}
           </div>
         )}
 
         {!isDedicatedCommunityView && episodeMatrix.length > 0 && (
-          <div className="mb-3">{renderEpisodeMatrixCards(episodeMatrix)}</div>
+          <div className="mb-3">
+            {renderEpisodeMatrixCards(episodeMatrix, {
+              episodeAirDateByNumber,
+              episodeWindowByContainer: episodeWindowBoundsByContainer,
+              unassignedFlairLabel: trackedUnassignedFlairLabel,
+              totalsLoading: episodeRefreshing,
+              totalTrackedFlairCountByContainer: trackedFlairTotalCountByContainerWindow,
+              unassignedFlairCountByContainer: unassignedFlairCountByContainerWindow,
+              unassignedFlairCountBySlot: matrixUnassignedFlairCountBySlot,
+              totalTrackedFlairCountBySlot: matrixTrackedFlairTotalCountBySlot,
+              seasonalBoundaryPeriods: seasonalBoundaryPeriods,
+              unassignedFlairCountBySeasonBoundaryPeriod: matrixUnassignedFlairCountBySeasonBoundaryPeriod,
+              totalTrackedFlairCountBySeasonBoundaryPeriod:
+                matrixTrackedFlairTotalCountBySeasonBoundaryPeriod,
+              linkedPostsByContainer: linkedDiscussionPostsByContainer,
+              onOpenContainerPosts: (containerKey) => void openEpisodeWindowModal(containerKey),
+            })}
+          </div>
         )}
 
-        {episodeCandidates.length > 0 && (
+        {!isDedicatedCommunityView && episodeCandidates.length > 0 && (
           <div className="mb-3 grid gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
@@ -2852,7 +3926,8 @@ export default function RedditSourcesManager({
           </div>
         )}
 
-        {episodeCandidates.length === 0 ? (
+        {!isDedicatedCommunityView &&
+          (episodeCandidates.length === 0 ? (
           episodeMeta ? (
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
               <p>
@@ -2956,7 +4031,7 @@ export default function RedditSourcesManager({
               );
             })}
           </div>
-        )}
+        ))}
 
         {!isDedicatedCommunityView && (
           <div className="mt-3">
@@ -3132,11 +4207,11 @@ export default function RedditSourcesManager({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={isBusy}
-              onClick={() => void handleDiscover(selectedCommunity)}
+              disabled={isBusy || episodeRefreshing || periodsLoading}
+              onClick={() => void handleRefreshEpisodeDiscussions()}
               className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Discover Threads
+              {episodeRefreshing ? "Refreshing..." : "Refresh Discussions"}
             </button>
             <button
               type="button"
@@ -3671,14 +4746,6 @@ export default function RedditSourcesManager({
                             Community View
                           </a>
                         )}
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => void handleDiscover()}
-                          className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Discover Threads
-                        </button>
                       </div>
                     </div>
                     <p className="mt-2 text-xs text-zinc-500">
@@ -3995,9 +5062,9 @@ export default function RedditSourcesManager({
                               </p>
                               <div className="flex flex-wrap gap-1.5">
                                 {selectedCommunity.post_flares.map((flair) => {
-                                  const flairKey = flair.toLowerCase();
+                                  const flairKey = normalizeFlairKey(flair);
                                   const isSelected = selectedCommunity.analysis_all_flares.some(
-                                    (value) => value.toLowerCase() === flairKey,
+                                    (value) => normalizeFlairKey(value) === flairKey,
                                   );
                                   return (
                                     <button
@@ -4007,11 +5074,11 @@ export default function RedditSourcesManager({
                                       onClick={() => {
                                         const nextAll = isSelected
                                           ? selectedCommunity.analysis_all_flares.filter(
-                                              (value) => value.toLowerCase() !== flairKey,
+                                              (value) => normalizeFlairKey(value) !== flairKey,
                                             )
                                           : [...selectedCommunity.analysis_all_flares, flair];
                                         const nextScan = selectedCommunity.analysis_flares.filter(
-                                          (value) => value.toLowerCase() !== flairKey,
+                                          (value) => normalizeFlairKey(value) !== flairKey,
                                         );
                                         void persistAnalysisFlareModes(selectedCommunity.id, {
                                           analysisAllFlares: nextAll,
@@ -4038,9 +5105,9 @@ export default function RedditSourcesManager({
                               </p>
                               <div className="flex flex-wrap gap-1.5">
                                 {selectedCommunity.post_flares.map((flair) => {
-                                  const flairKey = flair.toLowerCase();
+                                  const flairKey = normalizeFlairKey(flair);
                                   const isSelected = selectedCommunity.analysis_flares.some(
-                                    (value) => value.toLowerCase() === flairKey,
+                                    (value) => normalizeFlairKey(value) === flairKey,
                                   );
                                   return (
                                     <button
@@ -4050,11 +5117,11 @@ export default function RedditSourcesManager({
                                       onClick={() => {
                                         const nextScan = isSelected
                                           ? selectedCommunity.analysis_flares.filter(
-                                              (value) => value.toLowerCase() !== flairKey,
+                                              (value) => normalizeFlairKey(value) !== flairKey,
                                             )
                                           : [...selectedCommunity.analysis_flares, flair];
                                         const nextAll = selectedCommunity.analysis_all_flares.filter(
-                                          (value) => value.toLowerCase() !== flairKey,
+                                          (value) => normalizeFlairKey(value) !== flairKey,
                                         );
                                         void persistAnalysisFlareModes(selectedCommunity.id, {
                                           analysisAllFlares: nextAll,
@@ -4109,7 +5176,22 @@ export default function RedditSourcesManager({
                           No episode discussion rows found for this community yet.
                         </p>
                       ) : (
-                        renderEpisodeMatrixCards(episodeMatrix)
+                        renderEpisodeMatrixCards(episodeMatrix, {
+                          episodeAirDateByNumber,
+                          episodeWindowByContainer: episodeWindowBoundsByContainer,
+                          unassignedFlairLabel: trackedUnassignedFlairLabel,
+                          totalsLoading: episodeRefreshing,
+                          totalTrackedFlairCountByContainer: trackedFlairTotalCountByContainerWindow,
+                          unassignedFlairCountByContainer: unassignedFlairCountByContainerWindow,
+                          unassignedFlairCountBySlot: matrixUnassignedFlairCountBySlot,
+                          totalTrackedFlairCountBySlot: matrixTrackedFlairTotalCountBySlot,
+                          seasonalBoundaryPeriods,
+                          unassignedFlairCountBySeasonBoundaryPeriod: matrixUnassignedFlairCountBySeasonBoundaryPeriod,
+                          totalTrackedFlairCountBySeasonBoundaryPeriod:
+                            matrixTrackedFlairTotalCountBySeasonBoundaryPeriod,
+                          linkedPostsByContainer: linkedDiscussionPostsByContainer,
+                          onOpenContainerPosts: (containerKey) => void openEpisodeWindowModal(containerKey),
+                        })
                       )
                     ) : selectedCommunity.assigned_threads.length === 0 ? (
                       <p className="text-sm text-zinc-500">No saved threads for this community.</p>
@@ -4267,6 +5349,70 @@ export default function RedditSourcesManager({
               </>
             )}
           </section>
+        </div>
+      )}
+      {episodeWindowModalContainerKey && selectedEpisodeWindowBounds && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
+          onClick={closeEpisodeWindowModal}
+        >
+          <article
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${selectedEpisodeWindowBounds.label} posts`}
+            className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                  {selectedEpisodeWindowBounds.label}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  {fmtDateTime(selectedEpisodeWindowBounds.start)} to {fmtDateTime(selectedEpisodeWindowBounds.end)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEpisodeWindowModal}
+                className="rounded-lg border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <section className="mb-4 space-y-2">
+              <h5 className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                Episode Discussions
+              </h5>
+              {selectedEpisodeWindowDiscussionPosts.length === 0 ? (
+                <p className="text-xs text-zinc-500">No linked discussion posts in this container.</p>
+              ) : (
+                <div className="space-y-2">
+                  {selectedEpisodeWindowDiscussionPosts.map((post) =>
+                    renderEpisodeWindowPostCard(post, { showDiscussionType: true }),
+                  )}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-2">
+              <h5 className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                Other Unassigned Posts In Window
+              </h5>
+              {episodeWindowModalLoading ? (
+                <p className="text-xs text-zinc-500">Loading posts...</p>
+              ) : episodeWindowModalError ? (
+                <p className="text-xs text-red-600">{episodeWindowModalError}</p>
+              ) : episodeWindowModalOtherPosts.length === 0 ? (
+                <p className="text-xs text-zinc-500">No unassigned posts matched this window.</p>
+              ) : (
+                <div className="space-y-2">
+                  {episodeWindowModalOtherPosts.map((post) => renderEpisodeWindowPostCard(post))}
+                </div>
+              )}
+            </section>
+          </article>
         </div>
       )}
     </div>

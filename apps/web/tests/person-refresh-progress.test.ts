@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPersonRefreshDetailMessage,
   createSyncProgressTracker,
+  formatRefreshSourceLabel,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
   PERSON_REFRESH_PHASES,
@@ -66,5 +68,38 @@ describe("person refresh progress mapping", () => {
         total: 2,
       }),
     ).toEqual({ current: 2, total: 2 });
+  });
+
+  it("formats source labels for backend source identifiers", () => {
+    expect(formatRefreshSourceLabel("imdb")).toBe("IMDb");
+    expect(formatRefreshSourceLabel("fandom-gallery")).toBe("Fandom Gallery");
+    expect(formatRefreshSourceLabel("tmdb")).toBe("TMDb");
+  });
+
+  it("builds detailed heartbeat messages with source + elapsed context", () => {
+    expect(
+      buildPersonRefreshDetailMessage({
+        rawStage: "sync_imdb",
+        message: "Syncing IMDb...",
+        heartbeat: true,
+        elapsedMs: 6200,
+        source: "imdb",
+        sourceTotal: 50,
+        mirroredCount: 24,
+        current: 0,
+        total: 4,
+      }),
+    ).toBe("Syncing IMDb... · mirrored 24/50 · step 0/4 · 6s elapsed");
+  });
+
+  it("builds fallback detail when backend emits no message", () => {
+    expect(
+      buildPersonRefreshDetailMessage({
+        rawStage: "sync_tmdb",
+        heartbeat: true,
+        elapsedMs: 3000,
+        source: "tmdb",
+      }),
+    ).toBe("SYNCING in progress · source: TMDb · 3s elapsed");
   });
 });

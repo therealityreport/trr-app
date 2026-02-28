@@ -2,6 +2,7 @@ import {
   normalizeRedditFlairLabel,
   sanitizeRedditFlairList,
 } from "@/lib/server/admin/reddit-flair-normalization";
+import { toCanonicalFlairKey } from "@/lib/reddit/flair-key";
 import {
   EPISODE_DISCUSSION_TYPE_ALIASES,
   sanitizeEpisodeTitlePatterns,
@@ -9,6 +10,7 @@ import {
 
 export type RedditListingSort = "new" | "hot" | "top";
 export type EpisodeDiscussionType = "live" | "post" | "weekly";
+export type DiscoveryCollectionMode = "sample" | "exhaustive_window";
 
 export interface RedditDiscoveryThread {
   reddit_post_id: string;
@@ -45,17 +47,33 @@ export interface DiscoverSubredditThreadsInput {
   isShowFocused?: boolean;
   analysisFlares?: string[] | null;
   analysisAllFlares?: string[] | null;
+  forceIncludeFlares?: string[] | null;
   sortModes?: RedditListingSort[];
   limitPerMode?: number;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  exhaustiveWindow?: boolean;
+  maxPages?: number;
 }
 
 export interface DiscoverSubredditThreadsResult {
   subreddit: string;
   fetched_at: string;
+  collection_mode: DiscoveryCollectionMode;
   sources_fetched: RedditListingSort[];
   successful_sorts: RedditListingSort[];
   failed_sorts: RedditListingSort[];
   rate_limited_sorts: RedditListingSort[];
+  listing_pages_fetched: number;
+  max_pages_applied: number;
+  window_exhaustive_complete: boolean | null;
+  totals: {
+    fetched_rows: number;
+    matched_rows: number;
+    tracked_flair_rows: number;
+  };
+  window_start: string | null;
+  window_end: string | null;
   terms: string[];
   hints: RedditDiscoveryHints;
   threads: RedditDiscoveryThread[];
@@ -173,6 +191,7 @@ interface RedditListingChild {
 interface RedditListingPayload {
   data?: {
     children?: RedditListingChild[];
+    after?: string | null;
   };
 }
 
@@ -194,6 +213,8 @@ const DEFAULT_LIMIT_PER_MODE = 35;
 const DEFAULT_EPISODE_LIMIT_PER_MODE = 65;
 const MAX_LIMIT_PER_MODE = 80;
 const MAX_SEARCH_LIMIT_PER_PAGE = 100;
+const DEFAULT_EXHAUSTIVE_WINDOW_MAX_PAGES = 160;
+const MAX_EXHAUSTIVE_WINDOW_MAX_PAGES = 500;
 const DEFAULT_REDDIT_TIMEOUT_MS = 12_000;
 const DEFAULT_REDDIT_USER_AGENT = "TRRAdminRedditDiscovery/1.0 (+https://thereality.report)";
 const MAX_REDDIT_FETCH_RETRIES = 2;
@@ -235,6 +256,22 @@ const getFetchTimeoutMs = (): number => {
 
 const getRedditUserAgent = (): string =>
   (process.env.REDDIT_USER_AGENT ?? "").trim() || DEFAULT_REDDIT_USER_AGENT;
+
+const getExhaustiveWindowMaxPages = (requestedMaxPages?: number | null): number => {
+  if (
+    typeof requestedMaxPages === "number" &&
+    Number.isFinite(requestedMaxPages) &&
+    requestedMaxPages > 0
+  ) {
+    return Math.min(Math.floor(requestedMaxPages), MAX_EXHAUSTIVE_WINDOW_MAX_PAGES);
+  }
+  const raw = process.env.REDDIT_EXHAUSTIVE_WINDOW_MAX_PAGES;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.min(parsed, MAX_EXHAUSTIVE_WINDOW_MAX_PAGES);
+  }
+  return DEFAULT_EXHAUSTIVE_WINDOW_MAX_PAGES;
+};
 
 const dedupeTerms = (terms: string[]): string[] => {
   const seen = new Set<string>();
@@ -437,10 +474,18 @@ const toAbsoluteRedditUrl = (value: string): string => {
   return `https://www.reddit.com/${value}`;
 };
 
-const makeSortUrl = (subreddit: string, sort: RedditListingSort, limit: number): string => {
+const makeSortUrl = (
+  subreddit: string,
+  sort: RedditListingSort,
+  limit: number,
+  after: string | null = null,
+): string => {
   const params = new URLSearchParams({ limit: String(limit), raw_json: "1" });
   if (sort === "top") {
     params.set("t", "all");
+  }
+  if (after) {
+    params.set("after", after);
   }
   return `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/${sort}.json?${params.toString()}`;
 };
@@ -509,16 +554,35 @@ const parseListingPayload = (
     .filter((thread): thread is RedditDiscoveryThread => Boolean(thread));
 };
 
-const fetchSort = async (
+const filterThreadsByPeriodWindow = (input: {
+  rows: RedditDiscoveryThread[];
+  periodStartDate: Date | null;
+  periodEndDate: Date | null;
+}): RedditDiscoveryThread[] => {
+  if (!input.periodStartDate && !input.periodEndDate) return input.rows;
+  const minMs = input.periodStartDate?.getTime() ?? null;
+  const maxMs = input.periodEndDate?.getTime() ?? null;
+  return input.rows.filter((row) => {
+    const postedDate = parseIsoDate(row.posted_at);
+    if (!postedDate) return false;
+    const postedMs = postedDate.getTime();
+    if (minMs !== null && postedMs < minMs) return false;
+    if (maxMs !== null && postedMs > maxMs) return false;
+    return true;
+  });
+};
+
+const fetchSortPage = async (
   subreddit: string,
   sort: RedditListingSort,
   limit: number,
-): Promise<RedditDiscoveryThread[]> => {
+  after: string | null,
+): Promise<{ rows: RedditDiscoveryThread[]; after: string | null }> => {
   for (let attempt = 0; attempt <= MAX_REDDIT_FETCH_RETRIES; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), getFetchTimeoutMs());
     try {
-      const response = await fetch(makeSortUrl(subreddit, sort, limit), {
+      const response = await fetch(makeSortUrl(subreddit, sort, limit, after), {
         headers: {
           Accept: "application/json",
           "User-Agent": getRedditUserAgent(),
@@ -539,7 +603,10 @@ const fetchSort = async (
       }
 
       const payload = (await response.json()) as RedditListingPayload;
-      return parseListingPayload(payload, sort);
+      return {
+        rows: parseListingPayload(payload, sort),
+        after: payload.data?.after ?? null,
+      };
     } catch (error) {
       const mappedError =
         error instanceof RedditDiscoveryError
@@ -561,6 +628,59 @@ const fetchSort = async (
     }
   }
   throw new RedditDiscoveryError("Failed to fetch subreddit threads", 502);
+};
+
+const fetchSort = async (
+  subreddit: string,
+  sort: RedditListingSort,
+  limit: number,
+): Promise<RedditDiscoveryThread[]> => {
+  const page = await fetchSortPage(subreddit, sort, limit, null);
+  return page.rows;
+};
+
+const fetchNewWindowExhaustive = async (input: {
+  subreddit: string;
+  periodStartDate: Date | null;
+  periodEndDate: Date | null;
+  maxPages: number;
+}): Promise<{ rows: RedditDiscoveryThread[]; pages_fetched: number; window_complete: boolean }> => {
+  let after: string | null = null;
+  let pagesFetched = 0;
+  const rows: RedditDiscoveryThread[] = [];
+  let reachedPeriodStart = input.periodStartDate === null;
+  while (pagesFetched < input.maxPages) {
+    const page = await fetchSortPage(
+      input.subreddit,
+      "new",
+      MAX_SEARCH_LIMIT_PER_PAGE,
+      after,
+    );
+    pagesFetched += 1;
+    rows.push(...page.rows);
+    after = page.after;
+    if (!after || page.rows.length === 0) {
+      break;
+    }
+    if (input.periodStartDate) {
+      const oldestMsOnPage = page.rows.reduce<number | null>((oldest, row) => {
+        const posted = parseIsoDate(row.posted_at);
+        if (!posted) return oldest;
+        const postedMs = posted.getTime();
+        if (oldest === null || postedMs < oldest) return postedMs;
+        return oldest;
+      }, null);
+      if (
+        oldestMsOnPage !== null &&
+        oldestMsOnPage < input.periodStartDate.getTime()
+      ) {
+        reachedPeriodStart = true;
+        break;
+      }
+    }
+  }
+  const windowComplete = reachedPeriodStart || after === null;
+  return { rows, pages_fetched: pagesFetched, window_complete: windowComplete };
 };
 
 const fetchSearchPage = async (
@@ -706,13 +826,18 @@ const applyMatchMetadata = (
   isShowFocused: boolean,
   analysisScanFlares: string[],
   analysisAllFlares: string[],
+  forcedAllPostFlares: string[],
 ): { threads: RedditDiscoveryThread[]; hints: RedditDiscoveryHints } => {
   const includeCounts = new Map<string, number>();
   const excludeCounts = new Map<string, number>();
-  const analysisAllFlairKeys = new Set(analysisAllFlares.map((flair) => flair.toLowerCase()));
+  const analysisAllFlairKeys = new Set(analysisAllFlares.map((flair) => toCanonicalFlairKey(flair)));
+  for (const forcedFlair of forcedAllPostFlares) {
+    analysisAllFlairKeys.add(toCanonicalFlairKey(forcedFlair));
+  }
   const analysisScanFlairKeys = new Set(
     analysisScanFlares
-      .map((flair) => flair.toLowerCase())
+      .map((flair) => toCanonicalFlairKey(flair))
+      .filter((flair) => flair.length > 0)
       .filter((flair) => !analysisAllFlairKeys.has(flair)),
   );
   const hasAnalysisFlairFilter =
@@ -736,7 +861,7 @@ const applyMatchMetadata = (
     const normalizedThreadFlair = thread.link_flair_text
       ? normalizeRedditFlairLabel(subreddit, thread.link_flair_text)
       : null;
-    const flairKey = normalizedThreadFlair?.toLowerCase() ?? null;
+    const flairKey = toCanonicalFlairKey(normalizedThreadFlair);
     const matchesAllPostsFlair = Boolean(flairKey && analysisAllFlairKeys.has(flairKey));
     const matchesScanFlair = Boolean(flairKey && analysisScanFlairKeys.has(flairKey));
     const passesFlairFilter = hasAnalysisFlairFilter
@@ -804,18 +929,64 @@ export async function discoverSubredditThreads(
   const castTerms = buildCastTerms(input.castNames ?? []);
   const analysisScanFlares = sanitizeRedditFlairList(subreddit, input.analysisFlares ?? []);
   const analysisAllFlares = sanitizeRedditFlairList(subreddit, input.analysisAllFlares ?? []);
+  const forcedAllPostFlares = sanitizeRedditFlairList(subreddit, input.forceIncludeFlares ?? []);
   const isShowFocused = input.isShowFocused ?? false;
+  const periodStartDate = parseIsoDate(input.periodStart);
+  const periodEndDate = parseIsoDate(input.periodEnd);
+  const useExhaustiveWindow =
+    input.exhaustiveWindow === true && Boolean(periodStartDate || periodEndDate);
+  const maxPages = getExhaustiveWindowMaxPages(input.maxPages ?? null);
 
   if (terms.length === 0) {
     throw new RedditDiscoveryError("Show terms are required for discovery", 400);
   }
+  if (input.periodStart && !periodStartDate) {
+    throw new RedditDiscoveryError("period_start must be a valid ISO datetime", 400);
+  }
+  if (input.periodEnd && !periodEndDate) {
+    throw new RedditDiscoveryError("period_end must be a valid ISO datetime", 400);
+  }
+  if (periodStartDate && periodEndDate && periodStartDate.getTime() > periodEndDate.getTime()) {
+    throw new RedditDiscoveryError("period_start must be before period_end", 400);
+  }
 
-  const { rows: fetchedRows, diagnostics } = await fetchSortsWithDiagnostics(
-    subreddit,
-    sortModes,
-    limitPerMode,
-  );
+  let fetchedRows: RedditDiscoveryThread[] = [];
+  let listingPagesFetched = 0;
+  let windowExhaustiveComplete: boolean | null = null;
+  const diagnostics: SortFetchDiagnostics = {
+    successful_sorts: [],
+    failed_sorts: [],
+    rate_limited_sorts: [],
+  };
+  if (useExhaustiveWindow) {
+    const exhaustive = await fetchNewWindowExhaustive({
+      subreddit,
+      periodStartDate,
+      periodEndDate,
+      maxPages,
+    });
+    fetchedRows = filterThreadsByPeriodWindow({
+      rows: exhaustive.rows,
+      periodStartDate,
+      periodEndDate,
+    });
+    listingPagesFetched = exhaustive.pages_fetched;
+    windowExhaustiveComplete = exhaustive.window_complete;
+    diagnostics.successful_sorts = ["new"];
+  } else {
+    const sample = await fetchSortsWithDiagnostics(subreddit, sortModes, limitPerMode);
+    fetchedRows = sample.rows;
+    diagnostics.successful_sorts = sample.diagnostics.successful_sorts;
+    diagnostics.failed_sorts = sample.diagnostics.failed_sorts;
+    diagnostics.rate_limited_sorts = sample.diagnostics.rate_limited_sorts;
+    listingPagesFetched = diagnostics.successful_sorts.length;
+  }
   const mergedThreads = mergeByPostId(fetchedRows);
+  const trackedFlairKeySet = new Set<string>(
+    [...analysisAllFlares, ...analysisScanFlares, ...forcedAllPostFlares]
+      .map((flair) => toCanonicalFlairKey(flair))
+      .filter((flair) => flair.length > 0),
+  );
   const { threads, hints } = applyMatchMetadata(
     mergedThreads,
     terms,
@@ -824,7 +995,18 @@ export async function discoverSubredditThreads(
     isShowFocused,
     analysisScanFlares,
     analysisAllFlares,
+    forcedAllPostFlares,
   );
+  const trackedFlairRows =
+    trackedFlairKeySet.size === 0
+      ? 0
+      : mergedThreads.reduce((count, row) => {
+          const normalizedThreadFlair = row.link_flair_text
+            ? normalizeRedditFlairLabel(subreddit, row.link_flair_text)
+            : null;
+          const flairKey = toCanonicalFlairKey(normalizedThreadFlair);
+          return flairKey && trackedFlairKeySet.has(flairKey) ? count + 1 : count;
+        }, 0);
 
   threads.sort((a, b) => {
     if (b.match_score !== a.match_score) return b.match_score - a.match_score;
@@ -834,10 +1016,21 @@ export async function discoverSubredditThreads(
 
   console.info("[reddit_discover_threads_complete]", {
     subreddit,
-    requested_sorts: sortModes,
+    requested_sorts: useExhaustiveWindow ? ["new"] : sortModes,
+    collection_mode: useExhaustiveWindow ? "exhaustive_window" : "sample",
     successful_sorts: diagnostics.successful_sorts,
     failed_sorts: diagnostics.failed_sorts,
     rate_limited_sorts: diagnostics.rate_limited_sorts,
+    listing_pages_fetched: listingPagesFetched,
+    max_pages_applied: maxPages,
+    window_exhaustive_complete: windowExhaustiveComplete,
+    totals: {
+      fetched_rows: mergedThreads.length,
+      matched_rows: threads.length,
+      tracked_flair_rows: trackedFlairRows,
+    },
+    window_start: periodStartDate?.toISOString() ?? null,
+    window_end: periodEndDate?.toISOString() ?? null,
     threads_returned: threads.length,
     duration_ms: Date.now() - requestStartedAt,
   });
@@ -845,10 +1038,21 @@ export async function discoverSubredditThreads(
   return {
     subreddit,
     fetched_at: new Date().toISOString(),
+    collection_mode: useExhaustiveWindow ? "exhaustive_window" : "sample",
     sources_fetched: diagnostics.successful_sorts,
     successful_sorts: diagnostics.successful_sorts,
     failed_sorts: diagnostics.failed_sorts,
     rate_limited_sorts: diagnostics.rate_limited_sorts,
+    listing_pages_fetched: listingPagesFetched,
+    max_pages_applied: maxPages,
+    window_exhaustive_complete: windowExhaustiveComplete,
+    totals: {
+      fetched_rows: mergedThreads.length,
+      matched_rows: threads.length,
+      tracked_flair_rows: trackedFlairRows,
+    },
+    window_start: periodStartDate?.toISOString() ?? null,
+    window_end: periodEndDate?.toISOString() ?? null,
     terms,
     hints,
     threads,

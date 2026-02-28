@@ -11,10 +11,12 @@ export type PersonRefreshPhase =
   (typeof PERSON_REFRESH_PHASES)[keyof typeof PERSON_REFRESH_PHASES];
 
 const SYNC_STAGE_IDS = new Set([
+  "proxy_connecting",
   "tmdb_profile",
   "fandom_profile",
   "fetching",
   "metadata_enrichment",
+  "metadata_repair",
   "upserting",
   "pruning",
 ]);
@@ -55,6 +57,121 @@ export function formatPersonRefreshPhaseLabel(
 }
 
 const SYNC_COMPLETE_MESSAGE_RE = /^(synced|fetched|upsert complete|pruned|skipping)/i;
+const SOURCE_LABEL_BY_ID: Record<string, string> = {
+  imdb: "IMDb",
+  tmdb: "TMDb",
+  fandom: "Fandom",
+  fandom_gallery: "Fandom Gallery",
+};
+
+function normalizeKey(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return null;
+  return trimmed.replace(/[-\s]+/g, "_");
+}
+
+function normalizeCount(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.floor(value));
+}
+
+function formatSkipReason(value: string | null | undefined): string | null {
+  const normalized = normalizeKey(value);
+  if (!normalized) return null;
+  return normalized.replace(/_/g, " ");
+}
+
+export function formatRefreshSourceLabel(source: string | null | undefined): string | null {
+  const normalized = normalizeKey(source);
+  if (!normalized) return null;
+  return SOURCE_LABEL_BY_ID[normalized] ?? normalized.replace(/_/g, " ");
+}
+
+export function buildPersonRefreshDetailMessage(input: {
+  rawStage?: string | null;
+  message?: string | null;
+  heartbeat?: boolean;
+  elapsedMs?: number | null;
+  source?: string | null;
+  sourceTotal?: number | null;
+  mirroredCount?: number | null;
+  current?: number | null;
+  total?: number | null;
+  skipReason?: string | null;
+  detail?: string | null;
+  serviceUnavailable?: boolean;
+  retryAfterS?: number | null;
+}): string | null {
+  const baseMessage = typeof input.message === "string" ? input.message.trim() : "";
+  const sourceLabel = formatRefreshSourceLabel(input.source);
+  const sourceTotal = normalizeCount(input.sourceTotal);
+  const mirroredCount = normalizeCount(input.mirroredCount);
+  const current = normalizeCount(input.current);
+  const total = normalizeCount(input.total);
+  const elapsedSeconds =
+    typeof input.elapsedMs === "number" && Number.isFinite(input.elapsedMs) && input.elapsedMs >= 0
+      ? Math.max(0, Math.round(input.elapsedMs / 1000))
+      : null;
+  const skipReason = formatSkipReason(input.skipReason);
+  const stageLabel = formatPersonRefreshPhaseLabel(input.rawStage);
+  const detail = typeof input.detail === "string" ? input.detail.trim() : "";
+
+  const suffixParts: string[] = [];
+  if (
+    sourceLabel &&
+    !baseMessage.toLowerCase().includes(sourceLabel.toLowerCase())
+  ) {
+    suffixParts.push(`source: ${sourceLabel}`);
+  }
+  if (
+    mirroredCount !== null &&
+    sourceTotal !== null &&
+    !/mirrored\s+\d+\s*\/\s*\d+/i.test(baseMessage)
+  ) {
+    suffixParts.push(`mirrored ${mirroredCount}/${sourceTotal}`);
+  }
+  if (
+    current !== null &&
+    total !== null &&
+    total > 0 &&
+    !new RegExp(`\\b${current}\\s*/\\s*${total}\\b`).test(baseMessage)
+  ) {
+    suffixParts.push(`step ${current}/${total}`);
+  }
+  if (skipReason && !baseMessage.toLowerCase().includes(skipReason)) {
+    suffixParts.push(`skip: ${skipReason}`);
+  }
+  if (input.serviceUnavailable) {
+    const retryAfter =
+      typeof input.retryAfterS === "number" && Number.isFinite(input.retryAfterS) && input.retryAfterS > 0
+        ? Math.round(input.retryAfterS)
+        : null;
+    suffixParts.push(
+      retryAfter !== null ? `service unavailable (retry in ~${retryAfter}s)` : "service unavailable",
+    );
+  }
+  if (detail && !baseMessage.toLowerCase().includes(detail.toLowerCase())) {
+    suffixParts.push(detail);
+  }
+  if (elapsedSeconds !== null && input.heartbeat) {
+    suffixParts.push(`${elapsedSeconds}s elapsed`);
+  }
+
+  let normalizedMessage = baseMessage;
+  if (!normalizedMessage) {
+    if (input.heartbeat) {
+      normalizedMessage = stageLabel ? `${stageLabel} in progress` : "Refresh in progress";
+    } else if (stageLabel) {
+      normalizedMessage = `${stageLabel} update`;
+    }
+  }
+
+  if (!normalizedMessage && suffixParts.length === 0) return null;
+  if (!normalizedMessage) return suffixParts.join(" · ");
+  if (suffixParts.length === 0) return normalizedMessage;
+  return `${normalizedMessage} · ${suffixParts.join(" · ")}`;
+}
 
 export interface SyncProgressTracker {
   seenStageIds: Set<string>;

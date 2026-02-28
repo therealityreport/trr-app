@@ -1,4 +1,5 @@
 import "server-only";
+import { toCanonicalFlairKey } from "@/lib/reddit/flair-key";
 
 const RHOSLC_SUBREDDIT = "realhousewivesofslc";
 const RHOSLC_REMOVE_TOKEN = ":whitney:";
@@ -83,7 +84,7 @@ export const sanitizeRedditFlairList = (subreddit: string, rawFlares: string[]):
     if (typeof raw !== "string") continue;
     const normalized = normalizeRedditFlairLabel(subreddit, raw);
     if (!normalized) continue;
-    const key = normalized.toLowerCase();
+    const key = toCanonicalFlairKey(normalized);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(normalized);

@@ -137,6 +137,7 @@ import {
   fetchWithTimeout,
 } from "@/lib/admin/admin-fetch";
 import { useShowCore } from "@/lib/admin/show-page/use-show-core";
+import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -495,14 +496,6 @@ const SHOW_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: strin
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
   { id: "reddit", label: "REDDIT ANALYTICS" },
-];
-
-const SHOW_SOCIAL_PLATFORM_TABS: Array<{ key: PlatformTab; label: string }> = [
-  { key: "overview", label: "Overview" },
-  { key: "instagram", label: "Instagram" },
-  { key: "tiktok", label: "TikTok" },
-  { key: "twitter", label: "Twitter/X" },
-  { key: "youtube", label: "YouTube" },
 ];
 
 const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {

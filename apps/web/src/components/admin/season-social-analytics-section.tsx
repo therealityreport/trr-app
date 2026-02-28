@@ -1993,7 +1993,9 @@ export default function SeasonSocialAnalyticsSection({
       seasonSocialPathSegment === "instagram" ||
       seasonSocialPathSegment === "tiktok" ||
       seasonSocialPathSegment === "twitter" ||
-      seasonSocialPathSegment === "youtube"
+      seasonSocialPathSegment === "youtube" ||
+      seasonSocialPathSegment === "facebook" ||
+      seasonSocialPathSegment === "threads"
         ? seasonSocialPathSegment
         : null;
     const platformForWeek =

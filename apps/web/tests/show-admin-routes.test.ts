@@ -306,6 +306,8 @@ describe("show-admin-routes", () => {
     expect(parseSeasonEpisodeNumberFromPath("/rhoslc/s6/e1/social/twitter")).toBe(1);
     expect(parseSeasonEpisodeNumberFromPath("/rhoslc/s6/social/reddit")).toBeNull();
     expect(parseSeasonSocialPathSegment("/rhoslc/s6/e1/social/twitter")).toBe("twitter");
+    expect(parseSeasonSocialPathSegment("/rhoslc/s6/e1/social/facebook")).toBe("facebook");
+    expect(parseSeasonSocialPathSegment("/rhoslc/s6/e1/social/threads")).toBe("threads");
     expect(parseSeasonSocialPathSegment("/rhoslc/s6/e1/social/official")).toBe("official");
     expect(parseSeasonSocialPathSegment("/rhoslc/s6/social/official/reddit")).toBe("reddit");
     expect(parseSeasonSocialPathSegment("/rhoslc/s6/e1/cast")).toBeNull();
@@ -430,7 +432,9 @@ describe("show-admin-routes", () => {
         showSlug: "the-real-housewives-of-salt-lake-city",
         personSlug: "meredith-marks--7f528757",
       })
-    ).toBe("/people/meredith-marks--7f528757");
+    ).toBe(
+      "/people/meredith-marks--7f528757?showId=the-real-housewives-of-salt-lake-city",
+    );
 
     expect(
       buildPersonAdminUrl({
@@ -438,7 +442,25 @@ describe("show-admin-routes", () => {
         personSlug: "meredith-marks--7f528757",
         tab: "gallery",
       })
-    ).toBe("/people/meredith-marks--7f528757/gallery");
+    ).toBe(
+      "/people/meredith-marks--7f528757/gallery?showId=the-real-housewives-of-salt-lake-city",
+    );
+
+    expect(
+      buildPersonAdminUrl({
+        showId: "7f528757-5017-4599-8252-c02f0d0736cf",
+        personSlug: "meredith-marks--7f528757",
+        tab: "gallery",
+      })
+    ).toBe("/people/meredith-marks--7f528757/gallery?showId=7f528757-5017-4599-8252-c02f0d0736cf");
+
+    expect(
+      buildPersonAdminUrl({
+        personSlug: "meredith-marks--7f528757",
+        tab: "gallery",
+        query: new URLSearchParams({ scope: "all", page: "2" }),
+      })
+    ).toBe("/people/meredith-marks--7f528757/gallery?page=2");
   });
 
   it("slugifies people names and appends person id prefix", () => {
@@ -457,6 +479,6 @@ describe("show-admin-routes", () => {
       new URLSearchParams("showId=the-real-housewives-of-salt-lake-city&tab=gallery&seasonNumber=4")
     );
 
-    expect(cleaned.toString()).toBe("seasonNumber=4");
+    expect(cleaned.toString()).toBe("showId=the-real-housewives-of-salt-lake-city&seasonNumber=4");
   });
 });

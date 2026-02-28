@@ -246,7 +246,7 @@ interface ImageLightboxProps extends ImageManagementProps {
   src: string;
   fallbackSrcs?: string[];
   fallbackSrc?: string | null;
-  mediaType?: "image" | "video";
+  mediaType?: "image" | "video" | "embed";
   videoPosterSrc?: string | null;
   alt: string;
   isOpen: boolean;
@@ -328,6 +328,52 @@ interface MetadataPanelProps {
   showExtras?: boolean;
   onToggleExtras?: () => void;
 }
+
+const parseYouTubeVideoId = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "youtu.be") {
+      const pathId = parsed.pathname.split("/").filter(Boolean)[0];
+      return pathId ?? null;
+    }
+    if (host.includes("youtube.com")) {
+      if (parsed.pathname === "/watch") {
+        const watchId = parsed.searchParams.get("v");
+        return watchId && watchId.trim().length > 0 ? watchId.trim() : null;
+      }
+      if (parsed.pathname.startsWith("/shorts/")) {
+        const shortsId = parsed.pathname.split("/").filter(Boolean)[1];
+        return shortsId ?? null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const parseTikTokVideoId = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("tiktok.com")) return null;
+    const match = parsed.pathname.match(/\/video\/(\d+)/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveEmbeddableUrl = (url: string): string | null => {
+  const tiktokId = parseTikTokVideoId(url);
+  if (tiktokId) return `https://www.tiktok.com/embed/v2/${tiktokId}`;
+
+  const youtubeId = parseYouTubeVideoId(url);
+  if (youtubeId) return `https://www.youtube.com/embed/${youtubeId}`;
+
+  return null;
+};
 
 function MetadataPanel({
   metadata,
@@ -1275,6 +1321,11 @@ export function ImageLightbox({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const overlayImageRef = useRef<HTMLDivElement>(null);
   const isVideoMedia = mediaType === "video";
+  const isEmbedMedia = mediaType === "embed";
+  const embedSrc = useMemo(() => {
+    if (!isEmbedMedia) return null;
+    return resolveEmbeddableUrl(currentSrc);
+  }, [currentSrc, isEmbedMedia]);
 
   useEffect(() => {
     setCurrentSrc(src);
@@ -1372,6 +1423,7 @@ export function ImageLightbox({
   const faceBoxes = metadata?.faceBoxes ?? [];
   const shouldShowFaceBoxes =
     !isVideoMedia &&
+    !isEmbedMedia &&
     (faceBoxes.length > 1 ||
       (faceBoxes.length === 0 &&
         metadata?.peopleCount !== null &&
@@ -1390,6 +1442,7 @@ export function ImageLightbox({
       : previewCenter?.xPct ?? 50;
   const canAdjustThumbnailCrop = Boolean(
     !isVideoMedia &&
+      !isEmbedMedia &&
       showMetadata &&
       onThumbnailCropPreviewAdjust &&
       thumbnailCropPreview &&
@@ -1622,6 +1675,30 @@ export function ImageLightbox({
                     }
                   }}
                 />
+              ) : isEmbedMedia ? (
+                embedSrc ? (
+                  <iframe
+                    src={embedSrc}
+                    title={alt}
+                    aria-label={alt}
+                    allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                    allowFullScreen
+                    className="h-[70vh] w-[80vw] max-w-[90vw] rounded-lg bg-black shadow-2xl md:h-[80vh] md:w-[70vw]"
+                    onError={handlePrimaryMediaError}
+                  />
+                ) : (
+                  <div className="flex h-[60vh] w-[60vw] max-w-[90vw] flex-col items-center justify-center gap-2 rounded-lg bg-black/40 px-6 text-center text-sm text-white/70">
+                    <p>Embedded playback is not available for this URL.</p>
+                    <a
+                      href={currentSrc}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-white/40 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white hover:bg-white/10"
+                    >
+                      Open Original Source
+                    </a>
+                  </div>
+                )
               ) : (
                 <Image
                   src={currentSrc}
@@ -1668,7 +1745,7 @@ export function ImageLightbox({
                   })}
                 </div>
               )}
-              {!isVideoMedia && effectivePreviewRect && (
+              {!isVideoMedia && !isEmbedMedia && effectivePreviewRect && (
                 <div className="pointer-events-none absolute inset-0">
                   <div
                     className="absolute bottom-0 top-0 w-px bg-white/45"
