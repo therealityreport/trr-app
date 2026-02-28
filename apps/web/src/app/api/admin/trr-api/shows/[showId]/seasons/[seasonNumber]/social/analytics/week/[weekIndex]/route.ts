@@ -52,6 +52,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
     const seasonIdHint = seasonIdHintRaw ?? undefined;
     forwardedSearchParams.delete("season_id");
+    if (!forwardedSearchParams.has("max_comments_per_post")) {
+      forwardedSearchParams.set("max_comments_per_post", "25");
+    }
+    // post_limit and post_offset are passed through unchanged to support paginated requests from the admin UI.
 
     const data = await fetchSeasonBackendJson(
       showId,
@@ -62,7 +66,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         seasonIdHint,
         fallbackError: "Failed to fetch week detail",
         retries: 0,
-        timeoutMs: 20_000,
+        timeoutMs: 45_000,
       },
     );
     return NextResponse.json(data);
