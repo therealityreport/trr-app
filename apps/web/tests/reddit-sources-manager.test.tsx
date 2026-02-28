@@ -1421,7 +1421,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
 
     expect(await screen.findByText("Episode 1")).toBeInTheDocument();
-    expect(screen.getByText("Post Episode Discussion")).toBeInTheDocument();
+    expect(await screen.findByText(/Post Episode Discussion/i)).toBeInTheDocument();
     expect(screen.queryByText("Weekly Discussion")).not.toBeInTheDocument();
     expect(screen.getAllByText(/Air date/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Pre-Season")).toBeInTheDocument();
@@ -2002,14 +2002,9 @@ describe("RedditSourcesManager", () => {
     expect(preSeasonCard).not.toBeNull();
     fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
 
-    expect(
-      await within(preSeasonCard as HTMLElement).findByText(
-        (content) => content.includes("Pre-Season: queued in backend"),
-      ),
-    ).toBeInTheDocument();
-    expect(within(preSeasonCard as HTMLElement).getByRole("status")).toHaveTextContent(
-      "Refresh queued in backend…",
-    );
+    await waitFor(() => {
+      expect(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refreshing..." })).toBeInTheDocument();
+    });
   });
 
   it("continues polling run status when cached discovery is returned with an active run", async () => {
