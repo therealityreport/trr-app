@@ -331,8 +331,8 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const openLightboxButton = screen.getByRole("button", {
-      name: "Open post media lightbox from details",
+    const openLightboxButton = await screen.findByRole("button", {
+      name: /open post media lightbox from details/i,
     });
     fireEvent.click(openLightboxButton);
     const metadataToggle = await screen.findByRole("button", {
@@ -400,8 +400,8 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const openLightboxButton = screen.getByRole("button", {
-      name: "Open post media lightbox from details",
+    const openLightboxButton = await screen.findByRole("button", {
+      name: /open post media lightbox from details/i,
     });
     fireEvent.click(openLightboxButton);
     const nextButton = screen.queryByLabelText("Next image");
@@ -482,8 +482,8 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const openLightboxButton = screen.getByRole("button", {
-      name: "Open post media lightbox from details",
+    const openLightboxButton = await screen.findByRole("button", {
+      name: /open post media lightbox from details/i,
     });
     fireEvent.click(openLightboxButton);
     const metadataToggle = await screen.findByRole("button", {
@@ -692,11 +692,9 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("@collab_user").length).toBeGreaterThan(0);
     expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
     expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
-    expect(
-      await screen.findByText((_, element) => {
-        return Boolean(element?.textContent?.includes("(high)"));
-      }),
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText(/\(high\)/i).length).toBeGreaterThan(0);
+    });
     expect(screen.getAllByText("IG post").length).toBeGreaterThan(1);
   });
 
