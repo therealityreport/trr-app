@@ -1989,6 +1989,7 @@ describe("RedditSourcesManager", () => {
       ],
     };
 
+    let refreshDiscoverCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/social/analytics")) {
@@ -2004,6 +2005,7 @@ describe("RedditSourcesManager", () => {
       }
       if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
         if (url.includes("refresh=true")) {
+          refreshDiscoverCount += 1;
           return jsonResponse({
             run: {
               run_id: "63a7be5d-0000-4000-8000-000000000000",
@@ -2056,10 +2058,7 @@ describe("RedditSourcesManager", () => {
     clickPeriodRefreshPosts("Pre-Season");
 
     await waitFor(() => {
-      expect(
-        cardHasPendingRefresh("Pre-Season") ||
-          fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/")),
-      ).toBe(true);
+      expect(refreshDiscoverCount).toBeGreaterThan(0);
     });
   });
 
@@ -2235,13 +2234,11 @@ describe("RedditSourcesManager", () => {
     clickPeriodRefreshPosts("Pre-Season");
 
     await waitFor(() => {
-      expect(
-        cardHasPendingRefresh("Pre-Season") ||
-          fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/")),
-      ).toBe(true);
-      expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/"))).toBe(true);
       expect(refreshDiscoverCount).toBeGreaterThan(0);
     });
+    expect(
+      await screen.findByText("Cached preseason post", {}, { timeout: 10_000 }),
+    ).toBeInTheDocument();
   });
 
   it("shows per-candidate reason when a post is not auto-synced", async () => {
