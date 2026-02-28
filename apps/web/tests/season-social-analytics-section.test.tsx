@@ -3180,11 +3180,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       }
       if (url.includes("/social/jobs?")) {
         if (failJobsRefresh) {
-          return ({
-            ok: false,
+          return new Response(JSON.stringify({ error: "temporary jobs outage" }), {
             status: 503,
-            json: async () => ({ error: "temporary jobs outage" }),
-          }) as Response;
+            headers: { "Content-Type": "application/json" },
+          });
         }
         return jsonResponse({
           jobs: [
