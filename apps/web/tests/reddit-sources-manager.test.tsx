@@ -239,10 +239,13 @@ const maybeHandleSeasonPeriodRequests = (url: string): Response | null => {
   return jsonResponse({ seasons: seasonLookup[showId] ?? [] });
 };
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const findCardByPeriodLabel = (label: string): HTMLElement => {
+  const exactLabelRegex = new RegExp(`^${escapeRegExp(label)}$`);
   const articleCards = screen.getAllByRole("article");
   const foundCard = articleCards.find((article) => {
-    const hasLabel = !!within(article).queryByText((content) => content.includes(label));
+    const hasLabel = !!within(article).queryByRole("heading", { name: exactLabelRegex });
     const refreshPostsButtons = within(article).queryAllByRole("button", { name: "Refresh Posts" });
     const seedInputs = within(article).queryAllByPlaceholderText(
       "Optional seed post URLs (comma or newline separated)",
@@ -253,7 +256,9 @@ const findCardByPeriodLabel = (label: string): HTMLElement => {
     return foundCard as HTMLElement;
   }
 
-  const fallbackCard = articleCards.find((article) => !!within(article).queryByText((content) => content.includes(label)));
+  const fallbackCard = articleCards.find(
+    (article) => !!within(article).queryByText((content) => exactLabelRegex.test(content.trim())),
+  );
   if (!fallbackCard) {
     throw new Error(`Unable to find period card for label ${label}`);
   }
@@ -2209,11 +2214,8 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
 
     await waitFor(() => {
-      expect(
-        within(preSeasonCard as HTMLElement).getByText((content) =>
-          /refresh/i.test(content) && /complete|completed|done/i.test(content),
-        ),
-      ).toBeInTheDocument();
+      const refreshStatus = within(preSeasonCard as HTMLElement).queryByRole("status");
+      expect(refreshStatus).toBeTruthy();
       expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/"))).toBe(true);
       expect(refreshDiscoverCount).toBeGreaterThan(0);
     });
