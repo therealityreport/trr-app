@@ -205,11 +205,41 @@ describe("social routes season_id hint forwarding", () => {
       expect.objectContaining({
         seasonIdHint: seasonId,
         retries: 0,
-        timeoutMs: 20_000,
+        timeoutMs: 45_000,
       }),
     );
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
     expect(String(options.queryString ?? "")).not.toContain("season_id=");
+  });
+
+  it("sets default max_comments_per_post=25 on week analytics route", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/analytics/week/3?season_id=${seasonId}&source_scope=bravo`,
+      { method: "GET" },
+    );
+
+    const response = await getWeek(request, { params: Promise.resolve({ showId, seasonNumber: "6", weekIndex: "3" }) });
+    expect(response.status).toBe(200);
+
+    const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
+    expect(String(options.queryString ?? "")).toContain("max_comments_per_post=25");
+    expect(String(options.queryString ?? "")).not.toContain("post_offset=20");
+  });
+
+  it("forwards week analytics pagination params to backend", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/analytics/week/3?season_id=${seasonId}&source_scope=bravo&post_limit=20&post_offset=40&max_comments_per_post=30`,
+      { method: "GET" },
+    );
+
+    const response = await getWeek(request, { params: Promise.resolve({ showId, seasonNumber: "6", weekIndex: "3" }) });
+    expect(response.status).toBe(200);
+
+    const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
+    const query = new URLSearchParams(String(options.queryString ?? ""));
+    expect(query.get("post_limit")).toBe("20");
+    expect(query.get("post_offset")).toBe("40");
+    expect(query.get("max_comments_per_post")).toBe("30");
   });
 
   it("forwards season_id hint on post comments routes", async () => {

@@ -140,6 +140,16 @@ async function clickPostDetailCardByThumbnailAlt(altText: string) {
   fireEvent.click(thumbnail);
 }
 
+async function waitForWeekDetailReady() {
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: "Week 1" })).toBeInTheDocument();
+    expect(screen.queryByText("Loading week detail...")).not.toBeInTheDocument();
+    const gallery = screen.queryByTestId("week-post-gallery");
+    const noPostsMessage = screen.queryByText(/No posts found for this (week|day)\./);
+    expect(gallery || noPostsMessage).toBeTruthy();
+  });
+}
+
 const byeWeekPayload = {
   ...weekPayload,
   week: {
@@ -244,18 +254,16 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-    expect(screen.getByText("Week 1")).toBeInTheDocument();
-  });
-  const gallery = screen.getByTestId("week-post-gallery");
-  expect(gallery.className).toContain("lg:grid-cols-4");
-  expect(screen.getByLabelText("Instagram platform")).toBeInTheDocument();
-  expect(screen.getByLabelText("TikTok platform")).toBeInTheDocument();
-  expect(screen.getByLabelText("YouTube platform")).toBeInTheDocument();
-  const youtubeHandleLink = screen.getByRole("link", { name: "@Bravo" });
-  expect(youtubeHandleLink).toHaveAttribute("href", "https://youtube.com/watch?v=abc");
-  const backLink = screen.getByRole("link", { name: /Back to Season Social Analytics/i });
-  expect(backLink.getAttribute("href")).not.toContain("source_scope=");
+    await waitForWeekDetailReady();
+    const gallery = screen.getByTestId("week-post-gallery");
+    expect(gallery.className).toContain("lg:grid-cols-4");
+    expect(screen.getByLabelText("Instagram platform")).toBeInTheDocument();
+    expect(screen.getByLabelText("TikTok platform")).toBeInTheDocument();
+    expect(screen.getByLabelText("YouTube platform")).toBeInTheDocument();
+    const youtubeHandleLink = screen.getByRole("link", { name: "@Bravo" });
+    expect(youtubeHandleLink).toHaveAttribute("href", "https://youtube.com/watch?v=abc");
+    const backLink = screen.getByRole("link", { name: /Back to Season Social Analytics/i });
+    expect(backLink.getAttribute("href")).not.toContain("source_scope=");
 
     const instagramThumb = screen.getByAltText("Instagram post thumbnail");
     expect(instagramThumb.className).toContain("object-contain");
@@ -284,6 +292,117 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("14s")).toBeInTheDocument();
     expect(screen.getByText("@tagged_user")).toBeInTheDocument();
     expect(screen.getByText("@collab_user")).toBeInTheDocument();
+  });
+
+  it("initially requests first 20 posts and appends second page on Load more", async () => {
+    const pagedPayloadPosts = Array.from({ length: 30 }, (_, index) => ({
+      source_id: `ig-${index + 1}`,
+      author: "bravotv",
+      text: `Post ${index + 1}`,
+      url: `https://instagram.com/p/${index + 1}`,
+      posted_at: `2026-01-01T00:${String(index).padStart(2, "0")}:00.000Z`,
+      engagement: 100 + index,
+      total_comments_available: 0,
+      comments: [],
+      likes: 20 + index,
+      comments_count: 3,
+      views: 1000 + index,
+      thumbnail_url: `https://images.test/ig-post-${index + 1}.jpg`,
+      media_urls: [`https://images.test/ig-post-${index + 1}.jpg`],
+      media_urls_count: 1,
+      media_url_count: 1,
+      post_format: "post",
+      hashtags: [],
+      mentions: [],
+      profile_tags: [],
+      collaborators: [],
+      duration_seconds: 12,
+    }));
+    const firstPayload = {
+      ...weekPayload,
+      platforms: {
+        instagram: {
+          posts: pagedPayloadPosts.slice(0, 20),
+          totals: { posts: 20, total_comments: 0, total_engagement: 2000 },
+        },
+      },
+      totals: {
+        posts: 30,
+        total_comments: 0,
+        total_engagement: 3000,
+      },
+      pagination: {
+        limit: 20,
+        offset: 0,
+        returned: 20,
+        total: 30,
+        has_more: true,
+      },
+    };
+    const secondPayload = {
+      ...firstPayload,
+      platforms: {
+        instagram: {
+          posts: pagedPayloadPosts.slice(20),
+          totals: { posts: 10, total_comments: 0, total_engagement: 1200 },
+        },
+      },
+      pagination: {
+        limit: 20,
+        offset: 20,
+        returned: 10,
+        total: 30,
+        has_more: false,
+      },
+    };
+    const fetchCalls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        const query = new URLSearchParams(url.split("?")[1] ?? "");
+        fetchCalls.push(url);
+        const postOffset = query.get("post_offset");
+        if (postOffset === "20") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => secondPayload,
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => firstPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitForWeekDetailReady();
+    expect(fetchCalls).toHaveLength(1);
+    const firstQuery = new URLSearchParams(fetchCalls[0].split("?")[1] ?? "");
+    expect(firstQuery.get("post_limit")).toBe("20");
+    expect(firstQuery.get("post_offset")).toBe("0");
+    expect(firstQuery.get("max_comments_per_post")).toBe("25");
+
+    expect(screen.getByRole("button", { name: /load more posts/i })).toBeInTheDocument();
+    expect(screen.getByText("Post 20")).toBeInTheDocument();
+    expect(screen.queryByText("Post 21")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /load more posts/i }));
+    await waitFor(() => {
+      expect(screen.getByText("Post 21")).toBeInTheDocument();
+    });
+    expect(fetchCalls).toHaveLength(2);
+    const secondQuery = new URLSearchParams(fetchCalls[1].split("?")[1] ?? "");
+    expect(secondQuery.get("post_offset")).toBe("20");
+    expect(secondQuery.get("post_limit")).toBe("20");
+    expect(screen.getByText("Post 30")).toBeInTheDocument();
+    expect(screen.getByText("All loaded: 30/30 posts")).toBeInTheDocument();
+    expect(screen.queryByText("Post 31")).not.toBeInTheDocument();
   });
 
   it("renders hashtag and mention chips for youtube/facebook/threads with text fallback when token arrays are absent", async () => {
@@ -352,9 +471,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     expect(screen.getByLabelText("Facebook platform")).toBeInTheDocument();
     expect(screen.getByLabelText("Threads platform")).toBeInTheDocument();
@@ -406,9 +523,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
@@ -476,10 +591,8 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
-    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await waitForWeekDetailReady();
+      await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -554,10 +667,8 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
-    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await waitForWeekDetailReady();
+      await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
@@ -632,9 +743,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
@@ -667,9 +776,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     const twitterThumb = await screen.findByAltText("Twitter/X post thumbnail");
     expect(twitterThumb).toHaveAttribute("src", "https://images.test/x-preview.jpg");
@@ -694,10 +801,8 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("12 Dislikes")).not.toBeInTheDocument();
+    await waitForWeekDetailReady();
+      expect(screen.queryByText("12 Dislikes")).not.toBeInTheDocument();
     expect(screen.queryByText(/Downvotes/i)).not.toBeInTheDocument();
   });
 
@@ -739,9 +844,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     const allRender = render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     expect(screen.getByText("38.1%")).toBeInTheDocument();
     expect(screen.getByText("542/1.4K* Comments (Saved/Actual)")).toBeInTheDocument();
@@ -835,9 +938,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
 
@@ -942,9 +1043,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     fireEvent.click(screen.getByLabelText("Instagram platform"));
     await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
@@ -1011,9 +1110,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
@@ -1090,9 +1187,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
 
@@ -1104,6 +1199,93 @@ describe("WeekDetailPage thumbnails", () => {
       name: /comment media 1/i,
     });
     expect(commentMediaLink).toHaveAttribute("href", "https://cdn.example/comment-media.jpg");
+  });
+
+  it("renders a cycle-suppressed warning for cyclic threaded comments in Post Details", async () => {
+    const cyclicPostPayload = {
+      platform: "instagram",
+      source_id: "ig-1",
+      author: "bravotv",
+      text: "IG post",
+      url: "https://instagram.com/p/abc",
+      posted_at: "2026-01-01T00:00:00.000Z",
+      thumbnail_url: "https://images.test/ig-preview.jpg",
+      media_urls: ["https://images.test/ig-media-1.jpg"],
+      stats: {
+        likes: 50,
+        comments_count: 10,
+        views: 1000,
+        engagement: 1060,
+      },
+      total_comments_in_db: 2,
+      total_quotes_in_db: 0,
+      comments: [
+        {
+          comment_id: "root-comment",
+          author: "thread_owner",
+          text: "Root comment",
+          likes: 1,
+          is_reply: false,
+          reply_count: 1,
+          created_at: "2026-01-01T00:10:00.000Z",
+          replies: [
+            {
+              comment_id: "reply-comment",
+              author: "reply_user",
+              text: "Child reply",
+              likes: 2,
+              is_reply: true,
+              reply_count: 1,
+              created_at: "2026-01-01T00:11:00.000Z",
+              replies: [
+                {
+                  comment_id: "root-comment",
+                  author: "thread_owner",
+                  text: "Cyclic repeat",
+                  likes: 0,
+                  is_reply: true,
+                  reply_count: 0,
+                  created_at: "2026-01-01T00:12:00.000Z",
+                  replies: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => weekPayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/instagram/ig-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => cyclicPostPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitForWeekDetailReady();
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+
+    expect(await screen.findByText((_, element) => element?.textContent?.trim() === "Root comment")).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent?.trim() === "Child reply")).toBeInTheDocument();
+    expect(screen.getByText(/nested replies skipped due to thread cycle/i)).toBeInTheDocument();
   });
 
   it("switches Twitter/X Post Details drawer between comments/replies and quotes", async () => {
@@ -1191,9 +1373,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
     await clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
 
@@ -1340,11 +1520,9 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
-    const syncButton = await screen.findByRole("button", { name: /Sync .*Metrics/i });
+    const syncButton = await screen.findByRole("button", { name: /Ingest/i });
     fireEvent.click(syncButton);
 
     await waitFor(() => {
@@ -1461,11 +1639,9 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Week 1")).toBeInTheDocument();
-    });
+    await waitForWeekDetailReady();
 
-    const syncButton = await screen.findByRole("button", { name: /Sync .*Metrics/i });
+    const syncButton = await screen.findByRole("button", { name: /Ingest/i });
     fireEvent.click(syncButton);
 
     await waitFor(() => {

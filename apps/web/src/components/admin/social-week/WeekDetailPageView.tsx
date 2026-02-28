@@ -134,6 +134,7 @@ interface YouTubePost extends BasePost {
   comments_count: number;
   thumbnail_url?: string | null;
   duration_seconds?: number | null;
+  is_short?: boolean;
 }
 
 interface TwitterPost extends BasePost {
@@ -201,6 +202,13 @@ interface WeekDetailResponse {
     posts: number;
     total_comments: number;
     total_engagement: number;
+  };
+  pagination?: {
+    limit: number;
+    offset: number;
+    returned: number;
+    total: number;
+    has_more: boolean;
   };
 }
 
@@ -438,6 +446,8 @@ const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
+const WEEK_DETAIL_MAX_COMMENTS_PER_POST = 25;
+const WEEK_DETAIL_POST_LIMIT = 20;
 const REQUEST_TIMEOUT_MS = {
   weekDetail: 45_000,
   syncRuns: 15_000,
@@ -506,6 +516,31 @@ const isTransientDevRestartMessage = (message: string | null | undefined): boole
   const normalized = String(message ?? "").toLowerCase();
   if (!normalized) return false;
   return TRANSIENT_DEV_RESTART_PATTERNS.some((pattern) => normalized.includes(pattern));
+};
+
+const buildCanonicalRoute = (relativeUrl: string): string => {
+  try {
+    const url = new URL(relativeUrl, "http://localhost");
+    const sortedParams = new URLSearchParams(url.search);
+    sortedParams.sort();
+    const query = sortedParams.toString();
+    return `${url.pathname}${query ? `?${query}` : ""}`;
+  } catch {
+    return relativeUrl;
+  }
+};
+
+const buildStableRoute = (pathname: string, search: string): string => {
+  return buildCanonicalRoute(`${pathname}${search ? `?${search}` : ""}`);
+};
+
+const compareAndReplace = (
+  router: ReturnType<typeof useRouter>,
+  canonicalCurrentRoute: string,
+  nextRoute: string,
+) => {
+  if (buildCanonicalRoute(nextRoute) === canonicalCurrentRoute) return;
+  router.replace(nextRoute as Route, { scroll: false });
 };
 
 const parseResponseJson = async <T,>(response: Response, fallbackMessage: string): Promise<T> => {
@@ -1315,6 +1350,8 @@ function formatRunStatus(status: SocialRun["status"]): string {
   return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
 }
 
+const MAX_THREADED_COMMENT_DEPTH = 128;
+
 /* ------------------------------------------------------------------ */
 /* Threaded comment component                                          */
 /* ------------------------------------------------------------------ */
@@ -1322,12 +1359,31 @@ function formatRunStatus(status: SocialRun["status"]): string {
 function ThreadedCommentItem({
   comment,
   depth = 0,
+  seenCommentIds = new Set<string>(),
 }: {
   comment: ThreadedComment;
   depth?: number;
+  seenCommentIds?: ReadonlySet<string>;
 }) {
+  const commentId = comment.comment_id;
+  const visited = useMemo(() => {
+    const next = new Set<string>(seenCommentIds);
+    if (commentId) next.add(commentId);
+    return next;
+  }, [seenCommentIds, commentId]);
   const [expanded, setExpanded] = useState(depth < 2);
-  const hasReplies = comment.replies && comment.replies.length > 0;
+  const replies = Array.isArray(comment.replies) ? comment.replies : [];
+  const hasReplies = replies.length > 0;
+  const visibleReplies = replies.filter((reply) => !visited.has(reply.comment_id));
+  const suppressedReplies = replies.length - visibleReplies.length;
+  const hasDepthBudget = depth < MAX_THREADED_COMMENT_DEPTH;
+  if (commentId && seenCommentIds.has(commentId)) {
+    return (
+      <div className="ml-4 border-l-2 border-amber-200 pl-3 py-2 text-xs text-amber-700">
+        Recursion guard: comment already rendered in this thread.
+      </div>
+    );
+  }
   const hostedMedia = Array.isArray(comment.hosted_media_urls) ? comment.hosted_media_urls : [];
   const sourceMedia = Array.isArray(comment.media_urls) ? comment.media_urls : [];
   const mediaUrls = (hostedMedia.length > 0 ? hostedMedia : sourceMedia).filter((url) => !!url);
@@ -1406,17 +1462,28 @@ function ThreadedCommentItem({
           </button>
         )}
       </div>
-      {expanded && hasReplies && (
+      {expanded && hasReplies && hasDepthBudget && (
         <div>
-          {comment.replies.map((reply) => (
+          {visibleReplies.map((reply) => (
             <ThreadedCommentItem
               key={reply.comment_id}
               comment={reply}
               depth={depth + 1}
+              seenCommentIds={visited}
             />
           ))}
+          {suppressedReplies > 0 ? (
+            <p className="ml-4 border-l-2 border-amber-200 pl-3 py-1 text-xs text-amber-700">
+              {suppressedReplies} nested replies skipped due to thread cycle.
+            </p>
+          ) : null}
         </div>
       )}
+      {expanded && hasReplies && !hasDepthBudget ? (
+        <p className="ml-4 border-l-2 border-amber-200 pl-3 py-1 text-xs text-amber-700">
+          Max thread depth reached. {replies.length} {replies.length === 1 ? "reply" : "replies"} hidden.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1455,9 +1522,10 @@ function PostStatsDrawer({
     if (seasonId) {
       params.set("season_id", seasonId);
     }
-    const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}${
-      params.toString() ? `?${params.toString()}` : ""
-    }`;
+    const baseUrl = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
+    const url = `${baseUrl}${
+        params.toString() ? `?${params.toString()}` : ""
+      }`;
     const res = await fetchWithTimeout(
       url,
       {
@@ -1512,11 +1580,12 @@ function PostStatsDrawer({
       setRefreshing(true);
       setRefreshError(null);
       const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
-      const params = new URLSearchParams();
-      if (seasonId) {
-        params.set("season_id", seasonId);
-      }
-      const url = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}${
+    const params = new URLSearchParams();
+    if (seasonId) {
+      params.set("season_id", seasonId);
+    }
+    const baseUrl = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
+    const url = `${baseUrl}/refresh${
         params.toString() ? `?${params.toString()}` : ""
       }`;
       const res = await fetchWithTimeout(
@@ -1801,10 +1870,10 @@ function PostStatsDrawer({
                   <p className="text-xs text-gray-500 mb-3">{fmtNum(twitterQuoteCount)} quotes saved in Supabase.</p>
                 ) : (
                   <p className="text-xs text-gray-500 mb-3">
-                    {commentsIncomplete
-                      ? `Saved in Supabase: ${fmtNum(savedCommentsCount)} of ${fmtNum(reportedCommentsCount)} platform-reported comments. Use Full Sync + Mirror in Week view (or REFRESH here) to backfill.`
-                      : `${fmtNum(savedCommentsCount)} comments saved in Supabase.`}
-                  </p>
+                {commentsIncomplete
+                    ? `Saved in Supabase: ${fmtNum(savedCommentsCount)} of ${fmtNum(reportedCommentsCount)} platform-reported comments. Run an Ingest in Week view (or open the row details for a post-level refresh) to backfill.`
+                    : `${fmtNum(savedCommentsCount)} comments saved in Supabase.`}
+                </p>
                 )}
 
                 {activeComments.length === 0 ? (
@@ -1991,7 +2060,14 @@ function PostCard({
 
         {/* Title (YouTube) */}
         {platform === "youtube" && getStr(post, "title") && (
-          <h3 className="text-sm font-semibold text-gray-900 mb-1">{getStr(post, "title")}</h3>
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-sm font-semibold text-gray-900">{getStr(post, "title")}</h3>
+            {(post as YouTubePost).is_short && (
+              <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                Short
+              </span>
+            )}
+          </div>
         )}
 
         {/* Thumbnail preview */}
@@ -2194,8 +2270,13 @@ export default function WeekDetailPage() {
   const socialPlatformFilterFromQuery: PlatformFilter = socialPlatform ?? "all";
 
   const [data, setData] = useState<WeekDetailResponse | null>(null);
+  const [displayedPagination, setDisplayedPagination] = useState<WeekDetailResponse["pagination"] | null>(null);
+  const [accumulatedPostsByPlatform, setAccumulatedPostsByPlatform] = useState<Record<string, AnyPost[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [postOffset, setPostOffset] = useState(0);
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all");
   const [sortField, setSortField] = useState<SortField>("engagement");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -2233,12 +2314,42 @@ export default function WeekDetailPage() {
   const legacyWeekPathRedirectRef = useRef<string | null>(null);
   const legacyWeekSubTabRedirectRef = useRef<string | null>(null);
   const canonicalShowSlugRedirectRef = useRef<string | null>(null);
+  const canonicalCurrentRoute = useMemo(
+    () => buildStableRoute(pathname, searchParamsString),
+    [pathname, searchParamsString],
+  );
   const resolvedSeasonId = useMemo(() => {
     if (data?.season?.season_id && looksLikeUuid(data.season.season_id)) {
       return data.season.season_id;
     }
     return seasonIdHint;
   }, [data, seasonIdHint]);
+  const syncButtonLabel = useMemo(() => {
+    if (syncingComments) return "Syncing...";
+    if (SOCIAL_FULL_SYNC_MIRROR_ENABLED) {
+      return platformFilter === "all"
+        ? "Full Ingest + Mirror"
+        : `Full Ingest ${PLATFORM_LABELS[platformFilter]} + Mirror`;
+    }
+    return platformFilter === "all"
+      ? "Ingest Metrics"
+      : `Ingest ${PLATFORM_LABELS[platformFilter]} Metrics`;
+  }, [platformFilter, syncingComments]);
+
+  const displayData = useMemo(() => {
+    if (!data) return null;
+    const mergedPlatforms: Record<string, PlatformData> = {};
+    for (const [platform, payload] of Object.entries(data.platforms)) {
+      mergedPlatforms[platform] = {
+        ...payload,
+        posts: accumulatedPostsByPlatform[platform] ?? payload.posts ?? [],
+      };
+    }
+    return {
+      ...data,
+      platforms: mergedPlatforms,
+    };
+  }, [data, accumulatedPostsByPlatform]);
 
   useEffect(() => {
     setPlatformFilter(socialPlatformFilterFromQuery);
@@ -2261,16 +2372,14 @@ export default function WeekDetailPage() {
     const redirectKey = `${pathname}|${searchParamsString}|${currentSlug}|${preferredSlug}|${seasonNumber}|${weekIndex}|${socialPlatform ?? "details"}`;
     if (canonicalShowSlugRedirectRef.current === redirectKey) return;
     canonicalShowSlugRedirectRef.current = redirectKey;
-    router.replace(
-      buildSeasonSocialWeekUrl({
-        showSlug: preferredSlug,
-        seasonNumber,
-        weekIndex: weekIndexInt,
-        platform: socialPlatform ?? undefined,
-        query: new URLSearchParams(searchParamsString),
-      }) as Route,
-      { scroll: false },
-    );
+    const nextRoute = buildSeasonSocialWeekUrl({
+      showSlug: preferredSlug,
+      seasonNumber,
+      weekIndex: weekIndexInt,
+      platform: socialPlatform ?? undefined,
+      query: new URLSearchParams(searchParamsString),
+    });
+    compareAndReplace(router, canonicalCurrentRoute, nextRoute);
   }, [
     hasValidNumericPathParams,
     pathname,
@@ -2292,16 +2401,14 @@ export default function WeekDetailPage() {
     legacyWeekPathRedirectRef.current = redirectKey;
     const nextQuery = new URLSearchParams(searchParamsString);
     nextQuery.delete("social_platform");
-    router.replace(
-      buildSeasonSocialWeekUrl({
-        showSlug: showSlugForRouting,
-        seasonNumber,
-        weekIndex: weekIndexInt,
-        platform: socialPlatform ?? undefined,
-        query: nextQuery,
-      }) as Route,
-      { scroll: false },
-    );
+    const nextRoute = buildSeasonSocialWeekUrl({
+      showSlug: showSlugForRouting,
+      seasonNumber,
+      weekIndex: weekIndexInt,
+      platform: socialPlatform ?? undefined,
+      query: nextQuery,
+    });
+    compareAndReplace(router, canonicalCurrentRoute, nextRoute);
   }, [
     hasValidNumericPathParams,
     pathname,
@@ -2323,15 +2430,13 @@ export default function WeekDetailPage() {
     legacyWeekSubTabRedirectRef.current = redirectKey;
     const nextQuery = new URLSearchParams(searchParamsString);
     nextQuery.delete("social_platform");
-    router.replace(
-      buildSeasonSocialWeekUrl({
-        showSlug: showSlugForRouting,
-        seasonNumber,
-        weekIndex: weekIndexInt,
-        query: nextQuery,
-      }) as Route,
-      { scroll: false },
-    );
+    const nextRoute = buildSeasonSocialWeekUrl({
+      showSlug: showSlugForRouting,
+      seasonNumber,
+      weekIndex: weekIndexInt,
+      query: nextQuery,
+    });
+    compareAndReplace(router, canonicalCurrentRoute, nextRoute);
   }, [
     hasValidNumericPathParams,
     isOverviewSubTabPath,
@@ -2352,16 +2457,14 @@ export default function WeekDetailPage() {
     legacyWeekPlatformRedirectRef.current = redirectKey;
     const nextQuery = new URLSearchParams(searchParamsString);
     nextQuery.delete("social_platform");
-    router.replace(
-      buildSeasonSocialWeekUrl({
-        showSlug: showSlugForRouting,
-        seasonNumber,
-        weekIndex: weekIndexInt,
-        platform: socialPlatformFromQuery,
-        query: nextQuery,
-      }) as Route,
-      { scroll: false },
-    );
+    const nextRoute = buildSeasonSocialWeekUrl({
+      showSlug: showSlugForRouting,
+      seasonNumber,
+      weekIndex: weekIndexInt,
+      platform: socialPlatformFromQuery,
+      query: nextQuery,
+    });
+    compareAndReplace(router, canonicalCurrentRoute, nextRoute);
   }, [
     hasValidNumericPathParams,
     router,
@@ -2463,42 +2566,134 @@ export default function WeekDetailPage() {
     };
   }, [authLoading, isAdmin, showRouteParam]);
 
-  const fetchData = useCallback(async () => {
-    if (!showIdForApi || !seasonNumber || !weekIndex || !hasValidNumericPathParams) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
-      const weekParams = new URLSearchParams({
-        source_scope: sourceScope,
-        timezone: SOCIAL_TIME_ZONE,
-      });
-      if (resolvedSeasonId) {
-        weekParams.set("season_id", resolvedSeasonId);
+  const fetchData = useCallback(
+    async ({
+      append = false,
+      requestOffset,
+    }: {
+      append?: boolean;
+      requestOffset?: number;
+    } = {}) => {
+      if (!showIdForApi || !seasonNumber || !weekIndex || !hasValidNumericPathParams) return;
+      const pageRequestOffset = append ? Number(requestOffset ?? 0) : 0;
+      const requestLimit = WEEK_DETAIL_POST_LIMIT;
+      if (append) {
+        setIsLoadingMore(true);
+        setLoadMoreError(null);
+      } else {
+        setLoading(true);
+        setError(null);
+        setLoadMoreError(null);
+        setPostOffset(0);
+        setAccumulatedPostsByPlatform({});
+        setDisplayedPagination(null);
       }
-      const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}?${weekParams.toString()}`;
-      const res = await fetchWithTimeout(
-        url,
-        {
-          headers,
-          cache: "no-store",
-        },
-        REQUEST_TIMEOUT_MS.weekDetail,
-        "Week detail request timed out",
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          (body as Record<string, string>).error || `HTTP ${res.status}`,
+      try {
+        const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+        const weekParams = new URLSearchParams({
+          source_scope: sourceScope,
+          timezone: SOCIAL_TIME_ZONE,
+        });
+        if (socialPlatform) {
+          weekParams.set("platforms", socialPlatform);
+        }
+        weekParams.set("max_comments_per_post", String(WEEK_DETAIL_MAX_COMMENTS_PER_POST));
+        weekParams.set("post_limit", String(requestLimit));
+        weekParams.set("post_offset", String(pageRequestOffset));
+        if (resolvedSeasonId) {
+          weekParams.set("season_id", resolvedSeasonId);
+        }
+        const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}?${weekParams.toString()}`;
+        const res = await fetchWithTimeout(
+          url,
+          {
+            headers,
+            cache: "no-store",
+          },
+          REQUEST_TIMEOUT_MS.weekDetail,
+          "Week detail request timed out",
         );
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(
+            (body as Record<string, string>).error || `HTTP ${res.status}`,
+          );
+        }
+        const payload = await parseResponseJson<WeekDetailResponse>(res, "Failed to load week detail");
+        const platformPostsMap = Object.fromEntries(
+          Object.entries(payload.platforms).map(([platform, payloadForPlatform]) => [
+            platform,
+            payloadForPlatform.posts ?? [],
+          ]),
+        );
+        const returnedCount = platformPostsMap
+          ? Object.values(platformPostsMap).reduce((total, posts) => total + posts.length, 0)
+          : 0;
+        const pagination = payload.pagination ?? {
+          limit: requestLimit,
+          offset: pageRequestOffset,
+          returned: returnedCount,
+          total: returnedCount,
+          has_more: false,
+        };
+        const resolvedPagination = {
+          ...pagination,
+          offset: pageRequestOffset,
+          returned: returnedCount,
+          total: payload.totals.posts ?? pagination.total,
+          has_more:
+            pagination.has_more ??
+            pageRequestOffset + returnedCount < (payload.totals.posts ?? returnedCount),
+        };
+        const nextOffset = resolvedPagination.offset + resolvedPagination.returned;
+        setDisplayedPagination(resolvedPagination);
+        setPostOffset(nextOffset);
+        setData(payload);
+        setAccumulatedPostsByPlatform((previous) => {
+          if (!append) return platformPostsMap;
+
+          const merged: Record<string, AnyPost[]> = { ...previous };
+          for (const [platform, platformPosts] of Object.entries(platformPostsMap)) {
+            const existing = merged[platform] ?? [];
+            const seen = new Set(
+              existing.map((post) => `${platform}:${String(post.source_id ?? "")}`),
+            );
+            const nextPosts = [...existing];
+            for (const post of platformPosts) {
+              const key = `${platform}:${String(post.source_id ?? "")}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              nextPosts.push(post);
+            }
+            merged[platform] = nextPosts;
+          }
+          return merged;
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to load week detail";
+        if (append) {
+          setLoadMoreError(message);
+        } else {
+          setError(message);
+        }
+      } finally {
+        if (append) {
+          setIsLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
       }
-      setData(await parseResponseJson<WeekDetailResponse>(res, "Failed to load week detail"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load week detail");
-    } finally {
-      setLoading(false);
-    }
-  }, [hasValidNumericPathParams, resolvedSeasonId, showIdForApi, seasonNumber, sourceScope, weekIndex]);
+    },
+    [
+      hasValidNumericPathParams,
+      resolvedSeasonId,
+      showIdForApi,
+      seasonNumber,
+      sourceScope,
+      socialPlatform,
+      weekIndex,
+    ],
+  );
 
   useEffect(() => {
     if (!hasValidNumericPathParams) {
@@ -2508,6 +2703,12 @@ export default function WeekDetailPage() {
     }
     if (isAdmin) fetchData();
   }, [fetchData, hasValidNumericPathParams, invalidPathParamsError, isAdmin]);
+
+  const hasMorePosts = Boolean(displayedPagination?.has_more);
+  const handleLoadMorePosts = useCallback(() => {
+    if (!hasMorePosts || isLoadingMore || loading) return;
+    void fetchData({ append: true, requestOffset: postOffset });
+  }, [fetchData, hasMorePosts, isLoadingMore, loading, postOffset]);
 
   useEffect(() => {
     return () => {
@@ -2902,7 +3103,7 @@ export default function WeekDetailPage() {
       if (generation !== syncSessionGenerationRef.current) return;
       setSyncMessage(
         `Pass 1/${COMMENT_SYNC_MAX_PASSES} queued for ${weekLabel} (${platformLabel}) · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · ${
-          SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Sync + Mirror started." : "Sync Metrics started."
+          SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Ingest + Mirror started." : "Ingest Metrics started."
         }`,
       );
     } catch (err) {
@@ -2910,8 +3111,8 @@ export default function WeekDetailPage() {
         err instanceof Error
           ? err.message
           : SOCIAL_FULL_SYNC_MIRROR_ENABLED
-            ? "Failed to run full sync + mirror"
-            : "Failed to sync metrics",
+            ? "Failed to run full ingest + mirror"
+            : "Failed to start ingest",
       );
       setSyncingComments(false);
       syncSessionStateRef.current = null;
@@ -3149,9 +3350,9 @@ export default function WeekDetailPage() {
     (platform: string, post: AnyPost, initialIndex = 0) => {
       const mediaCandidates = getPostMediaCandidates(platform, post);
       if (mediaCandidates.length === 0) return;
-      const weekLabel = data?.week.label ?? `Week ${weekIndexInt}`;
+      const weekLabel = displayData?.week.label ?? `Week ${weekIndexInt}`;
       const stats = buildSocialStats(platform, post);
-      const allPlatformPosts = data?.platforms[platform]?.posts ?? [];
+      const allPlatformPosts = displayData?.platforms[platform]?.posts ?? [];
       // Count actual media URLs (not the appended thumbnail candidate)
       const mediaUrlCount = Math.max(
         getStrArr(post, "source_media_urls").length || getStrArr(post, "media_urls").length,
@@ -3163,8 +3364,8 @@ export default function WeekDetailPage() {
           platform,
           post,
           media,
-          showName: data?.season.show_name,
-          showSlug: data?.season.show_slug,
+          showName: displayData?.season.show_name,
+          showSlug: displayData?.season.show_slug,
           seasonNumber: Number.isFinite(seasonNumberInt) ? seasonNumberInt : null,
           weekLabel,
           sourceScope,
@@ -3186,7 +3387,7 @@ export default function WeekDetailPage() {
       const boundedIndex = Math.max(0, Math.min(initialIndex, entries.length - 1));
       setMediaLightbox({ entries, index: boundedIndex });
     },
-    [data?.season.show_name, data?.season.show_slug, data?.platforms, data?.week.label, seasonNumberInt, sourceScope, weekIndexInt],
+    [displayData?.season.show_name, displayData?.season.show_slug, seasonNumberInt, sourceScope, weekIndexInt],
   );
 
   const closeMediaLightbox = useCallback(() => {
@@ -3208,10 +3409,10 @@ export default function WeekDetailPage() {
 
   // Build merged post list with sort + search
   const allPosts = useMemo(() => {
-    if (!data) return [];
+    if (!displayData) return [];
     const entries: { platform: string; post: AnyPost }[] = [];
     const needle = searchText.trim().toLowerCase();
-    for (const [plat, pdata] of Object.entries(data.platforms)) {
+    for (const [plat, pdata] of Object.entries(displayData.platforms)) {
       if (platformFilter !== "all" && plat !== platformFilter) continue;
       for (const post of pdata.posts) {
         if (activeDayFilter) {
@@ -3246,19 +3447,19 @@ export default function WeekDetailPage() {
       });
     }
     return entries;
-  }, [activeDayFilter, data, platformFilter, sortField, sortDir, searchText]);
+  }, [activeDayFilter, displayData, platformFilter, sortField, sortDir, searchText]);
 
   // Filtered totals
   const filteredTotals = useMemo(() => {
-    if (!data) return { posts: 0, total_comments: 0, total_engagement: 0 };
+    if (!displayData) return { posts: 0, total_comments: 0, total_engagement: 0 };
     if (activeDayFilter) {
       let posts = 0;
       let totalComments = 0;
       let totalEngagement = 0;
       const platformEntries =
         platformFilter === "all"
-          ? Object.entries(data.platforms)
-          : [[platformFilter, data.platforms[platformFilter]] as [string, PlatformData | undefined]];
+          ? Object.entries(displayData.platforms)
+          : [[platformFilter, displayData.platforms[platformFilter]] as [string, PlatformData | undefined]];
       for (const [platform, platformData] of platformEntries) {
         if (!platformData) continue;
         for (const post of platformData.posts) {
@@ -3273,25 +3474,25 @@ export default function WeekDetailPage() {
     }
     if (platformFilter === "all") {
       return {
-        posts: data.totals.posts,
-        total_comments: data.totals.total_comments,
-        total_engagement: data.totals.total_engagement,
+        posts: displayData.totals.posts,
+        total_comments: displayData.totals.total_comments,
+        total_engagement: displayData.totals.total_engagement,
       };
     }
-    const pd = data.platforms[platformFilter];
+    const pd = displayData.platforms[platformFilter];
     return pd?.totals
       ? { posts: pd.totals.posts, total_comments: pd.totals.total_comments, total_engagement: pd.totals.total_engagement }
       : { posts: 0, total_comments: 0, total_engagement: 0 };
-  }, [activeDayFilter, data, platformFilter]);
+  }, [activeDayFilter, displayData, platformFilter]);
 
   const filteredCommentCoverage = useMemo(() => {
-    if (!data) return { saved: 0, actual: 0, incomplete: false };
+    if (!displayData) return { saved: 0, actual: 0, incomplete: false };
     let effectiveSaved = 0;
     let actual = 0;
     const platformEntries =
       platformFilter === "all"
-        ? Object.entries(data.platforms)
-        : [[platformFilter, data.platforms[platformFilter]] as [string, PlatformData | undefined]];
+        ? Object.entries(displayData.platforms)
+        : [[platformFilter, displayData.platforms[platformFilter]] as [string, PlatformData | undefined]];
     for (const [platform, platformData] of platformEntries) {
       if (!platformData) continue;
       for (const post of platformData.posts) {
@@ -3306,7 +3507,7 @@ export default function WeekDetailPage() {
       }
     }
     return toEffectiveCommentCoverage(effectiveSaved, actual);
-  }, [activeDayFilter, data, platformFilter]);
+  }, [activeDayFilter, displayData, platformFilter]);
 
   const syncFilteredCommentCoverage = useMemo(() => {
     if (!syncCoveragePreview) return null;
@@ -3625,16 +3826,14 @@ export default function WeekDetailPage() {
                 onClick={() => {
                   const nextQuery = new URLSearchParams(searchParams.toString());
                   nextQuery.delete("day");
-                  router.replace(
-                    buildSeasonSocialWeekUrl({
-                      showSlug: showSlugForRouting,
-                      seasonNumber,
-                      weekIndex: weekIndexInt,
-                      platform: socialPlatform ?? undefined,
-                      query: nextQuery,
-                    }) as Route,
-                    { scroll: false },
-                  );
+                  const nextRoute = buildSeasonSocialWeekUrl({
+                    showSlug: showSlugForRouting,
+                    seasonNumber,
+                    weekIndex: weekIndexInt,
+                    platform: socialPlatform ?? undefined,
+                    query: nextQuery,
+                  });
+                  compareAndReplace(router, canonicalCurrentRoute, nextRoute);
                 }}
                 className="ml-auto rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
@@ -3711,31 +3910,12 @@ export default function WeekDetailPage() {
             <button
               type="button"
               onClick={() => {
-                void fetchData();
-              }}
-              disabled={loading || syncingComments}
-              className="text-sm border border-gray-300 rounded-md px-3 py-1 bg-white text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Refresh
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
                 void syncAllCommentsForWeek();
               }}
               disabled={syncingComments}
               className="text-sm rounded-md px-3 py-1.5 bg-gray-900 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {syncingComments
-                ? "Syncing..."
-                : platformFilter === "all"
-                  ? SOCIAL_FULL_SYNC_MIRROR_ENABLED
-                    ? "Full Sync + Mirror"
-                    : "Sync Metrics"
-                  : SOCIAL_FULL_SYNC_MIRROR_ENABLED
-                    ? `Full Sync ${PLATFORM_LABELS[platformFilter]} + Mirror`
-                    : `Sync ${PLATFORM_LABELS[platformFilter]} Metrics`}
+              {syncButtonLabel}
             </button>
 
             {/* Result count */}
@@ -3923,7 +4103,7 @@ export default function WeekDetailPage() {
               {activeDayFilter ? "No posts found for this day." : "No posts found for this week."}
             </div>
           ) : (
-            <div data-testid="week-post-gallery" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div data-testid="week-post-gallery" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {allPosts.map(({ platform, post }) => (
                 <PostCard
                   key={`${platform}-${post.source_id}`}
@@ -3935,6 +4115,32 @@ export default function WeekDetailPage() {
                   onOpenMediaLightbox={openPostMediaLightbox}
                 />
               ))}
+            </div>
+          )}
+          {(loadMoreError || (displayedPagination && !displayedPagination.has_more)) && (
+            <div className="mt-4 text-sm">
+              {loadMoreError && <p className="text-red-600 text-center">{loadMoreError}</p>}
+              {!loadMoreError &&
+                displayedPagination &&
+                !displayedPagination.has_more &&
+                displayedPagination.total > 0 &&
+                allPosts.length > 0 && (
+                  <p className="text-gray-500 text-center">
+                    All loaded: {allPosts.length}/{displayedPagination.total} posts
+                  </p>
+                )}
+            </div>
+          )}
+          {hasMorePosts && (
+            <div className="mt-6 flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={handleLoadMorePosts}
+                disabled={isLoadingMore || loading}
+                className="px-4 py-2 bg-gray-900 text-white rounded-md text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoadingMore ? "Loading more posts..." : "Load more posts"}
+              </button>
             </div>
           )}
         </>
