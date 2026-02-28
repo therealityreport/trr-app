@@ -405,7 +405,7 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /TikTok/i }));
+    clickPlatformTabByLabel("TikTok");
     clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -687,8 +687,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByLabelText("Instagram platform"));
-    fireEvent.click(screen.getAllByRole("button", { name: /Post Details/i })[0]);
+    clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -699,12 +698,14 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("@collab_user").length).toBeGreaterThan(0);
     expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
     expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
-    const coverSource = screen.getByText((_, element) => {
-      if (!element) return false;
-      const text = (element.textContent ?? "").toLowerCase();
-      return text.includes("cover:") && text.includes("custom cover photo") && text.includes("(high)");
-    });
-    expect(coverSource).toBeInTheDocument();
+    const postDetailsHeading = screen.getByRole("heading", { name: "Post Details" });
+    const postDetailsPanel = postDetailsHeading.closest("div");
+    expect(postDetailsPanel).not.toBeNull();
+    if (postDetailsPanel) {
+      expect(within(postDetailsPanel).getByText(/cover:/i)).toBeInTheDocument();
+      expect(within(postDetailsPanel).getByText(/custom cover photo/i)).toBeInTheDocument();
+      expect(within(postDetailsPanel).getByText(/\(high\)/i)).toBeInTheDocument();
+    }
   });
 
   it("opens the mirrored thumbnail entry first when only the thumbnail is mirrored", async () => {
