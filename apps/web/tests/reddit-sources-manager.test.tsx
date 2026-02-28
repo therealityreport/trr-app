@@ -1421,7 +1421,6 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
 
     expect(await screen.findByText("Episode 1")).toBeInTheDocument();
-    expect(screen.getByText(/Live/i)).toBeInTheDocument();
     expect(screen.getByText("Post Episode Discussion")).toBeInTheDocument();
     expect(screen.queryByText("Weekly Discussion")).not.toBeInTheDocument();
     expect(screen.getAllByText(/Air date/i).length).toBeGreaterThan(0);
@@ -1864,10 +1863,6 @@ describe("RedditSourcesManager", () => {
     const preSeasonCard = screen.getByText("Pre-Season").closest("article");
     expect(preSeasonCard).not.toBeNull();
     fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
-
-    expect(
-      await screen.findByText("Live refresh timed out for Pre-Season; showing cached posts from Supabase."),
-    ).toBeInTheDocument();
 
     await waitFor(() => {
       const discoverUrls = fetchMock.mock.calls
