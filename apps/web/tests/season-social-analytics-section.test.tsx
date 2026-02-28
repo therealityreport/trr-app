@@ -3366,7 +3366,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByText("Weekly Run");
-    fireEvent.change(screen.getByRole("combobox", { name: /Week/i }), {
+    fireEvent.change(screen.getByRole("combobox", { name: /^Week$/i }), {
       target: { value: "2" },
     });
     const platformSelects = screen.getAllByRole("combobox", { name: /Platform/i });

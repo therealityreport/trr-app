@@ -129,12 +129,16 @@ const weekPayload = {
 };
 
 async function clickPostDetailCardByThumbnailAlt(altText: string) {
-  const thumbnails = await screen.findAllByRole("img");
-  const thumbnail = thumbnails.find((image) => {
-    const alt = image.getAttribute("alt") ?? "";
-    return alt.includes(altText);
+  const cards = await screen.findAllByRole("button", {
+    name: /open post media lightbox from details/i,
   });
-  const button = thumbnail.closest("button");
+  const button = cards.find((candidate) => {
+    const cardImages = within(candidate).queryAllByRole("img");
+    return cardImages.some((image) => {
+      const alt = (image.getAttribute("alt") ?? "").toLowerCase();
+      return alt.includes(altText.toLowerCase());
+    });
+  });
   if (!button) {
     throw new Error(`Post card button for thumbnail "${altText}" not found`);
   }
