@@ -1278,13 +1278,13 @@ describe("WeekDetailPage thumbnails", () => {
     render(<WeekDetailPage />);
 
     await waitForWeekDetailReady();
-      await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Root comment")).toBeInTheDocument();
-    expect(screen.getByText("Child reply")).toBeInTheDocument();
+    expect(await screen.findByText((_, element) => element?.textContent?.trim() === "Root comment")).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent?.trim() === "Child reply")).toBeInTheDocument();
     expect(screen.getByText(/nested replies skipped due to thread cycle/i)).toBeInTheDocument();
   });
 

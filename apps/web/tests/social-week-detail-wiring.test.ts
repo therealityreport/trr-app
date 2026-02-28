@@ -79,7 +79,8 @@ describe("social week detail wiring", () => {
 
     expect(contents).toMatch(/nextQuery\.delete\("social_platform"\)/);
     expect(contents).toMatch(/platform:\s*socialPlatformFromQuery/);
-    expect(contents).toMatch(/router\.replace\(\s*buildSeasonSocialWeekUrl\(/s);
+    expect(contents).toMatch(/compareAndReplace\(\s*router,\s*canonicalCurrentRoute,\s*nextRoute/);
+    expect(contents).toMatch(/router\.replace\(nextRoute as Route,\s*{ scroll: false }\);/);
   });
 
   it("canonicalizes legacy /social/week/{n} paths to /social/w{n}/{subtab}", () => {
