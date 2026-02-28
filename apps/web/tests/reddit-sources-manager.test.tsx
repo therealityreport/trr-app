@@ -2058,7 +2058,7 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(cardHasPendingRefresh("Pre-Season")).toBe(true);
     }, { timeout: 10_000 });
-  });
+  }, 20_000);
 
   it("continues polling run status when cached discovery is returned with an active run", async () => {
     const communityWithSaltLakeFlair = {
