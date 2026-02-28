@@ -222,6 +222,7 @@ describe("WeekDetailPage thumbnails", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    mockSearch.value = "source_scope=bravo";
   });
 
   it("renders thumbnail previews for instagram, tiktok, and youtube", async () => {
