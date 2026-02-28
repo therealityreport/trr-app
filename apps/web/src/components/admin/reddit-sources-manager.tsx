@@ -1171,9 +1171,9 @@ const renderEpisodeMatrixCards = (
             "Refreshing flair totals…"
           ) : (
             <>
-              {fmtNum(totalTrackedCount ?? options.totalTrackedFlairCountBySeasonBoundaryPeriod?.get(period.key) ?? 0)}{" "}
+              {fmtNum(totalTrackedCount ?? options?.totalTrackedFlairCountBySeasonBoundaryPeriod?.get(period.key) ?? 0)}{" "}
               tracked flair posts ·{" "}
-              {fmtNum(unassignedTrackedCount ?? options.unassignedFlairCountBySeasonBoundaryPeriod?.get(period.key) ?? 0)}{" "}
+              {fmtNum(unassignedTrackedCount ?? options?.unassignedFlairCountBySeasonBoundaryPeriod?.get(period.key) ?? 0)}{" "}
               unassigned tracked posts
             </>
           )}
