@@ -2669,8 +2669,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await screen.findByText("Bravo Content Leaderboard");
     fireEvent.click(screen.getByRole("button", { name: "Open leaderboard media lightbox" }));
-    await screen.findByLabelText("Close lightbox");
-    fireEvent.click(screen.getByLabelText("Show metadata"));
+    fireEvent.click(await screen.findByRole("button", { name: /show metadata|hide metadata/i }));
     const statsHeader = screen.getByText("Social Stats");
     const statsPanel = statsHeader.closest("div");
     expect(statsPanel).not.toBeNull();

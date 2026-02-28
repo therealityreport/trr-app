@@ -331,11 +331,14 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const drawerThumb = screen.getAllByAltText("Instagram post thumbnail").at(-1);
-    expect(drawerThumb).toBeDefined();
-    fireEvent.click(drawerThumb as HTMLElement);
-    await screen.findByLabelText("Close lightbox");
-    fireEvent.click(screen.getByLabelText("Show metadata"));
+    const openLightboxButton = screen.getByRole("button", {
+      name: "Open post media lightbox from details",
+    });
+    fireEvent.click(openLightboxButton);
+    const metadataToggle = await screen.findByRole("button", {
+      name: /show metadata|hide metadata/i,
+    });
+    fireEvent.click(metadataToggle);
     const statsHeader = screen.getByText("Social Stats");
     const statsPanel = statsHeader.closest("div");
     expect(statsPanel).not.toBeNull();
@@ -397,9 +400,10 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const drawerThumb = screen.getAllByAltText("TikTok post thumbnail").at(-1);
-    expect(drawerThumb).toBeDefined();
-    fireEvent.click(drawerThumb as HTMLElement);
+    const openLightboxButton = screen.getByRole("button", {
+      name: "Open post media lightbox from details",
+    });
+    fireEvent.click(openLightboxButton);
     const nextButton = screen.queryByLabelText("Next image");
     const previousButton = screen.queryByLabelText("Previous image");
     const mediaNavigationButton = nextButton ?? previousButton;
@@ -478,11 +482,14 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const drawerThumb = screen.getAllByAltText("Instagram post thumbnail").at(-1);
-    expect(drawerThumb).toBeDefined();
-    fireEvent.click(drawerThumb as HTMLElement);
-    await screen.findByLabelText("Close lightbox");
-    fireEvent.click(screen.getByLabelText("Show metadata"));
+    const openLightboxButton = screen.getByRole("button", {
+      name: "Open post media lightbox from details",
+    });
+    fireEvent.click(openLightboxButton);
+    const metadataToggle = await screen.findByRole("button", {
+      name: /show metadata|hide metadata/i,
+    });
+    fireEvent.click(metadataToggle);
     expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
   });
 
@@ -685,7 +692,11 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("@collab_user").length).toBeGreaterThan(0);
     expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
     expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
-    expect(screen.getByText(/\(high\)/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText((_, element) => {
+        return Boolean(element?.textContent?.includes("(high)"));
+      }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("IG post").length).toBeGreaterThan(1);
   });
 
@@ -784,11 +795,14 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
-    const drawerThumb = screen.getAllByAltText("Instagram post thumbnail").at(-1);
-    expect(drawerThumb).toBeDefined();
-    fireEvent.click(drawerThumb as HTMLElement);
-    await screen.findByLabelText("Close lightbox");
-    fireEvent.click(screen.getByLabelText("Show metadata"));
+    const openLightboxButton = screen.getByRole("button", {
+      name: "Open post media lightbox from details",
+    });
+    fireEvent.click(openLightboxButton);
+    const metadataToggle = await screen.findByRole("button", {
+      name: /show metadata|hide metadata/i,
+    });
+    fireEvent.click(metadataToggle);
     expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
     expect(document.querySelector("video[aria-label='Instagram media']")).toBeNull();
   });
@@ -858,7 +872,9 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
     expect(screen.getAllByText("Saves").length).toBeGreaterThan(0);
-    const commentMediaLink = screen.getByRole("link", { name: "Comment media 1" });
+    const commentMediaLink = await screen.findByRole("link", {
+      name: /comment media 1/i,
+    });
     expect(commentMediaLink).toHaveAttribute("href", "https://cdn.example/comment-media.jpg");
   });
 
