@@ -1191,7 +1191,7 @@ const renderEpisodeMatrixCards = (
               aria-hidden="true"
               className="h-3 w-3 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"
             />
-            {progress.status === "queued" ? "Refresh queued in backend…" : "Scraping posts…"}
+            {progress?.status === "queued" ? "Refresh queued in backend…" : "Scraping posts…"}
           </p>
         )}
         {progress?.message && (
@@ -1336,7 +1336,7 @@ const renderEpisodeMatrixCards = (
                 aria-hidden="true"
                 className="h-3 w-3 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"
               />
-              {progress.status === "queued" ? "Refresh queued in backend…" : "Scraping posts…"}
+            {progress?.status === "queued" ? "Refresh queued in backend…" : "Scraping posts…"}
             </p>
           )}
           {progress?.message && (
