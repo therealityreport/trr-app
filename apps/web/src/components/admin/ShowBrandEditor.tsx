@@ -1,5 +1,6 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -1243,7 +1244,6 @@ export default function ShowBrandEditor({
                 {defaultPosterAssetId ? "Change Poster" : "Choose Poster"}
               </button>
               {defaultPosterAssetId && showAssetUrlById.get(defaultPosterAssetId) && (
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={showAssetUrlById.get(defaultPosterAssetId)!}
                   alt="Default poster"
@@ -1266,7 +1266,6 @@ export default function ShowBrandEditor({
                 {defaultBackdropAssetId ? "Change Backdrop" : "Choose Backdrop"}
               </button>
               {defaultBackdropAssetId && showAssetUrlById.get(defaultBackdropAssetId) && (
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={showAssetUrlById.get(defaultBackdropAssetId)!}
                   alt="Default backdrop"
@@ -1289,7 +1288,6 @@ export default function ShowBrandEditor({
                 {defaultLogoAssetId ? "Change Logo" : "Choose Logo"}
               </button>
               {defaultLogoAssetId && showAssetUrlById.get(defaultLogoAssetId) && (
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={showAssetUrlById.get(defaultLogoAssetId)!}
                   alt="Default logo"
@@ -1425,7 +1423,6 @@ export default function ShowBrandEditor({
                           className="block"
                           title="Set as show icon"
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={icon.hosted_url}
                             alt={icon.filename}
@@ -1512,7 +1509,6 @@ export default function ShowBrandEditor({
                           : "border-zinc-200 bg-white hover:bg-zinc-50"
                       }`}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={asset.hosted_url}
                         alt={`${defaultMediaPickerKind} candidate`}
