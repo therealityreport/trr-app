@@ -325,9 +325,7 @@ describe("WeekDetailPage thumbnails", () => {
     const drawerThumb = screen.getAllByAltText("Instagram post thumbnail").at(-1);
     expect(drawerThumb).toBeDefined();
     fireEvent.click(drawerThumb as HTMLElement);
-    await waitFor(() => {
-      expect(screen.getByLabelText("Close lightbox")).toBeInTheDocument();
-    });
+    await screen.findByLabelText("Close lightbox");
     fireEvent.click(screen.getByLabelText("Show metadata"));
     const statsHeader = screen.getByText("Social Stats");
     const statsPanel = statsHeader.closest("div");
@@ -473,9 +471,7 @@ describe("WeekDetailPage thumbnails", () => {
     const drawerThumb = screen.getAllByAltText("Instagram post thumbnail").at(-1);
     expect(drawerThumb).toBeDefined();
     fireEvent.click(drawerThumb as HTMLElement);
-    await waitFor(() => {
-      expect(screen.getByLabelText("Close lightbox")).toBeInTheDocument();
-    });
+    await screen.findByLabelText("Close lightbox");
     fireEvent.click(screen.getByLabelText("Show metadata"));
     expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
   });
@@ -780,9 +776,7 @@ describe("WeekDetailPage thumbnails", () => {
     const drawerThumb = screen.getAllByAltText("Instagram post thumbnail").at(-1);
     expect(drawerThumb).toBeDefined();
     fireEvent.click(drawerThumb as HTMLElement);
-    await waitFor(() => {
-      expect(screen.getByLabelText("Close lightbox")).toBeInTheDocument();
-    });
+    await screen.findByLabelText("Close lightbox");
     fireEvent.click(screen.getByLabelText("Show metadata"));
     expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
     expect(document.querySelector("video[aria-label='Instagram media']")).toBeNull();

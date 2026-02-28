@@ -1260,7 +1260,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const lastUpdated = await screen.findByText("Last Updated");
     const seasonMetadata = lastUpdated.closest("dl");
     expect(seasonMetadata).toBeTruthy();
-    const windowLabel = screen.getByText("Window", { selector: "dt" });
+    const windowLabel = await screen.findByText("Window", { selector: "dt" });
     const windowRow = windowLabel.closest("div");
     expect(windowRow).toBeTruthy();
     const windowValue = windowRow?.querySelector("dd");
@@ -2669,9 +2669,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await screen.findByText("Bravo Content Leaderboard");
     fireEvent.click(screen.getByRole("button", { name: "Open leaderboard media lightbox" }));
-    await waitFor(() => {
-      expect(screen.getByLabelText("Close lightbox")).toBeInTheDocument();
-    });
+    await screen.findByLabelText("Close lightbox");
     fireEvent.click(screen.getByLabelText("Show metadata"));
     const statsHeader = screen.getByText("Social Stats");
     const statsPanel = statsHeader.closest("div");
