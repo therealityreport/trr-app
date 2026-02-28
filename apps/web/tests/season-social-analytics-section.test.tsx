@@ -1899,6 +1899,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       ),
     };
     mockSeasonSocialFetch(analyticsUpToDate);
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/official?social_metrics=posts,comments,likes");
 
     render(
       <SeasonSocialAnalyticsSection
