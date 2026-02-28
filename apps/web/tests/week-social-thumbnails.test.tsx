@@ -137,48 +137,6 @@ function clickPostDetailCardByThumbnailAlt(altText: string) {
   fireEvent.click(button);
 }
 
-function normalizePlatformLabel(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function clickPlatformTabByLabel(label: string) {
-  const normalizedTarget = normalizePlatformLabel(label);
-  const targetTokens = normalizedTarget.split(" ").filter(Boolean);
-  const buttons = screen.getAllByRole("button");
-  const button = buttons.find((candidate) => {
-    const candidateTexts = [
-      candidate.textContent,
-      candidate.getAttribute("aria-label"),
-      candidate.getAttribute("title"),
-    ]
-      .filter((value): value is string => Boolean(value))
-      .map(normalizePlatformLabel);
-
-    if (
-      candidateTexts.some(
-        (candidateText) =>
-          candidateText === normalizedTarget ||
-          candidateText.startsWith(normalizedTarget) ||
-          candidateText.includes(normalizedTarget),
-      )
-    ) {
-      return true;
-    }
-
-    return candidateTexts.some((candidateText) =>
-      targetTokens.some((token) => candidateText.split(" ").includes(token)),
-    );
-  });
-  if (!button) {
-    throw new Error(`Platform tab "${label}" button not found`);
-  }
-  fireEvent.click(button);
-}
-
 const byeWeekPayload = {
   ...weekPayload,
   week: {
@@ -368,7 +326,6 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPlatformTabByLabel("Instagram");
     clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -435,7 +392,6 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
-    clickPlatformTabByLabel("TikTok");
     clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -517,7 +473,6 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByLabelText("Instagram platform"));
     clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
@@ -550,7 +505,6 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPlatformTabByLabel("Twitter/X");
     const twitterThumb = await screen.findByAltText("Twitter/X post thumbnail");
     expect(twitterThumb).toHaveAttribute("src", "https://images.test/x-preview.jpg");
     expect(twitterThumb.className).toContain("object-contain");
@@ -603,6 +557,7 @@ describe("WeekDetailPage thumbnails", () => {
   });
 
   it("does not overstate ALL comments coverage when one platform is under-saved", async () => {
+    mockSearch.value = "source_scope=bravo&social_platform=twitter";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/social/analytics/week/1")) {
@@ -624,8 +579,6 @@ describe("WeekDetailPage thumbnails", () => {
 
     expect(screen.getByText("38.1%")).toBeInTheDocument();
     expect(screen.getByText("542/1.4K* Comments (Saved/Actual)")).toBeInTheDocument();
-
-    clickPlatformTabByLabel("Twitter/X");
 
     await waitFor(() => {
       expect(screen.getByText("36.5%")).toBeInTheDocument();
@@ -729,7 +682,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
     expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
     expect(screen.getByText(/\(high\)/i)).toBeInTheDocument();
-    expect(screen.getByText("IG post")).toBeInTheDocument();
+    expect(screen.getAllByText("IG post").length).toBeGreaterThan(1);
   });
 
   it("opens the mirrored thumbnail entry first when only the thumbnail is mirrored", async () => {
@@ -895,7 +848,6 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPlatformTabByLabel("TikTok");
     clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
 
     await waitFor(() => {
@@ -995,7 +947,6 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Week 1")).toBeInTheDocument();
     });
 
-    clickPlatformTabByLabel("Twitter/X");
     clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
 
     await waitFor(() => {
