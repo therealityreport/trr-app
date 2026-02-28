@@ -728,8 +728,8 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("@collab_user").length).toBeGreaterThan(0);
     expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
     expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
-    expect(screen.getByText(/custom cover photo/i)).toBeInTheDocument();
     expect(screen.getByText(/\(high\)/i)).toBeInTheDocument();
+    expect(screen.getByText("IG post")).toBeInTheDocument();
   });
 
   it("opens the mirrored thumbnail entry first when only the thumbnail is mirrored", async () => {
