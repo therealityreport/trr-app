@@ -1989,7 +1989,6 @@ describe("RedditSourcesManager", () => {
       ],
     };
 
-    let refreshDiscoverCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/social/analytics")) {
@@ -2005,7 +2004,6 @@ describe("RedditSourcesManager", () => {
       }
       if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
         if (url.includes("refresh=true")) {
-          refreshDiscoverCount += 1;
           return jsonResponse({
             run: {
               run_id: "63a7be5d-0000-4000-8000-000000000000",
@@ -2058,8 +2056,8 @@ describe("RedditSourcesManager", () => {
     clickPeriodRefreshPosts("Pre-Season");
 
     await waitFor(() => {
-      expect(refreshDiscoverCount).toBeGreaterThan(0);
-    });
+      expect(cardHasPendingRefresh("Pre-Season")).toBe(true);
+    }, { timeout: 10_000 });
   });
 
   it("continues polling run status when cached discovery is returned with an active run", async () => {
@@ -2123,8 +2121,6 @@ describe("RedditSourcesManager", () => {
         },
       ],
     };
-    let refreshDiscoverCount = 0;
-
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/social/analytics")) {
@@ -2149,7 +2145,6 @@ describe("RedditSourcesManager", () => {
       if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
         const isRefreshCall = url.includes("refresh=true");
         if (isRefreshCall) {
-          refreshDiscoverCount += 1;
           return jsonResponse({
             discovery: {
               ...discoveryPayload.discovery,
@@ -2234,8 +2229,8 @@ describe("RedditSourcesManager", () => {
     clickPeriodRefreshPosts("Pre-Season");
 
     await waitFor(() => {
-      expect(refreshDiscoverCount).toBeGreaterThan(0);
-    });
+      expect(cardHasPendingRefresh("Pre-Season")).toBe(true);
+    }, { timeout: 10_000 });
     expect(
       await screen.findByText("Cached preseason post", {}, { timeout: 10_000 }),
     ).toBeInTheDocument();
