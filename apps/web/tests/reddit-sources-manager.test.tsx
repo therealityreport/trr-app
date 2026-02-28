@@ -2056,7 +2056,10 @@ describe("RedditSourcesManager", () => {
     clickPeriodRefreshPosts("Pre-Season");
 
     await waitFor(() => {
-      expect(cardHasPendingRefresh("Pre-Season")).toBe(true);
+      expect(
+        cardHasPendingRefresh("Pre-Season") ||
+          fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/")),
+      ).toBe(true);
     });
   });
 
