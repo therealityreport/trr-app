@@ -265,6 +265,25 @@ const findCardByPeriodLabel = (label: string): HTMLElement => {
   return fallbackCard as HTMLElement;
 };
 
+const getPeriodSeedInput = (label: string): HTMLTextAreaElement => {
+  const card = findCardByPeriodLabel(label);
+  const seedInputs = within(card).queryAllByPlaceholderText("Optional seed post URLs (comma or newline separated)");
+  if (!seedInputs[0]) {
+    throw new Error(`Unable to find a seed input for period ${label}`);
+  }
+  return seedInputs[0] as HTMLTextAreaElement;
+};
+
+const clickPeriodRefreshPosts = (label: string): HTMLElement => {
+  const card = findCardByPeriodLabel(label);
+  const refreshPostsButtons = within(card).queryAllByRole("button", { name: "Refresh Posts" });
+  if (!refreshPostsButtons[0]) {
+    throw new Error(`Unable to find a refresh posts button for period ${label}`);
+  }
+  fireEvent.click(refreshPostsButtons[0]);
+  return card as HTMLElement;
+};
+
 describe("RedditSourcesManager", () => {
   beforeEach(() => {
     usePathnameMock.mockReturnValue("/admin/social-media");
@@ -1673,16 +1692,14 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     const preSeasonCard = findCardByPeriodLabel("Pre-Season");
-    const seedInput = within(preSeasonCard as HTMLElement).getByPlaceholderText(
-      "Optional seed post URLs (comma or newline separated)",
-    );
+    const seedInput = getPeriodSeedInput("Pre-Season");
     fireEvent.change(seedInput, {
       target: {
         value:
           "https://www.reddit.com/r/BravoRealHousewives/comments/1neufq0/example/,\nhttps://www.reddit.com/r/BravoRealHousewives/comments/1mr9pb8/example/",
       },
     });
-    fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
+    fireEvent.click(within(preSeasonCard as HTMLElement).getAllByRole("button", { name: "Refresh Posts" })[0]);
     fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: /View All Posts/i }));
 
     await waitFor(() => {
@@ -1885,11 +1902,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
-    fireEvent.click(
-      within(findCardByPeriodLabel("Pre-Season") as HTMLElement).getByRole("button", {
-        name: "Refresh Posts",
-      }),
-    );
+    clickPeriodRefreshPosts("Pre-Season");
 
     await waitFor(() => {
       const preSeasonUrls = fetchMock.mock.calls
@@ -2025,11 +2038,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
-    fireEvent.click(
-      within(findCardByPeriodLabel("Pre-Season") as HTMLElement).getByRole("button", {
-        name: "Refresh Posts",
-      }),
-    );
+    clickPeriodRefreshPosts("Pre-Season");
 
     await waitFor(() => {
       const refreshingCard = findCardByPeriodLabel("Pre-Season") as HTMLElement;
@@ -2211,7 +2220,8 @@ describe("RedditSourcesManager", () => {
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
     const preSeasonCard = findCardByPeriodLabel("Pre-Season");
-    fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
+    const refreshedPreSeasonCard = clickPeriodRefreshPosts("Pre-Season");
+    expect(refreshedPreSeasonCard).toBe(preSeasonCard);
 
     await waitFor(() => {
       const refreshStatus = within(preSeasonCard as HTMLElement).queryByRole("status");
