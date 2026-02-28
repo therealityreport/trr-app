@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { Route } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import ClientOnly from "@/components/ClientOnly";
@@ -18,7 +19,7 @@ import {
   cleanLegacyPersonRoutingQuery,
   parsePersonRouteState,
 } from "@/lib/admin/show-admin-routes";
-import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
+import { readAdminRecentShows, recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
 import ShowNewsTab from "@/components/admin/show-tabs/ShowNewsTab";
@@ -39,7 +40,7 @@ import { mapPhotoToMetadata, resolveMetadataDimensions } from "@/lib/photo-metad
 import {
   THUMBNAIL_CROP_LIMITS,
   THUMBNAIL_DEFAULTS,
-  isThumbnailCropMode,
+  parseThumbnailCrop,
   resolveThumbnailPresentation,
   type ThumbnailCrop,
 } from "@/lib/thumbnail-crop";
@@ -761,6 +762,24 @@ const getPersonPhotoCardUrl = (photo: TrrPersonPhoto): string | null =>
 const getPersonPhotoDetailUrl = (photo: TrrPersonPhoto): string | null =>
   firstImageUrlCandidate(getPersonPhotoDetailUrlCandidates(photo));
 
+const resolvePhotoPersistedCrop = (
+  photo: TrrPersonPhoto | null | undefined
+): ThumbnailCrop | null => {
+  if (!photo) return null;
+  const directCrop = parseThumbnailCrop(
+    {
+      x: photo.thumbnail_focus_x,
+      y: photo.thumbnail_focus_y,
+      zoom: photo.thumbnail_zoom,
+      mode: photo.thumbnail_crop_mode,
+    },
+    { clamp: true }
+  );
+  if (directCrop) return directCrop;
+  const metadata = photo.metadata as Record<string, unknown> | null;
+  return parseThumbnailCrop(metadata?.thumbnail_crop, { clamp: true });
+};
+
 const buildThumbnailCropPreview = (
   photo: TrrPersonPhoto | null | undefined
 ): {
@@ -773,10 +792,11 @@ const buildThumbnailCropPreview = (
 } | null => {
   if (!photo) return null;
   const dims = resolvePhotoDimensions(photo);
+  const persistedCrop = resolvePhotoPersistedCrop(photo);
   return {
-    focusX: photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x,
-    focusY: photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y,
-    zoom: photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom,
+    focusX: persistedCrop?.x ?? THUMBNAIL_DEFAULTS.x,
+    focusY: persistedCrop?.y ?? THUMBNAIL_DEFAULTS.y,
+    zoom: persistedCrop?.zoom ?? THUMBNAIL_DEFAULTS.zoom,
     imageWidth: dims.width,
     imageHeight: dims.height,
     aspectRatio: 4 / 5,
@@ -784,18 +804,13 @@ const buildThumbnailCropPreview = (
 };
 
 const buildThumbnailCropPayload = (photo: TrrPersonPhoto): Record<string, unknown> | null => {
-  if (
-    photo.thumbnail_focus_x === null ||
-    photo.thumbnail_focus_y === null ||
-    photo.thumbnail_zoom === null
-  ) {
-    return null;
-  }
+  const persistedCrop = resolvePhotoPersistedCrop(photo);
+  if (!persistedCrop) return null;
   return {
-    x: photo.thumbnail_focus_x,
-    y: photo.thumbnail_focus_y,
-    zoom: photo.thumbnail_zoom,
-    mode: photo.thumbnail_crop_mode ?? "auto",
+    x: persistedCrop.x,
+    y: persistedCrop.y,
+    zoom: persistedCrop.zoom,
+    mode: persistedCrop.mode,
   };
 };
 
@@ -946,15 +961,11 @@ function GalleryPhoto({
   photo,
   onClick,
   isCover,
-  onSetCover,
-  settingCover,
   onFallbackEvent,
 }: {
   photo: TrrPersonPhoto;
   onClick: () => void;
   isCover?: boolean;
-  onSetCover?: () => void;
-  settingCover?: boolean;
   onFallbackEvent?: (event: "attempt" | "recovered" | "failed") => void;
 }) {
   const [hasError, setHasError] = useState(false);
@@ -983,18 +994,7 @@ function GalleryPhoto({
     return `Broken (unreachable) • ${reasonLabel} • ${checkedAtLabel}`;
   }, [galleryStatus.checkedAt, galleryStatus.reason, isMarkedBroken]);
   const presentation = useMemo(() => {
-    const persistedCrop: ThumbnailCrop | null =
-      isThumbnailCropMode(photo.thumbnail_crop_mode) &&
-      photo.thumbnail_focus_x !== null &&
-      photo.thumbnail_focus_y !== null &&
-      photo.thumbnail_zoom !== null
-        ? {
-            x: photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x,
-            y: photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y,
-            zoom: photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom,
-            mode: photo.thumbnail_crop_mode,
-          }
-        : null;
+    const persistedCrop = resolvePhotoPersistedCrop(photo);
 
     return resolveThumbnailPresentation({
       width: photo.width,
@@ -1107,19 +1107,6 @@ function GalleryPhoto({
           Broken
         </div>
       )}
-      {/* Set as Cover button */}
-      {onSetCover && !isCover && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onSetCover();
-          }}
-          disabled={settingCover}
-          className="absolute bottom-2 right-2 z-10 rounded-lg bg-black/70 px-2 py-1 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black disabled:opacity-50"
-        >
-          {settingCover ? "..." : "Set as Cover"}
-        </button>
-      )}
     </>
   );
 }
@@ -1194,14 +1181,15 @@ function TagPeoplePanel({
   const [mirrorError, setMirrorError] = useState<string | null>(null);
   const [facebankSeedSaving, setFacebankSeedSaving] = useState(false);
   const [facebankSeedError, setFacebankSeedError] = useState<string | null>(null);
+  const initialPersistedCrop = resolvePhotoPersistedCrop(photo);
   const [cropX, setCropX] = useState<number>(
-    photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x
+    initialPersistedCrop?.x ?? THUMBNAIL_DEFAULTS.x
   );
   const [cropY, setCropY] = useState<number>(
-    photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y
+    initialPersistedCrop?.y ?? THUMBNAIL_DEFAULTS.y
   );
   const [cropZoom, setCropZoom] = useState<number>(
-    photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom
+    initialPersistedCrop?.zoom ?? THUMBNAIL_DEFAULTS.zoom
   );
   const [cropSaving, setCropSaving] = useState(false);
   const [cropError, setCropError] = useState<string | null>(null);
@@ -1209,10 +1197,11 @@ function TagPeoplePanel({
   const currentPeopleCount = parsePeopleCount(photo.people_count);
   const faceBoxesEnabled =
     (currentPeopleCount ?? 0) > 1 || normalizeFaceBoxes(photo.face_boxes).length > 1;
-  const originalCropMode = photo.thumbnail_crop_mode;
-  const originalCropX = photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x;
-  const originalCropY = photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y;
-  const originalCropZoom = photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom;
+  const originalPersistedCrop = resolvePhotoPersistedCrop(photo);
+  const originalCropMode = originalPersistedCrop?.mode ?? photo.thumbnail_crop_mode;
+  const originalCropX = originalPersistedCrop?.x ?? THUMBNAIL_DEFAULTS.x;
+  const originalCropY = originalPersistedCrop?.y ?? THUMBNAIL_DEFAULTS.y;
+  const originalCropZoom = originalPersistedCrop?.zoom ?? THUMBNAIL_DEFAULTS.zoom;
   const manualCropDirty =
     originalCropMode !== "manual" ||
     Math.abs(cropX - originalCropX) >= 1 ||
@@ -1267,13 +1256,16 @@ function TagPeoplePanel({
   ]);
 
   useEffect(() => {
-    setCropX(photo.thumbnail_focus_x ?? THUMBNAIL_DEFAULTS.x);
-    setCropY(photo.thumbnail_focus_y ?? THUMBNAIL_DEFAULTS.y);
-    setCropZoom(clampCropZoom(photo.thumbnail_zoom ?? THUMBNAIL_DEFAULTS.zoom));
+    const persistedCrop = resolvePhotoPersistedCrop(photo);
+    setCropX(persistedCrop?.x ?? THUMBNAIL_DEFAULTS.x);
+    setCropY(persistedCrop?.y ?? THUMBNAIL_DEFAULTS.y);
+    setCropZoom(clampCropZoom(persistedCrop?.zoom ?? THUMBNAIL_DEFAULTS.zoom));
     setCropError(null);
   }, [
     clampCropZoom,
+    photo,
     photo.id,
+    photo.metadata,
     photo.thumbnail_crop_mode,
     photo.thumbnail_focus_x,
     photo.thumbnail_focus_y,
@@ -2142,7 +2134,7 @@ function TagPeoplePanel({
           Thumbnail Crop
         </span>
         <p className="mt-1 text-xs text-white/60">
-          Mode: {photo.thumbnail_crop_mode === "manual" ? "Manual" : "Auto"}
+          Mode: {(resolvePhotoPersistedCrop(photo)?.mode ?? photo.thumbnail_crop_mode) === "manual" ? "Manual" : "Auto"}
         </p>
         <div className="mt-2 space-y-2">
           <label className="block text-xs text-white/70">
@@ -2255,7 +2247,41 @@ export default function PersonProfilePage() {
     typeof showIdParamRaw === "string" && showIdParamRaw.trim().length > 0
       ? showIdParamRaw.trim()
       : null;
-  const showIdParam = showRouteParam ?? legacyShowIdParam;
+  const [stickyShowParam, setStickyShowParam] = useState<string | null>(
+    showRouteParam ?? legacyShowIdParam
+  );
+  const [recentShowFallback, setRecentShowFallback] = useState<{
+    slug: string;
+    label: string;
+    href: string;
+  } | null>(null);
+  useEffect(() => {
+    const explicitShowParam = showRouteParam ?? legacyShowIdParam;
+    if (explicitShowParam) {
+      setStickyShowParam((prev) => (prev === explicitShowParam ? prev : explicitShowParam));
+      return;
+    }
+    const recent = readAdminRecentShows();
+    const recentEntry = recent[0] ?? null;
+    setRecentShowFallback((prev) => {
+      if (!recentEntry) return null;
+      if (
+        prev &&
+        prev.slug === recentEntry.slug &&
+        prev.label === recentEntry.label &&
+        prev.href === recentEntry.href
+      ) {
+        return prev;
+      }
+      return {
+        slug: recentEntry.slug,
+        label: recentEntry.label,
+        href: recentEntry.href,
+      };
+    });
+  }, [legacyShowIdParam, showRouteParam]);
+  const showIdParam =
+    showRouteParam ?? legacyShowIdParam ?? stickyShowParam ?? recentShowFallback?.slug ?? null;
   const [resolvedShowIdParam, setResolvedShowIdParam] = useState<string | null>(
     showIdParam && looksLikeUuid(showIdParam) ? showIdParam : null
   );
@@ -2537,21 +2563,20 @@ export default function PersonProfilePage() {
   const setTab = useCallback(
     (tab: TabId) => {
       setActiveTab(tab);
-      if (!showSlugForRouting || !personSlugForRouting) return;
+      if (!personSlugForRouting) return;
       const preservedQuery = cleanLegacyPersonRoutingQuery(
         new URLSearchParams(searchParams.toString())
       );
       router.replace(
         buildPersonAdminUrl({
-          showSlug: showSlugForRouting,
           personSlug: personSlugForRouting,
           tab,
           query: preservedQuery,
-        }) as "/admin/trr-shows",
+        }) as Route,
         { scroll: false }
       );
     },
-    [personSlugForRouting, router, searchParams, showSlugForRouting]
+    [personSlugForRouting, router, searchParams]
   );
 
   const advancedFilters = useMemo(
@@ -3045,10 +3070,9 @@ export default function PersonProfilePage() {
   }, [getAuthHeaders, hasAccess, personRouteParam, showIdParam]);
 
   useEffect(() => {
-    if (!showSlugForRouting || !personSlugForRouting) return;
+    if (!personSlugForRouting) return;
     const preservedQuery = cleanLegacyPersonRoutingQuery(new URLSearchParams(searchParams.toString()));
     const canonicalUrl = buildPersonAdminUrl({
-      showSlug: showSlugForRouting,
       personSlug: personSlugForRouting,
       tab: personRouteState.tab,
       query: preservedQuery,
@@ -3056,14 +3080,13 @@ export default function PersonProfilePage() {
     const currentQuery = searchParams.toString();
     const currentUrl = currentQuery ? `${pathname}?${currentQuery}` : pathname;
     if (currentUrl === canonicalUrl) return;
-    router.replace(canonicalUrl as "/admin/trr-shows", { scroll: false });
+    router.replace(canonicalUrl as Route, { scroll: false });
   }, [
     pathname,
     personRouteState.tab,
     personSlugForRouting,
     router,
     searchParams,
-    showSlugForRouting,
   ]);
 
   useEffect(() => {
@@ -5797,6 +5820,8 @@ export default function PersonProfilePage() {
   const breadcrumbShowName =
     showScopedCredits?.show_name && showScopedCredits.show_name.trim().length > 0
       ? showScopedCredits.show_name.trim()
+      : recentShowFallback?.label && recentShowFallback.label.trim().length > 0
+        ? recentShowFallback.label.trim()
       : showSlugForRouting
         ? humanizeSlug(showSlugForRouting)
         : null;
@@ -6647,28 +6672,44 @@ export default function PersonProfilePage() {
                     <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                       {gallerySections.profilePictures.map((photo) => {
                         const index = filteredPhotoIndexById.get(photo.id) ?? 0;
+                        const isCover = coverPhoto?.photo_id === photo.id;
                         return (
-                          <button
-                            type="button"
+                          <div
                             key={photo.id}
-                            onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
-                            className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200"
                           >
-                            <GalleryPhoto
-                              photo={photo}
-                              onClick={() => {}}
-                              isCover={coverPhoto?.photo_id === photo.id}
-                              onSetCover={photo.hosted_url ? () => handleSetCover(photo) : undefined}
-                              settingCover={settingCover}
-                              onFallbackEvent={trackGalleryFallbackEvent}
-                            />
-                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
+                            <button
+                              type="button"
+                              onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
+                              className="relative h-full w-full cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            >
+                              <GalleryPhoto
+                                photo={photo}
+                                onClick={() => {}}
+                                isCover={isCover}
+                                onFallbackEvent={trackGalleryFallbackEvent}
+                              />
+                            </button>
+                            {!isCover && photo.hosted_url && (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleSetCover(photo);
+                                }}
+                                disabled={settingCover}
+                                className="absolute bottom-2 right-2 z-20 rounded-lg bg-black/70 px-2 py-1 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black disabled:opacity-50"
+                              >
+                                {settingCover ? "..." : "Set as Cover"}
+                              </button>
+                            )}
+                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
                               <p className="text-xs text-white truncate">
                                 {photo.source}
                                 {photo.season && ` • S${photo.season}`}
                               </p>
                             </div>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -6681,28 +6722,44 @@ export default function PersonProfilePage() {
                     <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                       {gallerySections.otherPhotos.map((photo) => {
                         const index = filteredPhotoIndexById.get(photo.id) ?? 0;
+                        const isCover = coverPhoto?.photo_id === photo.id;
                         return (
-                          <button
-                            type="button"
+                          <div
                             key={photo.id}
-                            onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
-                            className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200"
                           >
-                            <GalleryPhoto
-                              photo={photo}
-                              onClick={() => {}}
-                              isCover={coverPhoto?.photo_id === photo.id}
-                              onSetCover={photo.hosted_url ? () => handleSetCover(photo) : undefined}
-                              settingCover={settingCover}
-                              onFallbackEvent={trackGalleryFallbackEvent}
-                            />
-                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
+                            <button
+                              type="button"
+                              onClick={(e) => openLightbox(photo, index, e.currentTarget as HTMLElement)}
+                              className="relative h-full w-full cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            >
+                              <GalleryPhoto
+                                photo={photo}
+                                onClick={() => {}}
+                                isCover={isCover}
+                                onFallbackEvent={trackGalleryFallbackEvent}
+                              />
+                            </button>
+                            {!isCover && photo.hosted_url && (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleSetCover(photo);
+                                }}
+                                disabled={settingCover}
+                                className="absolute bottom-2 right-2 z-20 rounded-lg bg-black/70 px-2 py-1 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100 hover:bg-black disabled:opacity-50"
+                              >
+                                {settingCover ? "..." : "Set as Cover"}
+                              </button>
+                            )}
+                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
                               <p className="text-xs text-white truncate">
                                 {photo.source}
                                 {photo.season && ` • S${photo.season}`}
                               </p>
                             </div>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>

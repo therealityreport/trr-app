@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { THUMBNAIL_DEFAULTS, type ThumbnailCrop } from "@/lib/thumbnail-crop";
+import {
+  THUMBNAIL_DEFAULTS,
+  parseThumbnailCrop,
+  type ThumbnailCrop,
+} from "@/lib/thumbnail-crop";
 import type { GalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -28,6 +32,9 @@ const parseCountInput = (value: string): number | null => {
 
 const asFinite = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const asPeopleCountSource = (value: unknown): "auto" | "manual" | null =>
+  value === "auto" || value === "manual" ? value : null;
 
 const clampPercent = (value: number): number => Math.min(100, Math.max(0, value));
 const clampZoom = (value: number): number => Math.min(4, Math.max(1, value));
@@ -200,45 +207,61 @@ export function GalleryAssetEditTools({
     });
   };
 
-  const handleRecount = async () => {
-    await withBusy("recount", async () => {
-      if (!capabilities.canRecount || !processingBase) {
-        throw new Error(capabilities.reasons.recount ?? "Auto-count is not available for this asset.");
-      }
+  const runAutoCount = async (): Promise<{
+    payload: Record<string, unknown>;
+    peopleCount: number | null;
+    peopleCountSource: "auto" | "manual" | null;
+    thumbnailCrop: ThumbnailCrop | null;
+  }> => {
+    if (!capabilities.canRecount || !processingBase) {
+      throw new Error(capabilities.reasons.recount ?? "Auto-count is not available for this asset.");
+    }
 
-      const endpoint =
-        processingBase.type === "media"
-          ? `/api/admin/trr-api/media-assets/${processingBase.id}/auto-count`
-          : `/api/admin/trr-api/cast-photos/${processingBase.id}/auto-count`;
-      const payload = await callJson(endpoint, {
-        method: "POST",
-        body: JSON.stringify({ force: true }),
-      });
-      const peopleCount = asFinite(payload.people_count);
-      const peopleCountSource =
-        payload.people_count_source === "auto" || payload.people_count_source === "manual"
-          ? payload.people_count_source
-          : null;
-      setPeopleCountInput(toCountString(peopleCount));
-      onAssetUpdated?.({
-        people_count: peopleCount,
-        people_count_source: peopleCountSource,
-        metadata: mergeMetadata(asset.metadata, {
-          has_text_overlay:
-            typeof payload.has_text_overlay === "boolean"
-              ? payload.has_text_overlay
-              : (asset.metadata as Record<string, unknown> | null)?.has_text_overlay ?? null,
+    const endpoint =
+      processingBase.type === "media"
+        ? `/api/admin/trr-api/media-assets/${processingBase.id}/auto-count`
+        : `/api/admin/trr-api/cast-photos/${processingBase.id}/auto-count`;
+    const payload = await callJson(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ force: true }),
+    });
+    const peopleCount = asFinite(payload.people_count);
+    const peopleCountSource = asPeopleCountSource(payload.people_count_source);
+    const thumbnailCrop = parseThumbnailCrop(payload.thumbnail_crop, { clamp: true });
+
+    setPeopleCountInput(toCountString(peopleCount));
+    onAssetUpdated?.({
+      people_count: peopleCount,
+      people_count_source: peopleCountSource,
+      thumbnail_focus_x: thumbnailCrop?.x ?? null,
+      thumbnail_focus_y: thumbnailCrop?.y ?? null,
+      thumbnail_zoom: thumbnailCrop?.zoom ?? null,
+      thumbnail_crop_mode: thumbnailCrop?.mode ?? null,
+      metadata: mergeMetadata(asset.metadata, {
+        has_text_overlay:
+          typeof payload.has_text_overlay === "boolean"
+            ? payload.has_text_overlay
+            : (asset.metadata as Record<string, unknown> | null)?.has_text_overlay ?? null,
+        thumbnail_crop: thumbnailCrop ?? null,
+      }),
+    });
+
+    if (processingBase.type === "media" && asset.link_id && capabilities.canPersistCount) {
+      await callJson(`/api/admin/trr-api/media-links/${asset.link_id}/context`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          people_count: peopleCount,
+          people_count_source: peopleCountSource ?? "auto",
         }),
       });
-      if (processingBase.type === "media" && asset.link_id && capabilities.canPersistCount) {
-        await callJson(`/api/admin/trr-api/media-links/${asset.link_id}/context`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            people_count: peopleCount,
-            people_count_source: peopleCountSource ?? "auto",
-          }),
-        });
-      }
+    }
+
+    return { payload, peopleCount, peopleCountSource, thumbnailCrop };
+  };
+
+  const handleRecount = async () => {
+    await withBusy("recount", async () => {
+      await runAutoCount();
       setNotice("Auto-count complete.");
     });
   };
@@ -340,10 +363,45 @@ export function GalleryAssetEditTools({
   const handleRefreshAutoCrop = async () => {
     await withBusy("auto-crop", async () => {
       await persistCrop(null);
-      setCropX(THUMBNAIL_DEFAULTS.x);
-      setCropY(THUMBNAIL_DEFAULTS.y);
-      setCropZoom(THUMBNAIL_DEFAULTS.zoom);
-      setNotice("Auto crop restored.");
+      let activeCrop: ThumbnailCrop | null = null;
+      if (capabilities.canRecount && processingBase) {
+        const recount = await runAutoCount();
+        activeCrop = recount.thumbnailCrop;
+      }
+
+      const endpoint =
+        processingBase?.type === "media"
+          ? processingBase
+            ? `/api/admin/trr-api/media-assets/${processingBase.id}/variants`
+            : null
+          : processingBase
+            ? `/api/admin/trr-api/cast-photos/${processingBase.id}/variants`
+            : null;
+      if (endpoint) {
+        await callJson(endpoint, {
+          method: "POST",
+          body: JSON.stringify({ force: true }),
+        });
+        await callJson(endpoint, {
+          method: "POST",
+          body: JSON.stringify({
+            force: true,
+            crop: activeCrop ?? {
+              x: THUMBNAIL_DEFAULTS.x,
+              y: THUMBNAIL_DEFAULTS.y,
+              zoom: THUMBNAIL_DEFAULTS.zoom,
+              mode: "auto",
+              strategy: "resize_center_fallback_v1",
+            },
+          }),
+        });
+      }
+
+      setCropX(activeCrop?.x ?? THUMBNAIL_DEFAULTS.x);
+      setCropY(activeCrop?.y ?? THUMBNAIL_DEFAULTS.y);
+      setCropZoom(activeCrop?.zoom ?? THUMBNAIL_DEFAULTS.zoom);
+      if (onReload) await onReload();
+      setNotice("Auto-crop + centering refreshed.");
     });
   };
 

@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getCoverPhotos } from "@/lib/server/admin/person-cover-photos-repository";
+import { resolveAdminShowId } from "@/lib/server/admin/resolve-show-id";
+import {
+  buildUserScopedRouteCacheKey,
+  getRouteResponseCache,
+  parseCacheTtlMs,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
 import {
   type CastPhotoFallbackMode,
   type CastPhotoLookupDiagnostics,
@@ -12,6 +19,8 @@ import {
 export const dynamic = "force-dynamic";
 
 const DEFAULT_MIN_EPISODES = 1;
+const CAST_ROUTE_CACHE_NAMESPACE = "admin-show-cast";
+const CAST_ROUTE_CACHE_TTL_MS = parseCacheTtlMs(process.env.TRR_ADMIN_SHOW_CAST_CACHE_TTL_MS);
 const SHOW_FALLBACK_WARNING =
   "Episode-credit evidence is missing or stale. Showing approximate show-level cast until cast/credits sync succeeds.";
 
@@ -55,18 +64,28 @@ const parsePhotoFallbackMode = (value: string | null): CastPhotoFallbackMode =>
 export async function GET(request: NextRequest, { params }: RouteParams) {
   const requestStartedAt = Date.now();
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
-    const { showId } = await params;
+    const { showId: rawShowId } = await params;
+    const showId = await resolveAdminShowId(rawShowId);
 
     if (!showId) {
       return NextResponse.json(
-        { error: "showId is required" },
-        { status: 400 }
+        { error: `Show not found for "${rawShowId}".` },
+        { status: 404 }
       );
     }
 
     const { searchParams } = new URL(request.url);
+    const cacheKey = buildUserScopedRouteCacheKey(
+      user.uid,
+      `${showId}:list`,
+      request.nextUrl.searchParams,
+    );
+    const cachedData = getRouteResponseCache<unknown>(CAST_ROUTE_CACHE_NAMESPACE, cacheKey);
+    if (cachedData) {
+      return NextResponse.json(cachedData, { headers: { "x-trr-cache": "hit" } });
+    }
     const limit = parseInt(searchParams.get("limit") ?? "20", 10);
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
     const minEpisodes = searchParams.get("minEpisodes");
@@ -308,7 +327,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    return NextResponse.json({
+    const responsePayload = {
       cast: castWithCover,
       archive_footage_cast: archiveCastWithCover,
       cast_source: castSource,
@@ -318,7 +337,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         offset,
         count: castWithCover.length,
       },
-    });
+    };
+    setRouteResponseCache(CAST_ROUTE_CACHE_NAMESPACE, cacheKey, responsePayload, CAST_ROUTE_CACHE_TTL_MS);
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error("[api] Failed to get TRR cast", error);
     const message = error instanceof Error ? error.message : "failed";

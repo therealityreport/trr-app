@@ -127,6 +127,8 @@ export interface AnswerInput {
  */
 export interface SurveyWithQuestions extends NormalizedSurvey {
   questions: (SurveyQuestion & { options: QuestionOption[] })[];
+  /** Optional show-level icon URL used by numeric-rating icon renderer. */
+  show_icon_url?: string | null;
   /** Optional TRR linkage (if the survey was created from / linked to TRR core show/season). */
   trr_link?: {
     survey_id: string;

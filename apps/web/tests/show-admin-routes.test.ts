@@ -3,12 +3,19 @@ import { describe, expect, it } from "vitest";
 import {
   buildPersonAdminUrl,
   buildPersonRouteSlug,
+  buildShowRedditCommunityUrl,
+  buildShowRedditSeasonFilterUrl,
+  buildShowRedditUrl,
   buildSeasonAdminUrl,
   buildSeasonSocialWeekUrl,
   buildShowAdminUrl,
   cleanLegacyPersonRoutingQuery,
   cleanLegacyRoutingQuery,
+  parseSeasonEpisodeNumberFromPath,
+  parseSeasonSocialPathFilters,
   parseSocialAnalyticsViewFromPath,
+  parseShowSocialPathFilters,
+  parseSeasonSocialPathSegment,
   parsePersonRouteState,
   parseSeasonRouteState,
   parseShowRouteState,
@@ -29,7 +36,7 @@ describe("show-admin-routes", () => {
 
     expect(
       parseShowRouteState(
-        "/shows/the-real-housewives-of-salt-lake-city/media/images",
+        "/rhoslc/media/images",
         new URLSearchParams()
       )
     ).toMatchObject({ tab: "assets", assetsSubTab: "images", source: "path" });
@@ -49,22 +56,37 @@ describe("show-admin-routes", () => {
       buildShowAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city");
+    ).toBe("/the-real-housewives-of-salt-lake-city");
 
     expect(
       buildShowAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
         tab: "social",
+        socialRoute: {
+          seasonNumber: 6,
+        },
+      }),
+    ).toBe("/the-real-housewives-of-salt-lake-city/social/s6");
+
+    expect(
+      buildShowAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        tab: "social",
+        socialRoute: {
+          weekIndex: "w01",
+          platform: "instagram",
+          handle: "@BravoTV",
+        },
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/social/bravo");
+    ).toBe("/the-real-housewives-of-salt-lake-city/social/w1/instagram/account/bravotv");
 
     expect(
       buildShowAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
         tab: "assets",
-        assetsSubTab: "brand",
+        assetsSubTab: "branding",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media/brand");
+    ).toBe("/the-real-housewives-of-salt-lake-city/assets/branding");
 
     expect(
       buildShowAdminUrl({
@@ -72,21 +94,21 @@ describe("show-admin-routes", () => {
         tab: "assets",
         assetsSubTab: "videos",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media/videos");
+    ).toBe("/the-real-housewives-of-salt-lake-city/assets/videos");
 
     expect(
       buildShowAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
         tab: "assets",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/media/images");
+    ).toBe("/the-real-housewives-of-salt-lake-city/assets");
 
     expect(
       buildShowAdminUrl({
         showSlug: "rhoslc",
         tab: "cast",
       })
-    ).toBe("/shows/rhoslc/cast");
+    ).toBe("/rhoslc/cast");
   });
 
   it("parses season path tabs and query fallback", () => {
@@ -95,42 +117,42 @@ describe("show-admin-routes", () => {
         "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4",
         new URLSearchParams()
       )
-    ).toMatchObject({ tab: "overview", assetsSubTab: "media", source: "path" });
+    ).toMatchObject({ tab: "overview", assetsSubTab: "images", source: "path" });
 
     expect(
       parseSeasonRouteState(
         "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4/assets/brand",
         new URLSearchParams()
       )
-    ).toMatchObject({ tab: "assets", assetsSubTab: "brand", source: "path" });
+    ).toMatchObject({ tab: "assets", assetsSubTab: "branding", source: "path" });
 
     expect(
       parseSeasonRouteState(
-        "/shows/the-real-housewives-of-salt-lake-city/s4/social/reddit",
+        "/rhoslc/s4/e1/social/reddit",
         new URLSearchParams()
       )
-    ).toMatchObject({ tab: "social", assetsSubTab: "media", source: "path" });
+    ).toMatchObject({ tab: "social", assetsSubTab: "images", source: "path" });
 
     expect(
       parseSeasonRouteState(
         "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4",
         new URLSearchParams("tab=media")
       )
-    ).toMatchObject({ tab: "assets", assetsSubTab: "media", source: "query" });
+    ).toMatchObject({ tab: "assets", assetsSubTab: "images", source: "query" });
 
     expect(
       parseSeasonRouteState(
         "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4",
         new URLSearchParams("tab=fandom")
       )
-    ).toMatchObject({ tab: "fandom", assetsSubTab: "media", source: "query" });
+    ).toMatchObject({ tab: "fandom", assetsSubTab: "images", source: "query" });
 
     expect(
       parseSeasonRouteState(
         "/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4",
         new URLSearchParams("tab=details")
       )
-    ).toMatchObject({ tab: "overview", assetsSubTab: "media", source: "query" });
+    ).toMatchObject({ tab: "overview", assetsSubTab: "images", source: "query" });
   });
 
   it("builds canonical season URLs", () => {
@@ -139,7 +161,7 @@ describe("show-admin-routes", () => {
         showSlug: "the-real-housewives-of-salt-lake-city",
         seasonNumber: 4,
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4");
 
     expect(
       buildSeasonAdminUrl({
@@ -147,7 +169,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "overview",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4");
 
     expect(
       buildSeasonAdminUrl({
@@ -155,7 +177,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "episodes",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/episodes");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4/episodes");
 
     expect(
       buildSeasonAdminUrl({
@@ -163,16 +185,16 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "cast",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/cast");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4/cast");
 
     expect(
       buildSeasonAdminUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
         seasonNumber: 4,
         tab: "assets",
-        assetsSubTab: "brand",
+        assetsSubTab: "branding",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/media?assets=brand");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4/assets/branding");
 
     expect(
       buildSeasonAdminUrl({
@@ -180,7 +202,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "assets",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/media");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4/assets");
 
     expect(
       buildSeasonAdminUrl({
@@ -188,7 +210,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "fandom",
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/fandom");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4/fandom");
 
     expect(
       buildSeasonAdminUrl({
@@ -196,7 +218,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 6,
         tab: "cast",
       })
-    ).toBe("/shows/rhoslc/s6/cast");
+    ).toBe("/rhoslc/s6/cast");
 
     expect(
       buildSeasonAdminUrl({
@@ -205,7 +227,36 @@ describe("show-admin-routes", () => {
         tab: "social",
         socialView: "hashtags",
       })
-    ).toBe("/shows/rhoslc/s6/social/hashtags");
+    ).toBe("/rhoslc/s6/social/hashtags");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+        tab: "social",
+        socialRoute: {
+          weekIndex: "preseason",
+          handle: "@BravoTV",
+        },
+      }),
+    ).toBe("/rhoslc/s6/social/w0/account/bravotv");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+        episodeNumber: 1,
+        tab: "social",
+      }),
+    ).toBe("/rhoslc/s6/e1/social");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "rhoslc",
+        seasonNumber: Number.NaN,
+        tab: "social",
+      }),
+    ).toBe("/rhoslc/seasons");
   });
 
   it("builds canonical season social week URLs", () => {
@@ -215,24 +266,127 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         weekIndex: 3,
       })
-    ).toBe("/shows/the-real-housewives-of-salt-lake-city/s4/social/week/3");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4/social/w3/details");
 
     expect(
       buildSeasonSocialWeekUrl({
         showSlug: "the-real-housewives-of-salt-lake-city",
         seasonNumber: 4,
         weekIndex: 3,
+        platform: "youtube",
         query: new URLSearchParams("source_scope=bravo&platform=youtube"),
       })
     ).toBe(
-      "/shows/the-real-housewives-of-salt-lake-city/s4/social/week/3?source_scope=bravo&platform=youtube"
+      "/the-real-housewives-of-salt-lake-city/s4/social/w3/youtube?platform=youtube"
     );
+
+    expect(
+      buildSeasonSocialWeekUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonNumber: 4,
+        weekIndex: 3,
+        platform: "instagram",
+        query: new URLSearchParams("source_scope=bravo&social_platform=instagram&season_id=season-1"),
+      })
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4/social/w3/instagram");
   });
 
   it("parses social analytics view from canonical show and season paths", () => {
-    expect(parseSocialAnalyticsViewFromPath("/shows/rhoslc/social/bravo")).toBe("bravo");
-    expect(parseSocialAnalyticsViewFromPath("/shows/rhoslc/s6/social/reddit")).toBe("reddit");
-    expect(parseSocialAnalyticsViewFromPath("/shows/rhoslc/s6/cast")).toBeNull();
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/official")).toBe("official");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/s6")).toBe("official");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/official/reddit")).toBe("reddit");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/bravo")).toBe("bravo");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/social/reddit")).toBe("reddit");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/social/official/reddit")).toBe("reddit");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/e1/social/twitter")).toBeNull();
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/cast")).toBeNull();
+  });
+
+  it("parses season episode and social path segments", () => {
+    expect(parseSeasonEpisodeNumberFromPath("/rhoslc/s6/e1/social/twitter")).toBe(1);
+    expect(parseSeasonEpisodeNumberFromPath("/rhoslc/s6/social/reddit")).toBeNull();
+    expect(parseSeasonSocialPathSegment("/rhoslc/s6/e1/social/twitter")).toBe("twitter");
+    expect(parseSeasonSocialPathSegment("/rhoslc/s6/e1/social/official")).toBe("official");
+    expect(parseSeasonSocialPathSegment("/rhoslc/s6/social/official/reddit")).toBe("reddit");
+    expect(parseSeasonSocialPathSegment("/rhoslc/s6/e1/cast")).toBeNull();
+  });
+
+  it("parses social path filters with official account grammar and legacy aliases", () => {
+    expect(parseShowSocialPathFilters("/rhoslc/social/s6")).toMatchObject({
+      view: "official",
+      seasonNumber: 6,
+      canonicalPathSuffix: "/social/s6",
+    });
+
+    expect(parseShowSocialPathFilters("/rhoslc/social/s6/instagram/account/BravoTV")).toMatchObject({
+      view: "official",
+      seasonNumber: 6,
+      platform: "instagram",
+      handle: "bravotv",
+      canonicalPathSuffix: "/social/s6/instagram/account/bravotv",
+    });
+
+    expect(parseShowSocialPathFilters("/rhoslc/social/official/instagram/account/BravoTV")).toMatchObject({
+      view: "official",
+      seasonNumber: null,
+      platform: "instagram",
+      handle: "bravotv",
+      canonicalPathSuffix: "/social/instagram/account/bravotv",
+    });
+
+    expect(parseShowSocialPathFilters("/rhoslc/social/bravo/w00/instagram/BravoTV")).toMatchObject({
+      view: "official",
+      seasonNumber: null,
+      weekToken: "w0",
+      weekIndex: 0,
+      platform: "instagram",
+      handle: "bravotv",
+      canonicalPathSuffix: "/social/w0/instagram/account/bravotv",
+    });
+
+    expect(parseSeasonSocialPathFilters("/rhoslc/s6/social/official/w01/account/@BravoTV")).toMatchObject({
+      view: "official",
+      seasonNumber: null,
+      weekToken: "w1",
+      weekIndex: 1,
+      handle: "bravotv",
+      canonicalPathSuffix: "/social/w1/account/bravotv",
+    });
+
+    expect(parseShowSocialPathFilters("/rhoslc/social/official/reddit/BravoRealHousewives")).toMatchObject({
+      view: "reddit",
+      canonicalPathSuffix: "/social/reddit",
+    });
+  });
+
+  it("builds canonical reddit URLs", () => {
+    expect(
+      buildShowRedditUrl({
+        showSlug: "rhoslc",
+      }),
+    ).toBe("/rhoslc/social/reddit");
+
+    expect(
+      buildShowRedditSeasonFilterUrl({
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+      }),
+    ).toBe("/rhoslc/s6/social/reddit");
+
+    expect(
+      buildShowRedditCommunityUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives");
+
+    expect(
+      buildShowRedditCommunityUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+        seasonNumber: 6,
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6");
   });
 
   it("removes legacy tab query keys and preserves unrelated params", () => {
@@ -261,6 +415,13 @@ describe("show-admin-routes", () => {
         new URLSearchParams("tab=fandom")
       )
     ).toMatchObject({ tab: "fandom", source: "query" });
+
+    expect(
+      parsePersonRouteState(
+        "/people/meredith-marks--7f528757/gallery",
+        new URLSearchParams()
+      )
+    ).toMatchObject({ tab: "gallery", source: "path" });
   });
 
   it("builds canonical person URLs", () => {
@@ -269,9 +430,7 @@ describe("show-admin-routes", () => {
         showSlug: "the-real-housewives-of-salt-lake-city",
         personSlug: "meredith-marks--7f528757",
       })
-    ).toBe(
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/people/meredith-marks--7f528757/overview"
-    );
+    ).toBe("/people/meredith-marks--7f528757");
 
     expect(
       buildPersonAdminUrl({
@@ -279,9 +438,7 @@ describe("show-admin-routes", () => {
         personSlug: "meredith-marks--7f528757",
         tab: "gallery",
       })
-    ).toBe(
-      "/admin/trr-shows/the-real-housewives-of-salt-lake-city/people/meredith-marks--7f528757/gallery"
-    );
+    ).toBe("/people/meredith-marks--7f528757/gallery");
   });
 
   it("slugifies people names and appends person id prefix", () => {

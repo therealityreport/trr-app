@@ -1,28 +1,34 @@
 "use client";
 
-import { useParams, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import RedditSourcesManager, { type RedditCommunityContext } from "@/components/admin/reddit-sources-manager";
 import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
-import { buildSeasonAdminUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
+import {
+  buildSeasonAdminUrl,
+  buildShowAdminUrl,
+  buildShowRedditCommunityUrl,
+  buildShowRedditUrl,
+} from "@/lib/admin/show-admin-routes";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const DEFAULT_BACK_HREF = "/admin/social-media";
 const SEASON_TABS: Array<{ tab: SeasonAdminTab; label: string }> = [
-  { tab: "overview", label: "Overview" },
-  { tab: "episodes", label: "Seasons & Episodes" },
+  { tab: "overview", label: "Home" },
+  { tab: "episodes", label: "Episodes" },
   { tab: "assets", label: "Assets" },
-  { tab: "videos", label: "Videos" },
+  { tab: "news", label: "News" },
   { tab: "fandom", label: "Fandom" },
   { tab: "cast", label: "Cast" },
   { tab: "surveys", label: "Surveys" },
   { tab: "social", label: "Social Media" },
 ];
 const SOCIAL_TABS: Array<{ view: SocialAnalyticsViewSlug; label: string }> = [
-  { view: "bravo", label: "BRAVO ANALYTICS" },
+  { view: "official", label: "OFFICIAL ANALYTICS" },
   { view: "sentiment", label: "SENTIMENT ANALYSIS" },
   { view: "hashtags", label: "HASHTAGS ANALYSIS" },
   { view: "advanced", label: "ADVANCED ANALYTICS" },
@@ -35,10 +41,35 @@ const resolveBackHref = (raw: string | null): string => {
   return raw;
 };
 
+const parseRootRedditCommunityPath = (
+  pathname: string,
+): { showSlug: string; communitySlug: string; seasonNumber: number | null } | null => {
+  const match = pathname.match(/^\/([^/]+)\/social\/reddit\/([^/]+?)(?:\/s(\d+))?\/?$/i);
+  if (!match) return null;
+  let showSlug = "";
+  let communitySlug = "";
+  try {
+    showSlug = decodeURIComponent(match[1] ?? "").trim();
+    communitySlug = decodeURIComponent(match[2] ?? "").trim();
+  } catch {
+    return null;
+  }
+  const seasonRaw = match[3] ?? null;
+  const seasonNumber = seasonRaw ? Number.parseInt(seasonRaw, 10) : null;
+  return {
+    showSlug,
+    communitySlug,
+    seasonNumber: Number.isFinite(seasonNumber) && seasonNumber !== null ? seasonNumber : null,
+  };
+};
+
 export default function RedditCommunityViewPage() {
   const { user, checking, hasAccess } = useAdminGuard();
-  const params = useParams<{ communityId?: string; communitySlug?: string }>();
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useParams<{ showId?: string; seasonNumber?: string; communityId?: string; communitySlug?: string }>();
   const searchParams = useSearchParams();
+  const canonicalRedirectRef = useRef<string | null>(null);
 
   const initialCommunityKey =
     typeof params.communitySlug === "string"
@@ -46,10 +77,35 @@ export default function RedditCommunityViewPage() {
       : typeof params.communityId === "string"
         ? params.communityId
         : "";
+  const queryShowSlug = (() => {
+    const value = searchParams.get("showSlug") ?? searchParams.get("show") ?? null;
+    if (!value) return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  })();
+  const routeShowSlug =
+    typeof params.showId === "string" && params.showId.trim().length > 0
+      ? params.showId.trim()
+      : queryShowSlug;
+  const querySeasonNumber = (() => {
+    const raw = searchParams.get("season");
+    if (!raw) return null;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+  })();
+  const routeSeasonNumber = (() => {
+    if (typeof params.seasonNumber !== "string") return null;
+    const parsed = Number.parseInt(params.seasonNumber, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+  })();
   const backHref = resolveBackHref(searchParams.get("return_to"));
   const [communityContext, setCommunityContext] = useState<RedditCommunityContext | null>(null);
-  const showSlug = communityContext?.showSlug ?? null;
-  const seasonNumber = communityContext?.seasonNumber ?? null;
+  const showSlug = routeShowSlug ?? communityContext?.showSlug;
+  const seasonNumber = routeSeasonNumber ?? querySeasonNumber ?? communityContext?.seasonNumber;
+  const canonicalSeasonNumber = routeSeasonNumber ?? querySeasonNumber;
+  const communitySlug = communityContext?.communitySlug ?? initialCommunityKey;
   const showName = communityContext?.showFullName ?? communityContext?.showLabel ?? "Show";
   const hasSeasonContext =
     Boolean(showSlug) && typeof seasonNumber === "number" && Number.isFinite(seasonNumber);
@@ -61,16 +117,57 @@ export default function RedditCommunityViewPage() {
           seasonNumber,
         })
       : showHref;
-  const redditHref =
-    hasSeasonContext && showSlug
-      ? buildSeasonAdminUrl({
-          showSlug,
-          seasonNumber,
-          tab: "social",
-          socialView: "reddit",
-        })
-      : backHref;
+  const redditHref = showSlug
+    ? buildShowRedditUrl({
+        showSlug,
+        seasonNumber,
+      })
+    : backHref;
   const effectiveBackHref = showSlug ? showHref : backHref;
+  const canonicalCommunityHref = useMemo(() => {
+    if (!showSlug || !communitySlug) return null;
+    return buildShowRedditCommunityUrl({
+      showSlug,
+      communitySlug,
+      seasonNumber: canonicalSeasonNumber,
+    });
+  }, [canonicalSeasonNumber, communitySlug, showSlug]);
+
+  useEffect(() => {
+    if (!canonicalCommunityHref) return;
+    if (pathname === canonicalCommunityHref) return;
+    const current = parseRootRedditCommunityPath(pathname);
+    if (current && showSlug && communitySlug) {
+      const sameShow = current.showSlug.toLowerCase() === showSlug.toLowerCase();
+      const sameCommunity = current.communitySlug.toLowerCase() === communitySlug.toLowerCase();
+      const canonicalSeason =
+        typeof canonicalSeasonNumber === "number" && Number.isFinite(canonicalSeasonNumber)
+          ? canonicalSeasonNumber
+          : null;
+      const sameSeason = current.seasonNumber === canonicalSeason;
+      // Avoid redirect churn for case-only differences in slug segments.
+      if (sameShow && sameCommunity && sameSeason) {
+        return;
+      }
+      // Accept both URL forms:
+      // /{show}/social/reddit/{community}
+      // /{show}/social/reddit/{community}/s{season}
+      // Do not inject or strip season token solely from async context updates.
+      if (sameShow && sameCommunity) {
+        return;
+      }
+    }
+    const nextQuery = new URLSearchParams(searchParams.toString());
+    nextQuery.delete("return_to");
+    nextQuery.delete("showSlug");
+    nextQuery.delete("show");
+    nextQuery.delete("season");
+    const queryString = nextQuery.toString();
+    const nextHref = `${canonicalCommunityHref}${queryString ? `?${queryString}` : ""}`;
+    if (canonicalRedirectRef.current === nextHref) return;
+    canonicalRedirectRef.current = nextHref;
+    router.replace(nextHref as Route);
+  }, [canonicalCommunityHref, canonicalSeasonNumber, communitySlug, pathname, router, searchParams, showSlug]);
   const breadcrumbItems = useMemo(() => {
     return buildSeasonSocialBreadcrumb(showName, seasonNumber ?? "", {
       showHref,
@@ -80,10 +177,16 @@ export default function RedditCommunityViewPage() {
       subTabHref: redditHref,
     });
   }, [redditHref, seasonHref, seasonNumber, showHref, showName]);
-  const pageTitle =
-    hasSeasonContext && typeof seasonNumber === "number"
-      ? `${showName} · Season ${seasonNumber}`
-      : showName;
+  const pageTitle = (() => {
+    const communityLabel =
+      communityContext?.communityLabel?.trim() ||
+      (communitySlug ? `r/${communitySlug}` : "");
+    if (communityLabel) return communityLabel;
+    if (hasSeasonContext && typeof seasonNumber === "number") {
+      return `${showName} · Season ${seasonNumber}`;
+    }
+    return showName;
+  })();
 
   if (checking) {
     return (
@@ -165,13 +268,23 @@ export default function RedditCommunityViewPage() {
               {SOCIAL_TABS.map((tab) => {
                 const href =
                   hasSeasonContext && showSlug
-                    ? buildSeasonAdminUrl({
-                        showSlug,
-                        seasonNumber: seasonNumber!,
-                        tab: "social",
-                        socialView: tab.view,
-                      })
-                    : null;
+                    ? tab.view === "reddit"
+                      ? buildShowRedditUrl({
+                          showSlug,
+                          seasonNumber,
+                        })
+                      : buildSeasonAdminUrl({
+                          showSlug,
+                          seasonNumber: seasonNumber!,
+                          tab: "social",
+                          socialView: tab.view,
+                        })
+                    : showSlug && tab.view === "reddit"
+                      ? buildShowRedditUrl({
+                          showSlug,
+                          seasonNumber,
+                        })
+                      : null;
                 const isActive = tab.view === "reddit";
                 const classes = `rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
                   isActive
@@ -199,9 +312,10 @@ export default function RedditCommunityViewPage() {
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <RedditSourcesManager
               mode="global"
+              showSlug={routeShowSlug ?? undefined}
               initialCommunityId={initialCommunityKey}
               hideCommunityList
-              backHref={backHref}
+              backHref={redditHref}
               episodeDiscussionsPlacement="inline"
               enableEpisodeSync
               onCommunityContextChange={setCommunityContext}

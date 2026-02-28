@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { db, auth } from "@/lib/firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
@@ -75,7 +76,7 @@ export default function RealiteasePage() {
           <p className="mt-2">Score: {score} / {CARDS.length}</p>
           {!userUid && (
             <p className="text-sm text-amber-600">
-              Sign in on the <a className="underline" href="/test-auth">Auth page</a> to save your results.
+              Sign in on the <Link className="underline" href="/test-auth">Auth page</Link> to save your results.
             </p>
           )}
           <button

@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
+
 const {
   requireAdminMock,
+  resolveAdminShowIdMock,
   getCoverPhotosMock,
   getShowCastWithStatsMock,
   getShowArchiveFootageCastMock,
   getCastByShowIdMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  resolveAdminShowIdMock: vi.fn(),
   getCoverPhotosMock: vi.fn(),
   getShowCastWithStatsMock: vi.fn(),
   getShowArchiveFootageCastMock: vi.fn(),
@@ -23,6 +27,10 @@ vi.mock("@/lib/server/admin/person-cover-photos-repository", () => ({
   getCoverPhotos: getCoverPhotosMock,
 }));
 
+vi.mock("@/lib/server/admin/resolve-show-id", () => ({
+  resolveAdminShowId: resolveAdminShowIdMock,
+}));
+
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getCastByShowId: getCastByShowIdMock,
   getShowCastWithStats: getShowCastWithStatsMock,
@@ -34,12 +42,14 @@ import { GET } from "@/app/api/admin/trr-api/shows/[showId]/cast/route";
 describe("show cast route default minEpisodes behavior", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    resolveAdminShowIdMock.mockReset();
     getCoverPhotosMock.mockReset();
     getShowCastWithStatsMock.mockReset();
     getShowArchiveFootageCastMock.mockReset();
     getCastByShowIdMock.mockReset();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
+    resolveAdminShowIdMock.mockResolvedValue("00000000-0000-0000-0000-000000000001");
     getCoverPhotosMock.mockResolvedValue(new Map());
     getShowArchiveFootageCastMock.mockResolvedValue([]);
     getCastByShowIdMock.mockResolvedValue([]);
@@ -71,13 +81,15 @@ describe("show cast route default minEpisodes behavior", () => {
       },
     ]);
 
-    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/cast?limit=500");
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/cast?limit=500&test=fallback"
+    );
     const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(getShowCastWithStatsMock).toHaveBeenCalledWith(
-      "show-1",
+      "00000000-0000-0000-0000-000000000001",
       expect.objectContaining({
         limit: 500,
         offset: 0,
@@ -112,7 +124,7 @@ describe("show cast route default minEpisodes behavior", () => {
 
     expect(response.status).toBe(200);
     expect(getCastByShowIdMock).toHaveBeenCalledWith(
-      "show-1",
+      "00000000-0000-0000-0000-000000000001",
       expect.objectContaining({
         limit: 500,
         offset: 0,
@@ -209,7 +221,7 @@ describe("show cast route default minEpisodes behavior", () => {
 
     expect(response.status).toBe(200);
     expect(getCastByShowIdMock).toHaveBeenCalledWith(
-      "show-1",
+      "00000000-0000-0000-0000-000000000001",
       expect.objectContaining({
         limit: 500,
         offset: 0,
@@ -295,15 +307,15 @@ describe("show cast route default minEpisodes behavior", () => {
 
     expect(response.status).toBe(200);
     expect(getShowCastWithStatsMock).toHaveBeenCalledWith(
-      "show-1",
+      "00000000-0000-0000-0000-000000000001",
       expect.objectContaining({ photoFallbackMode: "bravo" })
     );
     expect(getShowArchiveFootageCastMock).toHaveBeenCalledWith(
-      "show-1",
+      "00000000-0000-0000-0000-000000000001",
       expect.objectContaining({ photoFallbackMode: "bravo" })
     );
     expect(getCastByShowIdMock).toHaveBeenCalledWith(
-      "show-1",
+      "00000000-0000-0000-0000-000000000001",
       expect.objectContaining({ photoFallbackMode: "bravo" })
     );
   });
@@ -330,8 +342,19 @@ describe("show cast route default minEpisodes behavior", () => {
 
     expect(response.status).toBe(200);
     expect(getShowCastWithStatsMock).toHaveBeenCalledWith(
-      "show-1",
+      "00000000-0000-0000-0000-000000000001",
       expect.objectContaining({ photoFallbackMode: "none" })
     );
+  });
+
+  it("returns 404 when show slug cannot be resolved", async () => {
+    resolveAdminShowIdMock.mockResolvedValueOnce(null);
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/not-found/cast");
+    const response = await GET(request, { params: Promise.resolve({ showId: "not-found" }) });
+    const payload = (await response.json()) as { error?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toContain('Show not found for "not-found".');
   });
 });

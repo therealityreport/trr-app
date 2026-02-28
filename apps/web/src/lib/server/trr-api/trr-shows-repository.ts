@@ -373,6 +373,16 @@ const buildShowSlugCandidates = (rawSlug: string): string[] => {
   return Array.from(new Set(candidates.filter((value) => value.length > 0)));
 };
 
+const pickPreferredShowAliasSlug = (alternativeNames: string[] | null | undefined): string | null => {
+  if (!Array.isArray(alternativeNames) || alternativeNames.length === 0) return null;
+  const normalized = alternativeNames
+    .map((value) => toShowSlug(value))
+    .filter((value) => value.length > 0);
+  if (normalized.length === 0) return null;
+  const acronym = normalized.find((value) => /^rh[a-z0-9]{2,}$/i.test(value) && !value.includes("-"));
+  return acronym ?? normalized[0] ?? null;
+};
+
 export interface ResolvedShowSlug {
   show_id: string;
   slug: string;
@@ -402,10 +412,16 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
   if (slugCandidates.length === 0) return null;
 
   for (const baseSlug of slugCandidates) {
-    const rows = await pgQuery<{ id: string; name: string; slug: string }>(
+    const rows = await pgQuery<{
+      id: string;
+      name: string;
+      slug: string;
+      alternative_names: string[] | null;
+    }>(
       `SELECT
          s.id::text AS id,
          s.name,
+         COALESCE(s.alternative_names, ARRAY[]::text[]) AS alternative_names,
          lower(
            trim(
              both '-' FROM regexp_replace(
@@ -454,26 +470,28 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
       if (!prefixMatch) {
         continue;
       }
+      const preferredSlug = pickPreferredShowAliasSlug(prefixMatch.alternative_names) ?? prefixMatch.slug ?? baseSlug;
       const canonicalSlug = rows.rows.length > 1
-        ? `${baseSlug}--${prefixMatch.id.slice(0, 8).toLowerCase()}`
-        : baseSlug;
+        ? `${preferredSlug}--${prefixMatch.id.slice(0, 8).toLowerCase()}`
+        : preferredSlug;
       return {
         show_id: prefixMatch.id,
-        slug: baseSlug,
+        slug: preferredSlug,
         canonical_slug: canonicalSlug,
         show_name: prefixMatch.name,
       };
     }
 
     const candidate = rows.rows[0];
+    const preferredSlug = pickPreferredShowAliasSlug(candidate.alternative_names) ?? candidate.slug ?? baseSlug;
     const hasCollision = rows.rows.length > 1;
     const canonicalSlug = hasCollision
-      ? `${baseSlug}--${candidate.id.slice(0, 8).toLowerCase()}`
-      : baseSlug;
+      ? `${preferredSlug}--${candidate.id.slice(0, 8).toLowerCase()}`
+      : preferredSlug;
 
     return {
       show_id: candidate.id,
-      slug: baseSlug,
+      slug: preferredSlug,
       canonical_slug: canonicalSlug,
       show_name: candidate.name,
     };
@@ -1116,10 +1134,14 @@ async function getPreferredCastPhotoMap(
       const candidateUrl = thumbUrlFromMetadata ?? displayUrlFromMetadata ?? row.hosted_url ?? null;
       if (!candidateUrl || !isLikelyImage(row.hosted_content_type, candidateUrl)) continue;
       const context = row.context ?? null;
+      const metadataCrop =
+        metadata && typeof metadata === "object"
+          ? (metadata as { thumbnail_crop?: unknown }).thumbnail_crop
+          : null;
       const thumbnailCrop =
         context && typeof context === "object"
-          ? (context as { thumbnail_crop?: unknown }).thumbnail_crop
-          : null;
+          ? (context as { thumbnail_crop?: unknown }).thumbnail_crop ?? metadataCrop
+          : metadataCrop;
       map.set(row.person_id, {
         url: candidateUrl,
         ...toCastThumbnailFields(thumbnailCrop),
@@ -2701,7 +2723,15 @@ export async function getPhotosByPersonId(
           context && typeof context === "object"
             ? (context as { thumbnail_crop?: unknown }).thumbnail_crop
             : null;
+        const metadataThumbnailCrop =
+          normalizedFandom.metadata && typeof normalizedFandom.metadata === "object"
+            ? (normalizedFandom.metadata as { thumbnail_crop?: unknown }).thumbnail_crop
+            : null;
         const thumbnailCropFields = toThumbnailCropFields(contextThumbnailCrop);
+        const effectiveThumbnailCropFields =
+          thumbnailCropFields.thumbnail_crop_mode !== null
+            ? thumbnailCropFields
+            : toThumbnailCropFields(metadataThumbnailCrop);
         const variantUrls = resolvePersonPhotoVariantUrls(
           normalizedFandom.metadata,
           {
@@ -2749,7 +2779,7 @@ export async function getPhotosByPersonId(
           media_asset_id: row.media_asset_id,
           facebank_seed: Boolean(row.facebank_seed),
           ...variantUrls,
-          ...thumbnailCropFields,
+          ...effectiveThumbnailCropFields,
         } as TrrPersonPhoto;
       })
       .filter((p): p is TrrPersonPhoto => p !== null);

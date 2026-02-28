@@ -37,6 +37,8 @@ describe("networks-streaming summary route", () => {
           hosted_logo_white_url: "https://cdn.example.com/bravo-white.png",
           wikidata_id: "Q123",
           wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+          tmdb_entity_id: "174",
+          homepage_url: "https://www.bravotv.com",
           resolution_status: "resolved",
           resolution_reason: null,
           last_attempt_at: "2026-02-19T00:00:00Z",
@@ -58,6 +60,43 @@ describe("networks-streaming summary route", () => {
     expect(payload.rows[0].hosted_logo_white_url).toBe("https://cdn.example.com/bravo-white.png");
     expect(payload.rows[0].has_bw_variants).toBe(true);
     expect(getNetworksStreamingSummaryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("includes production company rows in summary", async () => {
+    getNetworksStreamingSummaryMock.mockResolvedValue({
+      totals: { total_available_shows: 20, total_added_shows: 8 },
+      rows: [
+        {
+          type: "production",
+          name: "Warner Bros. Television",
+          available_show_count: 12,
+          added_show_count: 5,
+          hosted_logo_url: "https://cdn.example.com/wb.png",
+          hosted_logo_black_url: null,
+          hosted_logo_white_url: null,
+          wikidata_id: "Q1043427",
+          wikipedia_url: "https://en.wikipedia.org/wiki/Warner_Bros._Television",
+          tmdb_entity_id: "1957",
+          homepage_url: null,
+          resolution_status: "resolved",
+          resolution_reason: null,
+          last_attempt_at: "2026-02-25T00:00:00Z",
+          has_logo: true,
+          has_bw_variants: false,
+          has_links: true,
+        },
+      ],
+      generated_at: "2026-02-26T00:00:00.000Z",
+    });
+
+    const response = await GET(new NextRequest("http://localhost/api/admin/networks-streaming/summary"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    const productionRow = payload.rows.find((r: any) => r.type === "production");
+    expect(productionRow).toBeDefined();
+    expect(productionRow.name).toBe("Warner Bros. Television");
+    expect(productionRow.added_show_count).toBe(5);
   });
 
   it("returns unauthorized when admin check fails", async () => {

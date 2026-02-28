@@ -59,4 +59,33 @@ describe("ShowSocialTab runtime", () => {
     expect(screen.getByText("Platform tabs are available after selecting a season.")).toBeInTheDocument();
     expect(screen.getByText("fallback section")).toBeInTheDocument();
   });
+
+  it("hides platform controls and social scope chrome in reddit mode", () => {
+    render(
+      <ShowSocialTab
+        socialDependencyError={null}
+        selectedSocialSeason={{ id: "s6", season_number: 6 }}
+        socialPlatformTab="overview"
+        isRedditView
+        onSelectSocialPlatformTab={() => {}}
+        socialPlatformOptions={[
+          { key: "overview", label: "Overview" },
+          { key: "instagram", label: "Instagram" },
+        ]}
+        socialSeasonOptions={[
+          { id: "s5", season_number: 5 },
+          { id: "s6", season_number: 6 },
+        ]}
+        selectedSocialSeasonId="s6"
+        onSelectSocialSeasonId={() => {}}
+        analyticsSection={<div>reddit analytics section</div>}
+        fallbackSection={<div>fallback section</div>}
+      />
+    );
+
+    expect(screen.queryByText("Social Scope")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Instagram" })).not.toBeInTheDocument();
+    expect(screen.getByText("reddit analytics section")).toBeInTheDocument();
+  });
 });

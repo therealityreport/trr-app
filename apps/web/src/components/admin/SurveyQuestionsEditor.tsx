@@ -93,6 +93,12 @@ function withUpdatedRows(config: unknown, nextRows: RowItem[]): Record<string, u
   return { ...base, rows: nextRows };
 }
 
+function getNumericIconOverride(config: unknown): string {
+  if (!isPlainObject(config)) return "";
+  const value = config.iconOverrideUrl;
+  return typeof value === "string" ? value : "";
+}
+
 async function getAuthToken(): Promise<string> {
   const authHeaders = await getClientAuthHeaders();
   return authHeaders.Authorization.replace(/^Bearer\s+/i, "");
@@ -155,6 +161,7 @@ export function SurveyQuestionsEditor({
   const isControlled = questionsProp !== undefined;
 
   const [surveyInfo, setSurveyInfo] = React.useState<SurveyWithQuestions | null>(null);
+  const [surveyShowIconUrl, setSurveyShowIconUrl] = React.useState<string | null>(null);
   const [localQuestions, setLocalQuestions] = React.useState<QuestionWithOptions[]>([]);
   const [loading, setLoading] = React.useState(!isControlled);
   const [error, setError] = React.useState<string | null>(null);
@@ -181,6 +188,7 @@ export function SurveyQuestionsEditor({
   // Question preview
   const [previewQuestionId, setPreviewQuestionId] = React.useState<string | null>(null);
   const [previewValueByQuestionId, setPreviewValueByQuestionId] = React.useState<Record<string, unknown>>({});
+  const [iconOverrideDraftByQuestionId, setIconOverrideDraftByQuestionId] = React.useState<Record<string, string>>({});
 
   // Options editing
   const [expandedOptions, setExpandedOptions] = React.useState<Record<string, boolean>>({});
@@ -208,6 +216,24 @@ export function SurveyQuestionsEditor({
     return localQuestions;
   }, [isControlled, questionsProp, localQuestions]);
 
+  const resolveSurveyShowIcon = React.useCallback(async (survey: SurveyWithQuestions | null) => {
+    const trrShowId = survey?.trr_link?.trr_show_id;
+    if (!trrShowId) return null;
+    try {
+      const token = await getAuthToken();
+      const response = await fetchAdminWithAuth(`/api/admin/shows/by-trr-show/${trrShowId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return null;
+      const data = (await response.json().catch(() => ({}))) as {
+        show?: { icon_url?: string | null } | null;
+      };
+      return data.show?.icon_url ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const refresh = React.useCallback(async () => {
     if (isControlled) {
       onRefresh?.();
@@ -219,13 +245,14 @@ export function SurveyQuestionsEditor({
       setError(null);
       const survey = await fetchSurveyWithQuestions(surveySlug);
       setSurveyInfo(survey);
+      setSurveyShowIconUrl(await resolveSurveyShowIcon(survey));
       setLocalQuestions(survey.questions ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load questions");
     } finally {
       setLoading(false);
     }
-  }, [isControlled, onRefresh, surveySlug]);
+  }, [isControlled, onRefresh, resolveSurveyShowIcon, surveySlug]);
 
   React.useEffect(() => {
     if (!isControlled) {
@@ -237,12 +264,15 @@ export function SurveyQuestionsEditor({
     if (isControlled) {
       // When the parent controls questions, still load survey context (TRR link) for presets/resync.
       fetchSurveyWithQuestions(surveySlug)
-        .then((survey) => setSurveyInfo(survey))
+        .then(async (survey) => {
+          setSurveyInfo(survey);
+          setSurveyShowIconUrl(await resolveSurveyShowIcon(survey));
+        })
         .catch(() => {
           // Ignore; templates will surface actionable errors if context is missing.
         });
     }
-  }, [isControlled, surveySlug]);
+  }, [isControlled, resolveSurveyShowIcon, surveySlug]);
 
   const sortedQuestions = React.useMemo(() => {
     // Group questions by section (Ungrouped last), then preserve the per-question display_order.
@@ -253,6 +283,19 @@ export function SurveyQuestionsEditor({
       return a.display_order - b.display_order;
     });
   }, [questions]);
+
+  React.useEffect(() => {
+    setIconOverrideDraftByQuestionId((prev) => {
+      const next = { ...prev };
+      for (const q of sortedQuestions) {
+        const uiVariant = getQuestionUiVariant(q);
+        if (uiVariant !== "numeric-ranking") continue;
+        if (next[q.id] !== undefined) continue;
+        next[q.id] = getNumericIconOverride(q.config);
+      }
+      return next;
+    });
+  }, [sortedQuestions]);
 
   const questionsBySection = React.useMemo(() => {
     const groups = groupBySection(sortedQuestions, (q) => getQuestionSection(q));
@@ -1041,6 +1084,25 @@ export function SurveyQuestionsEditor({
     [refresh, surveySlug],
   );
 
+  const saveNumericIconOverride = React.useCallback(
+    async (questionId: string, currentConfig: unknown, draftUrl: string) => {
+      const baseConfig = isPlainObject(currentConfig) ? currentConfig : {};
+      const normalized = draftUrl.trim();
+      const nextConfig: Record<string, unknown> = { ...baseConfig };
+      if (normalized) {
+        nextConfig.iconOverrideUrl = normalized;
+      } else {
+        delete nextConfig.iconOverrideUrl;
+      }
+      await saveRowsConfig(questionId, nextConfig);
+      setIconOverrideDraftByQuestionId((prev) => ({
+        ...prev,
+        [questionId]: normalized,
+      }));
+    },
+    [saveRowsConfig],
+  );
+
   const addRow = React.useCallback(
     async (q: QuestionWithOptions) => {
       if (!newRowId.trim() || !newRowLabel.trim()) return;
@@ -1187,6 +1249,7 @@ export function SurveyQuestionsEditor({
                 question={previewQuestion}
                 value={previewValue}
                 onChange={(value) => setPreviewValue(previewQuestion.id, value)}
+                showIconUrl={surveyShowIconUrl}
               />
             </div>
           </div>
@@ -1537,6 +1600,45 @@ export function SurveyQuestionsEditor({
                     </button>
                   </div>
                 </div>
+
+                {uiVariant === "numeric-ranking" && (
+                  <div className="mt-5 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      Rating Icon Override
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Leave blank to use show default icon. Set URL to override for this question only.
+                    </p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="text"
+                        value={iconOverrideDraftByQuestionId[q.id] ?? getNumericIconOverride(q.config)}
+                        onChange={(event) =>
+                          setIconOverrideDraftByQuestionId((prev) => ({
+                            ...prev,
+                            [q.id]: event.target.value,
+                          }))
+                        }
+                        className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+                        placeholder="https://.../custom-icon.svg"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          saveNumericIconOverride(
+                            q.id,
+                            q.config,
+                            iconOverrideDraftByQuestionId[q.id] ?? "",
+                          )
+                        }
+                        disabled={busy}
+                        className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                      >
+                        Save Icon
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Rows editor (matrix-like / two-axis grid) */}
                 {usesRows && (

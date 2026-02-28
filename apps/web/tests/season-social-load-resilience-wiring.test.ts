@@ -39,7 +39,7 @@ describe("season social load resilience wiring", () => {
       /useEffect\(\(\) => \{[\s\S]*activeTab !== "fandom"[\s\S]*void fetchSeasonFandomData\(\);/
     );
     expect(contents).toMatch(
-      /useEffect\(\(\) => \{[\s\S]*activeTab !== "videos"[\s\S]*void fetchSeasonBravoVideos\(\{ signal: controller\.signal \}\);/
+      /useEffect\(\(\) => \{[\s\S]*activeTab !== "assets" \|\| assetsView !== "videos"[\s\S]*void fetchSeasonBravoVideos\(\{ signal: controller\.signal \}\);/
     );
     expect(contents).not.toMatch(
       /await Promise\.allSettled\(\[fetchSeasonBravoVideos\(\), fetchSeasonFandomData\(\)\]\)/

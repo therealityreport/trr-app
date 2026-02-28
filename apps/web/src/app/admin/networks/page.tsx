@@ -26,6 +26,8 @@ interface NetworksStreamingRow {
   hosted_logo_white_url: string | null;
   wikidata_id: string | null;
   wikipedia_url: string | null;
+  tmdb_entity_id: string | null;
+  homepage_url: string | null;
   resolution_status: CompletionStatus | null;
   resolution_reason: string | null;
   last_attempt_at: string | null;
@@ -146,6 +148,46 @@ const csvEscape = (value: string): string => {
   const escaped = value.replace(/"/g, '""');
   return `"${escaped}"`;
 };
+
+function getExternalIds(row: NetworksStreamingRow) {
+  const tmdbId = row.tmdb_entity_id;
+  let tmdbUrl: string | null = null;
+  if (tmdbId) {
+    if (row.type === "network") tmdbUrl = `https://www.themoviedb.org/network/${tmdbId}`;
+    else if (row.type === "streaming") tmdbUrl = `https://www.themoviedb.org/provider/${tmdbId}`;
+    else if (row.type === "production") tmdbUrl = `https://www.themoviedb.org/company/${tmdbId}`;
+  }
+
+  let imdbId: string | null = null;
+  let imdbUrl: string | null = null;
+  let wikidataId: string | null = null;
+  let wikidataUrl: string | null = null;
+
+  const raw = row.wikidata_id;
+  if (raw) {
+    if (raw.startsWith("Q") && /^Q\d+$/.test(raw)) {
+      wikidataId = raw;
+      wikidataUrl = `https://www.wikidata.org/wiki/${raw}`;
+    } else if (raw.startsWith("IMDB:")) {
+      imdbId = raw.replace("IMDB:", "");
+      imdbUrl = `https://www.imdb.com/company/${imdbId}/`;
+    } else if (raw.startsWith("TMDB:")) {
+      // TMDb ID stored in wikidata field — already covered by tmdb_entity_id
+    } else if (/^Q/.test(raw)) {
+      // Partial Q-ID match (shouldn't happen but be safe)
+      wikidataId = raw;
+      wikidataUrl = `https://www.wikidata.org/wiki/${raw}`;
+    }
+  }
+
+  return {
+    tmdb: { id: tmdbId, url: tmdbUrl },
+    imdb: { id: imdbId, url: imdbUrl },
+    wikidata: { id: wikidataId, url: wikidataUrl },
+    wikipedia: { url: row.wikipedia_url },
+    website: { url: row.homepage_url },
+  };
+}
 
 export default function AdminNetworksPage() {
   const pathname = usePathname();
@@ -832,15 +874,14 @@ export default function AdminNetworksPage() {
                     <th className="px-3 py-2 text-right font-semibold text-zinc-700">Available Shows</th>
                     <th className="px-3 py-2 text-right font-semibold text-zinc-700">Added Shows</th>
                     <th className="px-3 py-2 text-left font-semibold text-zinc-700">Logo</th>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Wikipedia</th>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Wikidata</th>
+                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">External IDs</th>
                     <th className="px-3 py-2 text-left font-semibold text-zinc-700">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 bg-white">
                   {summaryLoading ? (
                     <tr>
-                      <td colSpan={8} className="px-3 py-8 text-center text-zinc-500">
+                      <td colSpan={7} className="px-3 py-8 text-center text-zinc-500">
                         Loading brands summary...
                       </td>
                     </tr>
@@ -848,7 +889,7 @@ export default function AdminNetworksPage() {
 
                   {!summaryLoading && filteredRows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-3 py-8 text-center text-zinc-500">
+                      <td colSpan={7} className="px-3 py-8 text-center text-zinc-500">
                         No rows available.
                       </td>
                     </tr>
@@ -856,7 +897,7 @@ export default function AdminNetworksPage() {
 
                   {!summaryLoading
                     ? filteredRows.map((row) => {
-                        const wikidataHref = row.wikidata_id ? `https://www.wikidata.org/wiki/${row.wikidata_id}` : null;
+                        const extIds = getExternalIds(row);
                         const rowComplete =
                           row.type === "production"
                             ? row.resolution_status === "resolved"
@@ -889,32 +930,68 @@ export default function AdminNetworksPage() {
                               )}
                             </td>
                             <td className="px-3 py-2">
-                              {row.wikipedia_url ? (
-                                <a
-                                  className="text-blue-700 underline"
-                                  href={row.wikipedia_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  Open
-                                </a>
-                              ) : (
-                                <span className="text-zinc-500">Missing</span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              {wikidataHref ? (
-                                <a
-                                  className="text-blue-700 underline"
-                                  href={wikidataHref}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {row.wikidata_id}
-                                </a>
-                              ) : (
-                                <span className="text-zinc-500">Missing</span>
-                              )}
+                              <div className="flex flex-wrap gap-1">
+                                {extIds.tmdb.url ? (
+                                  <a
+                                    href={extIds.tmdb.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                  >
+                                    TMDb
+                                  </a>
+                                ) : (
+                                  <span className="rounded px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700">TMDb</span>
+                                )}
+                                {extIds.imdb.url ? (
+                                  <a
+                                    href={extIds.imdb.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                  >
+                                    IMDb
+                                  </a>
+                                ) : (
+                                  <span className="rounded px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700">IMDb</span>
+                                )}
+                                {extIds.wikidata.url ? (
+                                  <a
+                                    href={extIds.wikidata.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                  >
+                                    Wikidata
+                                  </a>
+                                ) : (
+                                  <span className="rounded px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700">Wikidata</span>
+                                )}
+                                {extIds.wikipedia.url ? (
+                                  <a
+                                    href={extIds.wikipedia.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                  >
+                                    Wikipedia
+                                  </a>
+                                ) : (
+                                  <span className="rounded px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700">Wikipedia</span>
+                                )}
+                                {extIds.website.url ? (
+                                  <a
+                                    href={extIds.website.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                  >
+                                    Website
+                                  </a>
+                                ) : (
+                                  <span className="rounded px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700">Website</span>
+                                )}
+                              </div>
                             </td>
                             <td className="px-3 py-2">
                               <div className="flex flex-wrap gap-1">

@@ -14,9 +14,13 @@ describe("show detail cast lazy-loading wiring", () => {
   });
 
   it("loads cast lazily on cast tab entry", () => {
-    expect(contents).toMatch(/if \(castLoadedOnce \|\| castLoading\) return;/);
     expect(contents).toMatch(/if \(!hasAccess \|\| !showId \|\| activeTab !== "cast"\) return;/);
-    expect(contents).toMatch(/void fetchCast\(\);/);
+    expect(contents).toMatch(/castAutoLoadAttemptedRef/);
+    expect(contents).toMatch(/const autoLoadKey = `\$\{showId\}:cast`;/);
+    expect(contents).toMatch(/if \(castAutoLoadAttemptedRef\.current === autoLoadKey\) return;/);
+    expect(contents).toMatch(/void fetchCast\(\{ force: true \}\);/);
+    expect(contents).toMatch(/castAutoRecoveryAttemptedRef/);
+    expect(contents).toMatch(/Cast list unavailable; retrying cast roster\.\.\./);
   });
 
   it("hardens cast loading with longer timeout, retry, and zero-episode exclusion", () => {
@@ -24,6 +28,8 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/SHOW_CAST_LOAD_MAX_ATTEMPTS = 2/);
     expect(contents).toMatch(/SHOW_CAST_LOAD_RETRY_BACKOFF_MS = 250/);
     expect(contents).toMatch(/params\.set\("exclude_zero_episode_members", "1"\)/);
+    expect(contents).toMatch(/castLoadInFlightRef/);
+    expect(contents).toMatch(/castSnapshotRef/);
     expect(contents).toMatch(/Showing last successful cast snapshot\./);
   });
 
@@ -137,6 +143,9 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/Cast intelligence unavailable; showing base cast snapshot\./);
     expect(contents).toMatch(/Retry Cast Intelligence/);
     expect(contents).toMatch(/Refreshing cast intelligence\.\.\./);
+    expect(contents).toMatch(/castUiTerminalReady/);
+    expect(contents).toMatch(/Loading role and credit filters\.\.\./);
+    expect(contents).toMatch(/Loading cast roster\.\.\./);
     expect(contents).toMatch(
       /showCastIntelligenceUnavailable =\s*activeTab === "cast" &&\s*castSource === "show_fallback" &&\s*!castRoleMembersLoading &&\s*!rolesLoading &&\s*\(Boolean\(castRoleMembersError\) \|\| Boolean\(rolesError\)\)/
     );

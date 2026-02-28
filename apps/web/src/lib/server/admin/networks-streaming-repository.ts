@@ -5,7 +5,7 @@ import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming
 import { query } from "@/lib/server/postgres";
 
 export interface NetworkStreamingSummaryRow {
-  type: "network" | "streaming";
+  type: "network" | "streaming" | "production";
   name: string;
   available_show_count: number;
   added_show_count: number;
@@ -14,6 +14,8 @@ export interface NetworkStreamingSummaryRow {
   hosted_logo_white_url: string | null;
   wikidata_id: string | null;
   wikipedia_url: string | null;
+  tmdb_entity_id: string | null;
+  homepage_url: string | null;
   resolution_status: "resolved" | "manual_required" | "failed" | null;
   resolution_reason: string | null;
   last_attempt_at: string | null;
@@ -39,7 +41,7 @@ type TotalsRow = {
 };
 
 type SummaryRow = {
-  type: "network" | "streaming";
+  type: "network" | "streaming" | "production";
   name: string;
   available_show_count: number;
   added_show_count: number;
@@ -48,6 +50,8 @@ type SummaryRow = {
   hosted_logo_white_url: string | null;
   wikidata_id: string | null;
   wikipedia_url: string | null;
+  tmdb_entity_id: string | null;
+  homepage_url: string | null;
   resolution_status: "resolved" | "manual_required" | "failed" | null;
   resolution_reason: string | null;
   last_attempt_at: string | null;
@@ -299,6 +303,26 @@ const NETWORK_STREAMING_ENTITY_REGISTRY_CTE_SQL = `
     UNION ALL
     SELECT * FROM provider_fallback_grouped
   ),
+  production_source AS (
+    SELECT
+      s.id AS show_id,
+      btrim(pc.name) AS display_name,
+      lower(btrim(pc.name)) AS name_key
+    FROM core.shows s
+    CROSS JOIN LATERAL unnest(COALESCE(s.tmdb_production_company_ids, ARRAY[]::int[])) AS pc_id
+    JOIN core.production_companies pc ON pc.id = pc_id
+    WHERE btrim(pc.name) <> ''
+  ),
+  production_grouped AS (
+    SELECT
+      ps.name_key,
+      MIN(ps.display_name) AS name,
+      COUNT(DISTINCT ps.show_id)::int AS available_show_count,
+      COUNT(DISTINCT CASE WHEN a.show_id IS NOT NULL THEN ps.show_id END)::int AS added_show_count
+    FROM production_source ps
+    LEFT JOIN added a ON a.show_id = ps.show_id::text
+    GROUP BY ps.name_key
+  ),
   entity_registry AS (
     SELECT
       'network'::text AS type,
@@ -335,6 +359,24 @@ const NETWORK_STREAMING_ENTITY_REGISTRY_CTE_SQL = `
         )
       ) AS entity_slug
     FROM provider_grouped pg
+    UNION ALL
+    SELECT
+      'production'::text AS type,
+      pcg.name_key,
+      pcg.name,
+      pcg.available_show_count,
+      pcg.added_show_count,
+      lower(
+        trim(
+          both '-' FROM regexp_replace(
+            regexp_replace(pcg.name, '&', ' and ', 'gi'),
+            '[^a-z0-9]+',
+            '-',
+            'gi'
+          )
+        )
+      ) AS entity_slug
+    FROM production_grouped pcg
   )
 `;
 
@@ -449,6 +491,8 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
           meta.hosted_logo_white_url,
           meta.wikidata_id,
           meta.wikipedia_url,
+          meta.tmdb_entity_id,
+          meta.homepage_url,
           comp.resolution_status,
           comp.resolution_reason,
           comp.last_attempt_at
@@ -459,7 +503,9 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
             n.hosted_logo_black_url AS hosted_logo_black_url,
             n.hosted_logo_white_url AS hosted_logo_white_url,
             n.wikidata_id AS wikidata_id,
-            n.wikipedia_url AS wikipedia_url
+            n.wikipedia_url AS wikipedia_url,
+            n.id::text AS tmdb_entity_id,
+            (n.tmdb_meta->>'homepage')::text AS homepage_url
           FROM core.networks n
           WHERE lower(btrim(n.name)) = ng.name_key
           ORDER BY n.id ASC
@@ -533,6 +579,8 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
           meta.hosted_logo_white_url,
           meta.wikidata_id,
           meta.wikipedia_url,
+          meta.tmdb_entity_id,
+          meta.homepage_url,
           comp.resolution_status,
           comp.resolution_reason,
           comp.last_attempt_at
@@ -543,7 +591,9 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
             wp.hosted_logo_black_url AS hosted_logo_black_url,
             wp.hosted_logo_white_url AS hosted_logo_white_url,
             wp.wikidata_id AS wikidata_id,
-            wp.wikipedia_url AS wikipedia_url
+            wp.wikipedia_url AS wikipedia_url,
+            wp.provider_id::text AS tmdb_entity_id,
+            (wp.tmdb_meta->>'homepage')::text AS homepage_url
           FROM core.watch_providers wp
           WHERE lower(btrim(wp.provider_name)) = pg.name_key
           ORDER BY wp.provider_id ASC
@@ -560,12 +610,77 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
           ORDER BY c.updated_at DESC
           LIMIT 1
         ) comp ON true
+      ),
+      production_source AS (
+        SELECT
+          s.id AS show_id,
+          btrim(pc.name) AS display_name,
+          lower(btrim(pc.name)) AS name_key
+        FROM core.shows s
+        CROSS JOIN LATERAL unnest(COALESCE(s.tmdb_production_company_ids, ARRAY[]::int[])) AS pc_id
+        JOIN core.production_companies pc ON pc.id = pc_id
+        WHERE btrim(pc.name) <> ''
+      ),
+      production_grouped AS (
+        SELECT
+          ps.name_key,
+          MIN(ps.display_name) AS name,
+          COUNT(DISTINCT ps.show_id)::int AS available_show_count,
+          COUNT(DISTINCT CASE WHEN a.show_id IS NOT NULL THEN ps.show_id END)::int AS added_show_count
+        FROM production_source ps
+        LEFT JOIN added a ON a.show_id = ps.show_id::text
+        GROUP BY ps.name_key
+      ),
+      production_rows AS (
+        SELECT
+          'production'::text AS type,
+          pcg.name,
+          pcg.available_show_count,
+          pcg.added_show_count,
+          meta.hosted_logo_url,
+          meta.hosted_logo_black_url,
+          meta.hosted_logo_white_url,
+          meta.wikidata_id,
+          meta.wikipedia_url,
+          meta.tmdb_entity_id,
+          meta.homepage_url,
+          comp.resolution_status,
+          comp.resolution_reason,
+          comp.last_attempt_at
+        FROM production_grouped pcg
+        LEFT JOIN LATERAL (
+          SELECT
+            pc.hosted_logo_url AS hosted_logo_url,
+            pc.hosted_logo_black_url AS hosted_logo_black_url,
+            pc.hosted_logo_white_url AS hosted_logo_white_url,
+            pc.wikidata_id AS wikidata_id,
+            pc.wikipedia_url AS wikipedia_url,
+            pc.id::text AS tmdb_entity_id,
+            (pc.tmdb_meta->>'homepage')::text AS homepage_url
+          FROM core.production_companies pc
+          WHERE lower(btrim(pc.name)) = pcg.name_key
+          ORDER BY pc.id ASC
+          LIMIT 1
+        ) meta ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            c.resolution_status AS resolution_status,
+            c.resolution_reason AS resolution_reason,
+            c.last_attempt_at AS last_attempt_at
+          FROM admin.network_streaming_completion c
+          WHERE c.entity_type = 'production'
+            AND c.entity_key = pcg.name_key
+          ORDER BY c.updated_at DESC
+          LIMIT 1
+        ) comp ON true
       )
       SELECT *
       FROM (
         SELECT * FROM network_rows
         UNION ALL
         SELECT * FROM provider_rows
+        UNION ALL
+        SELECT * FROM production_rows
       ) all_rows
       ORDER BY type ASC, added_show_count DESC, available_show_count DESC, name ASC
     `,
@@ -578,6 +693,8 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
     const hostedLogoWhiteUrl = typeof row.hosted_logo_white_url === "string" ? row.hosted_logo_white_url : null;
     const wikidataId = typeof row.wikidata_id === "string" ? row.wikidata_id : null;
     const wikipediaUrl = typeof row.wikipedia_url === "string" ? row.wikipedia_url : null;
+    const tmdbEntityId = typeof row.tmdb_entity_id === "string" ? row.tmdb_entity_id : null;
+    const homepageUrl = typeof row.homepage_url === "string" && row.homepage_url.trim().length > 0 ? row.homepage_url.trim() : null;
     const resolutionStatus =
       row.resolution_status === "resolved" || row.resolution_status === "manual_required" || row.resolution_status === "failed"
         ? row.resolution_status
@@ -594,6 +711,8 @@ export async function getNetworksStreamingSummary(): Promise<NetworkStreamingSum
       hosted_logo_white_url: hostedLogoWhiteUrl,
       wikidata_id: wikidataId,
       wikipedia_url: wikipediaUrl,
+      tmdb_entity_id: tmdbEntityId,
+      homepage_url: homepageUrl,
       resolution_status: resolutionStatus,
       resolution_reason: resolutionReason,
       last_attempt_at: lastAttemptAt,
@@ -644,20 +763,24 @@ export async function getNetworkStreamingDetail(
         t.entity_slug,
         t.available_show_count,
         t.added_show_count,
-        CASE WHEN t.type = 'network' THEN n.id::text ELSE wp.provider_id::text END AS core_entity_id,
-        n.origin_country AS core_origin_country,
+        CASE
+          WHEN t.type = 'network' THEN n.id::text
+          WHEN t.type = 'streaming' THEN wp.provider_id::text
+          WHEN t.type = 'production' THEN pc.id::text
+        END AS core_entity_id,
+        COALESCE(n.origin_country, pc.origin_country) AS core_origin_country,
         wp.display_priority AS core_display_priority,
-        COALESCE(n.tmdb_logo_path, wp.tmdb_logo_path) AS core_tmdb_logo_path,
-        COALESCE(n.logo_path, wp.logo_path) AS core_logo_path,
-        COALESCE(n.hosted_logo_key, wp.hosted_logo_key) AS core_hosted_logo_key,
-        COALESCE(n.hosted_logo_url, wp.hosted_logo_url) AS core_hosted_logo_url,
-        COALESCE(n.hosted_logo_black_url, wp.hosted_logo_black_url) AS core_hosted_logo_black_url,
-        COALESCE(n.hosted_logo_white_url, wp.hosted_logo_white_url) AS core_hosted_logo_white_url,
-        COALESCE(n.wikidata_id, wp.wikidata_id) AS core_wikidata_id,
-        COALESCE(n.wikipedia_url, wp.wikipedia_url) AS core_wikipedia_url,
-        COALESCE(n.wikimedia_logo_file, wp.wikimedia_logo_file) AS core_wikimedia_logo_file,
-        COALESCE(n.link_enriched_at::text, wp.link_enriched_at::text) AS core_link_enriched_at,
-        COALESCE(n.link_enrichment_source, wp.link_enrichment_source) AS core_link_enrichment_source,
+        COALESCE(n.tmdb_logo_path, wp.tmdb_logo_path, pc.tmdb_logo_path) AS core_tmdb_logo_path,
+        COALESCE(n.logo_path, wp.logo_path, pc.logo_path) AS core_logo_path,
+        COALESCE(n.hosted_logo_key, wp.hosted_logo_key, pc.hosted_logo_key) AS core_hosted_logo_key,
+        COALESCE(n.hosted_logo_url, wp.hosted_logo_url, pc.hosted_logo_url) AS core_hosted_logo_url,
+        COALESCE(n.hosted_logo_black_url, wp.hosted_logo_black_url, pc.hosted_logo_black_url) AS core_hosted_logo_black_url,
+        COALESCE(n.hosted_logo_white_url, wp.hosted_logo_white_url, pc.hosted_logo_white_url) AS core_hosted_logo_white_url,
+        COALESCE(n.wikidata_id, wp.wikidata_id, pc.wikidata_id) AS core_wikidata_id,
+        COALESCE(n.wikipedia_url, wp.wikipedia_url, pc.wikipedia_url) AS core_wikipedia_url,
+        COALESCE(n.wikimedia_logo_file, wp.wikimedia_logo_file, pc.wikimedia_logo_file) AS core_wikimedia_logo_file,
+        COALESCE(n.link_enriched_at::text, wp.link_enriched_at::text, pc.link_enriched_at::text) AS core_link_enriched_at,
+        COALESCE(n.link_enrichment_source, wp.link_enrichment_source, pc.link_enrichment_source) AS core_link_enrichment_source,
         COALESCE(n.facebook_id, wp.facebook_id) AS core_facebook_id,
         COALESCE(n.instagram_id, wp.instagram_id) AS core_instagram_id,
         COALESCE(n.twitter_id, wp.twitter_id) AS core_twitter_id,
@@ -693,6 +816,14 @@ export async function getNetworkStreamingDetail(
         ORDER BY wp.provider_id ASC
         LIMIT 1
       ) wp ON true
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM core.production_companies pc
+        WHERE t.type = 'production'
+          AND lower(btrim(pc.name)) = t.name_key
+        ORDER BY pc.id ASC
+        LIMIT 1
+      ) pc ON true
       LEFT JOIN LATERAL (
         SELECT *
         FROM admin.network_streaming_overrides ov
@@ -763,12 +894,25 @@ export async function getNetworkStreamingDetail(
               AND lower(btrim(provider_name)) = $2
           )
       ),
+      production_show_source AS (
+        SELECT DISTINCT s.id AS show_id
+        FROM core.shows s
+        WHERE $1 = 'production'
+          AND EXISTS (
+            SELECT 1
+            FROM unnest(COALESCE(s.tmdb_production_company_ids, ARRAY[]::int[])) AS pc_id
+            JOIN core.production_companies pc ON pc.id = pc_id
+            WHERE lower(btrim(pc.name)) = $2
+          )
+      ),
       entity_show_source AS (
         SELECT show_id FROM network_show_source
         UNION
         SELECT show_id FROM streaming_show_source
         UNION
         SELECT show_id FROM streaming_fallback_show_source
+        UNION
+        SELECT show_id FROM production_show_source
       ),
       shows_with_slug AS (
         SELECT

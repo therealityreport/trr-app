@@ -293,6 +293,40 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     );
   });
 
+  it("defaults to the latest started season when a future season has episode dates", async () => {
+    getSeasonsByShowIdMock.mockResolvedValueOnce([
+      {
+        id: "77777777-7777-4777-8777-777777777777",
+        show_id: SHOW_ID,
+        season_number: 7,
+        has_scheduled_or_aired_episode: true,
+        episode_airdate_count: 4,
+        premiere_date: "2027-01-01",
+      },
+      {
+        id: SEASON_ID,
+        show_id: SHOW_ID,
+        season_number: 6,
+        has_scheduled_or_aired_episode: true,
+        episode_airdate_count: 19,
+        premiere_date: "2025-09-16",
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    expect(response.status).toBe(200);
+    expect(discoverEpisodeDiscussionThreadsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        seasonNumber: 6,
+      }),
+    );
+  });
+
   it("applies explicit period window filters", async () => {
     const request = new NextRequest(
       `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?season_id=${SEASON_ID}&period_start=2026-01-01T00:00:00.000Z&period_end=2026-01-31T23:59:59.000Z`,
@@ -549,6 +583,70 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     );
   });
 
+  it("sync=true allows weekly discussions posted the day after air date", async () => {
+    discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
+      subreddit: "BravoRealHousewives",
+      fetched_at: "2026-02-24T12:00:00.000Z",
+      sources_fetched: ["new"],
+      successful_sorts: ["new"],
+      failed_sorts: [],
+      rate_limited_sorts: [],
+      candidates: [
+        {
+          reddit_post_id: "weekly-post",
+          title:
+            "The Real Housewives Of Salt Lake City - Season 6 - Episode 18 - Weekly Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/weekly-post/test/",
+          permalink: "/r/BravoRealHousewives/comments/weekly-post/test/",
+          author: "AutoModerator",
+          score: 42,
+          num_comments: 217,
+          posted_at: "2026-01-21T12:01:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 18,
+          discussion_type: "weekly",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Weekly Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      filters_applied: {
+        season_number: 6,
+        title_patterns: ["Live Episode Discussion"],
+        required_flares: ["Salt Lake City"],
+        show_focused: false,
+        period_start: null,
+        period_end: null,
+      },
+    });
+    getEpisodesBySeasonIdMock.mockResolvedValueOnce([
+      {
+        id: "ep-18",
+        season_id: SEASON_ID,
+        episode_number: 18,
+        air_date: "2026-01-20",
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?sync=true`,
+      { method: "GET" },
+    );
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.sync_auto_saved_count).toBe(1);
+    expect(payload.meta?.sync_candidate_results).toEqual([
+      expect.objectContaining({
+        reddit_post_id: "weekly-post",
+        status: "auto_saved",
+        reason_code: "auto_saved_success",
+      }),
+    ]);
+  });
+
   it("sync=true resolves episode air dates when season episode_number values are numeric strings", async () => {
     discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
       subreddit: "BravoRealHousewives",
@@ -607,6 +705,71 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     expect(payload.meta?.sync_candidate_results).toEqual([
       expect.objectContaining({
         reddit_post_id: "eligible-post",
+        status: "auto_saved",
+        reason_code: "auto_saved_success",
+      }),
+    ]);
+    expect(createRedditThreadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sync=true resolves episode air dates when air_date values are Date objects", async () => {
+    discoverEpisodeDiscussionThreadsMock.mockResolvedValueOnce({
+      subreddit: "BravoRealHousewives",
+      fetched_at: "2026-02-24T12:00:00.000Z",
+      sources_fetched: ["new"],
+      successful_sorts: ["new"],
+      failed_sorts: [],
+      rate_limited_sorts: [],
+      candidates: [
+        {
+          reddit_post_id: "eligible-date-post",
+          title:
+            "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Live Episode Discussion",
+          text: null,
+          url: "https://www.reddit.com/r/BravoRealHousewives/comments/eligible-date-post/test/",
+          permalink: "/r/BravoRealHousewives/comments/eligible-date-post/test/",
+          author: "AutoModerator",
+          score: 120,
+          num_comments: 55,
+          posted_at: "2026-02-24T23:20:00.000Z",
+          link_flair_text: "Salt Lake City",
+          episode_number: 1,
+          discussion_type: "live",
+          source_sorts: ["new"],
+          match_reasons: ["title pattern: Live Episode Discussion"],
+        },
+      ],
+      episode_matrix: [],
+      filters_applied: {
+        season_number: 6,
+        title_patterns: ["Live Episode Discussion"],
+        required_flares: ["Salt Lake City"],
+        show_focused: false,
+        period_start: null,
+        period_end: null,
+      },
+    });
+    getEpisodesBySeasonIdMock.mockResolvedValueOnce([
+      {
+        id: "ep-1-date",
+        season_id: SEASON_ID,
+        episode_number: 1,
+        air_date: new Date("2026-02-24T12:00:00.000Z"),
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/episode-discussions/refresh?sync=true`,
+      { method: "GET" },
+    );
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta?.sync_auto_saved_count).toBe(1);
+    expect(payload.meta?.sync_candidate_results).toEqual([
+      expect.objectContaining({
+        reddit_post_id: "eligible-date-post",
         status: "auto_saved",
         reason_code: "auto_saved_success",
       }),

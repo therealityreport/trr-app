@@ -50,7 +50,7 @@ interface SyncCandidateResult {
 
 interface EpisodeAirDateSourceRow {
   episode_number: unknown;
-  air_date: string | null;
+  air_date: unknown;
 }
 
 const parseSortModes = (input: string | null): RedditListingSort[] => {
@@ -105,6 +105,39 @@ const parseBoolean = (input: string | null): boolean => {
   return normalized === "1" || normalized === "true" || normalized === "yes";
 };
 
+const parseDateMs = (value: string | null | undefined): number | null => {
+  if (!value || typeof value !== "string") return null;
+  const parsed = new Date(value);
+  const ms = parsed.getTime();
+  if (!Number.isFinite(ms)) return null;
+  return ms;
+};
+
+const isSeasonEligibleForEpisodeContext = (season: {
+  season_number?: number | null;
+  episode_airdate_count?: number | null;
+  air_date?: string | null;
+  premiere_date?: string | null;
+}): boolean => {
+  const airdateCount =
+    typeof season.episode_airdate_count === "number" && Number.isFinite(season.episode_airdate_count)
+      ? season.episode_airdate_count
+      : 0;
+  if (airdateCount <= 0) return false;
+
+  const nowMs = Date.now();
+  const premiereMs = parseDateMs(season.premiere_date);
+  if (premiereMs !== null) {
+    return premiereMs <= nowMs;
+  }
+  const seasonAirDateMs = parseDateMs(season.air_date);
+  if (seasonAirDateMs !== null) {
+    return seasonAirDateMs <= nowMs;
+  }
+
+  return true;
+};
+
 const formatDateKeyInTimeZone = (value: string, timeZone: string): string | null => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -122,15 +155,33 @@ const formatDateKeyInTimeZone = (value: string, timeZone: string): string | null
   return `${year}-${month}-${day}`;
 };
 
-const normalizeAirDateKey = (value: string | null | undefined): string | null => {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
+const normalizeAirDateKey = (value: unknown): string | null => {
+  if (value == null) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return formatDateKeyInTimeZone(value.toISOString(), EPISODE_SYNC_TIME_ZONE);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    return formatDateKeyInTimeZone(new Date(value).toISOString(), EPISODE_SYNC_TIME_ZONE);
+  }
+  const trimmed = String(value).trim();
   if (!trimmed) return null;
   const direct = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (direct) {
     return `${direct[1]}-${direct[2]}-${direct[3]}`;
   }
   return formatDateKeyInTimeZone(trimmed, EPISODE_SYNC_TIME_ZONE);
+};
+
+const addDaysToDateKey = (dateKey: string, days: number): string | null => {
+  const parsed = new Date(`${dateKey}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 const normalizeEpisodeNumber = (value: unknown): number | null => {
@@ -180,6 +231,7 @@ const evaluateEpisodeSyncEligibility = (input: {
   title: string;
   postedAt: string | null;
   episodeAirDateKey: string | null;
+  discussionType: "live" | "post" | "weekly";
   episodeNumber: number | null;
   seasonNumber: number;
 }): { eligible: boolean; reason: string; reasonCode: SyncCandidateReasonCode } => {
@@ -222,7 +274,13 @@ const evaluateEpisodeSyncEligibility = (input: {
       reasonCode: "invalid_post_timestamp",
     };
   }
-  if (postedDateKey !== input.episodeAirDateKey) {
+  const weeklyNextDayKey =
+    input.discussionType === "weekly" ? addDaysToDateKey(input.episodeAirDateKey, 1) : null;
+  const dateMatchesEpisode =
+    postedDateKey === input.episodeAirDateKey ||
+    (weeklyNextDayKey !== null && postedDateKey === weeklyNextDayKey);
+
+  if (!dateMatchesEpisode) {
     return {
       eligible: false,
       reason: `Post date ${postedDateKey} does not match episode air date ${input.episodeAirDateKey} (${EPISODE_SYNC_TIME_ZONE}).`,
@@ -319,7 +377,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         offset: 0,
         includeEpisodeSignal: true,
       });
+      const eligibleSeasons = seasons.filter((season) =>
+        isSeasonEligibleForEpisodeContext({
+          season_number: season.season_number,
+          episode_airdate_count: season.episode_airdate_count,
+          air_date: season.air_date,
+          premiere_date: season.premiere_date,
+        }),
+      );
       resolvedSeason =
+        eligibleSeasons[0] ??
         seasons.find((season) => season.has_scheduled_or_aired_episode === true) ??
         seasons[0] ??
         null;
@@ -354,9 +421,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .map((episode) => {
         const episodeNumber = normalizeEpisodeNumber(episode.episode_number);
         if (!episodeNumber) return null;
+        const normalizedAirDate = normalizeAirDateKey(episode.air_date);
         return {
           episode_number: episodeNumber,
-          air_date: episode.air_date ?? null,
+          air_date: normalizedAirDate,
         };
       })
       .filter(
@@ -398,7 +466,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const episodeAirDateByNumber = new Map<number, string>();
     if (syncRequested) {
-      for (const episode of seasonEpisodesRaw) {
+      for (const episode of seasonEpisodes) {
         const normalizedEpisodeNumber = normalizeEpisodeNumber(episode.episode_number);
         if (!normalizedEpisodeNumber) continue;
         const airDateKey = normalizeAirDateKey(episode.air_date);
@@ -424,6 +492,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           title: candidate.title,
           postedAt: candidate.posted_at,
           episodeAirDateKey,
+          discussionType: candidate.discussion_type,
           episodeNumber: candidateEpisodeNumber,
           seasonNumber: resolvedSeason.season_number,
         });
@@ -485,6 +554,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       season_id: resolvedSeason.id,
       season_number: resolvedSeason.season_number,
       season_episode_count: seasonEpisodes.length,
+      season_episode_airdate_mapped_count: episodeAirDateByNumber.size,
       subreddit: community.subreddit,
       period_window_start:
         parsedPeriodStart.value ?? discovery.filters_applied.period_start ?? null,

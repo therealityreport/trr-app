@@ -4,9 +4,10 @@ import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, resolveAdminShowIdMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  resolveAdminShowIdMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -17,18 +18,24 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/admin/resolve-show-id", () => ({
+  resolveAdminShowId: resolveAdminShowIdMock,
+}));
+
 import { GET } from "@/app/api/admin/trr-api/shows/[showId]/cast-role-members/route";
 
 describe("show cast-role-members proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    resolveAdminShowIdMock.mockReset();
     vi.restoreAllMocks();
     invalidateRouteResponseCache("admin-show-cast-role-members");
 
     requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
+    resolveAdminShowIdMock.mockResolvedValue("00000000-0000-0000-0000-000000000001");
     getBackendApiUrlMock.mockReturnValue(
-      "https://backend.example.com/api/v1/admin/shows/show-1/cast-role-members"
+      "https://backend.example.com/api/v1/admin/shows/00000000-0000-0000-0000-000000000001/cast-role-members"
     );
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
@@ -109,5 +116,27 @@ describe("show cast-role-members proxy route", () => {
     expect(payload.code).toBe("UPSTREAM_TIMEOUT");
     expect(payload.retryable).toBe(true);
     expect(payload.upstream_status).toBe(504);
+  });
+
+  it("returns 404 envelope when show slug cannot be resolved", async () => {
+    resolveAdminShowIdMock.mockResolvedValueOnce(null);
+    vi.stubGlobal("fetch", vi.fn());
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/not-a-show/cast-role-members"
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ showId: "not-a-show" }) });
+    const payload = (await response.json()) as {
+      error?: string;
+      code?: string;
+      retryable?: boolean;
+      upstream_status?: number;
+    };
+
+    expect(response.status).toBe(404);
+    expect(payload.code).toBe("SHOW_NOT_FOUND");
+    expect(payload.retryable).toBe(false);
+    expect(payload.upstream_status).toBe(404);
   });
 });

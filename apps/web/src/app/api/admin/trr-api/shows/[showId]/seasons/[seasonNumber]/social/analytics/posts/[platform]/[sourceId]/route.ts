@@ -17,7 +17,7 @@ interface RouteParams {
   }>;
 }
 
-const PLATFORM_ALLOWLIST = new Set(["instagram", "tiktok", "twitter", "youtube"]);
+const PLATFORM_ALLOWLIST = new Set(["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"]);
 const SOURCE_ID_RE = /^[A-Za-z0-9._:-]{1,200}$/;
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -41,7 +41,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
     if (!PLATFORM_ALLOWLIST.has(platform)) {
       return NextResponse.json(
-        { error: "platform must be one of instagram, tiktok, twitter, youtube", code: "BAD_REQUEST", retryable: false },
+        {
+          error: "platform must be one of instagram, tiktok, twitter, youtube, facebook, threads",
+          code: "BAD_REQUEST",
+          retryable: false,
+        },
         { status: 400 },
       );
     }
@@ -102,7 +106,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
     if (!PLATFORM_ALLOWLIST.has(platform)) {
       return NextResponse.json(
-        { error: "platform must be one of instagram, tiktok, twitter, youtube", code: "BAD_REQUEST", retryable: false },
+        {
+          error: "platform must be one of instagram, tiktok, twitter, youtube, facebook, threads",
+          code: "BAD_REQUEST",
+          retryable: false,
+        },
         { status: 400 },
       );
     }

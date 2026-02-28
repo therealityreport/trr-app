@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import Link from "next/link";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
 import {
   buildSeasonWeekBreadcrumb,
@@ -15,6 +16,7 @@ import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildSeasonAdminUrl, buildSeasonSocialWeekUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
+import type { PhotoMetadata } from "@/lib/photo-metadata";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -28,10 +30,51 @@ interface Comment {
   is_reply: boolean;
   reply_count: number;
   created_at: string | null;
+  comment_language?: string | null;
+  is_author_liked?: boolean | null;
+  aweme_id?: string | null;
+  parent_source_comment_id?: string | null;
+  media_urls?: string[] | null;
+  hosted_media_urls?: string[] | null;
+  media_mirror_status?: string | null;
+  user?: {
+    id?: string | null;
+    username?: string | null;
+    display_name?: string | null;
+    url?: string | null;
+    bio?: string | null;
+    avatar_url?: string | null;
+    region?: string | null;
+    language?: string | null;
+  };
 }
 
 interface ThreadedComment extends Comment {
   replies: ThreadedComment[];
+}
+
+interface QuoteComment {
+  comment_id: string;
+  author: string;
+  display_name?: string;
+  text: string;
+  likes: number;
+  retweets?: number;
+  reply_count?: number;
+  quotes?: number;
+  views?: number;
+  is_reply: boolean;
+  media_urls?: string[] | null;
+  hosted_media_urls?: string[] | null;
+  thumbnail_url?: string | null;
+  created_at: string | null;
+  user?: {
+    id?: string | null;
+    username?: string | null;
+    display_name?: string | null;
+    url?: string | null;
+    avatar_url?: string | null;
+  };
 }
 
 interface BasePost {
@@ -46,6 +89,12 @@ interface BasePost {
   dislikes?: number;
   downvotes?: number;
   upvotes?: number;
+  source_media_urls?: string[] | null;
+  source_thumbnail_url?: string | null;
+  hosted_media_urls?: string[] | null;
+  hosted_thumbnail_url?: string | null;
+  cover_source?: string | null;
+  cover_source_confidence?: string | null;
 }
 
 interface InstagramPost extends BasePost {
@@ -68,6 +117,7 @@ interface TikTokPost extends BasePost {
   likes: number;
   comments_count: number;
   shares: number;
+  saves?: number;
   views: number;
   hashtags: string[];
   duration_seconds?: number | null;
@@ -94,9 +144,31 @@ interface TwitterPost extends BasePost {
   hashtags: string[];
   mentions: string[];
   media_urls?: string[] | null;
+  thumbnail_url?: string | null;
+  total_quotes_in_db?: number;
 }
 
-type AnyPost = InstagramPost | TikTokPost | YouTubePost | TwitterPost;
+interface FacebookPost extends BasePost {
+  likes: number;
+  comments_count: number;
+  shares: number;
+  views: number;
+  media_urls?: string[] | null;
+  thumbnail_url?: string | null;
+  post_type?: string | null;
+}
+
+interface ThreadsPost extends BasePost {
+  likes: number;
+  replies_count: number;
+  reposts: number;
+  quotes: number;
+  views: number;
+  media_urls?: string[] | null;
+  thumbnail_url?: string | null;
+}
+
+type AnyPost = InstagramPost | TikTokPost | YouTubePost | TwitterPost | FacebookPost | ThreadsPost;
 
 interface PlatformData {
   posts: AnyPost[];
@@ -118,6 +190,7 @@ interface WeekDetailResponse {
     season_id: string;
     show_id: string;
     show_name: string | null;
+    show_slug: string | null;
     season_number: number;
   };
   source_scope: string;
@@ -139,6 +212,13 @@ interface PostDetailResponse {
   title?: string;
   display_name?: string;
   thumbnail_url?: string | null;
+  media_urls?: string[] | null;
+  source_media_urls?: string[] | null;
+  hosted_media_urls?: string[] | null;
+  source_thumbnail_url?: string | null;
+  hosted_thumbnail_url?: string | null;
+  cover_source?: string | null;
+  cover_source_confidence?: string | null;
   post_format?: "reel" | "post" | "carousel" | null;
   profile_tags?: string[];
   collaborators?: string[];
@@ -147,7 +227,9 @@ interface PostDetailResponse {
   duration_seconds?: number | null;
   stats: Record<string, number>;
   total_comments_in_db: number;
+  total_quotes_in_db?: number;
   comments: ThreadedComment[];
+  quotes?: QuoteComment[];
 }
 
 interface SocialJob {
@@ -243,10 +325,35 @@ interface WorkerHealthPayload {
   reason?: string | null;
 }
 
-type PlatformFilter = "all" | "instagram" | "tiktok" | "twitter" | "youtube";
+type PlatformFilter = "all" | "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
+type SocialPlatform = Exclude<PlatformFilter, "all">;
 type SortField = "engagement" | "likes" | "views" | "comments_count" | "shares" | "retweets" | "posted_at";
 type SortDir = "desc" | "asc";
 type SourceScope = "bravo" | "creator" | "community";
+type SocialMediaType = "image" | "video";
+
+interface SocialMediaCandidate {
+  src: string;
+  mediaType: SocialMediaType;
+  posterSrc: string | null;
+  mirrored: boolean;
+  originalSrc: string | null;
+}
+
+interface SocialStatsItem {
+  label: string;
+  value: string;
+}
+
+interface SocialMediaLightboxEntry {
+  id: string;
+  src: string;
+  mediaType: SocialMediaType;
+  posterSrc: string | null;
+  alt: string;
+  metadata: PhotoMetadata;
+  stats: SocialStatsItem[];
+}
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -258,6 +365,8 @@ const PLATFORM_FILTERS: { key: PlatformFilter; label: string }[] = [
   { key: "tiktok", label: "TikTok" },
   { key: "twitter", label: "Twitter/X" },
   { key: "youtube", label: "YouTube" },
+  { key: "facebook", label: "Facebook" },
+  { key: "threads", label: "Threads" },
 ];
 
 const SORT_OPTIONS: { key: SortField; label: string }[] = [
@@ -266,7 +375,7 @@ const SORT_OPTIONS: { key: SortField; label: string }[] = [
   { key: "views", label: "Views" },
   { key: "comments_count", label: "Comments" },
   { key: "shares", label: "Shares" },
-  { key: "retweets", label: "Retweets" },
+  { key: "retweets", label: "Reposts" },
   { key: "posted_at", label: "Date" },
 ];
 
@@ -275,6 +384,8 @@ const PLATFORM_COLORS: Record<string, string> = {
   tiktok: "bg-gray-100 text-gray-800",
   twitter: "bg-sky-100 text-sky-800",
   youtube: "bg-red-100 text-red-800",
+  facebook: "bg-blue-100 text-blue-800",
+  threads: "bg-neutral-100 text-neutral-800",
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -282,9 +393,13 @@ const PLATFORM_LABELS: Record<string, string> = {
   tiktok: "TikTok",
   twitter: "Twitter/X",
   youtube: "YouTube",
+  facebook: "Facebook",
+  threads: "Threads",
 };
 const PLATFORM_HANDLE_FALLBACK: Record<string, string> = {
   youtube: "Bravo",
+  facebook: "Bravo",
+  threads: "bravotv",
 };
 
 const STAT_LABELS: Record<string, string> = {
@@ -292,7 +407,8 @@ const STAT_LABELS: Record<string, string> = {
   comments_count: "Comments",
   views: "Views",
   shares: "Shares",
-  retweets: "Retweets",
+  saves: "Saves",
+  retweets: "Reposts",
   replies_count: "Replies",
   quotes: "Quotes",
   engagement: "Total Engagement",
@@ -329,6 +445,17 @@ const TRANSIENT_DEV_RESTART_PATTERNS = [
   "load failed",
   "connection closed",
 ] as const;
+const SOCIAL_MEDIA_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|$)/i;
+const SOCIAL_MEDIA_VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|m3u8|mpd)(\?|$)/i;
+const SOCIAL_MIRROR_HOST_MARKERS = ["cloudfront.net", "amazonaws.com", "s3.", "therealityreport"];
+const SOCIAL_SOURCE_COLORS: Record<string, string> = {
+  instagram: "#f43f5e",
+  tiktok: "#111827",
+  twitter: "#0284c7",
+  youtube: "#dc2626",
+  facebook: "#1d4ed8",
+  threads: "#27272a",
+};
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -465,7 +592,7 @@ function getStr(post: AnyPost, key: string): string {
 }
 
 function getActualCommentsForPost(platform: string, post: AnyPost): number {
-  if (platform === "twitter") {
+  if (platform === "twitter" || platform === "threads") {
     return Math.max(0, getNum(post, "replies_count"));
   }
   return Math.max(0, getNum(post, "comments_count"));
@@ -518,6 +645,20 @@ function getCoverageEntryCounts(
   };
 }
 
+function parseSocialPlatform(value: string | null | undefined): SocialPlatform | null {
+  if (
+    value === "instagram" ||
+    value === "tiktok" ||
+    value === "twitter" ||
+    value === "youtube" ||
+    value === "facebook" ||
+    value === "threads"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function formatCoverageLabel(saved: number, actual: number): string {
   const pct = actual > 0 ? Math.max(0, Math.min(100, (saved / actual) * 100)) : 100;
   return `${fmtNum(saved)}/${fmtNum(actual)} (${pct.toFixed(1)}%)`;
@@ -530,7 +671,7 @@ function formatMirrorCoverageLabel(readyCount: number, total: number): string {
 
 function getReportedCommentCountFromStats(platform: string, stats: Record<string, number>): number {
   const raw =
-    platform === "twitter"
+    platform === "twitter" || platform === "threads"
       ? Number(stats.replies_count ?? stats.comments_count ?? 0)
       : Number(stats.comments_count ?? 0);
   if (!Number.isFinite(raw)) return 0;
@@ -538,17 +679,324 @@ function getReportedCommentCountFromStats(platform: string, stats: Record<string
 }
 
 function getPostThumbnailUrl(platform: string, post: AnyPost): string | null {
+  const hostedThumbnail = getStr(post, "hosted_thumbnail_url");
+  if (hostedThumbnail) return hostedThumbnail;
+
   if (platform === "twitter") {
-    return null;
+    const thumbnail = getStr(post, "thumbnail_url");
+    if (thumbnail) return thumbnail;
+    const hostedMediaUrls = getStrArr(post, "hosted_media_urls");
+    if (hostedMediaUrls[0]) return hostedMediaUrls[0];
+    const mediaUrls = getStrArr(post, "media_urls");
+    return mediaUrls[0] || null;
   }
   if (platform === "youtube") return getStr(post, "thumbnail_url") || null;
   if (platform === "instagram") {
     const thumbnail = getStr(post, "thumbnail_url");
     if (thumbnail) return thumbnail;
+    const hostedMediaUrls = getStrArr(post, "hosted_media_urls");
+    if (hostedMediaUrls[0]) return hostedMediaUrls[0];
     const mediaUrls = getStrArr(post, "media_urls");
     return mediaUrls[0] || null;
   }
-  return getStr(post, "thumbnail_url") || null;
+  return getStr(post, "thumbnail_url") || getStrArr(post, "hosted_media_urls")[0] || null;
+}
+
+function detectSocialMediaType(url: string): SocialMediaType {
+  const normalized = url.toLowerCase();
+  if (SOCIAL_MEDIA_VIDEO_EXT_RE.test(normalized)) return "video";
+  return "image";
+}
+
+function isLikelyMirroredSocialUrl(url: string | null | undefined): boolean {
+  if (typeof url !== "string" || url.trim().length === 0) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return SOCIAL_MIRROR_HOST_MARKERS.some((marker) => host.includes(marker));
+  } catch {
+    return false;
+  }
+}
+
+function inferMirrorFileNameFromUrl(url: string | null | undefined): string | null {
+  if (typeof url !== "string" || url.trim().length === 0) return null;
+  try {
+    const pathname = new URL(url).pathname;
+    const fileName = pathname.split("/").filter(Boolean).pop();
+    return fileName ? decodeURIComponent(fileName) : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSocialMediaUrlForCompare(url: string | null | undefined): string {
+  if (typeof url !== "string" || url.trim().length === 0) return "";
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname.toLowerCase()}${parsed.pathname.replace(/\/+$/, "")}`.toLowerCase();
+  } catch {
+    return url.trim().toLowerCase();
+  }
+}
+
+function resolveMediaCandidateIndex(
+  candidates: SocialMediaCandidate[],
+  preferredSrc: string | null | undefined,
+): number {
+  if (candidates.length === 0) return 0;
+  const normalizedPreferred = normalizeSocialMediaUrlForCompare(preferredSrc ?? "");
+  if (!normalizedPreferred) return 0;
+  const matchIndex = candidates.findIndex((candidate) => {
+    if (normalizeSocialMediaUrlForCompare(candidate.src) === normalizedPreferred) return true;
+    if (normalizeSocialMediaUrlForCompare(candidate.originalSrc ?? "") === normalizedPreferred) return true;
+    return false;
+  });
+  return matchIndex >= 0 ? matchIndex : 0;
+}
+
+function formatInstagramCoverSourceLabel(value: string | null | undefined): string | null {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "custom_cover") return "Custom Cover Photo";
+  if (normalized === "still_frame_or_default") return "Still Frame / Default Cover";
+  if (normalized === "unknown") return "Unknown";
+  return normalized.replaceAll("_", " ");
+}
+
+function buildMirrorScopeLabel(post: AnyPost): string {
+  const sourceCount = getStrArr(post, "source_media_urls").length || getStrArr(post, "media_urls").length;
+  const hostedCount = getStrArr(post, "hosted_media_urls").length;
+  const hasHostedThumbnail = Boolean(getStr(post, "hosted_thumbnail_url"));
+  if (hostedCount > 0 && sourceCount > 0 && hostedCount >= sourceCount) return "Media + thumbnail mirrored";
+  if (hostedCount > 0 && sourceCount > 0) return `Partial media mirrored (${hostedCount}/${sourceCount})`;
+  if (hostedCount > 0) return "Media mirrored";
+  if (hasHostedThumbnail) return "Thumbnail mirrored only";
+  return "Platform-hosted media";
+}
+
+function getPostMediaCandidates(platform: string, post: AnyPost): SocialMediaCandidate[] {
+  const sourceMediaUrls = getStrArr(post, "source_media_urls").length
+    ? getStrArr(post, "source_media_urls")
+    : getStrArr(post, "media_urls");
+  const hostedMediaUrls = getStrArr(post, "hosted_media_urls");
+  const sourceThumbnail = getStr(post, "source_thumbnail_url") || getStr(post, "thumbnail_url");
+  const hostedThumbnail = getStr(post, "hosted_thumbnail_url");
+  const thumbnail = getPostThumbnailUrl(platform, post);
+  const candidates: SocialMediaCandidate[] = [];
+  const seen = new Set<string>();
+
+  const candidateCount = Math.max(sourceMediaUrls.length, hostedMediaUrls.length);
+  for (let index = 0; index < candidateCount; index += 1) {
+    const sourceMediaUrl = sourceMediaUrls[index]?.trim() || null;
+    const hostedMediaUrl = hostedMediaUrls[index]?.trim() || null;
+    const normalized = hostedMediaUrl ?? sourceMediaUrl;
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    const mirrored = Boolean(hostedMediaUrl) || isLikelyMirroredSocialUrl(normalized);
+    candidates.push({
+      src: normalized,
+      mediaType: detectSocialMediaType(normalized),
+      posterSrc: thumbnail,
+      mirrored,
+      originalSrc: mirrored ? sourceMediaUrl : sourceMediaUrl ?? null,
+    });
+  }
+
+  if (thumbnail && !seen.has(thumbnail)) {
+    const mirrored = Boolean(hostedThumbnail) || isLikelyMirroredSocialUrl(thumbnail);
+    candidates.push({
+      src: thumbnail,
+      mediaType: "image",
+      posterSrc: thumbnail,
+      mirrored,
+      originalSrc: mirrored ? sourceThumbnail : sourceThumbnail ?? null,
+    });
+  }
+
+  return candidates;
+}
+
+function inferFileExtensionFromUrl(url: string): string | null {
+  const imageMatch = url.match(SOCIAL_MEDIA_IMAGE_EXT_RE);
+  if (imageMatch?.[1]) return imageMatch[1].toLowerCase();
+  const videoMatch = url.match(SOCIAL_MEDIA_VIDEO_EXT_RE);
+  if (videoMatch?.[1]) return videoMatch[1].toLowerCase();
+  return null;
+}
+
+const PLATFORM_FILE_NAME_LABELS: Record<string, string> = {
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  youtube: "YouTube",
+  twitter: "Twitter",
+  facebook: "Facebook",
+  threads: "Threads",
+};
+
+function computeDailyPostNumber(
+  platform: string,
+  post: AnyPost,
+  allPlatformPosts: AnyPost[],
+): number {
+  if (!post.posted_at) return 1;
+  const postDate = new Date(post.posted_at);
+  if (Number.isNaN(postDate.getTime())) return 1;
+  const postDay = postDate.toISOString().slice(0, 10);
+  const postAuthor = (post.author || "").toLowerCase().replace(/^@/, "");
+
+  const sameDayPosts = allPlatformPosts
+    .filter((p) => {
+      const pDate = p.posted_at ? new Date(p.posted_at) : null;
+      if (!pDate || Number.isNaN(pDate.getTime())) return false;
+      const pDay = pDate.toISOString().slice(0, 10);
+      const pAuthor = (p.author || "").toLowerCase().replace(/^@/, "");
+      return pDay === postDay && pAuthor === postAuthor;
+    })
+    .sort((a, b) => {
+      const aTime = new Date(a.posted_at!).getTime();
+      const bTime = new Date(b.posted_at!).getTime();
+      return aTime - bTime || a.source_id.localeCompare(b.source_id);
+    });
+
+  const index = sameDayPosts.findIndex((p) => p.source_id === post.source_id);
+  return index >= 0 ? index + 1 : 1;
+}
+
+function buildPostDisplayName(
+  showSlug: string | null | undefined,
+  username: string,
+  platform: string,
+  postNumber: number,
+): string {
+  const slug = (showSlug || "").replace(/[^A-Za-z0-9]/g, "");
+  const sanitizedUser = username.replace(/^@/, "").replace(/[^A-Za-z0-9_]/g, "");
+  const platformLabel = PLATFORM_FILE_NAME_LABELS[platform] ?? platform;
+  return `${slug}${sanitizedUser}${platformLabel}Post${postNumber}`;
+}
+
+function buildSocialPostMetadata({
+  platform,
+  post,
+  media,
+  showName,
+  showSlug,
+  seasonNumber,
+  weekLabel,
+  sourceScope,
+  allPlatformPosts,
+  mediaIndex,
+  totalMediaCount,
+  isThumbnailEntry,
+}: {
+  platform: string;
+  post: AnyPost;
+  media: SocialMediaCandidate;
+  showName: string | null | undefined;
+  showSlug: string | null | undefined;
+  seasonNumber: number | null;
+  weekLabel: string | null;
+  sourceScope: SourceScope;
+  allPlatformPosts: AnyPost[];
+  mediaIndex: number;
+  totalMediaCount: number;
+  isThumbnailEntry: boolean;
+}): PhotoMetadata {
+  const postedDate =
+    typeof post.posted_at === "string" && post.posted_at.trim().length > 0
+      ? new Date(post.posted_at)
+      : null;
+  const validPostedDate =
+    postedDate && !Number.isNaN(postedDate.getTime()) ? postedDate : null;
+  const sourceLabel = PLATFORM_LABELS[platform] ?? platform;
+  const title = getStr(post, "title");
+  const caption = title || post.text || null;
+  const sourcePageTitle = title || caption || `${sourceLabel} post`;
+  const sectionLabel = weekLabel ? `${sourceLabel} · ${weekLabel}` : sourceLabel;
+  const fileType = inferFileExtensionFromUrl(media.src);
+  const isS3Mirrored = media.mirrored || isLikelyMirroredSocialUrl(media.src);
+  const mirrorFileName = isS3Mirrored ? inferMirrorFileNameFromUrl(media.src) : null;
+  const originalMediaUrl = media.originalSrc ?? (!isS3Mirrored ? media.src : null);
+
+  const postNumber = computeDailyPostNumber(platform, post, allPlatformPosts);
+  const displayName = buildPostDisplayName(showSlug, post.author, platform, postNumber);
+  let assetSuffix = "";
+  if (isThumbnailEntry) {
+    assetSuffix = "_Thumbnail";
+  } else if (totalMediaCount > 1) {
+    assetSuffix = `_S${mediaIndex + 1}`;
+  }
+
+  return {
+    source: sourceLabel,
+    sourceBadgeColor: SOCIAL_SOURCE_COLORS[platform] ?? "#71717a",
+    isS3Mirrored,
+    s3MirrorFileName: mirrorFileName,
+    originalImageUrl: originalMediaUrl,
+    originalSourceFileUrl: originalMediaUrl,
+    originalSourcePageUrl: post.url || null,
+    originalSourceLabel: sourceLabel,
+    fileType,
+    createdAt: validPostedDate,
+    addedAt: validPostedDate,
+    hasTextOverlay: null,
+    contentType: media.mediaType === "video" ? "OTHER" : "PROMO",
+    sectionTag: "OTHER",
+    sectionLabel,
+    sourceLogo: sourceScope.toUpperCase(),
+    assetName: `${displayName}${assetSuffix}`,
+    imdbType: null,
+    episodeLabel: weekLabel,
+    sourceVariant: sourceScope.toUpperCase(),
+    sourcePageTitle,
+    sourceUrl: post.url || media.src,
+    faceBoxes: [],
+    peopleCount: null,
+    caption,
+    dimensions: null,
+    season: seasonNumber,
+    contextType: "social_post_media",
+    people: [],
+    titles: [showName, title].filter((value): value is string => Boolean(value && value.trim())),
+    fetchedAt: validPostedDate,
+    galleryStatus: null,
+    galleryStatusReason: null,
+    galleryStatusCheckedAt: null,
+  };
+}
+
+function buildSocialStats(platform: string, post: AnyPost): SocialStatsItem[] {
+  const stats: SocialStatsItem[] = [
+    { label: "Platform", value: PLATFORM_LABELS[platform] ?? platform },
+    { label: "Engagement", value: fmtNum(Number(post.engagement ?? 0)) },
+    {
+      label: platform === "twitter" || platform === "threads" ? "Replies" : "Comments",
+      value: formatSavedVsActualComments(getSavedCommentsForPost(post), getActualCommentsForPost(platform, post)),
+    },
+  ];
+
+  if (hasNum(post, "likes")) stats.push({ label: "Likes", value: fmtNum(getNum(post, "likes")) });
+  if (hasNum(post, "views")) stats.push({ label: "Views", value: fmtNum(getNum(post, "views")) });
+  if (hasNum(post, "shares")) stats.push({ label: "Shares", value: fmtNum(getNum(post, "shares")) });
+  if (hasNum(post, "saves")) stats.push({ label: "Saves", value: fmtNum(getNum(post, "saves")) });
+  if (hasNum(post, "retweets")) stats.push({ label: "Reposts", value: fmtNum(getNum(post, "retweets")) });
+  if (hasNum(post, "reposts")) stats.push({ label: "Reposts", value: fmtNum(getNum(post, "reposts")) });
+  if (hasNum(post, "quotes")) stats.push({ label: "Quotes", value: fmtNum(getNum(post, "quotes")) });
+  if (hasNum(post, "duration_seconds")) {
+    stats.push({ label: "Duration", value: `${fmtNum(getNum(post, "duration_seconds"))}s` });
+  }
+  stats.push({ label: "Mirror", value: buildMirrorScopeLabel(post) });
+  if (platform === "instagram") {
+    const coverSourceLabel = formatInstagramCoverSourceLabel(getStr(post, "cover_source"));
+    if (coverSourceLabel) {
+      const confidence = getStr(post, "cover_source_confidence");
+      stats.push({
+        label: "Cover Source",
+        value: confidence ? `${coverSourceLabel} (${confidence})` : coverSourceLabel,
+      });
+    }
+  }
+
+  return stats;
 }
 
 function getPlatformIconKey(platform: string): SocialPlatformTabIconKey | null {
@@ -556,7 +1004,9 @@ function getPlatformIconKey(platform: string): SocialPlatformTabIconKey | null {
     platform === "instagram" ||
     platform === "tiktok" ||
     platform === "twitter" ||
-    platform === "youtube"
+    platform === "youtube" ||
+    platform === "facebook" ||
+    platform === "threads"
   ) {
     return platform;
   }
@@ -648,12 +1098,38 @@ function ThreadedCommentItem({
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
   const hasReplies = comment.replies && comment.replies.length > 0;
+  const hostedMedia = Array.isArray(comment.hosted_media_urls) ? comment.hosted_media_urls : [];
+  const sourceMedia = Array.isArray(comment.media_urls) ? comment.media_urls : [];
+  const mediaUrls = (hostedMedia.length > 0 ? hostedMedia : sourceMedia).filter((url) => !!url);
+  const avatarUrl =
+    (typeof comment.user?.avatar_url === "string" ? comment.user.avatar_url : "") ||
+    null;
+  const displayHandle =
+    (typeof comment.user?.username === "string" ? comment.user.username : "") ||
+    comment.author ||
+    "unknown";
+  const displayName =
+    (typeof comment.user?.display_name === "string" ? comment.user.display_name : "") ||
+    "";
+  const isImageUrl = (url: string): boolean =>
+    /\.(png|jpe?g|gif|webp)(\?|$)/i.test(url) || url.includes("image-origin");
 
   return (
     <div className={depth > 0 ? "ml-4 pl-3 border-l-2 border-gray-100" : ""}>
       <div className="py-2">
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="font-medium text-gray-700">@{comment.author || "unknown"}</span>
+          {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={avatarUrl}
+              alt={`@${displayHandle} avatar`}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="h-5 w-5 rounded-full object-cover border border-gray-200"
+            />
+          ) : null}
+          <span className="font-medium text-gray-700">@{displayHandle}</span>
+          {displayName ? <span className="text-gray-500">({displayName})</span> : null}
           {comment.created_at && <span>{fmtDateTime(comment.created_at)}</span>}
           {comment.likes > 0 && (
             <span className="font-medium text-gray-600">{fmtNum(comment.likes)} likes</span>
@@ -662,6 +1138,33 @@ function ThreadedCommentItem({
         <p className="text-sm text-gray-700 mt-0.5 whitespace-pre-wrap break-words">
           {comment.text}
         </p>
+        {mediaUrls.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {mediaUrls.map((mediaUrl, index) => (
+              <a
+                key={`${comment.comment_id}-media-${index + 1}`}
+                href={mediaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Comment media ${index + 1}`}
+                className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
+              >
+                {isImageUrl(mediaUrl) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={mediaUrl}
+                    alt={`Comment media ${index + 1}`}
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    className="h-14 w-14 rounded object-cover"
+                  />
+                ) : (
+                  `Comment media ${index + 1}`
+                )}
+              </a>
+            ))}
+          </div>
+        )}
         {hasReplies && (
           <button
             type="button"
@@ -689,7 +1192,7 @@ function ThreadedCommentItem({
 }
 
 /* ------------------------------------------------------------------ */
-/* Post Stats Drawer                                                   */
+/* Post Details Drawer                                                 */
 /* ------------------------------------------------------------------ */
 
 function PostStatsDrawer({
@@ -698,6 +1201,7 @@ function PostStatsDrawer({
   seasonId,
   platform,
   sourceId,
+  onOpenMediaLightbox,
   onClose,
 }: {
   showId: string;
@@ -705,6 +1209,7 @@ function PostStatsDrawer({
   seasonId?: string | null;
   platform: string;
   sourceId: string;
+  onOpenMediaLightbox?: ((preferredSrc?: string | null) => void) | null;
   onClose: () => void;
 }) {
   const [data, setData] = useState<PostDetailResponse | null>(null);
@@ -712,6 +1217,7 @@ function PostStatsDrawer({
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [twitterCommentMode, setTwitterCommentMode] = useState<"comments_replies" | "quotes">("comments_replies");
 
   const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
     const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
@@ -767,6 +1273,10 @@ function PostStatsDrawer({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
+  useEffect(() => {
+    setTwitterCommentMode("comments_replies");
+  }, [platform, sourceId]);
+
   const handleRefreshComments = useCallback(async () => {
     try {
       setRefreshing(true);
@@ -812,6 +1322,31 @@ function PostStatsDrawer({
     : 0;
   const savedCommentsCount = data ? Math.max(0, Number(data.total_comments_in_db ?? 0)) : 0;
   const commentsIncomplete = isCommentsCoverageIncomplete(savedCommentsCount, reportedCommentsCount);
+  const isTwitterPost = data?.platform === "twitter";
+  const twitterQuoteCount = data ? Math.max(0, Number(data.total_quotes_in_db ?? 0)) : 0;
+  const quoteCommentsAsThreaded: ThreadedComment[] = (data?.quotes ?? []).map((quote) => ({
+    comment_id: quote.comment_id,
+    author: quote.author,
+    text: quote.text,
+    likes: Number(quote.likes ?? 0),
+    is_reply: false,
+    reply_count: Number(quote.reply_count ?? 0),
+    created_at: quote.created_at,
+    media_urls: quote.media_urls ?? undefined,
+    hosted_media_urls: quote.hosted_media_urls ?? undefined,
+    user: {
+      id: quote.user?.id ?? null,
+      username: quote.user?.username ?? quote.author ?? null,
+      display_name: quote.user?.display_name ?? quote.display_name ?? null,
+      url: quote.user?.url ?? null,
+      avatar_url: quote.user?.avatar_url ?? null,
+    },
+    replies: [],
+  }));
+  const activeComments =
+    isTwitterPost && twitterCommentMode === "quotes"
+      ? quoteCommentsAsThreaded
+      : (data?.comments ?? []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -821,7 +1356,7 @@ function PostStatsDrawer({
       {/* Modal */}
       <div className="relative z-10 flex w-full max-w-4xl max-h-[90vh] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
         <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-gray-900">Post Stats</h2>
+          <h2 className="text-lg font-bold text-gray-900">Post Details</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -873,21 +1408,40 @@ function PostStatsDrawer({
                 </div>
                 {data.thumbnail_url && (
                   <div className="mb-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={data.thumbnail_url}
-                      alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      onError={(event) => {
-                        event.currentTarget.style.display = "none";
-                      }}
-                      className={`w-full ${
-                        data.platform === "youtube"
-                          ? "max-h-[360px] object-contain bg-black/5"
-                          : "max-h-72 object-cover"
-                      }`}
-                    />
+                    {onOpenMediaLightbox ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenMediaLightbox(data.thumbnail_url ?? data.media_urls?.[0] ?? null)}
+                        className="block w-full"
+                        aria-label="Open post media lightbox from details"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={data.thumbnail_url}
+                          alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                          className="max-h-[360px] w-full object-contain bg-black/5"
+                        />
+                      </button>
+                    ) : (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={data.thumbnail_url}
+                          alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                          className="max-h-[360px] w-full object-contain bg-black/5"
+                        />
+                      </>
+                    )}
                   </div>
                 )}
                 {data.title && (
@@ -909,6 +1463,12 @@ function PostStatsDrawer({
                       {typeof data.duration_seconds === "number" && data.duration_seconds > 0 && (
                         <span className="text-xs rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
                           {data.duration_seconds}s
+                        </span>
+                      )}
+                      {formatInstagramCoverSourceLabel(data.cover_source) && (
+                        <span className="text-xs rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">
+                          Cover: {formatInstagramCoverSourceLabel(data.cover_source)}
+                          {data.cover_source_confidence ? ` (${data.cover_source_confidence})` : ""}
                         </span>
                       )}
                     </div>
@@ -969,21 +1529,61 @@ function PostStatsDrawer({
 
               {/* Comments section */}
               <div className="border-t border-gray-200 pt-4">
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                  All Comments ({formatSavedVsActualComments(savedCommentsCount, reportedCommentsCount)}
-                  {commentsIncomplete ? "*" : ""})
-                </h3>
-                <p className="text-xs text-gray-500 mb-3">
-                  {commentsIncomplete
-                    ? `Saved in Supabase: ${fmtNum(savedCommentsCount)} of ${fmtNum(reportedCommentsCount)} platform-reported comments. Use Full Sync + Mirror in Week view (or REFRESH here) to backfill.`
-                    : `${fmtNum(savedCommentsCount)} comments saved in Supabase.`}
-                </p>
+                {isTwitterPost ? (
+                  <div className="mb-3 inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold">
+                    <button
+                      type="button"
+                      aria-pressed={twitterCommentMode === "comments_replies"}
+                      onClick={() => setTwitterCommentMode("comments_replies")}
+                      className={`rounded-full px-2.5 py-1 transition ${
+                        twitterCommentMode === "comments_replies"
+                          ? "bg-zinc-900 text-white"
+                          : "text-zinc-600 hover:bg-white hover:text-zinc-900"
+                      }`}
+                    >
+                      Comments & Replies
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={twitterCommentMode === "quotes"}
+                      onClick={() => setTwitterCommentMode("quotes")}
+                      className={`rounded-full px-2.5 py-1 transition ${
+                        twitterCommentMode === "quotes"
+                          ? "bg-zinc-900 text-white"
+                          : "text-zinc-600 hover:bg-white hover:text-zinc-900"
+                      }`}
+                    >
+                      Quotes
+                    </button>
+                  </div>
+                ) : null}
 
-                {data.comments.length === 0 ? (
-                  <p className="text-sm text-gray-500 italic py-4">No comments in database.</p>
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  {isTwitterPost && twitterCommentMode === "quotes"
+                    ? `All Quotes (${fmtNum(twitterQuoteCount)})`
+                    : `All Comments (${formatSavedVsActualComments(savedCommentsCount, reportedCommentsCount)}${
+                        commentsIncomplete ? "*" : ""
+                      })`}
+                </h3>
+                {isTwitterPost && twitterCommentMode === "quotes" ? (
+                  <p className="text-xs text-gray-500 mb-3">{fmtNum(twitterQuoteCount)} quotes saved in Supabase.</p>
+                ) : (
+                  <p className="text-xs text-gray-500 mb-3">
+                    {commentsIncomplete
+                      ? `Saved in Supabase: ${fmtNum(savedCommentsCount)} of ${fmtNum(reportedCommentsCount)} platform-reported comments. Use Full Sync + Mirror in Week view (or REFRESH here) to backfill.`
+                      : `${fmtNum(savedCommentsCount)} comments saved in Supabase.`}
+                  </p>
+                )}
+
+                {activeComments.length === 0 ? (
+                  <p className="text-sm text-gray-500 italic py-4">
+                    {isTwitterPost && twitterCommentMode === "quotes"
+                      ? "No quotes in database."
+                      : "No comments in database."}
+                  </p>
                 ) : (
                   <div className="space-y-1 divide-y divide-gray-100">
-                    {data.comments.map((c) => (
+                    {activeComments.map((c) => (
                       <ThreadedCommentItem key={c.comment_id} comment={c} />
                     ))}
                   </div>
@@ -1022,6 +1622,7 @@ function EngagementRow({ platform, post }: { platform: string; post: AnyPost }) 
     pushMetric("Likes", getNum(post, "likes"));
     items.push({ label: "Comments", value: commentsValue });
     pushMetric("Shares", getNum(post, "shares"));
+    pushMetric("Saves", getNum(post, "saves"));
     pushMetric("Views", getNum(post, "views"));
   } else if (platform === "youtube") {
     pushMetric("Views", getNum(post, "views"));
@@ -1034,8 +1635,19 @@ function EngagementRow({ platform, post }: { platform: string; post: AnyPost }) 
     items.push({ label: "Comments", value: commentsValue });
   } else if (platform === "twitter") {
     pushMetric("Likes", getNum(post, "likes"));
-    pushMetric("Retweets", getNum(post, "retweets"));
+    pushMetric("Reposts", getNum(post, "retweets"));
     items.push({ label: "Replies", value: commentsValue });
+    pushMetric("Quotes", getNum(post, "quotes"));
+    pushMetric("Views", getNum(post, "views"));
+  } else if (platform === "facebook") {
+    pushMetric("Likes", getNum(post, "likes"));
+    items.push({ label: "Comments", value: commentsValue });
+    pushMetric("Shares", getNum(post, "shares"));
+    pushMetric("Views", getNum(post, "views"));
+  } else if (platform === "threads") {
+    pushMetric("Likes", getNum(post, "likes"));
+    items.push({ label: "Replies", value: commentsValue });
+    pushMetric("Reposts", getNum(post, "reposts"));
     pushMetric("Quotes", getNum(post, "quotes"));
     pushMetric("Views", getNum(post, "views"));
   }
@@ -1051,6 +1663,26 @@ function EngagementRow({ platform, post }: { platform: string; post: AnyPost }) 
   );
 }
 
+function SocialStatsPanel({ stats }: { stats: SocialStatsItem[] }) {
+  if (stats.length === 0) return null;
+  return (
+    <div className="rounded border border-white/10 bg-white/[0.03] p-3">
+      <p className="text-[10px] uppercase tracking-widest text-white/55">Social Stats</p>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        {stats.map((item) => (
+          <div
+            key={`${item.label}-${item.value}`}
+            className="rounded border border-white/10 bg-black/20 px-2 py-1.5"
+          >
+            <p className="text-[10px] uppercase tracking-wide text-white/55">{item.label}</p>
+            <p className="mt-0.5 text-xs font-semibold text-white/90">{item.value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Post card                                                           */
 /* ------------------------------------------------------------------ */
@@ -1061,12 +1693,19 @@ function PostCard({
   showId,
   seasonNumber,
   seasonId,
+  onOpenMediaLightbox,
 }: {
   platform: string;
   post: AnyPost;
   showId: string;
   seasonNumber: string;
   seasonId?: string | null;
+  onOpenMediaLightbox?: (
+    platform: string,
+    post: AnyPost,
+    initialIndex?: number,
+    preferredSrc?: string | null,
+  ) => void;
 }) {
   const [statsOpen, setStatsOpen] = useState(false);
   const hashtags = getStrArr(post, "hashtags");
@@ -1079,6 +1718,8 @@ function PostCard({
   const savedComments = getSavedCommentsForPost(post);
   const commentsCoverageIncomplete = isCommentsCoverageIncomplete(savedComments, actualComments);
   const thumbnailUrl = getPostThumbnailUrl(platform, post);
+  const mediaCandidates = getPostMediaCandidates(platform, post);
+  const hasMedia = mediaCandidates.length > 0;
   const platformIconKey = getPlatformIconKey(platform);
   const postHandle = formatPostHandle(platform, post.author);
 
@@ -1125,18 +1766,27 @@ function PostCard({
 
         {/* Thumbnail preview */}
         {thumbnailUrl && (
-          <div className="mb-3 aspect-[3/4] overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={thumbnailUrl}
-              alt={`${PLATFORM_LABELS[platform] ?? platform} post thumbnail`}
-              loading="lazy"
-              referrerPolicy="no-referrer"
-              onError={(event) => {
-                event.currentTarget.style.display = "none";
-              }}
-              className="h-full w-full object-cover"
-            />
+          <div className="mb-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 p-1">
+            <button
+              type="button"
+              onClick={() => setStatsOpen(true)}
+              className="block w-full"
+              aria-label="Open post detail modal"
+            >
+              <div className="relative flex min-h-[10rem] max-h-72 items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={thumbnailUrl}
+                  alt={`${PLATFORM_LABELS[platform] ?? platform} post thumbnail`}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
+                  className="max-h-72 w-full object-contain"
+                />
+              </div>
+            </button>
           </div>
         )}
 
@@ -1212,7 +1862,7 @@ function PostCard({
               onClick={() => setStatsOpen(true)}
               className="text-xs font-medium px-2.5 py-1 rounded-md bg-gray-900 text-white hover:bg-gray-700 transition-colors"
             >
-              Post Stats
+              Post Details
               {actualComments > 0 && (
                 <span className="ml-1 opacity-70">
                   · {formatSavedVsActualComments(savedComments, actualComments)}
@@ -1224,7 +1874,7 @@ function PostCard({
         </div>
       </div>
 
-      {/* Post Stats Drawer */}
+      {/* Post Details Drawer */}
       {statsOpen && (
         <PostStatsDrawer
           showId={showId}
@@ -1232,6 +1882,18 @@ function PostCard({
           seasonId={seasonId}
           platform={platform}
           sourceId={post.source_id}
+          onOpenMediaLightbox={
+            hasMedia
+              ? (preferredSrc?: string | null) => {
+                  setStatsOpen(false);
+                  const preferredIndex = resolveMediaCandidateIndex(
+                    mediaCandidates,
+                    preferredSrc ?? thumbnailUrl ?? null,
+                  );
+                  onOpenMediaLightbox?.(platform, post, preferredIndex, preferredSrc ?? null);
+                }
+              : null
+          }
           onClose={() => setStatsOpen(false)}
         />
       )}
@@ -1246,9 +1908,14 @@ function PostCard({
 export default function WeekDetailPage() {
   const { hasAccess: isAdmin, checking: authLoading } = useAdminGuard();
   const router = useRouter();
-  const params = useParams<{ showId: string; seasonNumber: string; weekIndex: string }>();
+  const pathname = usePathname();
+  const params = useParams<{ showId: string; seasonNumber: string; weekIndex: string; platform?: string }>();
   const searchParams = useSearchParams();
-  const { showId: showRouteParam, seasonNumber, weekIndex } = params;
+  const showRouteParam = typeof params.showId === "string" ? params.showId : "";
+  const seasonNumber = typeof params.seasonNumber === "string" ? params.seasonNumber : "";
+  const weekIndex = typeof params.weekIndex === "string" ? params.weekIndex : "";
+  const platformFromPathParam = typeof params.platform === "string" ? params.platform : undefined;
+  const weekSubTabFromPath = (platformFromPathParam ?? "").trim().toLowerCase();
   const seasonNumberInt = Number.parseInt(seasonNumber, 10);
   const weekIndexInt = Number.parseInt(weekIndex, 10);
   const hasValidNumericPathParams =
@@ -1262,12 +1929,17 @@ export default function WeekDetailPage() {
   const [resolvedShowId, setResolvedShowId] = useState<string | null>(
     looksLikeUuid(showRouteParam) ? showRouteParam : null
   );
+  const [resolvedShowSlug, setResolvedShowSlug] = useState<string | null>(() => {
+    const raw = showRouteParam.trim().toLowerCase();
+    if (!raw || looksLikeUuid(raw)) return null;
+    return raw;
+  });
   const [slugResolutionLoading, setSlugResolutionLoading] = useState(
     !looksLikeUuid(showRouteParam)
   );
   const [slugResolutionError, setSlugResolutionError] = useState<string | null>(null);
   const showIdForApi = resolvedShowId ?? "";
-  const showSlugForRouting = showRouteParam;
+  const showSlugForRouting = resolvedShowSlug ?? showRouteParam;
   const sourceScope: SourceScope = (() => {
     const raw = searchParams.get("source_scope") ?? searchParams.get("scope") ?? "bravo";
     if (raw === "creator" || raw === "community") return raw;
@@ -1278,14 +1950,15 @@ export default function WeekDetailPage() {
     if (!raw || !looksLikeUuid(raw)) return null;
     return raw;
   })();
-  const socialPlatform = searchParams.get("social_platform");
+  const searchParamsString = searchParams.toString();
+  const socialPlatformFromPath = parseSocialPlatform(platformFromPathParam);
+  const socialPlatformFromQuery = parseSocialPlatform(searchParams.get("social_platform"));
+  const isOverviewSubTabPath = weekSubTabFromPath === "overview";
+  const socialPlatform = socialPlatformFromPath ?? socialPlatformFromQuery;
   const socialView = searchParams.get("social_view");
   const dayParam = searchParams.get("day");
   const dayFilterFromQuery = dayParam && DATE_TOKEN_RE.test(dayParam) ? dayParam : null;
-  const socialPlatformFilterFromQuery: PlatformFilter =
-    socialPlatform === "instagram" || socialPlatform === "tiktok" || socialPlatform === "twitter" || socialPlatform === "youtube"
-      ? socialPlatform
-      : "all";
+  const socialPlatformFilterFromQuery: PlatformFilter = socialPlatform ?? "all";
 
   const [data, setData] = useState<WeekDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1307,6 +1980,10 @@ export default function WeekDetailPage() {
   const [syncCoveragePreview, setSyncCoveragePreview] = useState<CommentsCoverageResponse | null>(null);
   const [syncMirrorCoveragePreview, setSyncMirrorCoveragePreview] = useState<MirrorCoverageResponse | null>(null);
   const [syncWorkerHealth, setSyncWorkerHealth] = useState<WorkerHealthPayload | null>(null);
+  const [mediaLightbox, setMediaLightbox] = useState<{
+    entries: SocialMediaLightboxEntry[];
+    index: number;
+  } | null>(null);
   const syncPollGenerationRef = useRef(0);
   const syncPollFailureCountRef = useRef(0);
   const syncSessionGenerationRef = useRef(0);
@@ -1319,6 +1996,10 @@ export default function WeekDetailPage() {
     startedAtMs: number;
     pass: number;
   } | null>(null);
+  const legacyWeekPlatformRedirectRef = useRef<string | null>(null);
+  const legacyWeekPathRedirectRef = useRef<string | null>(null);
+  const legacyWeekSubTabRedirectRef = useRef<string | null>(null);
+  const canonicalShowSlugRedirectRef = useRef<string | null>(null);
   const resolvedSeasonId = useMemo(() => {
     if (data?.season?.season_id && looksLikeUuid(data.season.season_id)) {
       return data.season.season_id;
@@ -1329,6 +2010,136 @@ export default function WeekDetailPage() {
   useEffect(() => {
     setPlatformFilter(socialPlatformFilterFromQuery);
   }, [socialPlatformFilterFromQuery]);
+
+  useEffect(() => {
+    const raw = showRouteParam.trim().toLowerCase();
+    if (!raw || looksLikeUuid(raw)) {
+      setResolvedShowSlug(null);
+      return;
+    }
+    setResolvedShowSlug(raw);
+  }, [showRouteParam]);
+
+  useEffect(() => {
+    if (!hasValidNumericPathParams) return;
+    const currentSlug = showRouteParam.trim().toLowerCase();
+    const preferredSlug = resolvedShowSlug?.trim().toLowerCase() ?? "";
+    if (!currentSlug || !preferredSlug || currentSlug === preferredSlug) return;
+    const redirectKey = `${pathname}|${searchParamsString}|${currentSlug}|${preferredSlug}|${seasonNumber}|${weekIndex}|${socialPlatform ?? "details"}`;
+    if (canonicalShowSlugRedirectRef.current === redirectKey) return;
+    canonicalShowSlugRedirectRef.current = redirectKey;
+    router.replace(
+      buildSeasonSocialWeekUrl({
+        showSlug: preferredSlug,
+        seasonNumber,
+        weekIndex: weekIndexInt,
+        platform: socialPlatform ?? undefined,
+        query: new URLSearchParams(searchParamsString),
+      }) as Route,
+      { scroll: false },
+    );
+  }, [
+    hasValidNumericPathParams,
+    pathname,
+    resolvedShowSlug,
+    router,
+    searchParamsString,
+    seasonNumber,
+    showRouteParam,
+    socialPlatform,
+    weekIndex,
+    weekIndexInt,
+  ]);
+
+  useEffect(() => {
+    if (!hasValidNumericPathParams) return;
+    if (!pathname.includes("/social/week/")) return;
+    const redirectKey = `${showSlugForRouting}|${seasonNumber}|${weekIndex}|${socialPlatform ?? "details"}|${searchParamsString}`;
+    if (legacyWeekPathRedirectRef.current === redirectKey) return;
+    legacyWeekPathRedirectRef.current = redirectKey;
+    const nextQuery = new URLSearchParams(searchParamsString);
+    nextQuery.delete("social_platform");
+    router.replace(
+      buildSeasonSocialWeekUrl({
+        showSlug: showSlugForRouting,
+        seasonNumber,
+        weekIndex: weekIndexInt,
+        platform: socialPlatform ?? undefined,
+        query: nextQuery,
+      }) as Route,
+      { scroll: false },
+    );
+  }, [
+    hasValidNumericPathParams,
+    pathname,
+    router,
+    searchParamsString,
+    seasonNumber,
+    showSlugForRouting,
+    socialPlatform,
+    weekIndex,
+    weekIndexInt,
+  ]);
+
+  useEffect(() => {
+    if (!hasValidNumericPathParams) return;
+    if (!isOverviewSubTabPath) return;
+    if (socialPlatformFromQuery) return;
+    const redirectKey = `${showSlugForRouting}|${seasonNumber}|${weekIndex}|${searchParamsString}`;
+    if (legacyWeekSubTabRedirectRef.current === redirectKey) return;
+    legacyWeekSubTabRedirectRef.current = redirectKey;
+    const nextQuery = new URLSearchParams(searchParamsString);
+    nextQuery.delete("social_platform");
+    router.replace(
+      buildSeasonSocialWeekUrl({
+        showSlug: showSlugForRouting,
+        seasonNumber,
+        weekIndex: weekIndexInt,
+        query: nextQuery,
+      }) as Route,
+      { scroll: false },
+    );
+  }, [
+    hasValidNumericPathParams,
+    isOverviewSubTabPath,
+    router,
+    searchParamsString,
+    seasonNumber,
+    showSlugForRouting,
+    socialPlatformFromQuery,
+    weekIndex,
+    weekIndexInt,
+  ]);
+
+  useEffect(() => {
+    if (!hasValidNumericPathParams) return;
+    if (socialPlatformFromPath || !socialPlatformFromQuery) return;
+    const redirectKey = `${showSlugForRouting}|${seasonNumber}|${weekIndex}|${socialPlatformFromQuery}|${searchParamsString}`;
+    if (legacyWeekPlatformRedirectRef.current === redirectKey) return;
+    legacyWeekPlatformRedirectRef.current = redirectKey;
+    const nextQuery = new URLSearchParams(searchParamsString);
+    nextQuery.delete("social_platform");
+    router.replace(
+      buildSeasonSocialWeekUrl({
+        showSlug: showSlugForRouting,
+        seasonNumber,
+        weekIndex: weekIndexInt,
+        platform: socialPlatformFromQuery,
+        query: nextQuery,
+      }) as Route,
+      { scroll: false },
+    );
+  }, [
+    hasValidNumericPathParams,
+    router,
+    searchParamsString,
+    seasonNumber,
+    showSlugForRouting,
+    socialPlatformFromPath,
+    socialPlatformFromQuery,
+    weekIndex,
+    weekIndexInt,
+  ]);
 
   const activeDayFilter = useMemo(() => {
     if (!dayFilterFromQuery || !data?.week) return null;
@@ -1380,7 +2191,11 @@ export default function WeekDetailPage() {
         );
         const data = (await response.json().catch(() => ({}))) as {
           error?: string;
-          resolved?: { show_id?: string | null };
+          resolved?: {
+            show_id?: string | null;
+            canonical_slug?: string | null;
+            slug?: string | null;
+          };
         };
         if (!response.ok) throw new Error(data.error || "Failed to resolve show slug");
         const showId =
@@ -1390,9 +2205,20 @@ export default function WeekDetailPage() {
         if (!showId) throw new Error("Resolved show slug did not return a valid show id.");
         if (cancelled) return;
         setResolvedShowId(showId);
+        const showSlugCandidate =
+          typeof data.resolved?.canonical_slug === "string" && data.resolved.canonical_slug.trim().length > 0
+            ? data.resolved.canonical_slug
+            : typeof data.resolved?.slug === "string" && data.resolved.slug.trim().length > 0
+              ? data.resolved.slug
+              : raw;
+        const normalizedShowSlug = showSlugCandidate.trim().toLowerCase();
+        if (normalizedShowSlug && !looksLikeUuid(normalizedShowSlug)) {
+          setResolvedShowSlug(normalizedShowSlug);
+        }
       } catch (err) {
         if (cancelled) return;
         setResolvedShowId(null);
+        setResolvedShowSlug(raw.toLowerCase());
         setSlugResolutionError(err instanceof Error ? err.message : "Could not resolve show URL slug.");
       } finally {
         if (!cancelled) setSlugResolutionLoading(false);
@@ -1983,13 +2809,23 @@ export default function WeekDetailPage() {
             .filter(([, value]) => !value.up_to_date)
             .map(([platform]) => platform)
             .filter((platform): platform is Exclude<PlatformFilter, "all"> =>
-              platform === "instagram" || platform === "tiktok" || platform === "twitter" || platform === "youtube",
+              platform === "instagram" ||
+              platform === "tiktok" ||
+              platform === "twitter" ||
+              platform === "youtube" ||
+              platform === "facebook" ||
+              platform === "threads",
             );
           const staleMirrorPlatforms = Object.entries(mirrorCoverage.by_platform ?? {})
             .filter(([, value]) => !value.up_to_date || Number(value.needs_mirror_count ?? 0) > 0)
             .map(([platform]) => platform)
             .filter((platform): platform is Exclude<PlatformFilter, "all"> =>
-              platform === "instagram" || platform === "tiktok" || platform === "twitter" || platform === "youtube",
+              platform === "instagram" ||
+              platform === "tiktok" ||
+              platform === "twitter" ||
+              platform === "youtube" ||
+              platform === "facebook" ||
+              platform === "threads",
             );
           const mergedStalePlatforms = Array.from(new Set([...staleCommentPlatforms, ...staleMirrorPlatforms]));
           if (SOCIAL_FULL_SYNC_MIRROR_ENABLED && staleMirrorPlatforms.length > 0) {
@@ -2075,6 +2911,67 @@ export default function WeekDetailPage() {
       syncSessionStateRef.current = null;
     }
   }, [syncingComments]);
+
+  const openPostMediaLightbox = useCallback(
+    (platform: string, post: AnyPost, initialIndex = 0) => {
+      const mediaCandidates = getPostMediaCandidates(platform, post);
+      if (mediaCandidates.length === 0) return;
+      const weekLabel = data?.week.label ?? `Week ${weekIndexInt}`;
+      const stats = buildSocialStats(platform, post);
+      const allPlatformPosts = data?.platforms[platform]?.posts ?? [];
+      // Count actual media URLs (not the appended thumbnail candidate)
+      const mediaUrlCount = Math.max(
+        getStrArr(post, "source_media_urls").length || getStrArr(post, "media_urls").length,
+        getStrArr(post, "hosted_media_urls").length,
+      );
+      const entries = mediaCandidates.map((media, mediaIndex) => {
+        const isThumbnailEntry = mediaIndex >= mediaUrlCount && mediaUrlCount > 0;
+        const metadata = buildSocialPostMetadata({
+          platform,
+          post,
+          media,
+          showName: data?.season.show_name,
+          showSlug: data?.season.show_slug,
+          seasonNumber: Number.isFinite(seasonNumberInt) ? seasonNumberInt : null,
+          weekLabel,
+          sourceScope,
+          allPlatformPosts,
+          mediaIndex,
+          totalMediaCount: mediaUrlCount,
+          isThumbnailEntry,
+        });
+        return {
+          id: `${platform}-${post.source_id}-${mediaIndex + 1}`,
+          src: media.src,
+          mediaType: media.mediaType,
+          posterSrc: media.posterSrc,
+          alt: `${PLATFORM_LABELS[platform] ?? platform} media`,
+          metadata,
+          stats,
+        } satisfies SocialMediaLightboxEntry;
+      });
+      const boundedIndex = Math.max(0, Math.min(initialIndex, entries.length - 1));
+      setMediaLightbox({ entries, index: boundedIndex });
+    },
+    [data?.season.show_name, data?.season.show_slug, data?.platforms, data?.week.label, seasonNumberInt, sourceScope, weekIndexInt],
+  );
+
+  const closeMediaLightbox = useCallback(() => {
+    setMediaLightbox(null);
+  }, []);
+
+  const navigateMediaLightbox = useCallback((direction: "prev" | "next") => {
+    setMediaLightbox((current) => {
+      if (!current) return current;
+      const delta = direction === "next" ? 1 : -1;
+      const nextIndex = current.index + delta;
+      if (nextIndex < 0 || nextIndex >= current.entries.length) return current;
+      return {
+        ...current,
+        index: nextIndex,
+      };
+    });
+  }, []);
 
   // Build merged post list with sort + search
   const allPosts = useMemo(() => {
@@ -2388,12 +3285,13 @@ export default function WeekDetailPage() {
 
   const breadcrumbShowName = recentShowLabel;
   const breadcrumbWeekLabel = data?.week.label?.trim() || `Week ${weekIndexInt}`;
+  const normalizedSocialView =
+    socialView === "bravo" || socialView === "official" ? "official" : socialView;
   const breadcrumbShowHref = buildShowAdminUrl({ showSlug: showSlugForRouting });
   const breadcrumbQuery = (() => {
-    const query = new URLSearchParams({ source_scope: sourceScope });
+    const query = new URLSearchParams();
     if (socialPlatform) query.set("social_platform", socialPlatform);
-    if (socialView) query.set("social_view", socialView);
-    if (resolvedSeasonId) query.set("season_id", resolvedSeasonId);
+    if (normalizedSocialView) query.set("social_view", normalizedSocialView);
     return query;
   })();
   const breadcrumbSeasonHref = buildSeasonAdminUrl({
@@ -2410,10 +3308,11 @@ export default function WeekDetailPage() {
     showSlug: showSlugForRouting,
     seasonNumber,
     weekIndex: weekIndexInt,
+    platform: socialPlatform ?? undefined,
     query: breadcrumbQuery,
   });
-  const breadcrumbSubTabLabel = socialView
-    ? `${humanizeSlug(socialView)} Analytics`
+  const breadcrumbSubTabLabel = normalizedSocialView
+    ? `${humanizeSlug(normalizedSocialView)} Analytics`
     : socialPlatform
       ? PLATFORM_LABELS[socialPlatform] ?? humanizeSlug(socialPlatform)
       : undefined;
@@ -2439,10 +3338,9 @@ export default function WeekDetailPage() {
               seasonNumber,
               tab: "social",
               query: (() => {
-                const query = new URLSearchParams({ source_scope: sourceScope });
+                const query = new URLSearchParams();
                 if (socialPlatform) query.set("social_platform", socialPlatform);
-                if (socialView) query.set("social_view", socialView);
-                if (resolvedSeasonId) query.set("season_id", resolvedSeasonId);
+                if (normalizedSocialView) query.set("social_view", normalizedSocialView);
                 return query;
               })(),
             }) as Route}
@@ -2499,6 +3397,7 @@ export default function WeekDetailPage() {
                       showSlug: showSlugForRouting,
                       seasonNumber,
                       weekIndex: weekIndexInt,
+                      platform: socialPlatform ?? undefined,
                       query: nextQuery,
                     }) as Route,
                     { scroll: false },
@@ -2800,6 +3699,7 @@ export default function WeekDetailPage() {
                   showId={showIdForApi}
                   seasonNumber={seasonNumber}
                   seasonId={resolvedSeasonId}
+                  onOpenMediaLightbox={openPostMediaLightbox}
                 />
               ))}
             </div>
@@ -2807,6 +3707,27 @@ export default function WeekDetailPage() {
         </>
       )}
       </main>
+
+      {mediaLightbox && mediaLightbox.entries[mediaLightbox.index] && (
+        <ImageLightbox
+          src={mediaLightbox.entries[mediaLightbox.index].src}
+          alt={mediaLightbox.entries[mediaLightbox.index].alt}
+          mediaType={mediaLightbox.entries[mediaLightbox.index].mediaType}
+          videoPosterSrc={mediaLightbox.entries[mediaLightbox.index].posterSrc}
+          isOpen={true}
+          onClose={closeMediaLightbox}
+          metadata={mediaLightbox.entries[mediaLightbox.index].metadata}
+          metadataExtras={<SocialStatsPanel stats={mediaLightbox.entries[mediaLightbox.index].stats} />}
+          position={{
+            current: mediaLightbox.index + 1,
+            total: mediaLightbox.entries.length,
+          }}
+          onPrevious={() => navigateMediaLightbox("prev")}
+          onNext={() => navigateMediaLightbox("next")}
+          hasPrevious={mediaLightbox.index > 0}
+          hasNext={mediaLightbox.index < mediaLightbox.entries.length - 1}
+        />
+      )}
     </div>
   );
 }

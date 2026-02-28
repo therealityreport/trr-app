@@ -16,12 +16,65 @@ const toSafeDecoded = (value: string): string => {
   }
 };
 
+const isAsciiUpperOrDigit = (part: string): boolean => {
+  if (!part) return false;
+  for (let index = 0; index < part.length; index += 1) {
+    const code = part.charCodeAt(index);
+    const isUpper = code >= 65 && code <= 90;
+    const isDigit = code >= 48 && code <= 57;
+    if (!isUpper && !isDigit) return false;
+  }
+  return true;
+};
+
+const normalizeSlugSeparators = (value: string): string => {
+  let out = "";
+  let lastWasSpace = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const ch = value[index];
+    const code = ch.charCodeAt(0);
+    const isWhitespace =
+      code === 32 ||
+      code === 9 ||
+      code === 10 ||
+      code === 13 ||
+      code === 11 ||
+      code === 12 ||
+      code === 160;
+    const isSeparator = ch === "_" || ch === "-" || isWhitespace;
+    if (isSeparator) {
+      if (!lastWasSpace) {
+        out += " ";
+        lastWasSpace = true;
+      }
+      continue;
+    }
+    out += ch;
+    lastWasSpace = false;
+  }
+  return out.trim();
+};
+
+const stripCollisionSuffix = (slug: string): string => {
+  if (slug.length < 10) return slug;
+  if (slug[slug.length - 10] !== "-" || slug[slug.length - 9] !== "-") return slug;
+  const suffix = slug.slice(-8);
+  for (let index = 0; index < suffix.length; index += 1) {
+    const code = suffix.charCodeAt(index);
+    const isDigit = code >= 48 && code <= 57;
+    const isLowerHex = code >= 97 && code <= 102;
+    const isUpperHex = code >= 65 && code <= 70;
+    if (!isDigit && !isLowerHex && !isUpperHex) return slug;
+  }
+  return slug.slice(0, -10);
+};
+
 const toTitleCase = (value: string): string =>
   value
     .split(" ")
     .filter((part) => part.length > 0)
     .map((part) => {
-      if (part.length <= 3 && /^[A-Z0-9]+$/.test(part)) {
+      if (part.length <= 3 && isAsciiUpperOrDigit(part)) {
         return part;
       }
       return `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`;
@@ -31,13 +84,13 @@ const toTitleCase = (value: string): string =>
 export const humanizeSlug = (slug: string): string => {
   const decoded = toSafeDecoded(slug).trim();
   if (!decoded) return "Unknown";
-  const normalized = decoded.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const normalized = normalizeSlugSeparators(decoded);
   if (!normalized) return "Unknown";
   return toTitleCase(normalized);
 };
 
 export const humanizePersonSlug = (slug: string): string => {
-  const withoutCollisionSuffix = slug.replace(/--[0-9a-f]{8}$/i, "");
+  const withoutCollisionSuffix = stripCollisionSuffix(slug);
   return humanizeSlug(withoutCollisionSuffix);
 };
 

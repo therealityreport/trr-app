@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { resolveAdminShowId } from "@/lib/server/admin/resolve-show-id";
 import {
   buildUserScopedRouteCacheKey,
   getRouteResponseCache,
@@ -24,7 +25,8 @@ type ProxyErrorCode =
   | "UPSTREAM_TIMEOUT"
   | "BACKEND_UNREACHABLE"
   | "UPSTREAM_ERROR"
-  | "INTERNAL_ERROR";
+  | "INTERNAL_ERROR"
+  | "SHOW_NOT_FOUND";
 
 type ProxyErrorPayload = {
   error: string;
@@ -65,7 +67,19 @@ const parseErrorMessage = (data: unknown, fallback: string): string => {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
-    const { showId } = await params;
+    const { showId: rawShowId } = await params;
+    const showId = await resolveAdminShowId(rawShowId);
+    if (!showId) {
+      return NextResponse.json(
+        {
+          error: `Show not found for "${rawShowId}".`,
+          code: "SHOW_NOT_FOUND",
+          retryable: false,
+          upstream_status: 404,
+        } satisfies ProxyErrorPayload,
+        { status: 404 }
+      );
+    }
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/cast-role-members`);
     if (!backendUrl) {
       return NextResponse.json(

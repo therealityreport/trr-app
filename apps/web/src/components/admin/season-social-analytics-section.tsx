@@ -1,16 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
-import { buildSeasonSocialWeekUrl } from "@/lib/admin/show-admin-routes";
+import type { PhotoMetadata } from "@/lib/photo-metadata";
+import {
+  buildSeasonSocialWeekUrl,
+  parseSeasonEpisodeNumberFromPath,
+  parseSeasonSocialPathSegment,
+} from "@/lib/admin/show-admin-routes";
 
-type Platform = "instagram" | "tiktok" | "twitter" | "youtube";
+type Platform = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
 export type PlatformTab = "overview" | Platform;
 type Scope = "bravo" | "creator" | "community";
 type SyncStrategy = "incremental" | "full_refresh";
@@ -153,11 +159,11 @@ type AnalyticsResponse = {
     };
     data_quality?: {
       comments_saved_pct_overall: number | null;
-      platform_comments_saved_pct: {
-        instagram: number | null;
-        youtube: number | null;
-        tiktok: number | null;
-        twitter: number | null;
+      platform_comments_saved_pct: Partial<Record<Platform, number | null>>;
+      youtube_content_breakdown?: {
+        videos_count: number;
+        reels_count: number;
+        total_count: number;
       };
       last_post_at: string | null;
       last_comment_at: string | null;
@@ -202,24 +208,9 @@ type AnalyticsResponse = {
     end: string;
     week_type?: "preseason" | "episode" | "bye" | "postseason";
     episode_number?: number | null;
-    posts: {
-      instagram: number;
-      youtube: number;
-      tiktok: number;
-      twitter: number;
-    };
-    comments?: {
-      instagram: number;
-      youtube: number;
-      tiktok: number;
-      twitter: number;
-    };
-    reported_comments?: {
-      instagram: number;
-      youtube: number;
-      tiktok: number;
-      twitter: number;
-    };
+    posts: Partial<Record<Platform, number>>;
+    comments?: Partial<Record<Platform, number>>;
+    reported_comments?: Partial<Record<Platform, number>>;
     total_posts: number;
     total_comments?: number;
     total_reported_comments?: number;
@@ -232,12 +223,7 @@ type AnalyticsResponse = {
     end: string;
     week_type?: "preseason" | "episode" | "bye" | "postseason";
     episode_number?: number | null;
-    engagement: {
-      instagram: number;
-      youtube: number;
-      tiktok: number;
-      twitter: number;
-    };
+    engagement: Partial<Record<Platform, number>>;
     total_engagement: number;
     has_data: boolean;
   }>;
@@ -251,24 +237,9 @@ type AnalyticsResponse = {
     days: Array<{
       day_index: number;
       date_local: string;
-      posts: {
-        instagram: number;
-        youtube: number;
-        tiktok: number;
-        twitter: number;
-      };
-      comments: {
-        instagram: number;
-        youtube: number;
-        tiktok: number;
-        twitter: number;
-      };
-      reported_comments?: {
-        instagram: number;
-        youtube: number;
-        tiktok: number;
-        twitter: number;
-      };
+      posts: Partial<Record<Platform, number>>;
+      comments: Partial<Record<Platform, number>>;
+      reported_comments?: Partial<Record<Platform, number>>;
       total_posts: number;
       total_comments: number;
       total_reported_comments?: number;
@@ -471,6 +442,23 @@ type MissingCommentTargets = {
   overflowPlatforms: Platform[];
 };
 
+type SocialMediaType = "image" | "video";
+
+type SocialStatsItem = {
+  label: string;
+  value: string;
+};
+
+type SocialLeaderboardLightboxEntry = {
+  id: string;
+  src: string;
+  mediaType: SocialMediaType;
+  posterSrc: string | null;
+  alt: string;
+  metadata: PhotoMetadata;
+  stats: SocialStatsItem[];
+};
+
 interface SeasonSocialAnalyticsSectionProps {
   showId: string;
   showSlug?: string;
@@ -488,8 +476,21 @@ const PLATFORM_LABELS: Record<string, string> = {
   tiktok: "TikTok",
   twitter: "Twitter/X",
   youtube: "YouTube",
+  facebook: "Facebook",
+  threads: "Threads",
   reddit: "Reddit",
 };
+const SOCIAL_SOURCE_COLORS: Record<string, string> = {
+  instagram: "#f43f5e",
+  tiktok: "#111827",
+  twitter: "#0284c7",
+  youtube: "#dc2626",
+  facebook: "#1d4ed8",
+  threads: "#27272a",
+  reddit: "#f97316",
+};
+const SOCIAL_MEDIA_VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|m3u8|mpd)(\?|$)/i;
+const SOCIAL_MIRROR_HOST_MARKERS = ["cloudfront.net", "amazonaws.com", "s3.", "therealityreport"];
 
 const PLATFORM_TABS: { key: PlatformTab; label: string }[] = [
   { key: "overview", label: "Overview" },
@@ -497,6 +498,8 @@ const PLATFORM_TABS: { key: PlatformTab; label: string }[] = [
   { key: "tiktok", label: "TikTok" },
   { key: "twitter", label: "Twitter/X" },
   { key: "youtube", label: "YouTube" },
+  { key: "facebook", label: "Facebook" },
+  { key: "threads", label: "Threads" },
 ];
 
 const SOCIAL_PLATFORM_QUERY_KEY = "social_platform";
@@ -528,7 +531,7 @@ const SOCIAL_TABLE_DETAIL_METRICS = new Set<SocialTableMetric>(["hashtags", "men
 type SocialDensity = "compact" | "comfortable";
 const HASHTAG_REGEX = /(^|\s)#([a-z0-9_]+)/gi;
 const MENTION_REGEX = /(^|\s)@([a-z0-9_.]+)/gi;
-const HASHTAG_PLATFORMS: Platform[] = ["instagram", "tiktok", "twitter", "youtube"];
+const HASHTAG_PLATFORMS: Platform[] = ["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"];
 
 const isPlatformTab = (value: string | null | undefined): value is PlatformTab => {
   if (!value) return false;
@@ -546,7 +549,7 @@ const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
 const WEEK_SYNC_ACTION_LABEL = SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Sync + Mirror" : "Sync Metrics";
-const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter"];
+const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter", "facebook", "threads"];
 const STALE_RUN_THRESHOLD_DEFAULT_MINUTES = 45;
 const MAX_COMMENT_ANCHOR_SOURCE_IDS_PER_PLATFORM = 5000;
 const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
@@ -1302,6 +1305,8 @@ const createEmptyHashtagUsageByPlatform = (): HashtagUsageByPlatform => ({
   youtube: 0,
   tiktok: 0,
   twitter: 0,
+  facebook: 0,
+  threads: 0,
 });
 
 const createEmptyHashtagTagCountsByPlatform = (): HashtagTagCountsByPlatform => ({
@@ -1309,6 +1314,8 @@ const createEmptyHashtagTagCountsByPlatform = (): HashtagTagCountsByPlatform => 
   youtube: {},
   tiktok: {},
   twitter: {},
+  facebook: {},
+  threads: {},
 });
 
 const createEmptyWeekDetailTokenCounts = (): WeekDetailTokenCounts => ({
@@ -1318,6 +1325,8 @@ const createEmptyWeekDetailTokenCounts = (): WeekDetailTokenCounts => ({
     youtube: createEmptyWeekDetailTokenTriplet(),
     tiktok: createEmptyWeekDetailTokenTriplet(),
     twitter: createEmptyWeekDetailTokenTriplet(),
+    facebook: createEmptyWeekDetailTokenTriplet(),
+    threads: createEmptyWeekDetailTokenTriplet(),
   },
 });
 
@@ -1480,6 +1489,112 @@ const formatJobActivitySummary = (activity: Record<string, unknown> | null): str
   return segments.join(" · ");
 };
 
+const detectSocialMediaType = (url: string): SocialMediaType =>
+  SOCIAL_MEDIA_VIDEO_EXT_RE.test(url.toLowerCase()) ? "video" : "image";
+
+const isLikelyMirroredSocialUrl = (url: string | null | undefined): boolean => {
+  if (typeof url !== "string" || url.trim().length === 0) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return SOCIAL_MIRROR_HOST_MARKERS.some((marker) => host.includes(marker));
+  } catch {
+    return false;
+  }
+};
+
+const inferMirrorFileNameFromUrl = (url: string | null | undefined): string | null => {
+  if (typeof url !== "string" || url.trim().length === 0) return null;
+  try {
+    const pathname = new URL(url).pathname;
+    const fileName = pathname.split("/").filter(Boolean).pop();
+    return fileName ? decodeURIComponent(fileName) : null;
+  } catch {
+    return null;
+  }
+};
+
+const buildLeaderboardMediaMetadata = (input: {
+  item: {
+    platform: string;
+    source_id: string;
+    text?: string;
+    url: string;
+    timestamp: string;
+    thumbnail_url?: string | null;
+  };
+  sourceScope: Scope;
+  showName: string;
+  seasonNumber: number;
+  sectionTitle: string;
+}): PhotoMetadata => {
+  const { item, sourceScope, showName, seasonNumber, sectionTitle } = input;
+  const sourceLabel = PLATFORM_LABELS[item.platform] ?? item.platform;
+  const postedAt = item.timestamp ? new Date(item.timestamp) : null;
+  const postedDate = postedAt && !Number.isNaN(postedAt.getTime()) ? postedAt : null;
+  const mediaUrl = item.thumbnail_url ?? item.url;
+  const fileTypeMatch = mediaUrl.match(/\.([a-z0-9]+)(\?|$)/i);
+  const fileType = fileTypeMatch?.[1]?.toLowerCase() ?? null;
+  const isS3Mirrored = isLikelyMirroredSocialUrl(mediaUrl);
+  const mirrorFileName = isS3Mirrored ? inferMirrorFileNameFromUrl(mediaUrl) : null;
+  const originalImageUrl = isS3Mirrored ? null : mediaUrl;
+  return {
+    source: sourceLabel,
+    sourceBadgeColor: SOCIAL_SOURCE_COLORS[item.platform] ?? "#71717a",
+    isS3Mirrored,
+    s3MirrorFileName: mirrorFileName,
+    originalImageUrl,
+    originalSourceFileUrl: originalImageUrl,
+    originalSourcePageUrl: item.url,
+    originalSourceLabel: sourceLabel,
+    fileType,
+    createdAt: postedDate,
+    addedAt: postedDate,
+    hasTextOverlay: null,
+    contentType: "PROMO",
+    sectionTag: "OTHER",
+    sectionLabel: sectionTitle,
+    sourceLogo: sourceScope.toUpperCase(),
+    assetName: `${sourceLabel} ${item.source_id}`,
+    imdbType: null,
+    episodeLabel: null,
+    sourceVariant: sourceScope.toUpperCase(),
+    sourcePageTitle: item.text || `${sourceLabel} social post`,
+    sourceUrl: item.url,
+    faceBoxes: [],
+    peopleCount: null,
+    caption: item.text || null,
+    dimensions: null,
+    season: seasonNumber,
+    contextType: "social_leaderboard",
+    people: [],
+    titles: [showName].filter(Boolean),
+    fetchedAt: postedDate,
+    galleryStatus: null,
+    galleryStatusReason: null,
+    galleryStatusCheckedAt: null,
+  };
+};
+
+function SocialStatsPanel({ stats }: { stats: SocialStatsItem[] }) {
+  if (stats.length === 0) return null;
+  return (
+    <div className="rounded border border-white/10 bg-white/[0.03] p-3">
+      <p className="text-[10px] uppercase tracking-widest text-white/55">Social Stats</p>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        {stats.map((item) => (
+          <div
+            key={`${item.label}-${item.value}`}
+            className="rounded border border-white/10 bg-black/20 px-2 py-1.5"
+          >
+            <p className="text-[10px] uppercase tracking-wide text-white/55">{item.label}</p>
+            <p className="mt-0.5 text-xs font-semibold text-white/90">{item.value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function SeasonSocialAnalyticsSection({
   showId,
   showSlug,
@@ -1578,6 +1693,10 @@ export default function SeasonSocialAnalyticsSection({
   const [weekDetailTokenCountsLoadingWeeks, setWeekDetailTokenCountsLoadingWeeks] = useState<Set<number>>(
     new Set(),
   );
+  const [leaderboardLightbox, setLeaderboardLightbox] = useState<{
+    entries: SocialLeaderboardLightboxEntry[];
+    index: number;
+  } | null>(null);
   const [ingestingWeek, setIngestingWeek] = useState<number | null>(null);
   const [ingestingDay, setIngestingDay] = useState<string | null>(null);
   const [activeRunRequest, setActiveRunRequest] = useState<{
@@ -1622,20 +1741,32 @@ export default function SeasonSocialAnalyticsSection({
   const ingestPanelRef = useRef<HTMLElement | null>(null);
   const runSeasonIngestButtonRef = useRef<HTMLButtonElement | null>(null);
   const weekDetailTokenRequestsRef = useRef<Set<string>>(new Set());
+  const episodeWeekRedirectRef = useRef<string | null>(null);
+  const componentMountedRef = useRef(true);
+  const activeAnalyticsViewRef = useRef<SocialAnalyticsView>(analyticsView);
+  const refreshGenerationRef = useRef(0);
   const inFlightRef = useRef<{
     analyticsByKey: Map<string, Promise<AnalyticsResponse>>;
     runsByKey: Map<string, Promise<SocialRun[]>>;
     targetsByKey: Map<string, Promise<SocialTarget[]>>;
     jobsByKey: Map<string, Promise<SocialJob[]>>;
-    refreshAll: Promise<void> | null;
+    refreshAllByView: Map<SocialAnalyticsView, Promise<void>>;
   }>({
     analyticsByKey: new Map(),
     runsByKey: new Map(),
     targetsByKey: new Map(),
     jobsByKey: new Map(),
-    refreshAll: null,
+    refreshAllByView: new Map(),
   });
   const showRouteSlug = (showSlug || showId).trim();
+  const seasonEpisodeNumberFromPath = useMemo(
+    () => parseSeasonEpisodeNumberFromPath(pathname),
+    [pathname],
+  );
+  const seasonSocialPathSegment = useMemo(
+    () => parseSeasonSocialPathSegment(pathname),
+    [pathname],
+  );
   const cacheKey = useMemo(() => {
     const weekKey = weekFilter === "all" ? "all" : String(weekFilter);
     return `${SOCIAL_CACHE_PREFIX}:v${SOCIAL_CACHE_VERSION}:${showId}:${seasonNumber}:${seasonId}:${scope}:${platformFilter}:${weekKey}`;
@@ -1673,6 +1804,50 @@ export default function SeasonSocialAnalyticsSection({
         sourceScope: scope,
       }),
     [scope, seasonId],
+  );
+
+  useLayoutEffect(() => {
+    activeAnalyticsViewRef.current = analyticsView;
+    refreshGenerationRef.current += 1;
+    inFlightRef.current.refreshAllByView.clear();
+    inFlightRef.current.analyticsByKey.clear();
+    inFlightRef.current.runsByKey.clear();
+    inFlightRef.current.targetsByKey.clear();
+    inFlightRef.current.jobsByKey.clear();
+    if (analyticsView !== "reddit") {
+      return;
+    }
+    setLoading(false);
+    setError(null);
+    setSectionErrors({
+      analytics: null,
+      targets: null,
+      runs: null,
+      jobs: null,
+    });
+    setWorkerHealth(null);
+    setWorkerHealthError(null);
+    setRunSummaryError(null);
+  }, [analyticsView]);
+
+  useEffect(() => {
+    return () => {
+      componentMountedRef.current = false;
+    };
+  }, []);
+
+  const isActiveView = useCallback(
+    (expectedView: SocialAnalyticsView) =>
+      componentMountedRef.current && activeAnalyticsViewRef.current === expectedView,
+    [],
+  );
+
+  const isCurrentRefreshRequest = useCallback(
+    (requestView: SocialAnalyticsView, requestId: number) =>
+      componentMountedRef.current &&
+      activeAnalyticsViewRef.current === requestView &&
+      refreshGenerationRef.current === requestId,
+    [],
   );
 
   const readErrorMessage = useCallback(async (response: Response, fallback: string): Promise<string> => {
@@ -1748,13 +1923,7 @@ export default function SeasonSocialAnalyticsSection({
 
   const buildWeekDetailHref = useCallback(
     (weekIndex: number, dayLocal?: string) => {
-      const weekLinkQuery = new URLSearchParams({
-        source_scope: scope,
-        season_id: seasonId,
-      });
-      if (platformTab !== "overview") {
-        weekLinkQuery.set(SOCIAL_PLATFORM_QUERY_KEY, platformTab);
-      }
+      const weekLinkQuery = new URLSearchParams();
       if (analyticsView !== "bravo") {
         weekLinkQuery.set("social_view", analyticsView);
       }
@@ -1777,14 +1946,13 @@ export default function SeasonSocialAnalyticsSection({
         showSlug: showRouteSlug,
         seasonNumber,
         weekIndex,
+        platform: platformTab !== "overview" ? platformTab : undefined,
         query: weekLinkQuery,
       });
     },
     [
       analyticsView,
       platformTab,
-      scope,
-      seasonId,
       seasonNumber,
       showRouteSlug,
       socialAlertsEnabled,
@@ -1806,6 +1974,54 @@ export default function SeasonSocialAnalyticsSection({
   useEffect(() => {
     setSocialAlertsEnabled(alertsFromQuery);
   }, [alertsFromQuery]);
+
+  useEffect(() => {
+    if (!seasonEpisodeNumberFromPath) return;
+    if (!seasonSocialPathSegment) return;
+    if (!analytics) return;
+    const weeklyCandidates = [
+      ...(analytics.weekly ?? []),
+      ...(analytics.weekly_platform_posts ?? []),
+    ];
+    const matchedWeek = weeklyCandidates.find((row) => {
+      const episodeNumber = Number(row.episode_number ?? NaN);
+      return Number.isFinite(episodeNumber) && episodeNumber === seasonEpisodeNumberFromPath;
+    });
+    if (!matchedWeek || !Number.isFinite(matchedWeek.week_index)) return;
+
+    const platformFromPath =
+      seasonSocialPathSegment === "instagram" ||
+      seasonSocialPathSegment === "tiktok" ||
+      seasonSocialPathSegment === "twitter" ||
+      seasonSocialPathSegment === "youtube"
+        ? seasonSocialPathSegment
+        : null;
+    const platformForWeek =
+      platformFromPath ?? (platformTab !== "overview" ? platformTab : undefined);
+    const nextQuery = new URLSearchParams(searchParams.toString());
+    nextQuery.delete("social_platform");
+    const nextHref = buildSeasonSocialWeekUrl({
+      showSlug: showRouteSlug,
+      seasonNumber,
+      weekIndex: matchedWeek.week_index,
+      platform: platformForWeek,
+      query: nextQuery,
+    });
+    const redirectKey = `${pathname}|${nextHref}|${seasonEpisodeNumberFromPath}`;
+    if (episodeWeekRedirectRef.current === redirectKey) return;
+    episodeWeekRedirectRef.current = redirectKey;
+    router.replace(nextHref as Route, { scroll: false });
+  }, [
+    analytics,
+    pathname,
+    platformTab,
+    router,
+    searchParams,
+    seasonEpisodeNumberFromPath,
+    seasonNumber,
+    seasonSocialPathSegment,
+    showRouteSlug,
+  ]);
 
   useEffect(() => {
     setWeekDetailTokenCountsByWeek({});
@@ -1913,6 +2129,9 @@ export default function SeasonSocialAnalyticsSection({
           throw new Error(await readErrorMessage(response, "Failed to load social analytics"));
         }
         const data = await parseResponseJson<AnalyticsResponse>(response, "Failed to load social analytics");
+        if (!isActiveView(analyticsView)) {
+          return data;
+        }
         const now = new Date();
         setAnalytics(data);
         setLastUpdated(now);
@@ -1921,7 +2140,9 @@ export default function SeasonSocialAnalyticsSection({
       } catch (analyticsError) {
         const message =
           analyticsError instanceof Error ? analyticsError.message : "Failed to load social analytics";
-        setSectionErrors((current) => ({ ...current, analytics: message }));
+        if (isActiveView(analyticsView)) {
+          setSectionErrors((current) => ({ ...current, analytics: message }));
+        }
         throw analyticsError;
       }
     })();
@@ -1935,7 +2156,16 @@ export default function SeasonSocialAnalyticsSection({
         inFlightRef.current.analyticsByKey.delete(analyticsRequestKey);
       }
     }
-  }, [analyticsRequestKey, getAuthHeaders, queryString, readErrorMessage, seasonNumber, showId]);
+  }, [
+    analyticsRequestKey,
+    analyticsView,
+    getAuthHeaders,
+    isActiveView,
+    queryString,
+    readErrorMessage,
+    seasonNumber,
+    showId,
+  ]);
 
   const fetchRuns = useCallback(async (options?: { runId?: string | null; limit?: number }) => {
     const runId = options?.runId?.trim() || null;
@@ -1948,6 +2178,10 @@ export default function SeasonSocialAnalyticsSection({
     }
 
     const request = (async () => {
+      if (!isActiveView(analyticsView)) {
+        return [] as SocialRun[];
+      }
+
       const headers = await getAuthHeaders();
       const params = new URLSearchParams({ limit: String(safeLimit) });
       params.set("source_scope", scope);
@@ -1967,23 +2201,29 @@ export default function SeasonSocialAnalyticsSection({
       const data = await parseResponseJson<{ runs?: SocialRun[] }>(response, "Failed to load social runs");
       const nextRuns = data.runs ?? [];
       if (!runId) {
-        setRuns(nextRuns);
+        if (isActiveView(analyticsView)) {
+          setRuns(nextRuns);
+        }
       } else {
-        setRuns((current) => {
-          if (nextRuns.length === 0) return current;
-          const merged = [...current];
-          for (const nextRun of nextRuns) {
-            const existingIndex = merged.findIndex((run) => run.id === nextRun.id);
-            if (existingIndex >= 0) {
-              merged[existingIndex] = nextRun;
-            } else {
-              merged.unshift(nextRun);
+        if (isActiveView(analyticsView)) {
+          setRuns((current) => {
+            if (nextRuns.length === 0) return current;
+            const merged = [...current];
+            for (const nextRun of nextRuns) {
+              const existingIndex = merged.findIndex((run) => run.id === nextRun.id);
+              if (existingIndex >= 0) {
+                merged[existingIndex] = nextRun;
+              } else {
+                merged.unshift(nextRun);
+              }
             }
-          }
-          return merged;
-        });
+            return merged;
+          });
+        }
       }
-      setSectionLastSuccessAt((current) => ({ ...current, runs: new Date() }));
+      if (isActiveView(analyticsView)) {
+        setSectionLastSuccessAt((current) => ({ ...current, runs: new Date() }));
+      }
       return nextRuns;
     })();
 
@@ -1996,9 +2236,10 @@ export default function SeasonSocialAnalyticsSection({
         inFlightRef.current.runsByKey.delete(scopedRunsKey);
       }
     }
-  }, [getAuthHeaders, readErrorMessage, runsRequestKey, scope, seasonId, seasonNumber, showId]);
+  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, runsRequestKey, scope, seasonId, seasonNumber, showId]);
 
   const fetchRunSummaries = useCallback(async () => {
+    if (!isActiveView(analyticsView)) return [] as SocialRunSummary[];
     setRunSummariesLoading(true);
     try {
       const headers = await getAuthHeaders();
@@ -2019,15 +2260,22 @@ export default function SeasonSocialAnalyticsSection({
         "Failed to load social run summary",
       );
       const nextSummaries = data.summaries ?? [];
-      setRunSummaries(nextSummaries);
-      setRunSummaryError(null);
+      if (isActiveView(analyticsView)) {
+        setRunSummaries(nextSummaries);
+        setRunSummaryError(null);
+      }
       return nextSummaries;
     } finally {
-      setRunSummariesLoading(false);
+      if (isActiveView(analyticsView)) {
+        setRunSummariesLoading(false);
+      }
     }
-  }, [getAuthHeaders, readErrorMessage, scope, seasonId, seasonNumber, showId]);
+  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, scope, seasonId, seasonNumber, showId]);
 
   const fetchWorkerHealth = useCallback(async () => {
+    if (!isActiveView(analyticsView)) {
+      return null;
+    }
     try {
       const headers = await getAuthHeaders();
       const response = await fetchAdminWithTimeout(
@@ -2044,18 +2292,22 @@ export default function SeasonSocialAnalyticsSection({
         "Failed to load social worker health",
       );
       const normalized = normalizeWorkerHealth(data.worker_health ?? data);
-      setWorkerHealth(normalized);
-      setWorkerHealthError(null);
+      if (isActiveView(analyticsView)) {
+        setWorkerHealth(normalized);
+        setWorkerHealthError(null);
+      }
       return normalized;
     } catch (workerHealthFetchError) {
       const message =
         workerHealthFetchError instanceof Error
           ? workerHealthFetchError.message
           : "Failed to load social worker health";
-      setWorkerHealthError(message);
+      if (isActiveView(analyticsView)) {
+        setWorkerHealthError(message);
+      }
       throw workerHealthFetchError;
     }
-  }, [getAuthHeaders, readErrorMessage, seasonNumber, showId]);
+  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, seasonNumber, showId]);
 
   const fetchTargets = useCallback(async () => {
     const existingRequest = inFlightRef.current.targetsByKey.get(runsRequestKey);
@@ -2064,6 +2316,10 @@ export default function SeasonSocialAnalyticsSection({
     }
 
     const request = (async () => {
+      if (!isActiveView(analyticsView)) {
+        return [] as SocialTarget[];
+      }
+
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
       params.set("source_scope", scope);
@@ -2078,8 +2334,10 @@ export default function SeasonSocialAnalyticsSection({
         throw new Error(await readErrorMessage(response, "Failed to load social targets"));
       }
       const data = await parseResponseJson<{ targets?: SocialTarget[] }>(response, "Failed to load social targets");
-      setTargets(data.targets ?? []);
-      setSectionLastSuccessAt((current) => ({ ...current, targets: new Date() }));
+      if (isActiveView(analyticsView)) {
+        setTargets(data.targets ?? []);
+        setSectionLastSuccessAt((current) => ({ ...current, targets: new Date() }));
+      }
       return data.targets ?? [];
     })();
 
@@ -2092,12 +2350,26 @@ export default function SeasonSocialAnalyticsSection({
         inFlightRef.current.targetsByKey.delete(runsRequestKey);
       }
     }
-  }, [getAuthHeaders, readErrorMessage, runsRequestKey, scope, seasonId, seasonNumber, showId]);
+  }, [
+    analyticsView,
+    getAuthHeaders,
+    isActiveView,
+    readErrorMessage,
+    runsRequestKey,
+    scope,
+    seasonId,
+    seasonNumber,
+    showId,
+  ]);
 
   const fetchJobs = useCallback(async (
     runId?: string | null,
     options?: { preserveLastGoodIfEmpty?: boolean; limit?: number },
   ) => {
+    if (!isActiveView(analyticsView)) {
+      return [] as SocialJob[];
+    }
+
     if (!runId) {
       setJobs([]);
       return [] as SocialJob[];
@@ -2110,30 +2382,32 @@ export default function SeasonSocialAnalyticsSection({
       return existingRequest;
     }
     const request = (async () => {
-    const headers = await getAuthHeaders();
-    const params = new URLSearchParams({ limit: String(safeLimit), run_id: runId });
-    params.set("season_id", seasonId);
-    const response = await fetchAdminWithTimeout(
-      `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?${params.toString()}`,
-      { headers, cache: "no-store" },
-      REQUEST_TIMEOUT_MS.jobs,
-      "Social jobs request timed out",
-    );
-    if (!response.ok) {
-      throw new Error(await readErrorMessage(response, "Failed to load social jobs"));
-    }
-    const data = await parseResponseJson<{ jobs?: SocialJob[] }>(response, "Failed to load social jobs");
-    const nextJobs = data.jobs ?? [];
-    setJobs((current) => {
-      if (options?.preserveLastGoodIfEmpty && nextJobs.length === 0) {
-        const hasCurrentForRun = current.some((job) => job.run_id === runId);
-        if (hasCurrentForRun) {
-          return current;
-        }
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams({ limit: String(safeLimit), run_id: runId });
+      params.set("season_id", seasonId);
+      const response = await fetchAdminWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs?${params.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.jobs,
+        "Social jobs request timed out",
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to load social jobs"));
+      }
+      const data = await parseResponseJson<{ jobs?: SocialJob[] }>(response, "Failed to load social jobs");
+      const nextJobs = data.jobs ?? [];
+      if (isActiveView(analyticsView)) {
+        setJobs((current) => {
+          if (options?.preserveLastGoodIfEmpty && nextJobs.length === 0) {
+            const hasCurrentForRun = current.some((job) => job.run_id === runId);
+            if (hasCurrentForRun) {
+              return current;
+            }
+          }
+          return nextJobs;
+        });
       }
       return nextJobs;
-    });
-    return nextJobs;
     })();
     inFlightRef.current.jobsByKey.set(jobsRequestKey, request);
     try {
@@ -2144,7 +2418,7 @@ export default function SeasonSocialAnalyticsSection({
         inFlightRef.current.jobsByKey.delete(jobsRequestKey);
       }
     }
-  }, [getAuthHeaders, readErrorMessage, seasonId, seasonNumber, showId]);
+  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, seasonId, seasonNumber, showId]);
 
   const fetchCommentsCoverage = useCallback(
     async (scopeWindow: {
@@ -2329,12 +2603,21 @@ export default function SeasonSocialAnalyticsSection({
   );
 
   const refreshAll = useCallback(async () => {
-    if (inFlightRef.current.refreshAll) {
-      return inFlightRef.current.refreshAll;
+    const requestView: SocialAnalyticsView = analyticsView;
+    const existingRequest = inFlightRef.current.refreshAllByView.get(requestView);
+    if (existingRequest) {
+      return existingRequest;
     }
 
+    const requestId = ++refreshGenerationRef.current;
+    const isCurrentRequest = () => isCurrentRefreshRequest(requestView, requestId);
+
     const request = (async () => {
-      if (analyticsView === "reddit") {
+      if (!isCurrentRequest()) {
+        return;
+      }
+
+      if (requestView === "reddit") {
         setLoading(false);
         setSectionErrors({
           analytics: null,
@@ -2344,6 +2627,7 @@ export default function SeasonSocialAnalyticsSection({
         });
         setWorkerHealth(null);
         setWorkerHealthError(null);
+        setRunSummaryError(null);
         return;
       }
 
@@ -2362,6 +2646,10 @@ export default function SeasonSocialAnalyticsSection({
         fetchRunSummaries(),
         fetchWorkerHealth(),
       ]);
+
+      if (!isCurrentRequest()) {
+        return;
+      }
 
       if (targetsResult.status === "rejected") {
         nextSectionErrors.targets =
@@ -2388,6 +2676,7 @@ export default function SeasonSocialAnalyticsSection({
         nextSectionErrors.runs =
           runsResult.reason instanceof Error ? runsResult.reason.message : "Failed to load social runs";
       }
+
       if (runSummariesResult.status === "rejected") {
         setRunSummaryError(
           runSummariesResult.reason instanceof Error
@@ -2397,6 +2686,7 @@ export default function SeasonSocialAnalyticsSection({
       } else {
         setRunSummaryError(null);
       }
+
       if (workerHealthResult.status === "rejected") {
         setWorkerHealthError(
           workerHealthResult.reason instanceof Error
@@ -2413,40 +2703,50 @@ export default function SeasonSocialAnalyticsSection({
         nextSectionErrors.jobs = jobsError instanceof Error ? jobsError.message : "Failed to load social jobs";
       }
 
+      if (!isCurrentRequest()) {
+        return;
+      }
+
       setSectionErrors(nextSectionErrors);
       setLoading(false);
 
       void fetchAnalytics()
         .then(() => {
-          setSectionErrors((current) => ({ ...current, analytics: null }));
+          if (isCurrentRequest()) {
+            setSectionErrors((current) => ({ ...current, analytics: null }));
+          }
         })
         .catch((analyticsError) => {
-          setSectionErrors((current) => ({
-            ...current,
-            analytics:
-              analyticsError instanceof Error ? analyticsError.message : "Failed to load social analytics",
-          }));
+          if (isCurrentRequest()) {
+            setSectionErrors((current) => ({
+              ...current,
+              analytics:
+                analyticsError instanceof Error ? analyticsError.message : "Failed to load social analytics",
+            }));
+          }
         });
     })();
 
-    inFlightRef.current.refreshAll = request;
+    inFlightRef.current.refreshAllByView.set(requestView, request);
     try {
       await request;
     } finally {
-      if (inFlightRef.current.refreshAll === request) {
-        inFlightRef.current.refreshAll = null;
+      const activeRequest = inFlightRef.current.refreshAllByView.get(requestView);
+      if (activeRequest === request) {
+        inFlightRef.current.refreshAllByView.delete(requestView);
       }
     }
   }, [
-    analyticsView,
     fetchAnalytics,
     fetchJobs,
     fetchRunSummaries,
     fetchRuns,
     fetchTargets,
     fetchWorkerHealth,
+    isCurrentRefreshRequest,
     runningIngest,
     selectedRunId,
+    analyticsView,
   ]);
 
   useEffect(() => {
@@ -3588,6 +3888,7 @@ export default function SeasonSocialAnalyticsSection({
     return grouped;
   }, [analytics]);
   const dataQuality = analytics?.summary.data_quality;
+  const youtubeContentBreakdown = dataQuality?.youtube_content_breakdown;
   const postMetadata = dataQuality?.post_metadata;
   const postMetadataTotalPosts = Math.max(0, Number(postMetadata?.total_posts ?? analytics?.summary.total_posts ?? 0));
   const postMetadataMetricCards = useMemo(
@@ -3605,7 +3906,7 @@ export default function SeasonSocialAnalyticsSection({
       .filter((bucket) => bucket && typeof bucket.key === "string")
       .map((bucket) => {
         const key = String(bucket.key || "").toLowerCase();
-        const label = key === "photo" ? "Photo" : key === "album" ? "Album" : key === "video" ? "Video" : "Other";
+        const label = key === "photo" ? "Photo" : key === "album" ? "Album" : key === "video" ? "Video" : key === "post" ? "Post" : "Other";
         const pctLabel = formatPctLabel(typeof bucket.pct === "number" ? bucket.pct : null);
         const countLabel = formatInteger(Number(bucket.count ?? 0));
         return `${label} ${pctLabel} (${countLabel})`;
@@ -3986,6 +4287,50 @@ export default function SeasonSocialAnalyticsSection({
     window.requestAnimationFrame(() => {
       runSeasonIngestButtonRef.current?.focus();
     });
+  }, []);
+  const openLeaderboardLightbox = useCallback(
+    (
+      item: {
+        platform: string;
+        source_id: string;
+        text: string;
+        engagement: number;
+        url: string;
+        timestamp: string;
+        thumbnail_url?: string | null;
+      },
+      sectionTitle: string,
+      extraStats: SocialStatsItem[] = [],
+    ) => {
+      if (!item.thumbnail_url) return;
+      const mediaType = detectSocialMediaType(item.thumbnail_url);
+      const metadata = buildLeaderboardMediaMetadata({
+        item,
+        sourceScope: scope,
+        showName,
+        seasonNumber,
+        sectionTitle,
+      });
+      const stats: SocialStatsItem[] = [
+        { label: "Platform", value: PLATFORM_LABELS[item.platform] ?? item.platform },
+        { label: "Engagement", value: formatInteger(item.engagement) },
+        ...extraStats,
+      ];
+      const entry: SocialLeaderboardLightboxEntry = {
+        id: `${item.platform}-${item.source_id}`,
+        src: item.thumbnail_url,
+        mediaType,
+        posterSrc: item.thumbnail_url,
+        alt: `${PLATFORM_LABELS[item.platform] ?? item.platform} social media`,
+        metadata,
+        stats,
+      };
+      setLeaderboardLightbox({ entries: [entry], index: 0 });
+    },
+    [scope, seasonNumber, showName],
+  );
+  const closeLeaderboardLightbox = useCallback(() => {
+    setLeaderboardLightbox(null);
   }, []);
 
   const ingestExportPanel = (
@@ -4637,6 +4982,7 @@ export default function SeasonSocialAnalyticsSection({
         <RedditSourcesManager
           mode="season"
           showId={showId}
+          showSlug={showRouteSlug}
           showName={showName}
           seasonId={seasonId}
           seasonNumber={seasonNumber}
@@ -4736,25 +5082,53 @@ export default function SeasonSocialAnalyticsSection({
               className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
               data-testid="metric-comments-saved-actual-card"
             >
-              <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-comments-saved-actual-value">
+              <p className="mt-2 text-3xl font-bold text-zinc-900 break-all" data-testid="metric-comments-saved-actual-value">
                 {`${formatCompactInteger(commentsSavedActualSummary.saved)}/${formatCompactInteger(commentsSavedActualSummary.actual)}*`}
               </p>
               <p className="mt-1 text-xs text-zinc-500">Comments (Saved/Actual)</p>
             </article>
-            <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Sentiment Mix</p>
-              <div className="mt-2 space-y-1 text-sm">
-                <p className="font-semibold text-emerald-700">
-                  Positive {formatPercent(analytics?.summary.sentiment_mix.positive ?? 0)}
-                </p>
-                <p className="font-semibold text-zinc-600">
-                  Neutral {formatPercent(analytics?.summary.sentiment_mix.neutral ?? 0)}
-                </p>
-                <p className="font-semibold text-red-700">
-                  Negative {formatPercent(analytics?.summary.sentiment_mix.negative ?? 0)}
-                </p>
-              </div>
-            </article>
+            {isSentimentView && (
+              <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Sentiment Mix</p>
+                <div className="mt-2 space-y-1 text-sm">
+                  <p className="font-semibold text-emerald-700">
+                    Positive {formatPercent(analytics?.summary.sentiment_mix.positive ?? 0)}
+                  </p>
+                  <p className="font-semibold text-zinc-600">
+                    Neutral {formatPercent(analytics?.summary.sentiment_mix.neutral ?? 0)}
+                  </p>
+                  <p className="font-semibold text-red-700">
+                    Negative {formatPercent(analytics?.summary.sentiment_mix.negative ?? 0)}
+                  </p>
+                </div>
+              </article>
+            )}
+            {platformTab === "youtube" && (
+              <>
+                <article
+                  className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+                  data-testid="metric-youtube-videos-card"
+                >
+                  <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-youtube-videos-value">
+                    {youtubeContentBreakdown
+                      ? formatCompactInteger(Number(youtubeContentBreakdown.videos_count ?? 0))
+                      : "--"}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">Videos</p>
+                </article>
+                <article
+                  className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+                  data-testid="metric-youtube-reels-card"
+                >
+                  <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-youtube-reels-value">
+                    {youtubeContentBreakdown
+                      ? formatCompactInteger(Number(youtubeContentBreakdown.reels_count ?? 0))
+                      : "--"}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">Reels</p>
+                </article>
+              </>
+            )}
             {postMetadataMetricCards.map((metric) => (
               <article
                 key={`post-metadata-${metric.key}`}
@@ -5287,13 +5661,7 @@ export default function SeasonSocialAnalyticsSection({
                       needsWeekDetailTokenMetrics &&
                       !detailTokenCounts &&
                       weekDetailTokenCountsLoadingWeeks.has(week.week_index);
-                    const weekLinkQuery = new URLSearchParams({
-                      source_scope: scope,
-                      season_id: seasonId,
-                    });
-                    if (platformTab !== "overview") {
-                      weekLinkQuery.set("social_platform", platformTab);
-                    }
+                    const weekLinkQuery = new URLSearchParams();
                     if (analyticsView !== "bravo") {
                       weekLinkQuery.set("social_view", analyticsView);
                     }
@@ -5416,6 +5784,7 @@ export default function SeasonSocialAnalyticsSection({
                               showSlug: showRouteSlug,
                               seasonNumber,
                               weekIndex: week.week_index,
+                              platform: platformTab !== "overview" ? platformTab : undefined,
                               query: weekLinkQuery,
                             }) as Route}
                             className="text-blue-600 hover:text-blue-800 hover:underline"
@@ -5600,23 +5969,27 @@ export default function SeasonSocialAnalyticsSection({
                   <h4 className="mb-4 text-lg font-semibold text-zinc-900">Bravo Content Leaderboard</h4>
                   <div className="space-y-2">
                     {(analytics?.leaderboards.bravo_content ?? []).slice(0, 10).map((item) => (
-                      <a
+                      <div
                         key={`${item.platform}-${item.source_id}`}
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
                       >
                         <div className="flex items-start gap-3">
                           {item.thumbnail_url && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={item.thumbnail_url}
-                              alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} leaderboard thumbnail`}
-                              loading="lazy"
-                              referrerPolicy="no-referrer"
-                              className="h-12 w-12 shrink-0 rounded-md border border-zinc-200 object-cover"
-                            />
+                            <button
+                              type="button"
+                              onClick={() => openLeaderboardLightbox(item, "Bravo Content Leaderboard")}
+                              className="shrink-0"
+                              aria-label="Open leaderboard media lightbox"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={item.thumbnail_url}
+                                alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} leaderboard thumbnail`}
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="h-12 w-12 rounded-md border border-zinc-200 object-cover"
+                              />
+                            </button>
                           )}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-3 text-sm">
@@ -5626,9 +5999,19 @@ export default function SeasonSocialAnalyticsSection({
                               <span className="text-xs text-zinc-500">{formatInteger(item.engagement)} engagement</span>
                             </div>
                             <p className="mt-1 text-sm text-zinc-700 line-clamp-2">{item.text || item.source_id}</p>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                              >
+                                Open Post
+                              </a>
+                            </div>
                           </div>
                         </div>
-                      </a>
+                      </div>
                     ))}
                     {(analytics?.leaderboards.bravo_content?.length ?? 0) === 0 && (
                       <p className="text-sm text-zinc-500">No content leaderboard entries yet.</p>
@@ -5641,23 +6024,31 @@ export default function SeasonSocialAnalyticsSection({
                 <h4 className="mb-4 text-lg font-semibold text-zinc-900">Viewer Discussion Highlights</h4>
                 <div className="space-y-2">
                   {(analytics?.leaderboards.viewer_discussion ?? []).slice(0, 10).map((item) => (
-                    <a
+                    <div
                       key={`${item.platform}-${item.source_id}`}
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
                     >
                       <div className="flex items-start gap-3">
                         {item.thumbnail_url && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={item.thumbnail_url}
-                            alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} discussion thumbnail`}
-                            loading="lazy"
-                            referrerPolicy="no-referrer"
-                            className="h-12 w-12 shrink-0 rounded-md border border-zinc-200 object-cover"
-                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openLeaderboardLightbox(item, "Viewer Discussion Highlights", [
+                                { label: "Sentiment", value: item.sentiment.toUpperCase() },
+                              ])
+                            }
+                            className="shrink-0"
+                            aria-label="Open discussion media lightbox"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={item.thumbnail_url}
+                              alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} discussion thumbnail`}
+                              loading="lazy"
+                              referrerPolicy="no-referrer"
+                              className="h-12 w-12 rounded-md border border-zinc-200 object-cover"
+                            />
+                          </button>
                         )}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between text-xs uppercase tracking-[0.15em] text-zinc-500">
@@ -5665,9 +6056,19 @@ export default function SeasonSocialAnalyticsSection({
                             <span>{item.sentiment}</span>
                           </div>
                           <p className="mt-1 text-sm text-zinc-700 line-clamp-3">{item.text}</p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                            >
+                              Open Post
+                            </a>
+                          </div>
                         </div>
                       </div>
-                    </a>
+                    </div>
                   ))}
                   {(analytics?.leaderboards.viewer_discussion?.length ?? 0) === 0 && (
                     <p className="text-sm text-zinc-500">No viewer discussion highlights yet.</p>
@@ -6015,6 +6416,26 @@ export default function SeasonSocialAnalyticsSection({
             </section>
           )}
         </>
+      )}
+      {leaderboardLightbox && leaderboardLightbox.entries[leaderboardLightbox.index] && (
+        <ImageLightbox
+          src={leaderboardLightbox.entries[leaderboardLightbox.index].src}
+          alt={leaderboardLightbox.entries[leaderboardLightbox.index].alt}
+          mediaType={leaderboardLightbox.entries[leaderboardLightbox.index].mediaType}
+          videoPosterSrc={leaderboardLightbox.entries[leaderboardLightbox.index].posterSrc}
+          isOpen={true}
+          onClose={closeLeaderboardLightbox}
+          metadata={leaderboardLightbox.entries[leaderboardLightbox.index].metadata}
+          metadataExtras={
+            <SocialStatsPanel stats={leaderboardLightbox.entries[leaderboardLightbox.index].stats} />
+          }
+          position={{
+            current: leaderboardLightbox.index + 1,
+            total: leaderboardLightbox.entries.length,
+          }}
+          hasPrevious={false}
+          hasNext={false}
+        />
       )}
     </div>
   );

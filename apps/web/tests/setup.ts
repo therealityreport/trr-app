@@ -9,10 +9,17 @@ afterEach(() => {
 
 vi.mock('next/image', () => ({
   __esModule: true,
-  default: (props: React.ImgHTMLAttributes<HTMLImageElement> & { priority?: boolean; unoptimized?: boolean }) => {
-    const { priority: _priority, unoptimized: _unoptimized, ...rest } = props;
+  default: (
+    props: React.ImgHTMLAttributes<HTMLImageElement> & {
+      priority?: boolean;
+      unoptimized?: boolean;
+      fill?: boolean;
+    }
+  ) => {
+    const { priority: _priority, unoptimized: _unoptimized, fill: _fill, ...rest } = props;
     void _priority;
     void _unoptimized;
+    void _fill;
     return React.createElement('img', rest);
   },
 }));

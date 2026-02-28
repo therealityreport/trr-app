@@ -10,7 +10,7 @@ describe("season social subnav wiring", () => {
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/BRAVO ANALYTICS/);
+    expect(contents).toMatch(/OFFICIAL ANALYTICS/);
     expect(contents).toMatch(/SENTIMENT ANALYSIS/);
     expect(contents).toMatch(/HASHTAGS ANALYSIS/);
     expect(contents).toMatch(/ADVANCED ANALYTICS/);

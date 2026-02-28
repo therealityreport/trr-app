@@ -66,4 +66,28 @@ describe("resolveShowSlug", () => {
       show_name: "The Valley",
     });
   });
+
+  it("prefers nickname alias slug as canonical when alternative names include one", async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "11111111-2222-3333-4444-555555555555",
+          name: "The Real Housewives of Salt Lake City",
+          slug: "the-real-housewives-of-salt-lake-city",
+          alternative_names: ["RHOSLC"],
+        },
+      ],
+    });
+
+    const resolved = await resolveShowSlug("the-real-housewives-of-salt-lake-city");
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(queryMock.mock.calls[0]?.[1]).toEqual(["the-real-housewives-of-salt-lake-city"]);
+    expect(resolved).toMatchObject({
+      show_id: "11111111-2222-3333-4444-555555555555",
+      slug: "rhoslc",
+      canonical_slug: "rhoslc",
+      show_name: "The Real Housewives of Salt Lake City",
+    });
+  });
 });

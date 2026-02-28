@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState, Suspense } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth, signInWithGoogle } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, OAuthProvider, signInWithPopup, updateProfile } from "firebase/auth";
@@ -559,17 +560,17 @@ function RegisterContent() {
             }}>
               <p className="text-sm text-gray-600 font-hamburg">
                 By continuing, you agree to the{" "}
-                <a href="/terms-of-sale" className="text-black underline hover:no-underline">
+                <Link href="/terms-of-sale" className="text-black underline hover:no-underline">
                   Terms of Sale
-                </a>
+                </Link>
                 ,{" "}
-                <a href="/terms-of-service" className="text-black underline hover:no-underline">
+                <Link href="/terms-of-service" className="text-black underline hover:no-underline">
                   Terms of Service
-                </a>
+                </Link>
                 , and{" "}
-                <a href="/privacy-policy" className="text-black underline hover:no-underline">
+                <Link href="/privacy-policy" className="text-black underline hover:no-underline">
                   Privacy Policy
-                </a>
+                </Link>
                 .
               </p>
             </div>

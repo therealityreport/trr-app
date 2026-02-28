@@ -158,7 +158,7 @@ export default function AdminSocialMediaPage() {
                   const socialHref = buildShowAdminUrl({
                     showSlug: routeSlug,
                     tab: "social",
-                    socialView: "bravo",
+                    socialView: "official",
                   }) as Route;
                   return (
                     <Link
@@ -168,7 +168,7 @@ export default function AdminSocialMediaPage() {
                     >
                       <p className="text-sm font-semibold text-zinc-900">{show.show_name}</p>
                       <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                        Open Bravo Analytics
+                        Open Official Analytics
                       </p>
                     </Link>
                   );

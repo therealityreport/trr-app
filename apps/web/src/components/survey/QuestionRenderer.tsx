@@ -2,10 +2,11 @@
 
 import * as React from "react";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
-import type { QuestionConfig, UiVariant } from "@/lib/surveys/question-config-types";
+import type { NumericRankingConfig, QuestionConfig, UiVariant } from "@/lib/surveys/question-config-types";
 import { canonicalizeRankingVariant, inferUiVariant } from "@/lib/surveys/question-config-types";
 
 import StarRatingInput from "./StarRatingInput";
+import IconRatingInput from "./IconRatingInput";
 import SliderInput from "./SliderInput";
 import PersonRankingsInput from "./PersonRankingsInput";
 import PosterRankingsInput from "./PosterRankingsInput";
@@ -32,6 +33,7 @@ export interface QuestionRendererProps {
   value: unknown;
   onChange: (value: unknown) => void;
   disabled?: boolean;
+  showIconUrl?: string | null;
 }
 
 // ============================================================================
@@ -47,6 +49,7 @@ export default function QuestionRenderer({
   value,
   onChange,
   disabled = false,
+  showIconUrl = null,
 }: QuestionRendererProps) {
   const config = question.config as QuestionConfig;
   const uiVariant: UiVariant = canonicalizeRankingVariant(
@@ -60,7 +63,27 @@ export default function QuestionRenderer({
 
   switch (uiVariant) {
     // Numeric rating questions
-    case "numeric-ranking":
+    case "numeric-ranking": {
+      const numericConfig = config as NumericRankingConfig;
+      const override = typeof numericConfig.iconOverrideUrl === "string"
+        ? numericConfig.iconOverrideUrl.trim()
+        : "";
+      const resolvedIconUrl = override || (showIconUrl ?? "").trim();
+      if (resolvedIconUrl) {
+        return (
+          <IconRatingInput
+            value={value as number | null}
+            onChange={onChange}
+            min={numericConfig.min}
+            max={numericConfig.max}
+            step={numericConfig.step}
+            iconCount={Math.max(1, Math.round(numericConfig.max))}
+            iconSrc={resolvedIconUrl}
+            ariaLabel={question.question_text}
+            disabled={disabled}
+          />
+        );
+      }
       return (
         <StarRatingInput
           {...commonProps}
@@ -68,6 +91,7 @@ export default function QuestionRenderer({
           onChange={onChange}
         />
       );
+    }
 
     case "numeric-scale-slider":
       return (

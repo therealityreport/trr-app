@@ -70,7 +70,7 @@ describe("social mirror requeue proxy route", () => {
 
   it("returns 400 for unsupported platform", async () => {
     const request = new NextRequest(
-      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/mirror/requeue?platform=facebook`,
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/mirror/requeue?platform=linkedin`,
       { method: "POST" },
     );
 

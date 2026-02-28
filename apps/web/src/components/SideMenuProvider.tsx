@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import {
   createContext,
   useCallback,
@@ -272,12 +273,12 @@ export default function SideMenuProvider({ children }: SideMenuProviderProps) {
                   return (
                     <div key={game.id} className="side-menu__game">
                       <div className="side-menu__game-row">
-                        <a className="side-menu__primary-link" href={game.links[0]?.href ?? "#"} onClick={closeMenu}>
+                        <Link className="side-menu__primary-link" href={game.links[0]?.href ?? "#"} onClick={closeMenu}>
                           <span className="side-menu__icon" aria-hidden="true">
                             <Image src={game.icon} alt="" width={20} height={20} />
                           </span>
                           <span className="side-menu__link-text">{game.label}</span>
-                        </a>
+                        </Link>
                         <button
                           type="button"
                           className={cx("side-menu__toggle", expanded && "is-open")}
@@ -297,9 +298,9 @@ export default function SideMenuProvider({ children }: SideMenuProviderProps) {
                         <ul className="side-menu__secondary-links">
                           {game.links.map((link) => (
                             <li key={link.href}>
-                              <a href={link.href} onClick={closeMenu}>
+                              <Link href={link.href} onClick={closeMenu}>
                                 {link.label}
-                              </a>
+                              </Link>
                             </li>
                           ))}
                         </ul>
@@ -308,9 +309,9 @@ export default function SideMenuProvider({ children }: SideMenuProviderProps) {
                   );
                 })}
               </div>
-              <a className="side-menu__view-all" href="/hub" onClick={closeMenu}>
+              <Link className="side-menu__view-all" href="/hub" onClick={closeMenu}>
                 View all Games
-              </a>
+              </Link>
             </section>
 
             <section className="side-menu__section" aria-labelledby="side-menu-surveys-heading">
@@ -319,21 +320,21 @@ export default function SideMenuProvider({ children }: SideMenuProviderProps) {
               </div>
               <div className="side-menu__game">
                 <div className="side-menu__game-row">
-                  <a className="side-menu__primary-link" href="/hub/surveys" onClick={closeMenu}>
+                  <Link className="side-menu__primary-link" href="/hub/surveys" onClick={closeMenu}>
                     <span className="side-menu__icon" aria-hidden="true">
                       <Image src="/assets/icons/side-menu/daily.svg" alt="" width={20} height={20} />
                     </span>
                     <span className="side-menu__link-text">Weekly Check-Ins</span>
-                  </a>
+                  </Link>
                 </div>
                 <div className="side-menu__game-panel is-open">
                   <p className="side-menu__game-description">Jump into surveys for your favorite Housewives cities.</p>
                   <ul className="side-menu__secondary-links">
                     {SURVEY_LINKS.map((survey) => (
                       <li key={survey.id}>
-                        <a href={survey.href} onClick={closeMenu}>
+                        <Link href={survey.href} onClick={closeMenu}>
                           {survey.label}
-                        </a>
+                        </Link>
                       </li>
                     ))}
                   </ul>
@@ -345,9 +346,9 @@ export default function SideMenuProvider({ children }: SideMenuProviderProps) {
               <div className="side-menu__section-heading" id="side-menu-profile-heading">
                 Profile
               </div>
-              <a className="side-menu__primary-link" href="/profile" onClick={closeMenu}>
+              <Link className="side-menu__primary-link" href="/profile" onClick={closeMenu}>
                 <span className="side-menu__link-text">Account details</span>
-              </a>
+              </Link>
               <button type="button" className="side-menu__logout" onClick={handleLogout}>
                 Log Out
               </button>
@@ -358,11 +359,11 @@ export default function SideMenuProvider({ children }: SideMenuProviderProps) {
                 Privacy Settings
               </div>
               <ul className="side-menu__secondary-links">
-                <li><a href="/privacy-policy" onClick={closeMenu}>Privacy Policy</a></li>
-                <li><a href="/privacy-policy#cookies" onClick={closeMenu}>Cookie Policy</a></li>
-                <li><a href="/privacy-policy#faq" onClick={closeMenu}>Privacy FAQ</a></li>
-                <li><a href="/privacy-policy#delete" onClick={closeMenu}>Delete My Account</a></li>
-                <li><a href="/privacy-policy#choices" onClick={closeMenu}>Your Privacy Choices</a></li>
+                <li><Link href="/privacy-policy" onClick={closeMenu}>Privacy Policy</Link></li>
+                <li><Link href="/privacy-policy#cookies" onClick={closeMenu}>Cookie Policy</Link></li>
+                <li><Link href="/privacy-policy#faq" onClick={closeMenu}>Privacy FAQ</Link></li>
+                <li><Link href="/privacy-policy#delete" onClick={closeMenu}>Delete My Account</Link></li>
+                <li><Link href="/privacy-policy#choices" onClick={closeMenu}>Your Privacy Choices</Link></li>
               </ul>
             </section>
           </div>

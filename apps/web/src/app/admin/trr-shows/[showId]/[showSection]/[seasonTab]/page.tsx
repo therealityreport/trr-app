@@ -1,5 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 import type { Route } from "next";
+import {
+  buildSeasonAdminUrl,
+  cleanLegacyRoutingQuery,
+  type SeasonAssetsSubTab,
+  type SeasonAdminTab,
+} from "@/lib/admin/show-admin-routes";
 
 interface SeasonTabAliasPageProps {
   params: Promise<{ showId: string; showSection: string; seasonTab: string }>;
@@ -11,6 +17,7 @@ const ALLOWED_SEASON_TABS = new Set([
   "episodes",
   "assets",
   "videos",
+  "news",
   "fandom",
   "cast",
   "surveys",
@@ -58,9 +65,26 @@ export default async function SeasonTabAliasPage({ params, searchParams }: Seaso
   }
 
   const query = new URLSearchParams(serializeSearchParams(resolvedSearchParams));
-  query.set("tab", canonicalTab);
-  const queryString = query.toString();
-  const destination = `/shows/${showId}/s${seasonNumber}${queryString ? `?${queryString}` : ""}`;
+  const cleanedQuery = cleanLegacyRoutingQuery(query);
+
+  let canonicalRouteTab: SeasonAdminTab = canonicalTab as SeasonAdminTab;
+  let assetsSubTab: SeasonAssetsSubTab | undefined;
+  if (normalizedTab === "videos") {
+    canonicalRouteTab = "assets";
+    assetsSubTab = "videos";
+  } else if (canonicalTab === "details") {
+    canonicalRouteTab = "overview";
+  } else if (canonicalTab === "assets") {
+    assetsSubTab = "images";
+  }
+
+  const destination = buildSeasonAdminUrl({
+    showSlug: showId,
+    seasonNumber,
+    tab: canonicalRouteTab,
+    assetsSubTab,
+    query: cleanedQuery,
+  });
   redirect(
     destination as Route,
   );

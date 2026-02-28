@@ -143,14 +143,20 @@ export const getSeasonAssetDetailUrlCandidates = (asset: SeasonAssetLike): strin
 };
 
 export const getPersonPhotoCardUrlCandidates = (photo: PersonPhotoLike): string[] => {
-  return buildCardImageUrlCandidates({
-    cropDisplayUrl: photo.crop_display_url,
+  // Person gallery cards apply client-side focal crop/zoom.
+  // Prefer uncropped/base variants to avoid double-cropping pre-generated crop variants.
+  const baseCandidates = buildCardImageUrlCandidates({
+    cropDisplayUrl: null,
     thumbUrl: photo.thumb_url,
     displayUrl: photo.display_url,
     hostedUrl: photo.hosted_url,
     originalUrl: photo.original_url,
     sourceUrl: photo.url,
   });
+  return dedupeCandidates([
+    ...baseCandidates,
+    normalizeImageUrl(photo.crop_display_url),
+  ]);
 };
 
 export const getPersonPhotoDetailUrlCandidates = (photo: PersonPhotoLike): string[] => {

@@ -135,6 +135,8 @@ export interface NumericRankingConfig extends BaseQuestionConfig {
   max: number;
   /** Step size for slider precision (default: 0.1) */
   step?: number;
+  /** Optional icon URL override for numeric-rating renderer. */
+  iconOverrideUrl?: string;
   labels?: {
     min: string;
     max: string;
