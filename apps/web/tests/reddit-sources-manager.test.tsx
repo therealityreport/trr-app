@@ -1916,10 +1916,6 @@ describe("RedditSourcesManager", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
     clickPeriodRefreshPosts("Pre-Season");
