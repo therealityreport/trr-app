@@ -453,6 +453,7 @@ export default function ImageSourceModal({
                       }}
                       className="rounded-lg border border-zinc-200 p-2 text-left transition hover:bg-zinc-50"
                     >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={asset.hosted_url}
                         alt={asset.caption ?? asset.kind ?? "Library asset"}

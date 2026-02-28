@@ -1543,7 +1543,6 @@ export default function TrrShowDetailPage() {
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
   const [castRoleMembersWarning, setCastRoleMembersWarning] = useState<string | null>(null);
-  const [castRoleMembersLoadTimedOut, setCastRoleMembersLoadTimedOut] = useState(false);
   const [castMatrixSyncLoading, setCastMatrixSyncLoading] = useState(false);
   const [castMatrixSyncError, setCastMatrixSyncError] = useState<string | null>(null);
   const [castMatrixSyncResult, setCastMatrixSyncResult] = useState<CastMatrixSyncResult | null>(
@@ -4242,7 +4241,6 @@ export default function TrrShowDetailPage() {
         setCastRoleMembersLoading(true);
         setCastRoleMembersError(null);
         setCastRoleMembersWarning(null);
-        setCastRoleMembersLoadTimedOut(false);
         try {
           const headers = await getAuthHeaders();
           const params = new URLSearchParams();
@@ -4295,7 +4293,6 @@ export default function TrrShowDetailPage() {
           setCastRoleMembersLoadedOnce(true);
           castRoleMembersLoadedOnceRef.current = true;
           setLastSuccessfulCastRoleMembersAt(Date.now());
-          setCastRoleMembersLoadTimedOut(false);
           setCastRoleMembersWarning(null);
         } catch (err) {
           const isTimeout = isAbortError(err) || (err instanceof Error && /timed out|aborted/i.test(err.message));
@@ -4304,7 +4301,6 @@ export default function TrrShowDetailPage() {
             : err instanceof Error
               ? err.message
               : "Failed to load cast role members";
-          setCastRoleMembersLoadTimedOut(isTimeout);
           const hasPriorData =
             castRoleMembersLoadedOnceRef.current || castRoleMembersSnapshotRef.current.length > 0;
           if (hasPriorData) {
@@ -4469,7 +4465,6 @@ export default function TrrShowDetailPage() {
       setRolesError(null);
       setRolesWarning(null);
       setCastRoleMembersError(null);
-      setCastRoleMembersLoadTimedOut(false);
       setCastRoleEditDraft({
         personId,
         personName,
@@ -4568,7 +4563,6 @@ export default function TrrShowDetailPage() {
         setRolesWarning(null);
         setRolesLoadTimedOut(false);
         setCastRoleMembersError(null);
-        setCastRoleMembersLoadTimedOut(false);
         const headers = await getAuthHeaders();
         let nextRoles = [...showRoles];
         const existingRoleNames = new Set(nextRoles.map((role) => role.name.trim().toLowerCase()));
@@ -6463,7 +6457,6 @@ export default function TrrShowDetailPage() {
     castRoleMembersLoadKeyRef.current = null;
     setCastRoleMembersError(null);
     setCastRoleMembersWarning(null);
-    setCastRoleMembersLoadTimedOut(false);
     setLastSuccessfulCastRoleMembersAt(null);
     setCastRoleEditorDeepLinkWarning(null);
     setCastMatrixSyncError(null);

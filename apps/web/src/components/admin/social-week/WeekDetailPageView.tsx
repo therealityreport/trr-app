@@ -2383,6 +2383,7 @@ export default function WeekDetailPage() {
   }, [
     hasValidNumericPathParams,
     pathname,
+    canonicalCurrentRoute,
     resolvedShowSlug,
     router,
     searchParamsString,
@@ -2412,6 +2413,7 @@ export default function WeekDetailPage() {
   }, [
     hasValidNumericPathParams,
     pathname,
+    canonicalCurrentRoute,
     router,
     searchParamsString,
     seasonNumber,
@@ -2440,6 +2442,7 @@ export default function WeekDetailPage() {
   }, [
     hasValidNumericPathParams,
     isOverviewSubTabPath,
+    canonicalCurrentRoute,
     router,
     searchParamsString,
     seasonNumber,
