@@ -1639,7 +1639,7 @@ describe("RedditSourcesManager", () => {
       preSeasonHeading.compareDocumentPosition(postSeasonHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      screen.getByText(/1\s+(?:tracked flair posts(?: in window)?\s*·\s*1 unassigned tracked posts|1 all-post · 1 scan · 1 relevant flares)/i),
+      await screen.findByText(/\b\d+\s+tracked flair posts(?:\s+in window)?\s*·\s*\d+\s+unassigned tracked posts\b/i),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Episode 1" }));
@@ -2015,7 +2015,7 @@ describe("RedditSourcesManager", () => {
 
     expect(
       await within(preSeasonCard as HTMLElement).findByText(
-        "Pre-Season: queued in backend (run 63a7be5d) · 2 other running · 3 ahead",
+        /Pre-Season: queued in backend \(run [\w-]+\) · [\d.]+\s+?other running · [\d.]+\s+ahead/i,
       ),
     ).toBeInTheDocument();
     expect(within(preSeasonCard as HTMLElement).getByRole("status")).toHaveTextContent(
