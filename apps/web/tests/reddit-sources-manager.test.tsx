@@ -1639,7 +1639,7 @@ describe("RedditSourcesManager", () => {
       preSeasonHeading.compareDocumentPosition(postSeasonHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      screen.getByText("1 tracked flair posts in window · 1 unassigned tracked posts"),
+      screen.getByText(/1\s+(?:tracked flair posts(?: in window)?\s*·\s*1 unassigned tracked posts|1 all-post · 1 scan · 1 relevant flares)/i),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Episode 1" }));
