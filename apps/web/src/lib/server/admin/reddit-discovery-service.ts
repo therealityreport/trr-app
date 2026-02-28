@@ -245,7 +245,6 @@ const MAX_SEARCH_LIMIT_PER_PAGE = 100;
 const DEFAULT_EXHAUSTIVE_WINDOW_MAX_PAGES = 160;
 const MAX_EXHAUSTIVE_WINDOW_MAX_PAGES = 500;
 const DEFAULT_REDDIT_TIMEOUT_MS = 12_000;
-const DEFAULT_REDDIT_USER_AGENT = "TRRAdminRedditDiscovery/1.0 (+https://thereality.report)";
 const MAX_REDDIT_FETCH_RETRIES = 4;
 const DEFAULT_REDDIT_RATE_LIMIT_DELAY_MS = 3_500;
 const DEFAULT_REDDIT_PAGE_COOLDOWN_MS = 250;
@@ -287,9 +286,6 @@ const getFetchTimeoutMs = (): number => {
   }
   return DEFAULT_REDDIT_TIMEOUT_MS;
 };
-
-const getRedditUserAgent = (): string =>
-  (process.env.REDDIT_USER_AGENT ?? "").trim() || DEFAULT_REDDIT_USER_AGENT;
 
 const isTestEnv = (): boolean =>
   process.env.NODE_ENV === "test" || process.env.VITEST === "true";

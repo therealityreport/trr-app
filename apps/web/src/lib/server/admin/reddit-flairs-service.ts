@@ -33,7 +33,6 @@ const SUBREDDIT_RE = /^[A-Za-z0-9_]{2,21}$/;
 const DEFAULT_FETCH_TIMEOUT_MS = 12_000;
 const DEFAULT_FLAIR_CAP = 40;
 const DEFAULT_LISTING_LIMIT = 60;
-const DEFAULT_REDDIT_USER_AGENT = "TRRAdminRedditFlairs/1.0 (+https://thereality.report)";
 
 const normalizeSubreddit = (value: string): string => {
   let cleaned = value.trim();
@@ -70,9 +69,6 @@ const getListingLimit = (): number => {
   if (Number.isFinite(parsed) && parsed > 0) return Math.min(parsed, 100);
   return DEFAULT_LISTING_LIMIT;
 };
-
-const getRedditUserAgent = (): string =>
-  (process.env.REDDIT_USER_AGENT ?? "").trim() || DEFAULT_REDDIT_USER_AGENT;
 
 const fetchJsonWithTimeout = async <T>(url: string): Promise<T> => {
   const controller = new AbortController();
