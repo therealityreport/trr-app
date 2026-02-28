@@ -1911,7 +1911,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const upToDateLabels = await screen.findAllByText("Up-to-Date");
     expect(upToDateLabels.length).toBeGreaterThan(0);
-    const weekOneRow = (await screen.findByRole("link", { name: /Week 1/i })).closest("tr");
+    const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
     expect(weekOneRow).not.toBeNull();
     const weekOne = within(weekOneRow as HTMLElement);
     expect(weekOne.getByTestId("weekly-total-progress-1")).toHaveTextContent("100.0%");
