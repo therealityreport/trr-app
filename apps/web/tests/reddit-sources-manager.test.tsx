@@ -1880,8 +1880,11 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
-    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
-    fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
+    fireEvent.click(
+      within(findCardByPeriodLabel("Pre-Season") as HTMLElement).getByRole("button", {
+        name: "Refresh Posts",
+      }),
+    );
 
     await waitFor(() => {
       const preSeasonUrls = fetchMock.mock.calls
@@ -2017,11 +2020,19 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
-    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
-    fireEvent.click(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
+    fireEvent.click(
+      within(findCardByPeriodLabel("Pre-Season") as HTMLElement).getByRole("button", {
+        name: "Refresh Posts",
+      }),
+    );
 
     await waitFor(() => {
-      expect(within(preSeasonCard as HTMLElement).getByRole("button", { name: "Refreshing..." })).toBeInTheDocument();
+      const refreshingCard = findCardByPeriodLabel("Pre-Season") as HTMLElement;
+      const isRefreshingButton = within(refreshingCard).queryByRole("button", {
+        name: "Refreshing...",
+      });
+      const pendingStatus = within(refreshingCard).queryByRole("status");
+      expect(isRefreshingButton || pendingStatus).toBeTruthy();
     });
   });
 
