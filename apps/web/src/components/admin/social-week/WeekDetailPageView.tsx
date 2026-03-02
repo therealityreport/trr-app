@@ -4,12 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import Link from "next/link";
-import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
-import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
+import { SeasonTabsNav } from "@/components/admin/season-tabs/SeasonTabsNav";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
 import {
-  buildSeasonWeekBreadcrumb,
+  buildSeasonSocialBreadcrumb,
   humanizeSlug,
 } from "@/lib/admin/admin-breadcrumbs";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
@@ -17,6 +17,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildSeasonAdminUrl, buildSeasonSocialWeekUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
+import { pickFirstNonVideoUrl, selectTwitterThumbnailUrl } from "./social-media-thumbnails";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -77,11 +78,25 @@ interface QuoteComment {
   };
 }
 
+interface PostUserSummary {
+  id?: string | null;
+  username?: string | null;
+  display_name?: string | null;
+  url?: string | null;
+  avatar_url?: string | null;
+}
+
+interface PostCollaboratorDetail {
+  username?: string | null;
+  profile_pic_url?: string | null;
+}
+
 interface BasePost {
   source_id: string;
   author: string;
   text: string;
   url: string;
+  sort_rank?: number;
   posted_at: string | null;
   engagement: number;
   total_comments_available: number;
@@ -97,6 +112,11 @@ interface BasePost {
   thumbnail_url?: string | null;
   cover_source?: string | null;
   cover_source_confidence?: string | null;
+  user?: PostUserSummary | null;
+  owner_profile_pic_url?: string | null;
+  hosted_owner_profile_pic_url?: string | null;
+  hosted_tagged_profile_pics?: Record<string, string> | null;
+  collaborators_detail?: PostCollaboratorDetail[] | null;
 }
 
 interface InstagramPost extends BasePost {
@@ -167,6 +187,7 @@ interface ThreadsPost extends BasePost {
   reposts: number;
   quotes: number;
   views: number;
+  topic?: string | null;
   media_urls?: string[] | null;
   thumbnail_url?: string | null;
 }
@@ -212,11 +233,34 @@ interface WeekDetailResponse {
   };
 }
 
+interface WeekSummaryResponse {
+  week: WeekDetailResponse["week"];
+  season: WeekDetailResponse["season"];
+  source_scope: string;
+  platforms: Record<
+    string,
+    {
+      total_posts?: number;
+      totals?: {
+        posts?: number;
+        total_comments?: number;
+        total_engagement?: number;
+      };
+    }
+  >;
+  totals: {
+    posts?: number;
+    total_comments?: number;
+    total_engagement?: number;
+  };
+}
+
 interface PostDetailResponse {
   platform: string;
   source_id: string;
   author: string;
   text: string;
+  topic?: string | null;
   url: string;
   posted_at: string | null;
   title?: string;
@@ -235,11 +279,69 @@ interface PostDetailResponse {
   hashtags?: string[];
   mentions?: string[];
   duration_seconds?: number | null;
+  media_asset_meta?: {
+    selection_policy?: string | null;
+    selected_source?: string | null;
+    source_assets?: Array<{
+      url?: string | null;
+      type?: string | null;
+      width?: number | null;
+      height?: number | null;
+      resolution?: string | null;
+      fps?: number | null;
+      bitrate?: number | null;
+      duration_seconds?: number | null;
+    }> | null;
+    thumbnail_source?: {
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      resolution?: string | null;
+    } | null;
+    hosted_assets?: Array<{
+      url?: string | null;
+      type?: string | null;
+      width?: number | null;
+      height?: number | null;
+      resolution?: string | null;
+    }> | null;
+    thumbnail_hosted?: {
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      resolution?: string | null;
+    } | null;
+    updated_at?: string | null;
+  } | null;
+  transcript_text?: string | null;
+  transcript_segments?: Array<{
+    start_seconds?: number;
+    end_seconds?: number;
+    text?: string;
+  }> | null;
+  transcript_language?: string | null;
+  transcript_source?: string | null;
+  transcript_synced_at?: string | null;
+  transcript_error?: string | null;
   stats: Record<string, number>;
   total_comments_in_db: number;
   total_quotes_in_db?: number;
   comments: ThreadedComment[];
   quotes?: QuoteComment[];
+  refresh?: {
+    detail_sync?: {
+      detail?: { status?: string; error?: string | null } | null;
+      comments?: { status?: string; is_complete?: boolean; reason?: string | null } | null;
+      media?: { status?: string; error?: string | null } | null;
+    } | null;
+    warnings?: string[] | null;
+    comment_gap?: {
+      reported?: number | null;
+      saved?: number | null;
+      is_complete?: boolean;
+      reason?: string | null;
+    } | null;
+  } | null;
 }
 
 interface SocialJob {
@@ -255,6 +357,16 @@ interface SocialJob {
   created_at?: string;
   config?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+}
+
+interface SocialJobsResponse {
+  jobs?: SocialJob[];
+  pagination?: {
+    limit?: number;
+    offset?: number;
+    returned?: number;
+    has_more?: boolean;
+  };
 }
 
 interface SocialRun {
@@ -340,7 +452,10 @@ type SocialPlatform = Exclude<PlatformFilter, "all">;
 type SortField = "engagement" | "likes" | "views" | "comments_count" | "shares" | "retweets" | "posted_at";
 type SortDir = "desc" | "asc";
 type SourceScope = "bravo" | "creator" | "community";
+type IngestMode = "posts_only" | "posts_and_comments" | "comments_only" | "details_refresh";
 type SocialMediaType = "image" | "video" | "embed";
+type SeasonTabId = "overview" | "episodes" | "assets" | "news" | "fandom" | "cast" | "surveys" | "social";
+type SocialAnalyticsViewId = "bravo" | "sentiment" | "hashtags" | "advanced" | "reddit";
 
 interface SocialMediaCandidate {
   src: string;
@@ -387,6 +502,32 @@ const PLATFORM_FILTERS: { key: PlatformFilter; label: string }[] = [
   { key: "facebook", label: "Facebook" },
   { key: "threads", label: "Threads" },
 ];
+const PLATFORM_KEYS: SocialPlatform[] = ["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"];
+const SEASON_PAGE_TABS: ReadonlyArray<{ id: SeasonTabId; label: string }> = [
+  { id: "overview", label: "Back Home" },
+  { id: "episodes", label: "Episodes" },
+  { id: "assets", label: "Assets" },
+  { id: "news", label: "News" },
+  { id: "fandom", label: "Fandom" },
+  { id: "cast", label: "Cast" },
+  { id: "surveys", label: "Surveys" },
+  { id: "social", label: "Social Media" },
+];
+const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsViewId; label: string }> = [
+  { id: "bravo", label: "OFFICIAL ANALYTICS" },
+  { id: "sentiment", label: "SENTIMENT ANALYSIS" },
+  { id: "hashtags", label: "HASHTAGS ANALYSIS" },
+  { id: "advanced", label: "ADVANCED ANALYTICS" },
+  { id: "reddit", label: "REDDIT ANALYTICS" },
+];
+const EMPTY_PLATFORM_TOTALS: Record<SocialPlatform, number> = {
+  instagram: 0,
+  tiktok: 0,
+  twitter: 0,
+  youtube: 0,
+  facebook: 0,
+  threads: 0,
+};
 
 const SORT_OPTIONS: { key: SortField; label: string }[] = [
   { key: "engagement", label: "Engagement" },
@@ -420,6 +561,7 @@ const PLATFORM_HANDLE_FALLBACK: Record<string, string> = {
   facebook: "Bravo",
   threads: "bravotv",
 };
+const REQUIRED_BRAVO_HANDLE = "bravotv";
 
 const STAT_LABELS: Record<string, string> = {
   likes: "Likes",
@@ -446,10 +588,12 @@ const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
-const WEEK_DETAIL_MAX_COMMENTS_PER_POST = 25;
+const WEEK_DETAIL_MAX_COMMENTS_PER_POST = 0;
 const WEEK_DETAIL_POST_LIMIT = 20;
 const REQUEST_TIMEOUT_MS = {
-  weekDetail: 45_000,
+  weekDetail: 50_000,
+  weekDetailYoutubeRefresh: 120_000,
+  ingestKickoff: 25_000,
   syncRuns: 15_000,
   syncJobs: 15_000,
   commentsCoverage: 35_000,
@@ -556,6 +700,11 @@ const fmtNum = (n: number | null | undefined): string => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
+};
+
+const fmtExactNum = (n: number | null | undefined): string => {
+  if (n == null || !Number.isFinite(n)) return "0";
+  return Math.max(0, Math.trunc(n)).toLocaleString();
 };
 
 const fmtDate = (iso: string | null | undefined): string => {
@@ -693,8 +842,11 @@ function getPostMentions(post: AnyPost): string[] {
 }
 
 function getActualCommentsForPost(platform: string, post: AnyPost): number {
-  if (platform === "twitter" || platform === "threads") {
-    return Math.max(0, getNum(post, "replies_count"));
+  if (platform === "twitter") {
+    return Math.max(0, getNum(post, "replies_count") + getNum(post, "quotes"));
+  }
+  if (platform === "threads") {
+    return Math.max(0, getNum(post, "replies_count") + getNum(post, "quotes"));
   }
   return Math.max(0, getNum(post, "comments_count"));
 }
@@ -771,26 +923,38 @@ function formatMirrorCoverageLabel(readyCount: number, total: number): string {
 }
 
 function getReportedCommentCountFromStats(platform: string, stats: Record<string, number>): number {
-  const raw =
-    platform === "twitter" || platform === "threads"
-      ? Number(stats.replies_count ?? stats.comments_count ?? 0)
-      : Number(stats.comments_count ?? 0);
+  const raw = (() => {
+    if (platform === "twitter") {
+      return Number(stats.replies_count ?? 0) + Number(stats.quotes ?? 0);
+    }
+    if (platform === "threads") {
+      return Number(stats.replies_count ?? stats.comments_count ?? 0) + Number(stats.quotes ?? 0);
+    }
+    return Number(stats.comments_count ?? 0);
+  })();
   if (!Number.isFinite(raw)) return 0;
   return Math.max(0, raw);
 }
 
+function getTwitterRepostCount(post: AnyPost): number {
+  if (hasNum(post, "reposts")) return Math.max(0, getNum(post, "reposts"));
+  return Math.max(0, getNum(post, "retweets") + getNum(post, "quotes"));
+}
+
 function getPostThumbnailUrl(platform: string, post: AnyPost): string | null {
   const hostedThumbnail = getStr(post, "hosted_thumbnail_url");
-  if (hostedThumbnail) return hostedThumbnail;
-
   if (platform === "twitter") {
     const thumbnail = getStr(post, "thumbnail_url");
-    if (thumbnail) return thumbnail;
     const hostedMediaUrls = getStrArr(post, "hosted_media_urls");
-    if (hostedMediaUrls[0]) return hostedMediaUrls[0];
     const mediaUrls = getStrArr(post, "media_urls");
-    return mediaUrls[0] || null;
+    return selectTwitterThumbnailUrl({
+      hostedThumbnail,
+      thumbnail,
+      hostedMediaUrls,
+      mediaUrls,
+    });
   }
+  if (hostedThumbnail) return hostedThumbnail;
   if (platform === "youtube") return getStr(post, "thumbnail_url") || null;
   if (platform === "instagram") {
     const thumbnail = getStr(post, "thumbnail_url");
@@ -1058,7 +1222,7 @@ function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | n
 }
 
 function getPostDetailThumbnailUrl(data: PostDetailMediaFields): string | null {
-  return pickFirstUrl([
+  return pickFirstNonVideoUrl([
     data.hosted_thumbnail_url,
     data.thumbnail_url,
     data.source_thumbnail_url,
@@ -1243,10 +1407,15 @@ function buildSocialStats(platform: string, post: AnyPost): SocialStatsItem[] {
   if (hasNum(post, "views")) stats.push({ label: "Views", value: fmtNum(getNum(post, "views")) });
   if (hasNum(post, "shares")) stats.push({ label: "Shares", value: fmtNum(getNum(post, "shares")) });
   if (hasNum(post, "saves")) stats.push({ label: "Saves", value: fmtNum(getNum(post, "saves")) });
-  if (hasNum(post, "retweets")) stats.push({ label: "Reposts", value: fmtNum(getNum(post, "retweets")) });
-  if (hasNum(post, "reposts")) stats.push({ label: "Reposts", value: fmtNum(getNum(post, "reposts")) });
+  if (platform === "twitter") {
+    stats.push({ label: "Reposts", value: fmtNum(getTwitterRepostCount(post)) });
+  } else if (hasNum(post, "retweets")) {
+    stats.push({ label: "Reposts", value: fmtNum(getNum(post, "retweets")) });
+  } else if (hasNum(post, "reposts")) {
+    stats.push({ label: "Reposts", value: fmtNum(getNum(post, "reposts")) });
+  }
   if (hasNum(post, "quotes")) stats.push({ label: "Quotes", value: fmtNum(getNum(post, "quotes")) });
-  if (hasNum(post, "duration_seconds")) {
+  if (hasNum(post, "duration_seconds") && getNum(post, "duration_seconds") > 0) {
     stats.push({ label: "Duration", value: `${fmtNum(getNum(post, "duration_seconds"))}s` });
   }
   stats.push({ label: "Mirror", value: buildMirrorScopeLabel(post) });
@@ -1278,12 +1447,170 @@ function getPlatformIconKey(platform: string): SocialPlatformTabIconKey | null {
   return null;
 }
 
-function formatPostHandle(platform: string, author: string): string {
-  const normalized = String(author || "").trim().replace(/^@+/, "");
-  if (normalized) return `@${normalized}`;
-  const fallback = PLATFORM_HANDLE_FALLBACK[platform];
-  if (fallback) return `@${fallback}`;
-  return "@unknown";
+function normalizeHandle(handle: string | null | undefined): string {
+  return String(handle ?? "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+}
+
+function formatHandleLabel(handle: string | null | undefined): string {
+  const normalized = normalizeHandle(handle);
+  return normalized ? `@${normalized}` : "";
+}
+
+type ProxyErrorPayload = {
+  error?: string;
+  trace_id?: string;
+};
+
+function formatErrorWithTraceId(message: string, traceId: unknown): string {
+  const traceToken = String(traceId ?? "").trim();
+  if (!traceToken) return message;
+  return `${message} (trace: ${traceToken})`;
+}
+
+async function readApiErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
+  const body = (await response.json().catch(() => ({}))) as ProxyErrorPayload;
+  const message = String(body.error || "").trim() || fallbackMessage;
+  return formatErrorWithTraceId(message, body.trace_id);
+}
+
+function getFallbackHandle(platform: string): string {
+  const fallback = normalizeHandle(PLATFORM_HANDLE_FALLBACK[platform]);
+  return fallback || REQUIRED_BRAVO_HANDLE;
+}
+
+function buildHeaderAccounts(platform: string, post: AnyPost, collaborators: string[]): string[] {
+  const accounts: string[] = [];
+  const authorHandle = normalizeHandle(post.author);
+  if (authorHandle) {
+    accounts.push(authorHandle);
+  } else {
+    accounts.push(REQUIRED_BRAVO_HANDLE);
+  }
+
+  for (const collaborator of collaborators) {
+    const normalized = normalizeHandle(collaborator);
+    if (!normalized) continue;
+    accounts.push(normalized);
+  }
+
+  if (!accounts.includes(REQUIRED_BRAVO_HANDLE)) {
+    accounts.push(REQUIRED_BRAVO_HANDLE);
+  }
+
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const account of accounts) {
+    const normalized = normalizeHandle(account) || getFallbackHandle(platform);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    deduped.push(normalized);
+  }
+  if (deduped.length === 0) return [getFallbackHandle(platform)];
+  return deduped;
+}
+
+function formatHeaderHandleLine(handles: string[]): string {
+  const displayHandles = handles.map((handle) => `@${normalizeHandle(handle)}`).filter((value) => value !== "@");
+  if (displayHandles.length === 0) return "@unknown";
+  if (displayHandles.length === 1) return displayHandles[0];
+  if (displayHandles.length === 2) return `${displayHandles[0]} and ${displayHandles[1]}`;
+  return `${displayHandles.slice(0, -1).join(", ")}, and ${displayHandles[displayHandles.length - 1]}`;
+}
+
+function initialsFromHandle(handle: string): string {
+  const normalized = normalizeHandle(handle);
+  if (!normalized) return "?";
+  const alnum = normalized.replace(/[^a-z0-9]/gi, "").toUpperCase();
+  if (!alnum) return "?";
+  return alnum.slice(0, 2);
+}
+
+function fallbackAvatarToneClass(handle: string): string {
+  const tones = [
+    "bg-sky-600 text-white",
+    "bg-emerald-600 text-white",
+    "bg-rose-600 text-white",
+    "bg-violet-600 text-white",
+    "bg-amber-600 text-white",
+    "bg-slate-600 text-white",
+  ] as const;
+  const normalized = normalizeHandle(handle);
+  let sum = 0;
+  for (const char of normalized) {
+    sum += char.charCodeAt(0);
+  }
+  return tones[sum % tones.length];
+}
+
+function resolveCaseInsensitiveRecordValue(
+  recordValue: Record<string, string> | null | undefined,
+  key: string,
+): string | null {
+  if (!recordValue || typeof recordValue !== "object") return null;
+  const normalizedKey = normalizeHandle(key);
+  if (!normalizedKey) return null;
+  for (const [entryKey, entryValue] of Object.entries(recordValue)) {
+    if (normalizeHandle(entryKey) !== normalizedKey) continue;
+    const value = String(entryValue || "").trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+function resolveCollaboratorAvatarFromDetail(post: AnyPost, handle: string): string | null {
+  const details = (post as { collaborators_detail?: PostCollaboratorDetail[] | null }).collaborators_detail;
+  if (!Array.isArray(details)) return null;
+  const normalizedHandle = normalizeHandle(handle);
+  for (const detail of details) {
+    if (normalizeHandle(detail?.username ?? null) !== normalizedHandle) continue;
+    const profilePicUrl = String(detail?.profile_pic_url || "").trim();
+    if (profilePicUrl) return profilePicUrl;
+  }
+  return null;
+}
+
+function resolveAccountAvatarUrl(post: AnyPost, handle: string, isAuthor: boolean): string | null {
+  if (isAuthor) {
+    const userAvatar = String(post.user?.avatar_url || "").trim();
+    if (userAvatar) return userAvatar;
+    const hostedOwnerAvatar = String(post.hosted_owner_profile_pic_url || "").trim();
+    if (hostedOwnerAvatar) return hostedOwnerAvatar;
+    const ownerAvatar = String(post.owner_profile_pic_url || "").trim();
+    if (ownerAvatar) return ownerAvatar;
+    return null;
+  }
+  const hostedTagged = resolveCaseInsensitiveRecordValue(post.hosted_tagged_profile_pics, handle);
+  if (hostedTagged) return hostedTagged;
+  return resolveCollaboratorAvatarFromDetail(post, handle);
+}
+
+function HeaderAccountAvatar({ handle, avatarUrl }: { handle: string; avatarUrl: string | null }) {
+  const normalizedHandle = normalizeHandle(handle);
+  const label = `@${normalizedHandle || "unknown"} avatar`;
+  if (avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={avatarUrl}
+        alt={label}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        className="h-6 w-6 rounded-full border border-white object-cover shadow-sm"
+      />
+    );
+  }
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-white text-[10px] font-semibold uppercase shadow-sm ${fallbackAvatarToneClass(handle)}`}
+    >
+      {initialsFromHandle(handle)}
+    </span>
+  );
 }
 
 function getJobStage(job: SocialJob): string {
@@ -1514,7 +1841,7 @@ function PostStatsDrawer({
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [twitterCommentMode, setTwitterCommentMode] = useState<"comments_replies" | "quotes">("comments_replies");
+  const [replyQuoteMode, setReplyQuoteMode] = useState<"replies" | "quotes">("replies");
 
   const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
     const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
@@ -1572,7 +1899,7 @@ function PostStatsDrawer({
   }, [onClose]);
 
   useEffect(() => {
-    setTwitterCommentMode("comments_replies");
+    setReplyQuoteMode("replies");
   }, [platform, sourceId]);
 
   const handleRefreshComments = useCallback(async () => {
@@ -1580,12 +1907,14 @@ function PostStatsDrawer({
       setRefreshing(true);
       setRefreshError(null);
       const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
-    const params = new URLSearchParams();
-    if (seasonId) {
-      params.set("season_id", seasonId);
-    }
-    const baseUrl = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
-    const url = `${baseUrl}/refresh${
+      const refreshTimeoutMs =
+        platform === "youtube" ? REQUEST_TIMEOUT_MS.weekDetailYoutubeRefresh : REQUEST_TIMEOUT_MS.weekDetail;
+      const params = new URLSearchParams();
+      if (seasonId) {
+        params.set("season_id", seasonId);
+      }
+      const baseUrl = `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/posts/${platform}/${sourceId}`;
+      const url = `${baseUrl}/refresh${
         params.toString() ? `?${params.toString()}` : ""
       }`;
       const res = await fetchWithTimeout(
@@ -1601,27 +1930,39 @@ function PostStatsDrawer({
             fetch_replies: true,
           }),
         },
-        REQUEST_TIMEOUT_MS.weekDetail,
+        refreshTimeoutMs,
         "Post comments refresh request timed out",
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as Record<string, string>).error || `HTTP ${res.status}`);
       }
-      setData(await parseResponseJson<PostDetailResponse>(res, "Failed to refresh post comments"));
+      setData(await parseResponseJson<PostDetailResponse>(res, "Failed to refresh post"));
     } catch (err) {
-      setRefreshError(err instanceof Error ? err.message : "Failed to refresh comments");
+      setRefreshError(err instanceof Error ? err.message : "Failed to refresh post");
     } finally {
       setRefreshing(false);
     }
   }, [seasonId, showId, seasonNumber, platform, sourceId]);
 
   const reportedCommentsCount = data
-    ? getReportedCommentCountFromStats(data.platform, data.stats)
+    ? (typeof data.refresh?.comment_gap?.reported === "number"
+        ? Math.max(0, Number(data.refresh?.comment_gap?.reported ?? 0))
+        : getReportedCommentCountFromStats(data.platform, data.stats))
     : 0;
-  const savedCommentsCount = data ? Math.max(0, Number(data.total_comments_in_db ?? 0)) : 0;
-  const commentsIncomplete = isCommentsCoverageIncomplete(savedCommentsCount, reportedCommentsCount);
+  const savedCommentsCount = data
+    ? (typeof data.refresh?.comment_gap?.saved === "number"
+        ? Math.max(0, Number(data.refresh?.comment_gap?.saved ?? 0))
+        : Math.max(0, Number(data.total_comments_in_db ?? 0)))
+    : 0;
+  const commentsIncomplete = data?.refresh?.comment_gap
+    ? data.refresh.comment_gap.is_complete === false
+    : isCommentsCoverageIncomplete(savedCommentsCount, reportedCommentsCount);
+  const commentGapReason = data?.refresh?.comment_gap?.reason ?? null;
+  const refreshWarnings = (data?.refresh?.warnings ?? []).filter((warning): warning is string => typeof warning === "string");
   const isTwitterPost = data?.platform === "twitter";
+  const detailMetricFormatter = isTwitterPost ? fmtExactNum : fmtNum;
+  const supportsReplyQuoteSwitch = data?.platform === "twitter" || data?.platform === "threads";
   const twitterQuoteCount = data ? Math.max(0, Number(data.total_quotes_in_db ?? 0)) : 0;
   const quoteCommentsAsThreaded: ThreadedComment[] = (data?.quotes ?? []).map((quote) => ({
     comment_id: quote.comment_id,
@@ -1642,10 +1983,18 @@ function PostStatsDrawer({
     },
     replies: [],
   }));
+  const savedQuoteCount = quoteCommentsAsThreaded.length;
+  const reportedQuoteCount = data
+    ? Math.max(
+        savedQuoteCount,
+        isTwitterPost
+          ? twitterQuoteCount
+          : Math.max(0, Number(data.stats?.quotes ?? 0)),
+      )
+    : 0;
+  const quotesIncomplete = savedQuoteCount < reportedQuoteCount;
   const activeComments =
-    isTwitterPost && twitterCommentMode === "quotes"
-      ? quoteCommentsAsThreaded
-      : (data?.comments ?? []);
+    supportsReplyQuoteSwitch && replyQuoteMode === "quotes" ? quoteCommentsAsThreaded : (data?.comments ?? []);
   const drawerThumbnailUrl = data ? getPostDetailThumbnailUrl(data) : null;
   const preferredDrawerMediaSrc = data ? getPreferredPostDetailMediaSrc(data) : null;
 
@@ -1689,6 +2038,16 @@ function PostStatsDrawer({
           {refreshError && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm mb-4">
               {refreshError}
+            </div>
+          )}
+          {refreshWarnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-800 text-sm mb-4">
+              <p className="font-semibold mb-1">Refresh completed with warnings:</p>
+              <ul className="list-disc pl-5">
+                {refreshWarnings.map((warning, index) => (
+                  <li key={`${warning}-${index}`}>{warning}</li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -1753,6 +2112,19 @@ function PostStatsDrawer({
                     {data.text}
                   </p>
                 )}
+                {data.platform !== "instagram" && typeof data.duration_seconds === "number" && data.duration_seconds > 0 && (
+                  <div className="mb-3">
+                    <span className="text-xs rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
+                      Duration: {data.duration_seconds}s
+                    </span>
+                  </div>
+                )}
+                {data.platform === "threads" && (
+                  <div className="mb-3 text-xs text-gray-600">
+                    <span className="font-medium text-gray-500">Topic</span>:{" "}
+                    {typeof data.topic === "string" && data.topic.trim().length > 0 ? data.topic : "-"}
+                  </div>
+                )}
                 {data.platform === "instagram" && (
                   <div className="mb-3 space-y-2">
                     <div className="flex flex-wrap gap-1.5">
@@ -1773,16 +2145,22 @@ function PostStatsDrawer({
                         </span>
                       )}
                     </div>
-                    {(data.profile_tags?.length || data.collaborators?.length) ? (
-                      <div className="flex flex-wrap gap-1.5">
+                    {data.profile_tags?.length ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-medium text-gray-500">Tagged:</span>
                         {(data.profile_tags ?? []).map((tag) => (
                           <span key={`profile-${tag}`} className="text-xs rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-700">
-                            {tag}
+                            {formatHandleLabel(tag)}
                           </span>
                         ))}
+                      </div>
+                    ) : null}
+                    {data.collaborators?.length ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-medium text-gray-500">Collaborators:</span>
                         {(data.collaborators ?? []).map((collab) => (
                           <span key={`collab-${collab}`} className="text-xs rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
-                            {collab}
+                            {formatHandleLabel(collab)}
                           </span>
                         ))}
                       </div>
@@ -1813,6 +2191,49 @@ function PostStatsDrawer({
                     View on {PLATFORM_LABELS[data.platform] ?? data.platform} ↗
                   </a>
                 )}
+                {data.platform === "youtube" && (data.transcript_text || data.transcript_error) && (
+                  <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <p className="text-xs font-semibold text-gray-700 mb-1">Transcript</p>
+                    {data.transcript_error ? (
+                      <p className="text-xs text-amber-700">Unavailable: {data.transcript_error}</p>
+                    ) : (
+                      <>
+                        <p className="text-xs text-gray-500 mb-1">
+                          {data.transcript_language ? `Language: ${data.transcript_language}` : "Language: unknown"}
+                          {data.transcript_source ? ` · Source: ${data.transcript_source}` : ""}
+                        </p>
+                        <p className="text-xs text-gray-700 whitespace-pre-wrap break-words line-clamp-6">
+                          {data.transcript_text}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+                {data.media_asset_meta && (
+                  <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <p className="text-xs font-semibold text-gray-700 mb-1">Media Asset Metadata</p>
+                    <p className="text-xs text-gray-600">
+                      Policy: {data.media_asset_meta.selection_policy || "best_per_asset"}
+                      {data.media_asset_meta.selected_source ? ` · Source: ${data.media_asset_meta.selected_source}` : ""}
+                    </p>
+                    {Array.isArray(data.media_asset_meta.source_assets) && data.media_asset_meta.source_assets.length > 0 && (
+                      <p className="text-xs text-gray-600 mt-1">
+                        Source: {data.media_asset_meta.source_assets
+                          .slice(0, 3)
+                          .map((asset) => asset.resolution || `${asset.width ?? "?"}x${asset.height ?? "?"}`)
+                          .join(", ")}
+                      </p>
+                    )}
+                    {Array.isArray(data.media_asset_meta.hosted_assets) && data.media_asset_meta.hosted_assets.length > 0 && (
+                      <p className="text-xs text-gray-600 mt-1">
+                        Hosted: {data.media_asset_meta.hosted_assets
+                          .slice(0, 3)
+                          .map((asset) => asset.resolution || `${asset.width ?? "?"}x${asset.height ?? "?"}`)
+                          .join(", ")}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Stats grid */}
@@ -1822,7 +2243,9 @@ function PostStatsDrawer({
                     key={key}
                     className="bg-gray-50 rounded-lg p-3 text-center"
                   >
-                    <div className="text-lg font-bold text-gray-900">{fmtNum(value)}</div>
+                    <div className="text-lg font-bold text-gray-900">
+                      {isTwitterPost ? fmtExactNum(value) : fmtNum(value)}
+                    </div>
                     <div className="text-xs text-gray-500">{STAT_LABELS[key] ?? key}</div>
                   </div>
                 ))}
@@ -1830,26 +2253,26 @@ function PostStatsDrawer({
 
               {/* Comments section */}
               <div className="border-t border-gray-200 pt-4">
-                {isTwitterPost ? (
+                {supportsReplyQuoteSwitch ? (
                   <div className="mb-3 inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold">
                     <button
                       type="button"
-                      aria-pressed={twitterCommentMode === "comments_replies"}
-                      onClick={() => setTwitterCommentMode("comments_replies")}
+                      aria-pressed={replyQuoteMode === "replies"}
+                      onClick={() => setReplyQuoteMode("replies")}
                       className={`rounded-full px-2.5 py-1 transition ${
-                        twitterCommentMode === "comments_replies"
+                        replyQuoteMode === "replies"
                           ? "bg-zinc-900 text-white"
                           : "text-zinc-600 hover:bg-white hover:text-zinc-900"
                       }`}
                     >
-                      Comments & Replies
+                      Replies
                     </button>
                     <button
                       type="button"
-                      aria-pressed={twitterCommentMode === "quotes"}
-                      onClick={() => setTwitterCommentMode("quotes")}
+                      aria-pressed={replyQuoteMode === "quotes"}
+                      onClick={() => setReplyQuoteMode("quotes")}
                       className={`rounded-full px-2.5 py-1 transition ${
-                        twitterCommentMode === "quotes"
+                        replyQuoteMode === "quotes"
                           ? "bg-zinc-900 text-white"
                           : "text-zinc-600 hover:bg-white hover:text-zinc-900"
                       }`}
@@ -1860,25 +2283,29 @@ function PostStatsDrawer({
                 ) : null}
 
                 <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                  {isTwitterPost && twitterCommentMode === "quotes"
-                    ? `All Quotes (${fmtNum(twitterQuoteCount)})`
-                    : `All Comments (${formatSavedVsActualComments(savedCommentsCount, reportedCommentsCount)}${
+                  {supportsReplyQuoteSwitch && replyQuoteMode === "quotes"
+                    ? `All Quotes (${detailMetricFormatter(reportedQuoteCount)})`
+                    : `All Comments (${detailMetricFormatter(savedCommentsCount)}/${detailMetricFormatter(reportedCommentsCount)}${
                         commentsIncomplete ? "*" : ""
                       })`}
                 </h3>
-                {isTwitterPost && twitterCommentMode === "quotes" ? (
-                  <p className="text-xs text-gray-500 mb-3">{fmtNum(twitterQuoteCount)} quotes saved in Supabase.</p>
+                {supportsReplyQuoteSwitch && replyQuoteMode === "quotes" ? (
+                  <p className="text-xs text-gray-500 mb-3">
+                    {quotesIncomplete
+                      ? `Saved in Supabase: ${detailMetricFormatter(savedQuoteCount)} of ${detailMetricFormatter(reportedQuoteCount)} platform-reported quotes.`
+                      : `${detailMetricFormatter(savedQuoteCount)} quotes saved in Supabase.`}
+                  </p>
                 ) : (
                   <p className="text-xs text-gray-500 mb-3">
                 {commentsIncomplete
-                    ? `Saved in Supabase: ${fmtNum(savedCommentsCount)} of ${fmtNum(reportedCommentsCount)} platform-reported comments. Run an Ingest in Week view (or open the row details for a post-level refresh) to backfill.`
-                    : `${fmtNum(savedCommentsCount)} comments saved in Supabase.`}
+                    ? `Saved in Supabase: ${detailMetricFormatter(savedCommentsCount)} of ${detailMetricFormatter(reportedCommentsCount)} platform-reported comments.${commentGapReason ? ` (${commentGapReason})` : ""} Run an Ingest in Week view (or open the row details for a post-level refresh) to backfill.`
+                    : `${detailMetricFormatter(savedCommentsCount)} comments saved in Supabase.`}
                 </p>
                 )}
 
                 {activeComments.length === 0 ? (
                   <p className="text-sm text-gray-500 italic py-4">
-                    {isTwitterPost && twitterCommentMode === "quotes"
+                    {supportsReplyQuoteSwitch && replyQuoteMode === "quotes"
                       ? "No quotes in database."
                       : "No comments in database."}
                   </p>
@@ -1907,12 +2334,13 @@ function EngagementRow({ platform, post }: { platform: string; post: AnyPost }) 
   const savedComments = getSavedCommentsForPost(post);
   const actualComments = getActualCommentsForPost(platform, post);
   const commentsCoverageIncomplete = isCommentsCoverageIncomplete(savedComments, actualComments);
-  const commentsValue = `${formatSavedVsActualComments(savedComments, actualComments)}${
+  const commentFormatter = platform === "twitter" ? fmtExactNum : fmtNum;
+  const commentsValue = `${commentFormatter(savedComments)}/${commentFormatter(actualComments)}${
     commentsCoverageIncomplete ? "*" : ""
   }`;
 
   const pushMetric = (label: string, value: number) => {
-    items.push({ label, value: fmtNum(value) });
+    items.push({ label, value: commentFormatter(value) });
   };
 
   if (platform === "instagram") {
@@ -1936,7 +2364,7 @@ function EngagementRow({ platform, post }: { platform: string; post: AnyPost }) 
     items.push({ label: "Comments", value: commentsValue });
   } else if (platform === "twitter") {
     pushMetric("Likes", getNum(post, "likes"));
-    pushMetric("Reposts", getNum(post, "retweets"));
+    pushMetric("Reposts", getTwitterRepostCount(post));
     items.push({ label: "Replies", value: commentsValue });
     pushMetric("Quotes", getNum(post, "quotes"));
     pushMetric("Views", getNum(post, "views"));
@@ -2020,14 +2448,17 @@ function PostCard({
   const commentsCoverageIncomplete = isCommentsCoverageIncomplete(savedComments, actualComments);
   const thumbnailUrl = getPostThumbnailUrl(platform, post);
   const platformIconKey = getPlatformIconKey(platform);
-  const postHandle = formatPostHandle(platform, post.author);
+  const headerAccounts = buildHeaderAccounts(platform, post, collaborators);
+  const headerAuthorHandle = normalizeHandle(post.author);
+  const headerHandleText = formatHeaderHandleLine(headerAccounts);
+  const topic = platform === "threads" ? getStr(post, "topic") : "";
 
   return (
     <>
       <div className="h-full bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
         {/* Header */}
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             {platformIconKey ? (
               <span aria-label={`${PLATFORM_LABELS[platform] ?? platform} platform`} className="inline-flex">
                 <SocialPlatformTabIcon tab={platformIconKey} />
@@ -2039,20 +2470,32 @@ function PostCard({
                 {PLATFORM_LABELS[platform] ?? platform}
               </span>
             )}
+            <div className="flex items-center -space-x-1" data-testid={`post-header-avatars-${post.source_id}`}>
+              {headerAccounts.map((account, index) => {
+                const isAuthor = headerAuthorHandle ? account === headerAuthorHandle : index === 0;
+                return (
+                  <HeaderAccountAvatar
+                    key={`post-header-avatar-${post.source_id}-${account}`}
+                    handle={account}
+                    avatarUrl={resolveAccountAvatarUrl(post, account, isAuthor)}
+                  />
+                );
+              })}
+            </div>
             {post.url ? (
               <a
                 href={post.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm font-medium text-gray-900 hover:underline"
+                className="min-w-0 truncate text-sm font-medium text-gray-900 hover:underline"
+                data-testid={`post-header-handles-${post.source_id}`}
               >
-                {postHandle}
+                {headerHandleText}
               </a>
             ) : (
-              <span className="text-sm font-medium text-gray-900">{postHandle}</span>
-            )}
-            {platform === "twitter" && getStr(post, "display_name") && (
-              <span className="text-xs text-gray-500">{getStr(post, "display_name")}</span>
+              <span className="min-w-0 truncate text-sm font-medium text-gray-900" data-testid={`post-header-handles-${post.source_id}`}>
+                {headerHandleText}
+              </span>
             )}
           </div>
           <span className="text-xs text-gray-500">{fmtDateTime(post.posted_at)}</span>
@@ -2102,6 +2545,11 @@ function PostCard({
             {post.text}
           </p>
         )}
+        {platform === "threads" && (
+          <div className="mb-3 text-xs text-gray-600">
+            <span className="font-medium text-gray-500">Topic</span>: {topic.trim().length > 0 ? topic : "-"}
+          </div>
+        )}
 
         {/* Engagement metrics */}
         <EngagementRow platform={platform} post={post} />
@@ -2143,16 +2591,22 @@ function PostCard({
                   </span>
                 )}
               </div>
-              {(profileTags.length > 0 || collaborators.length > 0) && (
-                <div className="flex flex-wrap gap-1.5">
+              {profileTags.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium text-gray-500">Tagged:</span>
                   {profileTags.map((tag) => (
                     <span key={`profile-${tag}`} className="text-xs rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-700">
-                      {tag}
+                      {formatHandleLabel(tag)}
                     </span>
                   ))}
+                </div>
+              )}
+              {collaborators.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium text-gray-500">Collaborators:</span>
                   {collaborators.map((collab) => (
                     <span key={`collab-${collab}`} className="text-xs rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
-                      {collab}
+                      {formatHandleLabel(collab)}
                     </span>
                   ))}
                 </div>
@@ -2264,7 +2718,6 @@ export default function WeekDetailPage() {
   const socialPlatformFromQuery = parseSocialPlatform(searchParams.get("social_platform"));
   const isOverviewSubTabPath = weekSubTabFromPath === "overview";
   const socialPlatform = socialPlatformFromPath ?? socialPlatformFromQuery;
-  const socialView = searchParams.get("social_view");
   const dayParam = searchParams.get("day");
   const dayFilterFromQuery = dayParam && DATE_TOKEN_RE.test(dayParam) ? dayParam : null;
   const socialPlatformFilterFromQuery: PlatformFilter = socialPlatform ?? "all";
@@ -2276,9 +2729,12 @@ export default function WeekDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isRefreshingGallery, setIsRefreshingGallery] = useState(false);
   const [postOffset, setPostOffset] = useState(0);
-  const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all");
-  const [sortField, setSortField] = useState<SortField>("engagement");
+  const [platformFilter, setPlatformFilter] = useState<PlatformFilter>(socialPlatformFilterFromQuery);
+  const [platformTotalsByPlatform, setPlatformTotalsByPlatform] = useState<Record<SocialPlatform, number> | null>(null);
+  const [allPlatformsTotalPosts, setAllPlatformsTotalPosts] = useState<number | null>(null);
+  const [sortField, setSortField] = useState<SortField>("likes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [searchText, setSearchText] = useState("");
   const [syncingComments, setSyncingComments] = useState(false);
@@ -2300,7 +2756,13 @@ export default function WeekDetailPage() {
   } | null>(null);
   const syncPollGenerationRef = useRef(0);
   const syncPollFailureCountRef = useRef(0);
+  const terminalCoverageFailureCountRef = useRef(0);
+  const missingRunConsecutiveCountRef = useRef(0);
   const syncSessionGenerationRef = useRef(0);
+  const hasLoadedWeekDetailRef = useRef(false);
+  const weekDetailRequestSeqRef = useRef(0);
+  const weekDetailContextRef = useRef("");
+  const weekSummaryRequestSeqRef = useRef(0);
   const syncSessionStateRef = useRef<{
     dateStart: string;
     dateEnd: string;
@@ -2314,10 +2776,26 @@ export default function WeekDetailPage() {
   const legacyWeekPathRedirectRef = useRef<string | null>(null);
   const legacyWeekSubTabRedirectRef = useRef<string | null>(null);
   const canonicalShowSlugRedirectRef = useRef<string | null>(null);
+  const lastRouteReplaceAttemptRef = useRef<string | null>(null);
   const canonicalCurrentRoute = useMemo(
     () => buildStableRoute(pathname, searchParamsString),
     [pathname, searchParamsString],
   );
+  const compareAndReplaceGuarded = useCallback(
+    (nextRoute: string) => {
+      const canonicalNextRoute = buildCanonicalRoute(nextRoute);
+      if (canonicalNextRoute === canonicalCurrentRoute) return;
+      if (lastRouteReplaceAttemptRef.current === canonicalNextRoute) return;
+      lastRouteReplaceAttemptRef.current = canonicalNextRoute;
+      compareAndReplace(router, canonicalCurrentRoute, nextRoute);
+    },
+    [canonicalCurrentRoute, router],
+  );
+
+  useEffect(() => {
+    lastRouteReplaceAttemptRef.current = canonicalCurrentRoute;
+  }, [canonicalCurrentRoute]);
+
   const resolvedSeasonId = useMemo(() => {
     if (data?.season?.season_id && looksLikeUuid(data.season.season_id)) {
       return data.season.season_id;
@@ -2365,6 +2843,13 @@ export default function WeekDetailPage() {
   }, [showRouteParam]);
 
   useEffect(() => {
+    hasLoadedWeekDetailRef.current = false;
+    weekDetailContextRef.current = "";
+    setPlatformTotalsByPlatform(null);
+    setAllPlatformsTotalPosts(null);
+  }, [resolvedSeasonId, showIdForApi, sourceScope, seasonNumber, weekIndex]);
+
+  useEffect(() => {
     if (!hasValidNumericPathParams) return;
     const currentSlug = showRouteParam.trim().toLowerCase();
     const preferredSlug = resolvedShowSlug?.trim().toLowerCase() ?? "";
@@ -2379,8 +2864,9 @@ export default function WeekDetailPage() {
       platform: socialPlatform ?? undefined,
       query: new URLSearchParams(searchParamsString),
     });
-    compareAndReplace(router, canonicalCurrentRoute, nextRoute);
+    compareAndReplaceGuarded(nextRoute);
   }, [
+    compareAndReplaceGuarded,
     hasValidNumericPathParams,
     pathname,
     canonicalCurrentRoute,
@@ -2409,8 +2895,9 @@ export default function WeekDetailPage() {
       platform: socialPlatform ?? undefined,
       query: nextQuery,
     });
-    compareAndReplace(router, canonicalCurrentRoute, nextRoute);
+    compareAndReplaceGuarded(nextRoute);
   }, [
+    compareAndReplaceGuarded,
     hasValidNumericPathParams,
     pathname,
     canonicalCurrentRoute,
@@ -2438,8 +2925,9 @@ export default function WeekDetailPage() {
       weekIndex: weekIndexInt,
       query: nextQuery,
     });
-    compareAndReplace(router, canonicalCurrentRoute, nextRoute);
+    compareAndReplaceGuarded(nextRoute);
   }, [
+    compareAndReplaceGuarded,
     hasValidNumericPathParams,
     isOverviewSubTabPath,
     canonicalCurrentRoute,
@@ -2467,8 +2955,9 @@ export default function WeekDetailPage() {
       platform: socialPlatformFromQuery,
       query: nextQuery,
     });
-    compareAndReplace(router, canonicalCurrentRoute, nextRoute);
+    compareAndReplaceGuarded(nextRoute);
   }, [
+    compareAndReplaceGuarded,
     canonicalCurrentRoute,
     hasValidNumericPathParams,
     router,
@@ -2574,17 +3063,66 @@ export default function WeekDetailPage() {
     async ({
       append = false,
       requestOffset,
+      refreshGalleryOnly = false,
+      platformFilterValue,
+      sortFieldValue,
+      sortDirValue,
     }: {
       append?: boolean;
       requestOffset?: number;
+      refreshGalleryOnly?: boolean;
+      platformFilterValue?: PlatformFilter;
+      sortFieldValue?: SortField;
+      sortDirValue?: SortDir;
     } = {}) => {
-      if (!showIdForApi || !seasonNumber || !weekIndex || !hasValidNumericPathParams) return;
+      if (!showIdForApi || !seasonNumber || !weekIndex || !hasValidNumericPathParams) {
+        if (append) {
+          setIsLoadingMore(false);
+        } else if (refreshGalleryOnly) {
+          setIsRefreshingGallery(false);
+          setLoading(false);
+        } else {
+          setLoading(false);
+        }
+        return;
+      }
       const pageRequestOffset = append ? Number(requestOffset ?? 0) : 0;
       const requestLimit = WEEK_DETAIL_POST_LIMIT;
+      const resolvedPlatformFilter = platformFilterValue ?? platformFilter;
+      const resolvedPlatform = resolvedPlatformFilter === "all" ? null : resolvedPlatformFilter;
+      const resolvedSortField = sortFieldValue ?? sortField;
+      const resolvedSortDir = sortDirValue ?? sortDir;
+      const requestContextKey = [
+        showIdForApi,
+        seasonNumber,
+        weekIndex,
+        sourceScope,
+        resolvedSeasonId ?? "",
+        resolvedPlatform ?? "all",
+        resolvedSortField,
+        resolvedSortDir,
+      ].join("|");
+      if (append && weekDetailContextRef.current && requestContextKey !== weekDetailContextRef.current) {
+        return;
+      }
+      const requestId = weekDetailRequestSeqRef.current + 1;
+      weekDetailRequestSeqRef.current = requestId;
+      if (!append) {
+        weekDetailContextRef.current = requestContextKey;
+      }
+      const isStaleRequest = () =>
+        requestId !== weekDetailRequestSeqRef.current || requestContextKey !== weekDetailContextRef.current;
       if (append) {
         setIsLoadingMore(true);
         setLoadMoreError(null);
+      } else if (refreshGalleryOnly) {
+        setIsLoadingMore(false);
+        setIsRefreshingGallery(true);
+        setLoading(false);
+        setError(null);
+        setLoadMoreError(null);
       } else {
+        setIsLoadingMore(false);
         setLoading(true);
         setError(null);
         setLoadMoreError(null);
@@ -2598,12 +3136,14 @@ export default function WeekDetailPage() {
           source_scope: sourceScope,
           timezone: SOCIAL_TIME_ZONE,
         });
-        if (socialPlatform) {
-          weekParams.set("platforms", socialPlatform);
+        if (resolvedPlatform) {
+          weekParams.set("platforms", resolvedPlatform);
         }
         weekParams.set("max_comments_per_post", String(WEEK_DETAIL_MAX_COMMENTS_PER_POST));
         weekParams.set("post_limit", String(requestLimit));
         weekParams.set("post_offset", String(pageRequestOffset));
+        weekParams.set("sort_field", resolvedSortField);
+        weekParams.set("sort_dir", resolvedSortDir);
         if (resolvedSeasonId) {
           weekParams.set("season_id", resolvedSeasonId);
         }
@@ -2618,12 +3158,10 @@ export default function WeekDetailPage() {
           "Week detail request timed out",
         );
         if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(
-            (body as Record<string, string>).error || `HTTP ${res.status}`,
-          );
+          throw new Error(await readApiErrorMessage(res, `HTTP ${res.status}`));
         }
         const payload = await parseResponseJson<WeekDetailResponse>(res, "Failed to load week detail");
+        if (isStaleRequest()) return;
         const platformPostsMap = Object.fromEntries(
           Object.entries(payload.platforms).map(([platform, payloadForPlatform]) => [
             platform,
@@ -2653,6 +3191,7 @@ export default function WeekDetailPage() {
         setDisplayedPagination(resolvedPagination);
         setPostOffset(nextOffset);
         setData(payload);
+        hasLoadedWeekDetailRef.current = true;
         setAccumulatedPostsByPlatform((previous) => {
           if (!append) return platformPostsMap;
 
@@ -2674,6 +3213,7 @@ export default function WeekDetailPage() {
           return merged;
         });
       } catch (err) {
+        if (isStaleRequest()) return;
         const message = err instanceof Error ? err.message : "Failed to load week detail";
         if (append) {
           setLoadMoreError(message);
@@ -2681,8 +3221,11 @@ export default function WeekDetailPage() {
           setError(message);
         }
       } finally {
+        if (isStaleRequest()) return;
         if (append) {
           setIsLoadingMore(false);
+        } else if (refreshGalleryOnly) {
+          setIsRefreshingGallery(false);
         } else {
           setLoading(false);
         }
@@ -2692,27 +3235,104 @@ export default function WeekDetailPage() {
       hasValidNumericPathParams,
       resolvedSeasonId,
       showIdForApi,
+      sortDir,
+      sortField,
+      platformFilter,
       seasonNumber,
       sourceScope,
-      socialPlatform,
       weekIndex,
     ],
   );
 
+  const fetchPlatformTotalsSummary = useCallback(async () => {
+    if (!showIdForApi || !seasonNumber || !weekIndex || !hasValidNumericPathParams || !isAdmin) return;
+    const requestId = weekSummaryRequestSeqRef.current + 1;
+    weekSummaryRequestSeqRef.current = requestId;
+    try {
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const weekParams = new URLSearchParams({
+        source_scope: sourceScope,
+        timezone: SOCIAL_TIME_ZONE,
+        max_comments_per_post: "0",
+        sort_field: "posted_at",
+        sort_dir: "desc",
+      });
+      if (resolvedSeasonId) {
+        weekParams.set("season_id", resolvedSeasonId);
+      }
+      const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}/summary?${weekParams.toString()}`;
+      const res = await fetchWithTimeout(
+        url,
+        {
+          headers,
+          cache: "no-store",
+        },
+        20_000,
+        "Week detail summary request timed out",
+      );
+      if (!res.ok) {
+        return;
+      }
+      const payload = await parseResponseJson<WeekSummaryResponse>(res, "Failed to load week detail summary");
+      if (requestId !== weekSummaryRequestSeqRef.current) return;
+      const nextTotals: Record<SocialPlatform, number> = { ...EMPTY_PLATFORM_TOTALS };
+      for (const platform of PLATFORM_KEYS) {
+        const platformPayload = payload.platforms?.[platform];
+        const totalsPostsValue =
+          platformPayload && typeof platformPayload === "object" && platformPayload.totals
+            ? Number(platformPayload.totals.posts ?? 0)
+            : Number.NaN;
+        const fallbackPosts = Number(platformPayload?.total_posts ?? 0);
+        nextTotals[platform] = Number.isFinite(totalsPostsValue) ? Math.max(0, totalsPostsValue) : fallbackPosts;
+      }
+      const payloadTotalPosts = Number(payload.totals?.posts ?? Number.NaN);
+      const fallbackTotalPosts = PLATFORM_KEYS.reduce((sum, platform) => sum + nextTotals[platform], 0);
+      setPlatformTotalsByPlatform(nextTotals);
+      setAllPlatformsTotalPosts(Number.isFinite(payloadTotalPosts) ? Math.max(0, payloadTotalPosts) : fallbackTotalPosts);
+    } catch {
+      // Intentionally non-fatal: tab-count fallback remains derived from current payload.
+    }
+  }, [
+    hasValidNumericPathParams,
+    isAdmin,
+    resolvedSeasonId,
+    seasonNumber,
+    showIdForApi,
+    sourceScope,
+    weekIndex,
+  ]);
+
+  useEffect(() => {
+    void fetchPlatformTotalsSummary();
+  }, [fetchPlatformTotalsSummary]);
+
   useEffect(() => {
     if (!hasValidNumericPathParams) {
+      hasLoadedWeekDetailRef.current = false;
       setLoading(false);
       setError(invalidPathParamsError);
       return;
     }
-    if (isAdmin) fetchData();
-  }, [fetchData, hasValidNumericPathParams, invalidPathParamsError, isAdmin]);
+    if (!isAdmin) return;
+    void fetchData({
+      refreshGalleryOnly: hasLoadedWeekDetailRef.current,
+      platformFilterValue: platformFilter,
+      sortFieldValue: sortField,
+      sortDirValue: sortDir,
+    });
+  }, [fetchData, hasValidNumericPathParams, invalidPathParamsError, isAdmin, platformFilter, sortDir, sortField]);
 
   const hasMorePosts = Boolean(displayedPagination?.has_more);
   const handleLoadMorePosts = useCallback(() => {
-    if (!hasMorePosts || isLoadingMore || loading) return;
-    void fetchData({ append: true, requestOffset: postOffset });
-  }, [fetchData, hasMorePosts, isLoadingMore, loading, postOffset]);
+    if (!hasMorePosts || isLoadingMore || loading || isRefreshingGallery) return;
+    void fetchData({
+      append: true,
+      requestOffset: postOffset,
+      platformFilterValue: platformFilter,
+      sortFieldValue: sortField,
+      sortDirValue: sortDir,
+    });
+  }, [fetchData, hasMorePosts, isLoadingMore, isRefreshingGallery, loading, platformFilter, postOffset, sortDir, sortField]);
 
   useEffect(() => {
     return () => {
@@ -2738,13 +3358,44 @@ export default function WeekDetailPage() {
       if (resolvedSeasonId) {
         runParams.set("season_id", resolvedSeasonId);
       }
-      const jobsParams = new URLSearchParams({
-        run_id: runId,
-        limit: "100",
-      });
-      if (resolvedSeasonId) {
-        jobsParams.set("season_id", resolvedSeasonId);
-      }
+      const jobsPageLimit = 250;
+      const jobsHardCap = 1000;
+
+      const fetchJobsPages = async (): Promise<SocialJob[]> => {
+        let offset = 0;
+        let aggregated: SocialJob[] = [];
+        while (aggregated.length < jobsHardCap) {
+          const jobsParams = new URLSearchParams({
+            run_id: runId,
+            limit: String(jobsPageLimit),
+            offset: String(offset),
+          });
+          if (resolvedSeasonId) {
+            jobsParams.set("season_id", resolvedSeasonId);
+          }
+          const jobsResponse = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/jobs?${jobsParams.toString()}`,
+            { headers, cache: "no-store" },
+            REQUEST_TIMEOUT_MS.syncJobs,
+            "Sync jobs request timed out",
+          );
+          if (!jobsResponse.ok) {
+            throw new Error(await readApiErrorMessage(jobsResponse, "Failed to load sync jobs"));
+          }
+          const jobsPayload = await parseResponseJson<SocialJobsResponse>(jobsResponse, "Failed to load sync jobs");
+          const jobsPage = jobsPayload.jobs ?? [];
+          aggregated = [...aggregated, ...jobsPage].slice(0, jobsHardCap);
+
+          const returned = jobsPage.length;
+          const pageOffset = Number(jobsPayload.pagination?.offset ?? offset);
+          const hasMore = Boolean(jobsPayload.pagination?.has_more ?? returned >= jobsPageLimit);
+          if (!hasMore || returned < jobsPageLimit) break;
+          offset = pageOffset + returned;
+          if (offset < 0 || offset > 10_000) break;
+        }
+        return aggregated;
+      };
+
       const [runsResult, jobsResult] = await Promise.allSettled([
         fetchWithTimeout(
           `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runParams.toString()}`,
@@ -2752,12 +3403,7 @@ export default function WeekDetailPage() {
           REQUEST_TIMEOUT_MS.syncRuns,
           "Sync runs request timed out",
         ),
-        fetchWithTimeout(
-          `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/jobs?${jobsParams.toString()}`,
-          { headers, cache: "no-store" },
-          REQUEST_TIMEOUT_MS.syncJobs,
-          "Sync jobs request timed out",
-        ),
+        fetchJobsPages(),
       ]);
       let runsError: string | null = null;
       let jobsError: string | null = null;
@@ -2769,14 +3415,18 @@ export default function WeekDetailPage() {
       if (runsResult.status === "fulfilled") {
         const runsResponse = runsResult.value;
         if (!runsResponse.ok) {
-          const body = (await runsResponse.json().catch(() => ({}))) as { error?: string };
-          runsError = body.error ?? "Failed to load sync runs";
+          runsError = await readApiErrorMessage(runsResponse, "Failed to load sync runs");
         } else {
           const runsPayload = await parseResponseJson<{ runs?: SocialRun[] }>(
             runsResponse,
             "Failed to load sync runs",
           );
           nextRun = (runsPayload.runs ?? []).find((run) => run.id === runId) ?? null;
+          if (nextRun) {
+            missingRunConsecutiveCountRef.current = 0;
+          } else {
+            missingRunConsecutiveCountRef.current += 1;
+          }
           runsLoaded = true;
         }
       } else {
@@ -2784,18 +3434,8 @@ export default function WeekDetailPage() {
       }
 
       if (jobsResult.status === "fulfilled") {
-        const jobsResponse = jobsResult.value;
-        if (!jobsResponse.ok) {
-          const body = (await jobsResponse.json().catch(() => ({}))) as { error?: string };
-          jobsError = body.error ?? "Failed to load sync jobs";
-        } else {
-          const jobsPayload = await parseResponseJson<{ jobs?: SocialJob[] }>(
-            jobsResponse,
-            "Failed to load sync jobs",
-          );
-          nextJobs = jobsPayload.jobs ?? [];
-          jobsLoaded = true;
-        }
+        nextJobs = jobsResult.value;
+        jobsLoaded = true;
       } else {
         jobsError = jobsResult.reason instanceof Error ? jobsResult.reason.message : "Failed to load sync jobs";
       }
@@ -2804,6 +3444,9 @@ export default function WeekDetailPage() {
         throw new Error(
           runsError && jobsError ? `${runsError}; ${jobsError}` : runsError ?? jobsError ?? "Failed to load sync progress",
         );
+      }
+      if (runsLoaded && !nextRun && missingRunConsecutiveCountRef.current >= 3) {
+        throw new Error("Run no longer available");
       }
 
       let effectiveRun: SocialRun | null = nextRun;
@@ -2842,25 +3485,29 @@ export default function WeekDetailPage() {
       platforms: Array<Exclude<PlatformFilter, "all">> | null;
     }) => {
       const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const ingestMode: IngestMode = pass > 1 ? "details_refresh" : "posts_and_comments";
       const payload: {
         source_scope: SourceScope;
         platforms?: Array<Exclude<PlatformFilter, "all">>;
+        accounts_override?: string[];
+        hashtags_override?: string[];
+        keywords_override?: string[];
         max_posts_per_target: number;
         max_comments_per_post: number;
         max_replies_per_post: number;
         fetch_replies: boolean;
-        ingest_mode: "posts_and_comments";
+        ingest_mode: IngestMode;
         sync_strategy: "incremental";
         allow_inline_dev_fallback: boolean;
         date_start: string;
         date_end: string;
       } = {
         source_scope: sourceScope,
-        max_posts_per_target: 100000,
+        max_posts_per_target: 0,
         max_comments_per_post: 100000,
         max_replies_per_post: 100000,
         fetch_replies: true,
-        ingest_mode: "posts_and_comments",
+        ingest_mode: ingestMode,
         sync_strategy: "incremental",
         allow_inline_dev_fallback: true,
         date_start: dateStart,
@@ -2874,7 +3521,7 @@ export default function WeekDetailPage() {
       if (resolvedSeasonId) {
         ingestParams.set("season_id", resolvedSeasonId);
       }
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest${ingestParams.toString() ? `?${ingestParams.toString()}` : ""}`,
         {
           method: "POST",
@@ -2884,10 +3531,11 @@ export default function WeekDetailPage() {
           },
           body: JSON.stringify(payload),
         },
+        REQUEST_TIMEOUT_MS.ingestKickoff,
+        "Ingest kickoff request timed out",
       );
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Failed to start sync pass ${pass}`);
+        throw new Error(await readApiErrorMessage(response, `Failed to start sync pass ${pass}`));
       }
 
       const result = (await response.json().catch(() => ({}))) as {
@@ -2903,6 +3551,8 @@ export default function WeekDetailPage() {
       setSyncRun(null);
       setSyncJobs([]);
       syncPollFailureCountRef.current = 0;
+      terminalCoverageFailureCountRef.current = 0;
+      missingRunConsecutiveCountRef.current = 0;
       setSyncPass(pass);
       void fetchSyncProgress(runId).catch(() => {});
       return { runId, jobs };
@@ -3111,12 +3761,18 @@ export default function WeekDetailPage() {
         }`,
       );
     } catch (err) {
-      setSyncError(
+      const rawMessage =
         err instanceof Error
           ? err.message
           : SOCIAL_FULL_SYNC_MIRROR_ENABLED
             ? "Failed to run full ingest + mirror"
-            : "Failed to start ingest",
+            : "Failed to start ingest";
+      const message =
+        rawMessage.toLowerCase().includes("timed out")
+          ? `${rawMessage}. Retry in a minute; if it keeps failing, share the trace id with engineering.`
+          : rawMessage;
+      setSyncError(
+        message,
       );
       setSyncingComments(false);
       syncSessionStateRef.current = null;
@@ -3181,30 +3837,47 @@ export default function WeekDetailPage() {
             setSyncMessage(terminalMessage);
             setSyncingComments(false);
             syncSessionStateRef.current = null;
-            void fetchData();
+            void fetchData({ sortFieldValue: sortField, sortDirValue: sortDir });
             return;
           }
 
-          const coverage = await fetchCommentsCoverage({
-            dateStart: session.dateStart,
-            dateEnd: session.dateEnd,
-            platforms: session.platforms,
-          });
-          const mirrorCoverage = SOCIAL_FULL_SYNC_MIRROR_ENABLED
-            ? await fetchMirrorCoverage({
-                dateStart: session.dateStart,
-                dateEnd: session.dateEnd,
-                platforms: session.platforms,
-              })
-            : {
-                up_to_date: true,
-                needs_mirror_count: 0,
-                mirrored_count: 0,
-                failed_count: 0,
-                partial_count: 0,
-                pending_count: 0,
-                posts_scanned: 0,
-              };
+          let coverage: CommentsCoverageResponse;
+          let mirrorCoverage: MirrorCoverageResponse;
+          try {
+            coverage = await fetchCommentsCoverage({
+              dateStart: session.dateStart,
+              dateEnd: session.dateEnd,
+              platforms: session.platforms,
+            });
+            mirrorCoverage = SOCIAL_FULL_SYNC_MIRROR_ENABLED
+              ? await fetchMirrorCoverage({
+                  dateStart: session.dateStart,
+                  dateEnd: session.dateEnd,
+                  platforms: session.platforms,
+                })
+              : {
+                  up_to_date: true,
+                  needs_mirror_count: 0,
+                  mirrored_count: 0,
+                  failed_count: 0,
+                  partial_count: 0,
+                  pending_count: 0,
+                  posts_scanned: 0,
+                };
+            terminalCoverageFailureCountRef.current = 0;
+          } catch (coverageError) {
+            terminalCoverageFailureCountRef.current += 1;
+            if (terminalCoverageFailureCountRef.current >= 2) {
+              const coverageMessage =
+                coverageError instanceof Error ? coverageError.message : "Failed to fetch terminal coverage checks";
+              setSyncPollError(coverageMessage);
+              setSyncMessage(`${terminalMessage} · ${coverageMessage}. Stopping sync polling.`);
+              setSyncingComments(false);
+              syncSessionStateRef.current = null;
+              return;
+            }
+            throw coverageError;
+          }
           if (cancelled || generation !== syncPollGenerationRef.current) return;
           setSyncCoveragePreview(coverage);
           setSyncMirrorCoveragePreview(SOCIAL_FULL_SYNC_MIRROR_ENABLED ? mirrorCoverage : null);
@@ -3224,7 +3897,7 @@ export default function WeekDetailPage() {
             setSyncMessage(`${terminalMessage} · Coverage ${coverageLabel}${mirrorToken} · Up-to-Date.`);
             setSyncingComments(false);
             syncSessionStateRef.current = null;
-            void fetchData();
+            void fetchData({ sortFieldValue: sortField, sortDirValue: sortDir });
             return;
           }
 
@@ -3239,7 +3912,7 @@ export default function WeekDetailPage() {
             );
             setSyncingComments(false);
             syncSessionStateRef.current = null;
-            void fetchData();
+            void fetchData({ sortFieldValue: sortField, sortDirValue: sortDir });
             return;
           }
 
@@ -3304,6 +3977,13 @@ export default function WeekDetailPage() {
       } catch (err) {
         if (cancelled || generation !== syncPollGenerationRef.current) return;
         const message = err instanceof Error ? err.message : "Failed to refresh sync progress";
+        if (message === "Run no longer available") {
+          setSyncPollError(message);
+          setSyncMessage(message);
+          setSyncingComments(false);
+          syncSessionStateRef.current = null;
+          return;
+        }
         if (isTransientDevRestartMessage(message)) {
           syncPollFailureCountRef.current = Math.max(1, syncPollFailureCountRef.current);
         } else {
@@ -3333,6 +4013,8 @@ export default function WeekDetailPage() {
     fetchSyncProgress,
     queueSyncPass,
     requeueMirrorJobs,
+    sortDir,
+    sortField,
     syncRunId,
     syncStartedAt,
     syncingComments,
@@ -3419,11 +4101,12 @@ export default function WeekDetailPage() {
     });
   }, []);
 
-  // Build merged post list with sort + search
+  // Build merged post list with server ordering + local filters/search.
   const allPosts = useMemo(() => {
     if (!displayData) return [];
-    const entries: { platform: string; post: AnyPost }[] = [];
+    const entries: { platform: string; post: AnyPost; ordinal: number }[] = [];
     const needle = searchText.trim().toLowerCase();
+    let ordinal = 0;
     for (const [plat, pdata] of Object.entries(displayData.platforms)) {
       if (platformFilter !== "all" && plat !== platformFilter) continue;
       for (const post of pdata.posts) {
@@ -3437,29 +4120,75 @@ export default function WeekDetailPage() {
           const text = (post.text ?? "").toLowerCase();
           const author = (post.author ?? "").toLowerCase();
           const title = getStr(post, "title").toLowerCase();
-          if (!text.includes(needle) && !author.includes(needle) && !title.includes(needle)) {
+          const topic = getStr(post, "topic").toLowerCase();
+          const commentsBlob = [
+            ...((Array.isArray((post as { comments?: unknown[] }).comments)
+              ? (post as { comments?: unknown[] }).comments
+              : []) as Array<Record<string, unknown>>),
+            ...((Array.isArray((post as { quotes?: unknown[] }).quotes)
+              ? (post as { quotes?: unknown[] }).quotes
+              : []) as Array<Record<string, unknown>>),
+          ]
+            .map((comment) => {
+              const textValue = comment?.text;
+              return typeof textValue === "string" ? textValue : "";
+            })
+            .filter((value) => value.length > 0)
+            .join(" ")
+            .toLowerCase();
+          if (
+            !text.includes(needle) &&
+            !author.includes(needle) &&
+            !title.includes(needle) &&
+            !topic.includes(needle) &&
+            !commentsBlob.includes(needle)
+          ) {
             continue;
           }
         }
-        entries.push({ platform: plat, post });
+        entries.push({ platform: plat, post, ordinal });
+        ordinal += 1;
       }
     }
-    const dir = sortDir === "desc" ? -1 : 1;
-    if (sortField === "posted_at") {
-      entries.sort((a, b) => {
-        const ta = a.post.posted_at ? new Date(a.post.posted_at).getTime() : 0;
-        const tb = b.post.posted_at ? new Date(b.post.posted_at).getTime() : 0;
-        return (ta - tb) * dir;
-      });
-    } else {
-      entries.sort((a, b) => {
-        const va = getNum(a.post, sortField);
-        const vb = getNum(b.post, sortField);
-        return (va - vb) * dir;
-      });
+    entries.sort((a, b) => {
+      const aRank = hasNum(a.post, "sort_rank") ? getNum(a.post, "sort_rank") : Number.MAX_SAFE_INTEGER;
+      const bRank = hasNum(b.post, "sort_rank") ? getNum(b.post, "sort_rank") : Number.MAX_SAFE_INTEGER;
+      if (aRank === bRank) return a.ordinal - b.ordinal;
+      return aRank - bRank;
+    });
+    return entries.map(({ platform, post }) => ({ platform, post }));
+  }, [activeDayFilter, displayData, platformFilter, searchText]);
+
+  const tabTotals = useMemo(() => {
+    const fallbackTotals: Record<SocialPlatform, number> = { ...EMPTY_PLATFORM_TOTALS };
+    for (const platform of PLATFORM_KEYS) {
+      const fromPayload = Number(displayData?.platforms?.[platform]?.totals?.posts ?? Number.NaN);
+      fallbackTotals[platform] = Number.isFinite(fromPayload) ? Math.max(0, fromPayload) : 0;
     }
-    return entries;
-  }, [activeDayFilter, displayData, platformFilter, sortField, sortDir, searchText]);
+    if (!platformTotalsByPlatform) {
+      return fallbackTotals;
+    }
+    const mergedTotals: Record<SocialPlatform, number> = { ...fallbackTotals };
+    for (const platform of PLATFORM_KEYS) {
+      const fromSummary = Number(platformTotalsByPlatform[platform] ?? Number.NaN);
+      if (Number.isFinite(fromSummary)) {
+        mergedTotals[platform] = Math.max(0, fromSummary);
+      }
+    }
+    return mergedTotals;
+  }, [displayData, platformTotalsByPlatform]);
+
+  const allTabTotalPosts = useMemo(() => {
+    const fromSummary = Number(allPlatformsTotalPosts ?? Number.NaN);
+    if (Number.isFinite(fromSummary)) {
+      return Math.max(0, fromSummary);
+    }
+    const fromPayload = Number(displayData?.totals?.posts ?? Number.NaN);
+    if (Number.isFinite(fromPayload)) {
+      return Math.max(0, fromPayload);
+    }
+    return PLATFORM_KEYS.reduce((sum, platform) => sum + tabTotals[platform], 0);
+  }, [allPlatformsTotalPosts, displayData?.totals?.posts, tabTotals]);
 
   // Filtered totals
   const filteredTotals = useMemo(() => {
@@ -3486,7 +4215,7 @@ export default function WeekDetailPage() {
     }
     if (platformFilter === "all") {
       return {
-        posts: displayData.totals.posts,
+        posts: allTabTotalPosts,
         total_comments: displayData.totals.total_comments,
         total_engagement: displayData.totals.total_engagement,
       };
@@ -3495,7 +4224,11 @@ export default function WeekDetailPage() {
     return pd?.totals
       ? { posts: pd.totals.posts, total_comments: pd.totals.total_comments, total_engagement: pd.totals.total_engagement }
       : { posts: 0, total_comments: 0, total_engagement: 0 };
-  }, [activeDayFilter, displayData, platformFilter]);
+  }, [activeDayFilter, allTabTotalPosts, displayData, platformFilter]);
+
+  const activeSortLabel = useMemo(() => {
+    return SORT_OPTIONS.find((option) => option.key === sortField)?.label ?? "selected metric";
+  }, [sortField]);
 
   const filteredCommentCoverage = useMemo(() => {
     if (!displayData) return { saved: 0, actual: 0, incomplete: false };
@@ -3667,8 +4400,8 @@ export default function WeekDetailPage() {
         const stageName = getJobStage(job);
         const stage = stageName === "comments" ? "comments" : stageName === "media_mirror" ? "media_mirror" : "posts";
         const platform = PLATFORM_LABELS[job.platform] ?? job.platform;
-        const account =
-          typeof job.config?.account === "string" && job.config.account ? ` @${job.config.account}` : "";
+        const accountHandle = typeof job.config?.account === "string" ? normalizeHandle(job.config.account) : "";
+        const account = accountHandle ? ` @${accountHandle}` : "";
         const timestampRaw = job.completed_at ?? job.started_at ?? job.created_at ?? null;
         const timestamp = timestampRaw
           ? new Date(timestampRaw).toLocaleTimeString("en-US", {
@@ -3703,6 +4436,38 @@ export default function WeekDetailPage() {
       });
   }, [syncJobs]);
 
+  const buildSeasonTabHref = useCallback(
+    (tabId: SeasonTabId): string => {
+      if (tabId === "overview") {
+        return buildSeasonAdminUrl({
+          showSlug: showSlugForRouting,
+          seasonNumber,
+        });
+      }
+      if (tabId === "social") {
+        return buildSeasonAdminUrl({
+          showSlug: showSlugForRouting,
+          seasonNumber,
+          tab: "social",
+          socialView: "official",
+        });
+      }
+      return buildSeasonAdminUrl({
+        showSlug: showSlugForRouting,
+        seasonNumber,
+        tab: tabId,
+      });
+    },
+    [seasonNumber, showSlugForRouting],
+  );
+
+  const handleSeasonTabSelect = useCallback(
+    (tabId: SeasonTabId) => {
+      compareAndReplaceGuarded(buildSeasonTabHref(tabId));
+    },
+    [buildSeasonTabHref, compareAndReplaceGuarded],
+  );
+
   if (authLoading || !isAdmin) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-500">
@@ -3729,17 +4494,8 @@ export default function WeekDetailPage() {
     );
   }
 
-  const breadcrumbShowName = recentShowLabel;
-  const breadcrumbWeekLabel = data?.week.label?.trim() || `Week ${weekIndexInt}`;
-  const normalizedSocialView =
-    socialView === "bravo" || socialView === "official" ? "official" : socialView;
+  const activePlatformForRoute = socialPlatform ?? undefined;
   const breadcrumbShowHref = buildShowAdminUrl({ showSlug: showSlugForRouting });
-  const breadcrumbQuery = (() => {
-    const query = new URLSearchParams();
-    if (socialPlatform) query.set("social_platform", socialPlatform);
-    if (normalizedSocialView) query.set("social_view", normalizedSocialView);
-    return query;
-  })();
   const breadcrumbSeasonHref = buildSeasonAdminUrl({
     showSlug: showSlugForRouting,
     seasonNumber,
@@ -3748,68 +4504,79 @@ export default function WeekDetailPage() {
     showSlug: showSlugForRouting,
     seasonNumber,
     tab: "social",
-    query: breadcrumbQuery,
+    socialView: "official",
   });
-  const breadcrumbWeekHref = buildSeasonSocialWeekUrl({
-    showSlug: showSlugForRouting,
-    seasonNumber,
-    weekIndex: weekIndexInt,
-    platform: socialPlatform ?? undefined,
-    query: breadcrumbQuery,
-  });
-  const breadcrumbSubTabLabel = normalizedSocialView
-    ? `${humanizeSlug(normalizedSocialView)} Analytics`
-    : socialPlatform
-      ? PLATFORM_LABELS[socialPlatform] ?? humanizeSlug(socialPlatform)
-      : undefined;
+  const socialHeaderTitle = `${recentShowLabel} · Season ${
+    Number.isFinite(seasonNumberInt) ? seasonNumberInt : seasonNumber
+  }`;
+  const weekLabel = data?.week.label?.trim() || `Week ${weekIndexInt}`;
+  const weekDateRangeLabel =
+    data?.week?.start && data?.week?.end
+      ? `${recentShowLabel} — Season ${Number.isFinite(seasonNumberInt) ? seasonNumberInt : seasonNumber} · ${fmtDate(
+          data.week.start,
+        )} – ${fmtDate(data.week.end)}`
+      : null;
 
   return (
     <div className="min-h-screen bg-zinc-50">
-      <AdminGlobalHeader bodyClassName="px-6 py-5">
-        <div className="mx-auto max-w-6xl">
-          <AdminBreadcrumbs
-            items={buildSeasonWeekBreadcrumb(breadcrumbShowName, seasonNumber, breadcrumbWeekLabel, {
-              showHref: breadcrumbShowHref,
-              seasonHref: breadcrumbSeasonHref,
-              socialHref: breadcrumbSocialHref,
-              subTabLabel: breadcrumbSubTabLabel,
-              subTabHref: breadcrumbSocialHref,
-              weekHref: breadcrumbWeekHref,
+      <SocialAdminPageHeader
+        breadcrumbs={buildSeasonSocialBreadcrumb(recentShowLabel, seasonNumber, {
+          showHref: breadcrumbShowHref,
+          seasonHref: breadcrumbSeasonHref,
+          socialHref: breadcrumbSocialHref,
+          subTabLabel: "Official Analytics",
+          subTabHref: breadcrumbSocialHref,
+        })}
+        title={socialHeaderTitle}
+        backHref={breadcrumbShowHref}
+        backLabel="Back"
+        bodyClassName="px-6 py-6"
+      />
+
+      <div className="border-b border-zinc-200 bg-white">
+        <div className="mx-auto max-w-6xl px-6">
+          <SeasonTabsNav tabs={SEASON_PAGE_TABS} activeTab="social" onSelect={handleSeasonTabSelect} />
+          <nav className="pb-4 flex flex-wrap gap-2" aria-label="Social analytics views">
+            {SEASON_SOCIAL_ANALYTICS_VIEWS.map((view) => {
+              const isActive = view.id === "bravo";
+              const viewHref = buildSeasonAdminUrl({
+                showSlug: showSlugForRouting,
+                seasonNumber,
+                tab: "social",
+                socialView: view.id === "bravo" ? "official" : view.id,
+              });
+              if (isActive) {
+                return (
+                  <span
+                    key={view.id}
+                    className="rounded-full border border-zinc-800 bg-zinc-800 px-3 py-1.5 text-xs font-semibold tracking-[0.08em] text-white"
+                  >
+                    {view.label}
+                  </span>
+                );
+              }
+              return (
+                <Link
+                  key={view.id}
+                  href={viewHref as Route}
+                  className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold tracking-[0.08em] text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  {view.label}
+                </Link>
+              );
             })}
-            className="mb-2"
-          />
-          <Link
-            href={buildSeasonAdminUrl({
-              showSlug: showSlugForRouting,
-              seasonNumber,
-              tab: "social",
-              query: (() => {
-                const query = new URLSearchParams();
-                if (socialPlatform) query.set("social_platform", socialPlatform);
-                if (normalizedSocialView) query.set("social_view", normalizedSocialView);
-                return query;
-              })(),
-            }) as Route}
-            className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
-          >
-            ← Back to Season Social Analytics
-          </Link>
-
-          {data && (
-            <div className="mt-2">
-              <h1 className="text-2xl font-bold text-gray-900">
-                {data.week.label}
-              </h1>
-              <p className="mt-1 text-sm text-gray-500">
-                {data.season.show_name} — Season {data.season.season_number} ·{" "}
-                {fmtDate(data.week.start)} – {fmtDate(data.week.end)}
-              </p>
-            </div>
-          )}
+          </nav>
         </div>
-      </AdminGlobalHeader>
+      </div>
 
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      <section className="border-b border-zinc-200 bg-zinc-50">
+        <div className="mx-auto max-w-6xl px-6 py-4">
+          <h1 className="text-2xl font-bold text-zinc-900">{weekLabel}</h1>
+          {weekDateRangeLabel && <p className="mt-1 text-sm text-zinc-600">{weekDateRangeLabel}</p>}
+        </div>
+      </section>
+
+      <main className="mx-auto max-w-6xl px-6 py-6">
 
       {/* Loading / Error */}
       {loading && (
@@ -3842,10 +4609,10 @@ export default function WeekDetailPage() {
                     showSlug: showSlugForRouting,
                     seasonNumber,
                     weekIndex: weekIndexInt,
-                    platform: socialPlatform ?? undefined,
+                    platform: activePlatformForRoute,
                     query: nextQuery,
                   });
-                  compareAndReplace(router, canonicalCurrentRoute, nextRoute);
+                  compareAndReplaceGuarded(nextRoute);
                 }}
                 className="ml-auto rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
@@ -3860,7 +4627,11 @@ export default function WeekDetailPage() {
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => setPlatformFilter(tab.key)}
+                onClick={() => {
+                  setPlatformFilter(tab.key);
+                }}
+                disabled={isRefreshingGallery || isLoadingMore || loading}
+                aria-pressed={platformFilter === tab.key}
                 className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                   platformFilter === tab.key
                     ? "bg-gray-900 text-white"
@@ -3868,11 +4639,13 @@ export default function WeekDetailPage() {
                 }`}
               >
                 {tab.label}
-                {tab.key !== "all" && data.platforms[tab.key] && (
-                  <span className="ml-1 text-xs opacity-70">
-                    ({data.platforms[tab.key].totals.posts})
-                  </span>
-                )}
+                <span className="ml-1 text-xs opacity-70">
+                  (
+                  {tab.key === "all"
+                    ? allTabTotalPosts
+                    : tabTotals[tab.key]}
+                  )
+                </span>
               </button>
             ))}
           </div>
@@ -3888,7 +4661,8 @@ export default function WeekDetailPage() {
                 id="sort-field"
                 value={sortField}
                 onChange={(e) => setSortField(e.target.value as SortField)}
-                className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isRefreshingGallery || isLoadingMore || loading}
+                className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {SORT_OPTIONS.map((opt) => (
                   <option key={opt.key} value={opt.key}>
@@ -3902,7 +4676,8 @@ export default function WeekDetailPage() {
             <button
               type="button"
               onClick={() => setSortDir((d) => (d === "desc" ? "asc" : "desc"))}
-              className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isRefreshingGallery || isLoadingMore || loading}
+              className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               title={sortDir === "desc" ? "Highest first" : "Lowest first"}
             >
               {sortDir === "desc" ? "↓ High to Low" : "↑ Low to High"}
@@ -4108,6 +4883,11 @@ export default function WeekDetailPage() {
               * Not all platform-reported comments are saved in Supabase yet.
             </p>
           )}
+          {isRefreshingGallery && (
+            <p className="mb-4 -mt-2 text-xs text-gray-500" role="status" aria-live="polite">
+              Refreshing gallery for {activeSortLabel} ({sortDir === "desc" ? "high to low" : "low to high"})...
+            </p>
+          )}
 
           {/* Post cards */}
           {allPosts.length === 0 ? (
@@ -4148,10 +4928,10 @@ export default function WeekDetailPage() {
               <button
                 type="button"
                 onClick={handleLoadMorePosts}
-                disabled={isLoadingMore || loading}
+                disabled={isLoadingMore || loading || isRefreshingGallery}
                 className="px-4 py-2 bg-gray-900 text-white rounded-md text-sm disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {isLoadingMore ? "Loading more posts..." : "Load more posts"}
+                {isLoadingMore ? "Loading more posts..." : isRefreshingGallery ? "Refreshing gallery..." : "Load more posts"}
               </button>
             </div>
           )}

@@ -9,10 +9,11 @@ const WEEK_ROUTE_DIRS = [
     "admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week",
   ),
   path.join(APP_ROOT, "shows/[showId]/seasons/[seasonNumber]/social/week"),
+  path.join(APP_ROOT, "[showId]/s[seasonNumber]/social/w[weekIndex]"),
 ];
 
 const EXPECTED_SHARED_IMPORT =
-  "@/components/admin/social-week/WeekDetailPageView";
+  "@/components/admin/social-week/WeekDetailPageViewLoader";
 
 function collectFilesRecursively(dir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -73,12 +74,34 @@ describe("social week route entry guardrails", () => {
         APP_ROOT,
         "shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/[platform]/page.tsx",
       ),
+      path.join(
+        APP_ROOT,
+        "[showId]/s[seasonNumber]/social/w[weekIndex]/page.tsx",
+      ),
+      path.join(
+        APP_ROOT,
+        "[showId]/s[seasonNumber]/social/w[weekIndex]/[platform]/page.tsx",
+      ),
     ];
 
     for (const pagePath of entryPages) {
       const contents = fs.readFileSync(pagePath, "utf8");
       expect(contents).toMatch(new RegExp(`from ["']${EXPECTED_SHARED_IMPORT}["']`));
-      expect(contents).toMatch(/return <WeekDetailPageView \/>;/);
+      expect(contents).toMatch(/return <WeekDetailPageViewLoader \/>;/);
+      expect(contents).toMatch(/export const dynamic = "force-dynamic";/);
+    }
+  });
+
+  it("forces dynamic rendering for root show alias layouts used by social week routes", () => {
+    const layoutPaths = [
+      path.join(APP_ROOT, "[showId]/layout.tsx"),
+      path.join(APP_ROOT, "[showId]/s[seasonNumber]/layout.tsx"),
+    ];
+
+    for (const layoutPath of layoutPaths) {
+      const contents = fs.readFileSync(layoutPath, "utf8");
+      expect(contents).toMatch(/export const dynamic = "force-dynamic";/);
+      expect(contents).toMatch(/export const revalidate = 0;/);
     }
   });
 });

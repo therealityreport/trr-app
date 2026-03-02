@@ -4,6 +4,7 @@ import type { AuthContext } from "@/lib/server/postgres";
 import {
   createRedditCommunity,
   isValidSubreddit,
+  listRedditCommunities,
   listRedditCommunitiesWithThreads,
   normalizeSubreddit,
 } from "@/lib/server/admin/reddit-sources-repository";
@@ -39,13 +40,28 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get("include_global_threads_for_season"),
       true,
     );
+    const includeAssignedThreads = parseBoolean(
+      request.nextUrl.searchParams.get("include_assigned_threads"),
+      false,
+    );
 
-    const communities = await listRedditCommunitiesWithThreads({
-      trrShowId,
-      trrSeasonId: trrSeasonId ?? null,
-      includeInactive,
-      includeGlobalThreadsForSeason,
-    });
+    const communities = includeAssignedThreads
+      ? await listRedditCommunitiesWithThreads({
+          trrShowId,
+          trrSeasonId: trrSeasonId ?? null,
+          includeInactive,
+          includeGlobalThreadsForSeason,
+        })
+      : (
+          await listRedditCommunities({
+            trrShowId,
+            includeInactive,
+          })
+        ).map((community) => ({
+          ...community,
+          assigned_thread_count: 0,
+          assigned_threads: [],
+        }));
 
     return NextResponse.json({ communities });
   } catch (error) {

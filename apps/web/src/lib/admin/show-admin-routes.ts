@@ -35,7 +35,13 @@ export type SocialAnalyticsViewSlug =
   | "reddit"
   | "hashtags"
   | "sentiment"
-  | "advanced";
+  | "advanced"
+  | "tiktok-overview"
+  | "tiktok-cast"
+  | "tiktok-hashtags"
+  | "tiktok-sounds"
+  | "tiktok-health"
+  | "tiktok-sentiment";
 export type SocialPlatformSlug = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
 export type SocialWeekSubTab = "details" | SocialPlatformSlug;
 
@@ -163,6 +169,24 @@ const SOCIAL_ANALYTICS_VIEW_SLUG_ALIASES: Record<string, SocialAnalyticsViewSlug
   hashtag: "hashtags",
   sentiment: "sentiment",
   advanced: "advanced",
+  "tiktok-overview": "tiktok-overview",
+  "tiktok_overview": "tiktok-overview",
+  tiktokoverview: "tiktok-overview",
+  "tiktok-cast": "tiktok-cast",
+  "tiktok_cast": "tiktok-cast",
+  tiktokcast: "tiktok-cast",
+  "tiktok-hashtags": "tiktok-hashtags",
+  "tiktok_hashtags": "tiktok-hashtags",
+  tiktokhashtags: "tiktok-hashtags",
+  "tiktok-sounds": "tiktok-sounds",
+  "tiktok_sounds": "tiktok-sounds",
+  tiktoksounds: "tiktok-sounds",
+  "tiktok-health": "tiktok-health",
+  "tiktok_health": "tiktok-health",
+  tiktokhealth: "tiktok-health",
+  "tiktok-sentiment": "tiktok-sentiment",
+  "tiktok_sentiment": "tiktok-sentiment",
+  tiktoksentiment: "tiktok-sentiment",
 };
 
 const normalizeCanonicalSocialViewSlug = (
@@ -748,7 +772,11 @@ export function buildShowAdminUrl(input: {
       normalizeCanonicalSocialViewSlug(input.query?.get("social_view")) ??
       "official";
     if (socialView === "reddit") {
-      return appendQuery(`${base}/social/reddit`, nextQuery);
+      return buildShowRedditUrl({
+        showSlug: input.showSlug,
+        seasonNumber: input.socialRoute?.seasonNumber,
+        query: nextQuery,
+      });
     }
     const season = parsePositiveSeasonNumber(input.socialRoute?.seasonNumber);
     const weekToken = toCanonicalWeekToken(input.socialRoute?.weekIndex);
@@ -928,6 +956,71 @@ export function buildShowRedditCommunityUrl(input: {
   const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
   nextQuery.delete("social_platform");
   return appendQuery(path, nextQuery);
+}
+
+const normalizeRedditWindowToken = (value: string): string | null => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "period-preseason" || normalized === "w0") return "w0";
+  if (normalized === "period-postseason" || normalized === "w-postseason") return "w-postseason";
+  const episodeMatch = normalized.match(/^episode-(\d+)$/);
+  if (episodeMatch) return `e${episodeMatch[1]}`;
+  const canonicalEpisodeMatch = normalized.match(/^e(\d+)$/);
+  if (canonicalEpisodeMatch) return `e${canonicalEpisodeMatch[1]}`;
+  const legacyEpisodeMatch = normalized.match(/^w(\d+)$/);
+  if (legacyEpisodeMatch) return `e${legacyEpisodeMatch[1]}`;
+  return normalized;
+};
+
+export function buildShowRedditCommunityWindowUrl(input: {
+  showSlug: string;
+  communitySlug: string;
+  seasonNumber: number | string;
+  windowKey: string;
+  query?: URLSearchParams;
+}): string {
+  const communityHref = buildShowRedditCommunityUrl({
+    showSlug: input.showSlug,
+    communitySlug: input.communitySlug,
+    seasonNumber: input.seasonNumber,
+  });
+  const token = normalizeRedditWindowToken(input.windowKey);
+  if (!token) return communityHref;
+  const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+  nextQuery.delete("social_platform");
+  return appendQuery(`${communityHref}/${encodeURIComponent(token)}`, nextQuery);
+}
+
+export function buildShowRedditCommunityAnalyticsUrl(input: {
+  showSlug: string;
+  communitySlug: string;
+  seasonNumber?: number | string | null;
+  scope?: "season" | "all";
+  section?: "overview" | "shows" | "flairs";
+  flairKey?: string | null;
+  query?: URLSearchParams;
+}): string {
+  const scope = input.scope ?? "season";
+  const section = input.section ?? "overview";
+  const base =
+    scope === "all"
+      ? `${buildShowRedditCommunityUrl({
+          showSlug: input.showSlug,
+          communitySlug: input.communitySlug,
+        })}/all`
+      : buildShowRedditCommunityUrl({
+          showSlug: input.showSlug,
+          communitySlug: input.communitySlug,
+          seasonNumber: input.seasonNumber,
+        });
+  const sectionPath = section === "overview" ? "" : `/${section}`;
+  const flairPath =
+    section === "flairs" && typeof input.flairKey === "string" && input.flairKey.trim()
+      ? `/${encodeURIComponent(input.flairKey.trim())}`
+      : "";
+  const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+  nextQuery.delete("social_platform");
+  return appendQuery(`${base}${sectionPath}${flairPath}`, nextQuery);
 }
 
 export function buildShowRedditSeasonFilterUrl(input: {

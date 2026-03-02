@@ -272,7 +272,7 @@ export async function searchShows(
     `WITH shows_with_slug AS (
        SELECT
          s.*,
-         ${SHOW_SLUG_SQL} AS slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
          COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
        FROM core.shows AS s
      )
@@ -280,8 +280,8 @@ export async function searchShows(
        s.*,
        CASE
          WHEN s.slug_collision_count > 1
-           THEN s.slug || '--' || lower(left(s.id::text, 8))
-         ELSE s.slug
+           THEN COALESCE(NULLIF(s.slug, ''), s.computed_slug) || '--' || lower(left(s.id::text, 8))
+         ELSE COALESCE(NULLIF(s.slug, ''), s.computed_slug)
        END AS canonical_slug,
        poster.hosted_url AS poster_url,
        backdrop.hosted_url AS backdrop_url,
@@ -313,7 +313,7 @@ export async function getShowById(id: string): Promise<TrrShow | null> {
     `WITH shows_with_slug AS (
        SELECT
          s.*,
-         ${SHOW_SLUG_SQL} AS slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
          COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
        FROM core.shows AS s
      )
@@ -321,8 +321,8 @@ export async function getShowById(id: string): Promise<TrrShow | null> {
        s.*,
        CASE
          WHEN s.slug_collision_count > 1
-           THEN s.slug || '--' || lower(left(s.id::text, 8))
-         ELSE s.slug
+           THEN COALESCE(NULLIF(s.slug, ''), s.computed_slug) || '--' || lower(left(s.id::text, 8))
+         ELSE COALESCE(NULLIF(s.slug, ''), s.computed_slug)
        END AS canonical_slug,
        poster.hosted_url AS poster_url,
        backdrop.hosted_url AS backdrop_url,
@@ -589,7 +589,7 @@ export async function getShowByImdbId(imdbId: string): Promise<TrrShow | null> {
     `WITH shows_with_slug AS (
        SELECT
          s.*,
-         ${SHOW_SLUG_SQL} AS slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
          COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
        FROM core.shows AS s
      )
@@ -597,8 +597,8 @@ export async function getShowByImdbId(imdbId: string): Promise<TrrShow | null> {
        s.*,
        CASE
          WHEN s.slug_collision_count > 1
-           THEN s.slug || '--' || lower(left(s.id::text, 8))
-         ELSE s.slug
+           THEN COALESCE(NULLIF(s.slug, ''), s.computed_slug) || '--' || lower(left(s.id::text, 8))
+         ELSE COALESCE(NULLIF(s.slug, ''), s.computed_slug)
        END AS canonical_slug,
        poster.hosted_url AS poster_url,
        backdrop.hosted_url AS backdrop_url,
@@ -1407,6 +1407,37 @@ export async function getCastByShowId(
       thumbnail_crop_mode: photo?.thumbnail_crop_mode ?? null,
     } as TrrCastMember;
   });
+}
+
+/**
+ * Lightweight cast-name helper for routes that only need text context.
+ * Avoids photo/metadata fanout used by getCastByShowId().
+ */
+export async function getCastNamesByShowId(
+  showId: string,
+  options?: { limit?: number },
+): Promise<string[]> {
+  const limit = Math.min(Math.max(options?.limit ?? 60, 1), MAX_LIMIT);
+  const result = await pgQuery<{ full_name: string | null; cast_member_name: string | null }>(
+    `SELECT p.full_name, vsc.cast_member_name
+     FROM core.v_show_cast AS vsc
+     LEFT JOIN core.people AS p ON p.id = vsc.person_id
+     WHERE vsc.show_id = $1::uuid
+     ORDER BY vsc.billing_order ASC NULLS LAST
+     LIMIT $2`,
+    [showId, limit],
+  );
+
+  const deduped = new Map<string, string>();
+  for (const row of result.rows) {
+    const raw = row.full_name ?? row.cast_member_name ?? "";
+    const normalized = raw.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (deduped.has(key)) continue;
+    deduped.set(key, normalized);
+  }
+  return [...deduped.values()];
 }
 
 /**
@@ -4497,4 +4528,387 @@ export async function getFandomDataByPersonId(
       trivia: null,
     },
   ];
+}
+
+export interface PersonLeaderboardEntry {
+  person_id: string;
+  full_name: string | null;
+  known_for: string | null;
+  photo_url: string | null;
+  metric_value: number;
+  show_context: string | null;
+  latest_at: string | null;
+}
+
+export interface PersonSearchEntry extends TrrPerson {
+  show_context: string | null;
+}
+
+export interface EpisodeSearchEntry {
+  id: string;
+  title: string | null;
+  episode_number: number | null;
+  season_number: number | null;
+  air_date: string | null;
+  show_id: string;
+  show_name: string | null;
+  show_slug: string;
+}
+
+const PERSON_CARD_PHOTO_SQL = `
+  LEFT JOIN LATERAL (
+    SELECT
+      cp.thumb_url,
+      cp.display_url,
+      cp.hosted_url,
+      cp.url
+    FROM core.v_cast_photos AS cp
+    WHERE cp.person_id = person_metrics.person_id
+    ORDER BY
+      CASE
+        WHEN lower(COALESCE(cp.context_section, '')) = 'bravo_profile' THEN 0
+        WHEN lower(COALESCE(cp.context_section, '')) IN ('official season announcement', 'official_season_announcement') THEN 1
+        ELSE 2
+      END,
+      cp.gallery_index ASC NULLS LAST
+    LIMIT 1
+  ) AS photo ON true
+`;
+
+const PERSON_SHOW_CONTEXT_SQL = `
+  LEFT JOIN LATERAL (
+    SELECT
+      CASE
+        WHEN sws.slug_collision_count > 1
+          THEN COALESCE(NULLIF(sws.slug, ''), sws.computed_slug) || '--' || lower(left(sws.id::text, 8))
+        ELSE COALESCE(NULLIF(sws.slug, ''), sws.computed_slug)
+      END AS canonical_slug
+    FROM core.v_person_show_seasons AS vpss
+    JOIN shows_with_slug AS sws ON sws.id = vpss.show_id
+    WHERE vpss.person_id = person_metrics.person_id
+    ORDER BY
+      COALESCE(vpss.total_episodes, 0) DESC,
+      vpss.show_id ASC
+    LIMIT 1
+  ) AS show_context ON true
+`;
+
+export async function searchPeopleWithShowContext(
+  query: string,
+  options?: PaginationOptions
+): Promise<PersonSearchEntry[]> {
+  const { limit, offset } = normalizePagination(options);
+  const likePrefix = `${query}%`;
+  const result = await pgQuery<PersonSearchEntry>(
+     `WITH shows_with_slug AS (
+       SELECT
+         s.id,
+         s.slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     ),
+     person_hits AS (
+       SELECT
+         p.id,
+         p.full_name,
+         p.known_for,
+         p.external_ids,
+         p.created_at,
+         p.updated_at
+       FROM core.people AS p
+       WHERE p.full_name ILIKE $1
+       ORDER BY p.full_name ASC
+       LIMIT $2 OFFSET $3
+     )
+     SELECT
+       person_hits.*,
+       (
+         SELECT
+           CASE
+             WHEN sws.slug_collision_count > 1
+               THEN COALESCE(NULLIF(sws.slug, ''), sws.computed_slug) || '--' || lower(left(sws.id::text, 8))
+             ELSE COALESCE(NULLIF(sws.slug, ''), sws.computed_slug)
+           END
+         FROM core.v_person_show_seasons AS vpss
+         JOIN shows_with_slug AS sws ON sws.id = vpss.show_id
+         WHERE vpss.person_id = person_hits.id
+         ORDER BY
+           COALESCE(vpss.total_episodes, 0) DESC,
+           vpss.show_id ASC
+         LIMIT 1
+       ) AS show_context
+     FROM person_hits`,
+    [likePrefix, limit, offset]
+  );
+  return result.rows;
+}
+
+export async function searchEpisodes(
+  query: string,
+  options?: PaginationOptions
+): Promise<EpisodeSearchEntry[]> {
+  const { limit, offset } = normalizePagination(options);
+  const like = `%${query}%`;
+  const likePrefix = `${query}%`;
+
+  const result = await pgQuery<EpisodeSearchEntry>(
+     `WITH shows_with_slug AS (
+       SELECT
+         s.id,
+         s.name,
+         s.slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     )
+     SELECT
+       e.id,
+       e.title,
+       e.episode_number,
+       e.season_number,
+       e.air_date,
+       e.show_id,
+       sws.name AS show_name,
+       CASE
+         WHEN sws.slug_collision_count > 1
+           THEN COALESCE(NULLIF(sws.slug, ''), sws.computed_slug) || '--' || lower(left(sws.id::text, 8))
+         ELSE COALESCE(NULLIF(sws.slug, ''), sws.computed_slug)
+       END AS show_slug
+     FROM core.episodes AS e
+     JOIN shows_with_slug AS sws ON sws.id = e.show_id
+     WHERE
+       COALESCE(e.title, '') ILIKE $1
+       OR CONCAT('episode ', COALESCE(e.episode_number::text, '')) ILIKE $1
+       OR CONCAT('s', COALESCE(e.season_number::text, ''), 'e', COALESCE(e.episode_number::text, '')) ILIKE $1
+     ORDER BY
+       CASE WHEN COALESCE(e.title, '') ILIKE $2 THEN 0 ELSE 1 END,
+       e.air_date DESC NULLS LAST,
+       e.updated_at DESC NULLS LAST,
+       e.id ASC
+     LIMIT $3 OFFSET $4`,
+    [like, likePrefix, limit, offset]
+  );
+
+  return result.rows;
+}
+
+export async function getPeopleMostShows(options?: { limit?: number }): Promise<PersonLeaderboardEntry[]> {
+  const limit = Math.min(Math.max(options?.limit ?? 12, 1), MAX_LIMIT);
+  const result = await pgQuery<PersonLeaderboardEntry>(
+     `WITH shows_with_slug AS (
+       SELECT
+         s.id,
+         s.slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     ),
+     person_metrics AS (
+       SELECT
+         vpss.person_id,
+         MAX(vpss.person_name) AS person_name,
+         COUNT(DISTINCT vpss.show_id)::int AS metric_value
+       FROM core.v_person_show_seasons AS vpss
+       GROUP BY vpss.person_id
+     )
+     SELECT
+       person_metrics.person_id,
+       COALESCE(p.full_name, person_metrics.person_name) AS full_name,
+       p.known_for,
+       COALESCE(photo.thumb_url, photo.display_url, photo.hosted_url, photo.url) AS photo_url,
+       person_metrics.metric_value,
+       show_context.canonical_slug AS show_context,
+       NULL::timestamptz AS latest_at
+     FROM person_metrics
+     LEFT JOIN core.people AS p ON p.id = person_metrics.person_id
+     ${PERSON_CARD_PHOTO_SQL}
+     ${PERSON_SHOW_CONTEXT_SQL}
+     ORDER BY
+       person_metrics.metric_value DESC,
+       COALESCE(p.full_name, person_metrics.person_name) ASC NULLS LAST
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
+}
+
+export async function getPeopleTopEpisodes(options?: { limit?: number }): Promise<PersonLeaderboardEntry[]> {
+  const limit = Math.min(Math.max(options?.limit ?? 12, 1), MAX_LIMIT);
+  const result = await pgQuery<PersonLeaderboardEntry>(
+     `WITH shows_with_slug AS (
+       SELECT
+         s.id,
+         s.slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     ),
+     person_metrics AS (
+       SELECT
+         vec.person_id,
+         MAX(vec.person_name) AS person_name,
+         COUNT(DISTINCT vec.episode_id)::int AS metric_value
+       FROM core.v_episode_credits AS vec
+       WHERE COALESCE(vec.appearance_type, 'appears') <> 'archive_footage'
+       GROUP BY vec.person_id
+     )
+     SELECT
+       person_metrics.person_id,
+       COALESCE(p.full_name, person_metrics.person_name) AS full_name,
+       p.known_for,
+       COALESCE(photo.thumb_url, photo.display_url, photo.hosted_url, photo.url) AS photo_url,
+       person_metrics.metric_value,
+       show_context.canonical_slug AS show_context,
+       NULL::timestamptz AS latest_at
+     FROM person_metrics
+     LEFT JOIN core.people AS p ON p.id = person_metrics.person_id
+     ${PERSON_CARD_PHOTO_SQL}
+     ${PERSON_SHOW_CONTEXT_SQL}
+     ORDER BY
+       person_metrics.metric_value DESC,
+       COALESCE(p.full_name, person_metrics.person_name) ASC NULLS LAST
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
+}
+
+export async function getPeopleRecentlyAdded(options?: { limit?: number }): Promise<PersonLeaderboardEntry[]> {
+  const limit = Math.min(Math.max(options?.limit ?? 12, 1), MAX_LIMIT);
+  const result = await pgQuery<PersonLeaderboardEntry>(
+     `WITH shows_with_slug AS (
+       SELECT
+         s.id,
+         s.slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     ),
+     person_metrics AS (
+       SELECT
+         p.id AS person_id,
+         p.full_name AS person_name,
+         0::int AS metric_value,
+         GREATEST(p.updated_at, p.created_at) AS latest_at
+       FROM core.people AS p
+     )
+     SELECT
+       person_metrics.person_id,
+       p.full_name,
+       p.known_for,
+       COALESCE(photo.thumb_url, photo.display_url, photo.hosted_url, photo.url) AS photo_url,
+       person_metrics.metric_value,
+       show_context.canonical_slug AS show_context,
+       person_metrics.latest_at
+     FROM person_metrics
+     JOIN core.people AS p ON p.id = person_metrics.person_id
+     ${PERSON_CARD_PHOTO_SQL}
+     ${PERSON_SHOW_CONTEXT_SQL}
+     ORDER BY
+       person_metrics.latest_at DESC NULLS LAST,
+       p.full_name ASC
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
+}
+
+export async function getPeopleMostPopular(options?: { limit?: number }): Promise<PersonLeaderboardEntry[]> {
+  const limit = Math.min(Math.max(options?.limit ?? 12, 1), MAX_LIMIT);
+  const result = await pgQuery<PersonLeaderboardEntry>(
+     `WITH shows_with_slug AS (
+       SELECT
+         s.id,
+         s.slug,
+         ${SHOW_SLUG_SQL} AS computed_slug,
+         COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
+       FROM core.shows AS s
+     ),
+     news_mentions AS (
+       SELECT
+         ssl.source_id,
+         COALESCE(
+           NULLIF(news_item->>'published_at', '')::timestamptz,
+           ssl.updated_at
+         ) AS published_at,
+         NULLIF(trim(tag->>'person_id'), '') AS person_id_token,
+         NULLIF(trim(tag->>'name'), '') AS person_name_token
+       FROM core.show_source_latest AS ssl
+       CROSS JOIN LATERAL jsonb_array_elements(
+         CASE
+           WHEN jsonb_typeof(ssl.payload->'normalized'->'news') = 'array'
+             THEN ssl.payload->'normalized'->'news'
+           ELSE '[]'::jsonb
+         END
+       ) AS news_item
+       CROSS JOIN LATERAL jsonb_array_elements(
+         CASE
+           WHEN jsonb_typeof(news_item->'person_tags') = 'array'
+             THEN news_item->'person_tags'
+           ELSE '[]'::jsonb
+         END
+       ) AS tag
+       WHERE
+         ssl.source_id IN ('google_news', 'bravo')
+         AND COALESCE(ssl.variant, 'default') = 'default'
+     ),
+     resolved_mentions AS (
+       SELECT
+         COALESCE(p_by_id.id, p_by_name.id) AS person_id,
+         mentions.source_id,
+         mentions.published_at
+       FROM news_mentions AS mentions
+       LEFT JOIN core.people AS p_by_id
+         ON p_by_id.id::text = mentions.person_id_token
+       LEFT JOIN core.people AS p_by_name
+         ON p_by_id.id IS NULL
+         AND mentions.person_name_token IS NOT NULL
+         AND lower(p_by_name.full_name) = lower(mentions.person_name_token)
+       WHERE COALESCE(p_by_id.id, p_by_name.id) IS NOT NULL
+         AND mentions.published_at >= (now() - interval '180 days')
+     ),
+     person_metrics AS (
+       SELECT
+         rm.person_id,
+         SUM(
+           CASE
+             WHEN rm.published_at >= (now() - interval '7 days') THEN 5
+             WHEN rm.published_at >= (now() - interval '30 days') THEN 3
+             WHEN rm.published_at >= (now() - interval '180 days') THEN 1
+             ELSE 0
+           END
+         )::int AS mention_points,
+         LEAST(4, (COUNT(DISTINCT rm.source_id)::int * 2))::int AS source_bonus,
+         MAX(rm.published_at) AS latest_at
+       FROM resolved_mentions AS rm
+       GROUP BY rm.person_id
+     ),
+     person_metrics_scored AS (
+       SELECT
+         pm.person_id,
+         (pm.mention_points + pm.source_bonus)::int AS metric_value,
+         pm.latest_at
+       FROM person_metrics AS pm
+     )
+     SELECT
+       person_metrics.person_id,
+       p.full_name,
+       p.known_for,
+       COALESCE(photo.thumb_url, photo.display_url, photo.hosted_url, photo.url) AS photo_url,
+       person_metrics.metric_value,
+       show_context.canonical_slug AS show_context,
+       person_metrics.latest_at
+     FROM person_metrics_scored AS person_metrics
+     JOIN core.people AS p ON p.id = person_metrics.person_id
+     ${PERSON_CARD_PHOTO_SQL}
+     ${PERSON_SHOW_CONTEXT_SQL}
+     ORDER BY
+       person_metrics.metric_value DESC,
+       person_metrics.latest_at DESC NULLS LAST,
+       p.full_name ASC
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
 }

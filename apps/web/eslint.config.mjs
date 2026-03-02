@@ -6,6 +6,10 @@ const eslintConfig = [
   ...nextTypeScript,
   {
     rules: {
+      // Admin image rendering policy: prefer next/image everywhere.
+      // Allow exceptions only with explicit inline disable + justification.
+      // See docs/lint/no-img-element-policy.md.
+      "@next/next/no-img-element": "error",
       "react-hooks/preserve-manual-memoization": "off",
       "react-hooks/purity": "off",
       "react-hooks/refs": "off",

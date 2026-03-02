@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildPersonAdminUrl,
   buildPersonRouteSlug,
+  buildShowRedditCommunityAnalyticsUrl,
   buildShowRedditCommunityUrl,
+  buildShowRedditCommunityWindowUrl,
   buildShowRedditSeasonFilterUrl,
   buildShowRedditUrl,
   buildSeasonAdminUrl,
@@ -67,6 +69,25 @@ describe("show-admin-routes", () => {
         },
       }),
     ).toBe("/the-real-housewives-of-salt-lake-city/social/s6");
+
+    expect(
+      buildShowAdminUrl({
+        showSlug: "rhoslc",
+        tab: "social",
+        socialView: "reddit",
+      }),
+    ).toBe("/rhoslc/social/reddit");
+
+    expect(
+      buildShowAdminUrl({
+        showSlug: "rhoslc",
+        tab: "social",
+        socialView: "reddit",
+        socialRoute: {
+          seasonNumber: 6,
+        },
+      }),
+    ).toBe("/rhoslc/s6/social/reddit");
 
     expect(
       buildShowAdminUrl({
@@ -234,6 +255,15 @@ describe("show-admin-routes", () => {
         showSlug: "rhoslc",
         seasonNumber: 6,
         tab: "social",
+        socialView: "tiktok-overview",
+      })
+    ).toBe("/rhoslc/s6/social/tiktok-overview");
+
+    expect(
+      buildSeasonAdminUrl({
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+        tab: "social",
         socialRoute: {
           weekIndex: "preseason",
           handle: "@BravoTV",
@@ -296,6 +326,7 @@ describe("show-admin-routes", () => {
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/s6")).toBe("official");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/official/reddit")).toBe("reddit");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/bravo")).toBe("bravo");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/tiktok-overview")).toBe("tiktok-overview");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/social/reddit")).toBe("reddit");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/social/official/reddit")).toBe("reddit");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/e1/social/twitter")).toBeNull();
@@ -389,6 +420,59 @@ describe("show-admin-routes", () => {
         seasonNumber: 6,
       }),
     ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6");
+
+    expect(
+      buildShowRedditCommunityWindowUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+        seasonNumber: 6,
+        windowKey: "episode-1",
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
+
+    expect(
+      buildShowRedditCommunityWindowUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+        seasonNumber: 6,
+        windowKey: "w1",
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
+
+    expect(
+      buildShowRedditCommunityWindowUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+        seasonNumber: 6,
+        windowKey: "period-preseason",
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+
+    expect(
+      buildShowRedditCommunityAnalyticsUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+        seasonNumber: 6,
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6");
+
+    expect(
+      buildShowRedditCommunityAnalyticsUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+        scope: "all",
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/all");
+
+    expect(
+      buildShowRedditCommunityAnalyticsUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+        scope: "all",
+        section: "flairs",
+        flairKey: "salt lake city",
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/all/flairs/salt%20lake%20city");
   });
 
   it("removes legacy tab query keys and preserves unrelated params", () => {

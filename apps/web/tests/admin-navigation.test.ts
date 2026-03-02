@@ -6,6 +6,7 @@ describe("admin navigation config", () => {
     expect(ADMIN_NAV_ITEMS.map((item) => item.title)).toEqual([
       "Dev Dashboard",
       "Shows",
+      "People",
       "Games",
       "Survey Editor",
       "Social Media",
@@ -19,6 +20,7 @@ describe("admin navigation config", () => {
     expect(ADMIN_NAV_ITEMS.map((item) => item.href)).toEqual([
       "/admin/dev-dashboard",
       "/shows",
+      "/people",
       "/admin/games",
       "/admin/surveys",
       "/admin/social-media",

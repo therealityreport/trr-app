@@ -93,6 +93,48 @@ interface NetworkStreamingDetailPayload {
   };
   logo_assets: NetworkStreamingDetailLogoAsset[];
   shows: NetworkStreamingDetailShowRow[];
+  family: {
+    id: string;
+    family_key: string;
+    display_name: string;
+    owner_wikidata_id: string | null;
+    owner_label: string | null;
+    members: Array<{
+      id: string;
+      entity_type: "network" | "streaming";
+      entity_key: string;
+      entity_display_name: string;
+    }>;
+  } | null;
+  family_suggestions: Array<{
+    owner_wikidata_id: string;
+    owner_label: string;
+    entity_count: number;
+    entities: Array<{
+      entity_type: "network" | "streaming";
+      entity_key: string;
+      display_name: string;
+    }>;
+  }>;
+  shared_links: Array<{
+    id: string;
+    link_group: string;
+    link_kind: string;
+    coverage_type: string;
+    coverage_value: string | null;
+    source: string;
+    url: string;
+    is_active: boolean;
+  }>;
+  wikipedia_show_urls: Array<{
+    id: string;
+    show_url: string;
+    show_title: string | null;
+    wikidata_id: string | null;
+    matched_show_id: string | null;
+    match_method: string | null;
+    is_applied: boolean;
+  }>;
 }
 
 const parseErrorPayload = async (response: Response): Promise<string> => {
@@ -136,6 +178,9 @@ export default function AdminNetworkStreamingDetailPage() {
   const [notFoundSuggestions, setNotFoundSuggestions] = useState<NetworkStreamingSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [familyActionBusy, setFamilyActionBusy] = useState<string | null>(null);
+  const [familyActionMessage, setFamilyActionMessage] = useState<string | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   const fetchWithAuth = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
@@ -143,6 +188,107 @@ export default function AdminNetworkStreamingDetailPage() {
         preferredUser: user,
       }),
     [user],
+  );
+
+  const ensureFamily = useCallback(async (): Promise<string> => {
+    if (!detail) throw new Error("Detail not loaded");
+    const existingFamilyId = typeof detail.family?.id === "string" ? detail.family.id : "";
+    if (existingFamilyId) return existingFamilyId;
+
+    const createResponse = await fetchWithAuth("/api/admin/trr-api/brands/families", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        display_name: `${detail.display_name} Family`,
+      }),
+    });
+    const createPayload = (await createResponse.json().catch(() => ({}))) as { id?: string; error?: string };
+    if (!createResponse.ok || typeof createPayload.id !== "string") {
+      throw new Error(createPayload.error || "Failed to create brand family");
+    }
+
+    const addMemberResponse = await fetchWithAuth(`/api/admin/trr-api/brands/families/${encodeURIComponent(createPayload.id)}/members`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        entity_type: detail.entity_type,
+        entity_key: detail.entity_key,
+        entity_display_name: detail.display_name,
+        source: "manual",
+      }),
+    });
+    if (!addMemberResponse.ok) {
+      const addPayload = (await addMemberResponse.json().catch(() => ({}))) as { error?: string };
+      throw new Error(addPayload.error || "Failed to add entity to family");
+    }
+    return createPayload.id;
+  }, [detail, fetchWithAuth]);
+
+  const handleCreateJoinFamily = useCallback(async () => {
+    if (!detail) return;
+    setFamilyActionBusy("family");
+    setFamilyActionMessage(null);
+    try {
+      if (detail.family?.id) {
+        setFamilyActionMessage("Entity is already linked to a family.");
+        return;
+      }
+      const familyId = await ensureFamily();
+      setFamilyActionMessage(`Linked to family ${familyId}.`);
+      setRefreshNonce((current) => current + 1);
+    } catch (actionError) {
+      setFamilyActionMessage(actionError instanceof Error ? actionError.message : "Failed to create/join family");
+    } finally {
+      setFamilyActionBusy(null);
+    }
+  }, [detail, ensureFamily]);
+
+  const handleWikipediaImport = useCallback(
+    async (applyMatched: boolean) => {
+      if (!detail) return;
+      setFamilyActionBusy(applyMatched ? "wiki-apply" : "wiki");
+      setFamilyActionMessage(null);
+      try {
+        const familyId = await ensureFamily();
+        const response = await fetchWithAuth(
+          `/api/admin/trr-api/brands/families/${encodeURIComponent(familyId)}/wikipedia-import`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              entity_type: detail.entity_type,
+              entity_key: detail.entity_key,
+              apply_matched: applyMatched,
+            }),
+          },
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          imported_count?: number;
+          matched_count?: number;
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error || "Wikipedia import failed");
+        }
+        setFamilyActionMessage(
+          `Imported ${payload.imported_count ?? 0} URLs, matched ${payload.matched_count ?? 0} shows${
+            applyMatched ? ", applied matched links." : "."
+          }`,
+        );
+        setRefreshNonce((current) => current + 1);
+      } catch (actionError) {
+        setFamilyActionMessage(actionError instanceof Error ? actionError.message : "Wikipedia import failed");
+      } finally {
+        setFamilyActionBusy(null);
+      }
+    },
+    [detail, ensureFamily, fetchWithAuth],
   );
 
   useEffect(() => {
@@ -185,7 +331,13 @@ export default function AdminNetworkStreamingDetailPage() {
         const payload = (await response.json()) as NetworkStreamingDetailPayload;
         if (cancelled) return;
         setNotFoundSuggestions([]);
-        setDetail(payload);
+        setDetail({
+          ...payload,
+          family: payload.family ?? null,
+          family_suggestions: Array.isArray(payload.family_suggestions) ? payload.family_suggestions : [],
+          shared_links: Array.isArray(payload.shared_links) ? payload.shared_links : [],
+          wikipedia_show_urls: Array.isArray(payload.wikipedia_show_urls) ? payload.wikipedia_show_urls : [],
+        });
 
         const canonicalSlug = toEntitySlug(payload.entity_slug || payload.display_name);
         if (canonicalSlug && canonicalSlug !== routeEntitySlug) {
@@ -208,7 +360,7 @@ export default function AdminNetworkStreamingDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [checking, fetchWithAuth, hasAccess, routeEntitySlug, routeEntityType, router, user]);
+  }, [checking, fetchWithAuth, hasAccess, refreshNonce, routeEntitySlug, routeEntityType, router, user]);
 
   const pageTitle = useMemo(() => {
     if (detail?.display_name) return detail.display_name;
@@ -480,6 +632,129 @@ export default function AdminNetworkStreamingDetailPage() {
                   <MetadataRow label="Completion Status" value={detail.completion.resolution_status} />
                   <MetadataRow label="Completion Reason" value={detail.completion.resolution_reason} />
                   <MetadataRow label="Completion Last Attempt" value={detail.completion.last_attempt_at} />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-zinc-200 bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h2 className="text-lg font-semibold text-zinc-900">Brand Family</h2>
+                    <p className="text-sm text-zinc-600">
+                      Pair related network/streaming brands and apply shared link coverage rules.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateJoinFamily()}
+                      disabled={familyActionBusy !== null}
+                      className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {familyActionBusy === "family" ? "Working..." : detail.family ? "Already in Family" : "Create/Join Family"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleWikipediaImport(false)}
+                      disabled={familyActionBusy !== null}
+                      className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {familyActionBusy === "wiki" ? "Importing..." : "Import Wiki Show URLs"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleWikipediaImport(true)}
+                      disabled={familyActionBusy !== null}
+                      className="rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {familyActionBusy === "wiki-apply" ? "Applying..." : "Import + Apply Matched"}
+                    </button>
+                  </div>
+                </div>
+                {familyActionMessage ? (
+                  <p className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">{familyActionMessage}</p>
+                ) : null}
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <article className="rounded-lg border border-zinc-200 p-3">
+                    <h3 className="text-sm font-semibold text-zinc-900">Current Family</h3>
+                    {detail.family ? (
+                      <div className="mt-2 space-y-2 text-sm text-zinc-700">
+                        <p>
+                          <span className="font-semibold">{detail.family.display_name}</span> ({detail.family.family_key})
+                        </p>
+                        <p>Owner: {detail.family.owner_label ?? detail.family.owner_wikidata_id ?? "Unknown"}</p>
+                        <ul className="list-disc pl-5">
+                          {detail.family.members.map((member) => (
+                            <li key={member.id}>
+                              {member.entity_display_name} [{member.entity_type}]
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-zinc-500">No family linked yet.</p>
+                    )}
+                  </article>
+
+                  <article className="rounded-lg border border-zinc-200 p-3">
+                    <h3 className="text-sm font-semibold text-zinc-900">Suggested Pairings</h3>
+                    {detail.family_suggestions.length > 0 ? (
+                      <ul className="mt-2 space-y-2 text-sm text-zinc-700">
+                        {detail.family_suggestions.slice(0, 5).map((suggestion) => (
+                          <li key={`${suggestion.owner_wikidata_id}:${suggestion.owner_label}`}>
+                            <p className="font-semibold">{suggestion.owner_label}</p>
+                            <p className="text-xs text-zinc-600">
+                              {suggestion.entities
+                                .map((entity) => `${entity.display_name} [${entity.entity_type}]`)
+                                .join(", ")}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-zinc-500">No owner-based suggestions currently available.</p>
+                    )}
+                  </article>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <article className="rounded-lg border border-zinc-200 p-3">
+                    <h3 className="text-sm font-semibold text-zinc-900">Shared Links</h3>
+                    {detail.shared_links.length > 0 ? (
+                      <ul className="mt-2 space-y-1 text-xs text-zinc-700">
+                        {detail.shared_links.map((link) => (
+                          <li key={link.id} className="[overflow-wrap:anywhere]">
+                            {link.link_group}/{link.link_kind} - {link.coverage_type}
+                            {link.coverage_value ? ` (${link.coverage_value})` : ""} -{" "}
+                            <a href={link.url} target="_blank" rel="noreferrer" className="text-blue-700 underline">
+                              {link.url}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-zinc-500">No shared links configured.</p>
+                    )}
+                  </article>
+
+                  <article className="rounded-lg border border-zinc-200 p-3">
+                    <h3 className="text-sm font-semibold text-zinc-900">Wikipedia Show URLs</h3>
+                    {detail.wikipedia_show_urls.length > 0 ? (
+                      <ul className="mt-2 space-y-1 text-xs text-zinc-700">
+                        {detail.wikipedia_show_urls.slice(0, 20).map((link) => (
+                          <li key={link.id} className="[overflow-wrap:anywhere]">
+                            <a href={link.show_url} target="_blank" rel="noreferrer" className="text-blue-700 underline">
+                              {link.show_title ?? link.show_url}
+                            </a>{" "}
+                            - {link.matched_show_id ? `matched (${link.match_method ?? "matched"})` : "unmatched"} -{" "}
+                            {link.is_applied ? "applied" : "not applied"}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-zinc-500">No imported Wikipedia show URLs.</p>
+                    )}
+                  </article>
                 </div>
               </section>
 

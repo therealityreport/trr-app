@@ -138,6 +138,13 @@ import {
 } from "@/lib/admin/admin-fetch";
 import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
+import {
+  buildHostFaviconUrl,
+  getHostnameFromUrl,
+  isFandomLinkKind,
+  parsePersonNameFromLink,
+  resolveLinkPageTitle,
+} from "@/lib/admin/show-page/link-display";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -419,28 +426,38 @@ type PersonRefreshMode = "full" | "ingest_only" | "profile_only";
 
 type HealthStatus = "ready" | "missing" | "stale";
 type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "wikipedia" | "wikidata" | "fandom";
-type PersonLinkSourceState = "found" | "missing" | "pending" | "rejected";
+type PersonLinkSourceState = "found" | "missing";
 
 type PersonLinkSourceSummary = {
   key: PersonLinkSourceKey;
   label: string;
   state: PersonLinkSourceState;
   url: string | null;
-  urls: string[];
+  urls: { url: string; label: string; iconUrl?: string | null }[];
   link: EntityLink | null;
+};
+
+type PersonAdditionalLinkPill = {
+  id: string;
+  label: string;
+  url: string;
+  iconUrl?: string | null;
 };
 
 type PersonLinkCoverageCard = {
   personId: string;
   personName: string;
   seasons: number[];
+  approvedLinkCount: number;
   sources: PersonLinkSourceSummary[];
+  additionalApprovedLinks: PersonAdditionalLinkPill[];
 };
 
 type SeasonCoverageLinkPill = {
   id: string;
   url: string;
   text: string;
+  iconUrl?: string | null;
 };
 
 type SeasonUrlCoverageRow = {
@@ -603,6 +620,17 @@ const resolveShowLogoIdentityKey = (asset: SeasonAsset): string => {
 const isTrustedShowBrandLogoAsset = (asset: SeasonAsset): boolean => {
   if (asset.type !== "show") return false;
   if ((asset.kind ?? "").toLowerCase().trim() !== "logo") return false;
+  const metadata = asset.metadata && typeof asset.metadata === "object" ? asset.metadata : null;
+  const logoTargetType =
+    typeof (metadata as Record<string, unknown> | null)?.logo_target_type === "string"
+      ? ((metadata as Record<string, unknown>).logo_target_type as string).trim().toLowerCase()
+      : "";
+  if (logoTargetType === "show") return true;
+  const sourceLogo =
+    typeof (metadata as Record<string, unknown> | null)?.source_logo === "string"
+      ? ((metadata as Record<string, unknown>).source_logo as string).trim().toLowerCase()
+      : "";
+  if (sourceLogo === "show") return true;
 
   const sourceToken = (asset.source ?? "").trim().toLowerCase();
   if (TRUSTED_SHOW_LOGO_SOURCES.has(sourceToken)) return true;
@@ -670,6 +698,21 @@ const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   mirror: "S3 Mirroring",
 };
 
+const LINK_DISCOVERY_STAGE_LABELS: Record<string, string> = {
+  starting: "Initializing",
+  heartbeat: "Refresh",
+  show_discovery_started: "Show Links",
+  show_discovery_completed: "Show Links",
+  season_discovery_started: "Season Links",
+  season_discovery_completed: "Season Links",
+  people_discovery_started: "Cast Links",
+  people_discovery_completed: "Cast Links",
+  upsert_started: "Saving Links",
+  upsert_completed: "Saving Links",
+  cleanup_completed: "Validation",
+  run_timeout: "Timeout",
+};
+
 const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
   starting: "Initializing",
   tmdb_profile: "TMDb Profile",
@@ -690,6 +733,7 @@ const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
 const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const SHOW_REFRESH_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
 const SHOW_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+const LINK_DISCOVERY_STREAM_TIMEOUT_MS = 12 * 60 * 1000;
 const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
 const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
@@ -804,37 +848,9 @@ const classifyPersonLinkSource = (linkKind: string): PersonLinkSourceKey | null 
   if (kind.includes("imdb")) return "imdb";
   if (kind.includes("tmdb")) return "tmdb";
   if (kind === "wikipedia") return "wikipedia";
-  if (kind === "wikidata" || kind.includes("knowledge")) return "wikidata";
+  if (kind === "wikidata") return "wikidata";
   if (kind === "fandom" || kind === "wikia") return "fandom";
   return null;
-};
-
-const getHostnameFromUrl = (value: string): string | null => {
-  try {
-    const parsed = new URL(value);
-    return parsed.hostname || null;
-  } catch {
-    return null;
-  }
-};
-
-const parsePersonNameFromLink = (link: EntityLink): string | null => {
-  const rawLabel = typeof link.label === "string" ? link.label.trim() : "";
-  if (rawLabel) {
-    const cleaned = rawLabel
-      .replace(/\s+(wikipedia|wikidata|fandom|wikia|bravo profile|imdb|tmdb)$/i, "")
-      .trim();
-    if (cleaned) return cleaned;
-  }
-  try {
-    const parsed = new URL(link.url);
-    const slug = decodeURIComponent((parsed.pathname.split("/").pop() ?? "").trim());
-    if (!slug) return null;
-    const humanized = slug.replace(/_/g, " ").replace(/-/g, " ").trim();
-    return humanized || null;
-  } catch {
-    return null;
-  }
 };
 
 const getPersonSourceKindPriority = (sourceKey: PersonLinkSourceKey, linkKind: string): number => {
@@ -3786,7 +3802,7 @@ export default function TrrShowDetailPage() {
     try {
       const headers = await getAuthHeaders();
       const response = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${showId}/links?status=all`,
+        `/api/admin/trr-api/shows/${showId}/links?view=active`,
         {
           headers,
           cache: "no-store",
@@ -3826,18 +3842,67 @@ export default function TrrShowDetailPage() {
       setLinksRefreshProgress("Refreshing links: scanning show, season, and cast sources...");
       try {
         const headers = await getAuthHeaders();
-        const response = await fetchWithTimeout(
-          `/api/admin/trr-api/shows/${showId}/links/discover`,
-          {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ include_seasons: true, include_people: true }),
+        let completePayload: Record<string, unknown> | null = null;
+        await adminStream(`/api/admin/trr-api/shows/${showId}/links/discover/stream`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ include_seasons: true, include_people: true }),
+          timeoutMs: LINK_DISCOVERY_STREAM_TIMEOUT_MS,
+          onEvent: async ({ event, payload }) => {
+            if (!payload || typeof payload !== "object") return;
+            const eventPayload = payload as Record<string, unknown>;
+            if (event === "progress") {
+              const stage = typeof eventPayload.stage === "string" ? eventPayload.stage : "refresh";
+              const stageLabel = resolveStageLabel(stage, LINK_DISCOVERY_STAGE_LABELS);
+              const elapsedMs = parseProgressNumber(eventPayload.elapsed_ms);
+              const rows = parseProgressNumber(eventPayload.rows);
+              const heartbeat = eventPayload.heartbeat === true;
+              const messageRaw = typeof eventPayload.message === "string" ? eventPayload.message : null;
+              let progressMessage = messageRaw || `${stageLabel}: in progress`;
+              if (!messageRaw) {
+                progressMessage = stageLabel;
+              }
+              if (rows !== null && rows >= 0) {
+                progressMessage = `${progressMessage} (${rows} rows)`;
+              }
+              if (heartbeat && elapsedMs !== null && elapsedMs >= 0) {
+                progressMessage = `${progressMessage} · ${Math.round(elapsedMs / 1000)}s elapsed`;
+              }
+              setLinksRefreshProgress(progressMessage);
+              return;
+            }
+            if (event === "error") {
+              const reason = typeof eventPayload.reason === "string" ? eventPayload.reason : "validation_error";
+              const detail =
+                typeof eventPayload.detail === "string"
+                  ? eventPayload.detail
+                  : typeof eventPayload.error === "string"
+                    ? eventPayload.error
+                    : "Links discovery failed";
+              throw new Error(`${reason}|${detail}`);
+            }
+            if (event === "complete") {
+              completePayload = eventPayload;
+            }
           },
-          SETTINGS_MUTATION_TIMEOUT_MS
-        );
-        const data = (await response.json().catch(() => ({}))) as {
-          error?: string;
+        });
+        if (!completePayload) {
+          throw new Error("validation_error|Discovery stream ended without a completion payload.");
+        }
+
+        const resultCandidate = completePayload.result;
+        const data = (resultCandidate && typeof resultCandidate === "object"
+          ? (resultCandidate as Record<string, unknown>)
+          : completePayload) as {
           discovered?: number;
+          duration_ms?: number;
+          status_counts?: {
+            approved_added?: number;
+            deleted_invalid?: number;
+            skipped_fetch_error?: number;
+            skipped_fetch_budget?: number;
+          };
+          validation_reasons?: Record<string, number>;
           pending_person_source_links_promoted?: number;
           invalid_people_links_deleted?: number;
           invalid_people_links_validation_failures?: number;
@@ -3846,6 +3911,17 @@ export default function TrrShowDetailPage() {
           fandom_domains_used?: string[];
           fandom_links_by_entity?: Record<string, number>;
           tmdb_season_links_discovered?: number;
+          fandom_candidates_tested?: number;
+          wikidata_identifier_links_added?: number;
+          wikidata_social_links_added?: number;
+          tmdb_social_links_added?: number;
+          timed_out?: boolean;
+          timeout?: {
+            reason?: string;
+            stage?: string;
+            detail?: string;
+            elapsed_ms?: number;
+          } | null;
           stage_counts?: {
             show_scanned?: number;
             season_scanned?: number;
@@ -3855,7 +3931,6 @@ export default function TrrShowDetailPage() {
             links_promoted?: number;
           };
         };
-        if (!response.ok) throw new Error(data.error || "Failed to discover links");
 
         const discovered = typeof data.discovered === "number" ? data.discovered : 0;
         const promoted =
@@ -3868,7 +3943,8 @@ export default function TrrShowDetailPage() {
           typeof data.invalid_people_links_validation_failures === "number"
             ? data.invalid_people_links_validation_failures
             : 0;
-        const countsByKind = typeof data.counts_by_kind === "object" && data.counts_by_kind ? data.counts_by_kind : {};
+        const countsByKind =
+          typeof data.counts_by_kind === "object" && data.counts_by_kind ? data.counts_by_kind : {};
         const countsByEntity =
           typeof data.counts_by_entity_type === "object" && data.counts_by_entity_type ? data.counts_by_entity_type : {};
         const fandomByEntity =
@@ -3880,6 +3956,14 @@ export default function TrrShowDetailPage() {
           : [];
         const tmdbSeasonLinks =
           typeof data.tmdb_season_links_discovered === "number" ? data.tmdb_season_links_discovered : 0;
+        const fandomCandidatesTested =
+          typeof data.fandom_candidates_tested === "number" ? data.fandom_candidates_tested : 0;
+        const wikidataIdentifierLinksAdded =
+          typeof data.wikidata_identifier_links_added === "number" ? data.wikidata_identifier_links_added : 0;
+        const wikidataSocialLinksAdded =
+          typeof data.wikidata_social_links_added === "number" ? data.wikidata_social_links_added : 0;
+        const tmdbSocialLinksAdded =
+          typeof data.tmdb_social_links_added === "number" ? data.tmdb_social_links_added : 0;
         const stageCounts = typeof data.stage_counts === "object" && data.stage_counts ? data.stage_counts : {};
         const showScanned = Number(stageCounts.show_scanned ?? 0);
         const seasonScanned = Number(stageCounts.season_scanned ?? 0);
@@ -3887,22 +3971,46 @@ export default function TrrShowDetailPage() {
         const legacyRowsNormalized = Number(stageCounts.legacy_rows_normalized ?? 0);
         const linksValidated = Number(stageCounts.links_validated ?? 0);
         const linksPromoted = Number(stageCounts.links_promoted ?? 0);
+        const statusCounts =
+          typeof data.status_counts === "object" && data.status_counts ? data.status_counts : {};
+        const approvedAdded = Number(statusCounts.approved_added ?? discovered);
+        const deletedInvalid = Number(statusCounts.deleted_invalid ?? deleted);
+        const skippedFetchError = Number(statusCounts.skipped_fetch_error ?? validationFailures);
+        const skippedFetchBudget = Number(statusCounts.skipped_fetch_budget ?? 0);
+        const durationMs = Number(data.duration_ms ?? 0);
+        const validationReasons =
+          typeof data.validation_reasons === "object" && data.validation_reasons ? data.validation_reasons : {};
         const seasonLinks = Number(countsByEntity.season ?? 0);
         const personLinks = Number(countsByEntity.person ?? 0);
         const showLinksDiscovered = Number(countsByEntity.show ?? 0);
         const fandomSeasonLinks = Number(fandomByEntity.season ?? 0);
         const fandomPersonLinks = Number(fandomByEntity.person ?? 0);
 
-        const actionLabel = "Refreshed";
         const messageParts = [
-          `${actionLabel} ${discovered} link${discovered === 1 ? "" : "s"}.`,
+          `Refreshed ${discovered} link${discovered === 1 ? "" : "s"} in ${Math.max(0, Math.round(durationMs / 1000))}s.`,
+          `Approved added ${approvedAdded}; removed invalid ${deletedInvalid}; fetch skipped ${skippedFetchError}; budget skipped ${skippedFetchBudget}.`,
           `Scanned show ${showScanned}, seasons ${seasonScanned}, cast ${peopleScanned}.`,
           `Show ${showLinksDiscovered}, seasons ${seasonLinks}, cast ${personLinks}.`,
           `Season TMDb links ${tmdbSeasonLinks}; Fandom season links ${fandomSeasonLinks}; Fandom cast links ${fandomPersonLinks}.`,
+          `Fandom candidates tested ${fandomCandidatesTested}; Wikidata identifiers ${wikidataIdentifierLinksAdded}; Wikidata social ${wikidataSocialLinksAdded}; TMDb social ${tmdbSocialLinksAdded}.`,
           fandomDomains.length > 0 ? `Fandom domains used: ${fandomDomains.join(", ")}.` : "No valid Fandom domains were used.",
           `Cast-member source validation: promoted ${promoted}, removed ${deleted}, fetch failures ${validationFailures}.`,
           `Legacy kinds normalized ${legacyRowsNormalized}; validated ${linksValidated}; promoted ${linksPromoted}.`,
         ];
+        if (data.timed_out) {
+          const timeoutStage = typeof data.timeout?.stage === "string" ? data.timeout.stage : "unknown_stage";
+          const timeoutDetail = typeof data.timeout?.detail === "string" ? data.timeout.detail : "";
+          messageParts.unshift(
+            `Server processing timeout at ${timeoutStage}${timeoutDetail ? `: ${timeoutDetail}` : ""}.`
+          );
+        }
+        const validationReasonParts = Object.entries(validationReasons)
+          .filter((entry) => Number(entry[1]) > 0)
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+          .map(([reason, count]) => `${reason} ${count}`);
+        if (validationReasonParts.length > 0) {
+          messageParts.push(`Validation reasons: ${validationReasonParts.join(", ")}.`);
+        }
         const kindParts = Object.entries(countsByKind)
           .filter((entry) => Number(entry[1]) > 0)
           .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
@@ -3912,9 +4020,31 @@ export default function TrrShowDetailPage() {
         }
         setLinksNotice(messageParts.join(" "));
         await fetchShowLinks();
-    } catch (err) {
-      setLinksLoadTimedOut(false);
-      setLinksError(err instanceof Error ? err.message : "Failed to discover links");
+      } catch (err) {
+        const mapReasonToMessage = (reason: string, detail: string): string => {
+          if (reason === "request_abort") return detail || "Client request timeout.";
+          if (reason === "server_processing_timeout") {
+            return detail || "Server processing timeout while refreshing links.";
+          }
+          if (reason === "fandom_timeout") return detail || "Fandom lookup timeout during links refresh.";
+          if (reason === "wikipedia_timeout") return detail || "Wikipedia lookup timeout during links refresh.";
+          if (reason === "validation_error") return detail || "Links refresh validation error.";
+          return detail || "Failed to discover links";
+        };
+
+        if (err instanceof AdminRequestError && err.status === 408) {
+          setLinksLoadTimedOut(true);
+          setLinksError("Client request timeout while refreshing links.");
+        } else if (err instanceof Error) {
+          const [reasonPart, detailPart] = err.message.split("|", 2);
+          const reason = reasonPart && reasonPart.trim().length > 0 ? reasonPart.trim() : "validation_error";
+          const detail = detailPart && detailPart.trim().length > 0 ? detailPart.trim() : "";
+          setLinksLoadTimedOut(reason === "request_abort");
+          setLinksError(mapReasonToMessage(reason, detail));
+        } else {
+          setLinksLoadTimedOut(false);
+          setLinksError("Failed to discover links");
+        }
     } finally {
         setLinksRefreshProgress(null);
         setLinksRefreshing(false);
@@ -6937,6 +7067,39 @@ export default function TrrShowDetailPage() {
     ] as const;
   }, [showIsBravo, showLinks]);
 
+  const showFandomSeedLinks = useMemo(() => {
+    const seeds = showLinks
+      .filter(
+        (link) =>
+          link.entity_type === "show" &&
+          Number(link.season_number || 0) === 0 &&
+          isFandomLinkKind(link.link_kind) &&
+          normalizeEntityLinkStatus(link.status) === "approved"
+      )
+      .map((link) => {
+        const url = String(link.url || "").trim();
+        const title = resolveLinkPageTitle(link) || String(link.label || "Fandom").trim();
+        const host = getHostnameFromUrl(url) || "";
+        return {
+          id: link.id,
+          url,
+          title,
+          host,
+          iconUrl: buildHostFaviconUrl(url),
+        };
+      })
+      .filter((seed) => seed.url.length > 0);
+    const byUrl = new Map<string, (typeof seeds)[number]>();
+    for (const seed of seeds) {
+      const key = seed.url.toLowerCase();
+      if (!byUrl.has(key)) byUrl.set(key, seed);
+    }
+    return Array.from(byUrl.values()).sort((a, b) => {
+      if (a.host !== b.host) return a.host.localeCompare(b.host);
+      return a.title.localeCompare(b.title);
+    });
+  }, [showLinks]);
+
   const overviewExternalIdLinks = useMemo(() => {
     return showLinks
       .filter(
@@ -7002,12 +7165,17 @@ export default function TrrShowDetailPage() {
         const dedupeKey = `${link.link_kind.toLowerCase()}::${link.url.trim().toLowerCase()}`;
         if (!link.url || seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
-        const label = String(link.label || link.link_kind || "Link").trim();
+        const isFandom = isFandomLinkKind(link.link_kind);
+        const pageTitle = resolveLinkPageTitle(link);
+        const label = isFandom
+          ? pageTitle || String(link.label || "Fandom").trim()
+          : String(link.label || link.link_kind || "Link").trim();
         const host = getHostnameFromUrl(link.url);
         links.push({
           id: link.id,
           url: link.url,
-          text: host ? `${label} · ${host}` : label,
+          text: isFandom ? label : host ? `${label} · ${host}` : label,
+          iconUrl: isFandom ? buildHostFaviconUrl(link.url) : null,
         });
       }
       return {
@@ -7068,13 +7236,23 @@ export default function TrrShowDetailPage() {
       const sources = PERSON_LINK_SOURCE_DEFINITIONS.map<PersonLinkSourceSummary>((definition) => {
         const sourceLinks = linksBySource.get(definition.key) ?? [];
         const selected = pickPreferredPersonSourceLink(definition.key, sourceLinks);
+        const approvedPills: { url: string; label: string; iconUrl?: string | null }[] = [];
+        for (const link of sourceLinks) {
+          if (normalizeEntityLinkStatus(link.status) !== "approved") continue;
+          const url = String(link.url || "").trim();
+          if (!url) continue;
+          const isFandom = definition.key === "fandom";
+          const pageTitle = isFandom ? resolveLinkPageTitle(link) : null;
+          approvedPills.push({
+            url,
+            label: isFandom ? pageTitle || url : url,
+            iconUrl: isFandom ? buildHostFaviconUrl(url) : null,
+          });
+        }
         const approvedUrls = Array.from(
-          new Set(
-            sourceLinks
-              .filter((link) => normalizeEntityLinkStatus(link.status) === "approved")
-              .map((link) => String(link.url || "").trim())
-              .filter((value) => value.length > 0)
-          )
+          new Map(
+            approvedPills.map((pill) => [`${pill.url.trim().toLowerCase()}`, pill] as const)
+          ).values()
         );
         if (!selected) {
           return {
@@ -7093,21 +7271,15 @@ export default function TrrShowDetailPage() {
             key: definition.key,
             label: definition.label,
             state: "found",
-            url: approvedUrls[0] ?? null,
+            url: approvedUrls[0]?.url ?? null,
             urls: approvedUrls,
             link: selected,
           };
         }
-        const fallbackState: PersonLinkSourceState =
-          normalizedStatus === "rejected"
-            ? "rejected"
-            : normalizedStatus === "pending"
-              ? "pending"
-              : "missing";
         return {
           key: definition.key,
           label: definition.label,
-          state: fallbackState,
+          state: "missing",
           url: null,
           urls: [],
           link: selected,
@@ -7119,6 +7291,38 @@ export default function TrrShowDetailPage() {
         parsePersonNameFromLink(links[0]) ||
         "Unknown Person";
 
+      const approvedLinkKeys = new Set(
+        links
+          .filter((link) => normalizeEntityLinkStatus(link.status) === "approved")
+          .map((link) => {
+            const normalizedUrl = String(link.url || "").trim().toLowerCase();
+            const normalizedKind = String(link.link_kind || "").trim().toLowerCase();
+            return `${normalizedKind}::${normalizedUrl}`;
+          })
+          .filter((value) => value !== "::")
+      );
+
+      const additionalLinkMap = new Map<string, PersonAdditionalLinkPill>();
+      for (const link of links) {
+        if (normalizeEntityLinkStatus(link.status) !== "approved") continue;
+        const sourceKey = classifyPersonLinkSource(link.link_kind);
+        if (sourceKey) continue;
+        const rawUrl = String(link.url || "").trim();
+        if (!rawUrl) continue;
+        const dedupeKey = `${String(link.link_kind || "").trim().toLowerCase()}::${rawUrl.toLowerCase()}`;
+        if (additionalLinkMap.has(dedupeKey)) continue;
+        const host = getHostnameFromUrl(rawUrl);
+        const labelBase = String(link.label || link.link_kind || "Link").trim();
+        additionalLinkMap.set(dedupeKey, {
+          id: link.id,
+          url: rawUrl,
+          label: host ? `${labelBase} · ${host}` : labelBase,
+        });
+      }
+      const additionalApprovedLinks = Array.from(additionalLinkMap.values()).sort((a, b) =>
+        a.label.localeCompare(b.label)
+      );
+
       const visibleSources = showIsBravo
         ? sources
         : sources.filter((source) => source.key !== "bravo" || source.state !== "missing");
@@ -7127,11 +7331,18 @@ export default function TrrShowDetailPage() {
         personId,
         personName,
         seasons: [...seasonSet].sort((a, b) => a - b),
+        approvedLinkCount: approvedLinkKeys.size,
         sources: visibleSources,
+        additionalApprovedLinks,
       });
     }
 
-    cards.sort((a, b) => a.personName.localeCompare(b.personName));
+    cards.sort((a, b) => {
+      if (b.approvedLinkCount !== a.approvedLinkCount) {
+        return b.approvedLinkCount - a.approvedLinkCount;
+      }
+      return a.personName.localeCompare(b.personName);
+    });
     return cards;
   }, [cast, showIsBravo, showLinks]);
 
@@ -12064,6 +12275,42 @@ export default function TrrShowDetailPage() {
                         links and routes social handles (Instagram/TikTok/X/YouTube/Threads/Facebook/Reddit) into
                         social links.
                       </p>
+                      {showFandomSeedLinks.length > 0 && (
+                        <div className="mt-2">
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                            Active Fandom Seeds
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {showFandomSeedLinks.map((seed) => (
+                              <a
+                                key={`show-fandom-seed-${seed.id}-${seed.url}`}
+                                href={seed.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium text-zinc-700 hover:bg-zinc-100"
+                                title={seed.url}
+                              >
+                                {seed.iconUrl ? (
+                                  <Image
+                                    src={seed.iconUrl}
+                                    alt=""
+                                    width={12}
+                                    height={12}
+                                    className="h-3 w-3 shrink-0 rounded-sm"
+                                    unoptimized
+                                  />
+                                ) : null}
+                                <span className="truncate">{seed.title}</span>
+                                {seed.host ? (
+                                  <span className="shrink-0 text-[9px] uppercase tracking-[0.1em] text-zinc-500">
+                                    {seed.host}
+                                  </span>
+                                ) : null}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <textarea
                         value={linkBulkInput}
                         onChange={(event) => setLinkBulkInput(event.target.value)}
@@ -12110,23 +12357,24 @@ export default function TrrShowDetailPage() {
                                     >
                                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                         <p className="text-sm font-semibold text-zinc-900">{card.personName}</p>
-                                        {card.seasons.length > 0 && (
-                                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                            Seasons {card.seasons.map((season) => `S${season}`).join(", ")}
+                                        <div className="flex flex-wrap items-center gap-1">
+                                          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                                            {card.approvedLinkCount} approved
                                           </span>
-                                        )}
+                                          {card.seasons.length > 0 && (
+                                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                              Seasons {card.seasons.map((season) => `S${season}`).join(", ")}
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
-                                      <div className="grid gap-2 sm:grid-cols-2">
+                                      <div className="grid gap-2">
                                         {card.sources.map((source) => {
                                           const isFound = source.state === "found";
                                           const stateLabel =
                                             source.state === "found"
                                               ? "Found"
-                                              : source.state === "pending"
-                                                ? "Missing"
-                                                : source.state === "rejected"
-                                                  ? "Rejected"
-                                                  : "Missing";
+                                              : "Missing";
                                           return (
                                             <div
                                               key={`person-link-source-${card.personId}-${source.key}`}
@@ -12158,22 +12406,30 @@ export default function TrrShowDetailPage() {
                                                 <div className="flex flex-wrap gap-1">
                                                   {source.urls.map((approvedUrl) => (
                                                     <a
-                                                      key={`person-link-source-url-${card.personId}-${source.key}-${approvedUrl}`}
-                                                      href={approvedUrl}
+                                                      key={`person-link-source-url-${card.personId}-${source.key}-${approvedUrl.url}`}
+                                                      href={approvedUrl.url}
                                                       target="_blank"
                                                       rel="noopener noreferrer"
-                                                      className="max-w-full truncate rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100"
-                                                      title={approvedUrl}
+                                                      className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100"
+                                                      title={approvedUrl.url}
                                                     >
-                                                      {approvedUrl}
+                                                      {approvedUrl.iconUrl ? (
+                                                        <Image
+                                                          src={approvedUrl.iconUrl}
+                                                          alt=""
+                                                          width={12}
+                                                          height={12}
+                                                          className="h-3 w-3 shrink-0 rounded-sm"
+                                                          unoptimized
+                                                        />
+                                                      ) : null}
+                                                      <span className="truncate">{approvedUrl.label}</span>
                                                     </a>
                                                   ))}
                                                 </div>
                                               ) : (
                                                 <p className="truncate text-xs text-red-700">
-                                                  {source.state === "rejected"
-                                                    ? "Rejected source URL"
-                                                    : "No validated source URL found"}
+                                                  No validated source URL found
                                                 </p>
                                               )}
 
@@ -12192,6 +12448,27 @@ export default function TrrShowDetailPage() {
                                           );
                                         })}
                                       </div>
+                                      {card.additionalApprovedLinks.length > 0 && (
+                                        <div className="mt-2">
+                                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                            Other Verified Links
+                                          </p>
+                                          <div className="flex flex-wrap gap-1">
+                                            {card.additionalApprovedLinks.map((link) => (
+                                              <a
+                                                key={`person-additional-link-${card.personId}-${link.id}-${link.url}`}
+                                                href={link.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="max-w-full truncate rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium text-zinc-700 hover:bg-zinc-100"
+                                                title={link.url}
+                                              >
+                                                {link.label}
+                                              </a>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -12219,10 +12496,20 @@ export default function TrrShowDetailPage() {
                                               href={link.url}
                                               target="_blank"
                                               rel="noopener noreferrer"
-                                              className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
                                               title={link.url}
                                             >
-                                              {link.text}
+                                              {link.iconUrl ? (
+                                                <Image
+                                                  src={link.iconUrl}
+                                                  alt=""
+                                                  width={14}
+                                                  height={14}
+                                                  className="h-3.5 w-3.5 shrink-0 rounded-sm"
+                                                  unoptimized
+                                                />
+                                              ) : null}
+                                              <span className="truncate">{link.text}</span>
                                             </a>
                                           ))}
                                         </div>
@@ -12238,6 +12525,11 @@ export default function TrrShowDetailPage() {
                                 {section.links.map((link) => {
                                   const isPersonBravoProfile =
                                     link.entity_type === "person" && link.link_kind === "bravo_profile";
+                                  const isFandom = isFandomLinkKind(link.link_kind);
+                                  const linkDisplayLabel = isFandom
+                                    ? resolveLinkPageTitle(link) || String(link.label || "Fandom").trim()
+                                    : link.label || link.url;
+                                  const linkIconUrl = isFandom ? buildHostFaviconUrl(link.url) : null;
                                   return (
                                     <div
                                       key={`settings-link-${section.key}-${link.id}`}
@@ -12248,9 +12540,19 @@ export default function TrrShowDetailPage() {
                                           href={link.url}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          className="block truncate text-sm font-medium text-blue-700 hover:underline"
+                                          className="inline-flex max-w-full items-center gap-1 truncate text-sm font-medium text-blue-700 hover:underline"
                                         >
-                                          {link.label || link.url}
+                                          {linkIconUrl ? (
+                                            <Image
+                                              src={linkIconUrl}
+                                              alt=""
+                                              width={14}
+                                              height={14}
+                                              className="h-3.5 w-3.5 shrink-0 rounded-sm"
+                                              unoptimized
+                                            />
+                                          ) : null}
+                                          <span className="truncate">{linkDisplayLabel}</span>
                                         </a>
                                         <div className="mt-1 flex flex-wrap items-center gap-1">
                                           <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">

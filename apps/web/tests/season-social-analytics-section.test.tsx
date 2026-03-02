@@ -1310,6 +1310,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       await waitFor(() => {
         expect(routerReplaceMock).toHaveBeenCalled();
       });
+      expect(routerReplaceMock).toHaveBeenCalledTimes(1);
       const redirectedHref = String(routerReplaceMock.mock.calls.at(-1)?.[0] ?? "");
       expect(redirectedHref).toContain(`/show-1/s6/social/w1/${platform}`);
     },
@@ -1533,14 +1534,14 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("5 comments");
     expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("1 hashtag");
     expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("1 mention");
-    expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("2 tags");
+    expect(weekOne.getByTestId("weekly-platform-metrics-instagram-1")).toHaveTextContent("1 tag");
     await waitFor(() => {
       expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("4 posts");
       expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("1,000 likes");
       expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("20 comments");
       expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("2 hashtags");
       expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("3 mentions");
-      expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("2 tags");
+      expect(weekOne.getByTestId("weekly-total-metrics-1")).toHaveTextContent("1 tag");
     });
     expect(weekOne.getByTestId("weekly-total-progress-1")).toHaveTextContent("90.0%");
     const weekOneMissingMetrics = weekOne.getByTestId("weekly-missing-metrics-1");
@@ -1684,7 +1685,25 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     const weekOneMetricsLine = await screen.findByTestId("weekly-total-metrics-1");
-    const deselectAllButton = await screen.findByRole("button", { name: "Deselect all" });
+    const selectAllButton = await screen.findByRole("button", { name: /select all/i });
+    fireEvent.click(selectAllButton);
+    rerender(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+    await waitFor(() => {
+      expect(new URLSearchParams(window.location.search).get("social_metrics")).toContain(
+        "collaborators",
+      );
+      expect(weekOneMetricsLine).toHaveTextContent("4 posts");
+      expect(weekOneMetricsLine).toHaveTextContent("1,000 likes");
+    });
+
+    const deselectAllButton = await screen.findByRole("button", { name: /deselect all/i });
     fireEvent.click(deselectAllButton);
     rerender(
       <SeasonSocialAnalyticsSection
@@ -1697,22 +1716,6 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await waitFor(() => {
       expect(new URLSearchParams(window.location.search).get("social_metrics")).toBe("none");
       expect(weekOneMetricsLine).toHaveTextContent("No metrics selected");
-    });
-
-    const selectAllButton = await screen.findByRole("button", { name: "Select All" });
-    fireEvent.click(selectAllButton);
-    rerender(
-      <SeasonSocialAnalyticsSection
-        showId="show-1"
-        seasonNumber={6}
-        seasonId="season-1"
-        showName="Test Show"
-      />,
-    );
-    await waitFor(() => {
-      expect(new URLSearchParams(window.location.search).get("social_metrics")).toBeNull();
-      expect(weekOneMetricsLine).toHaveTextContent("4 posts");
-      expect(weekOneMetricsLine).toHaveTextContent("1,000 likes");
     });
   });
 
@@ -1734,6 +1737,142 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
         String(input).includes("/social/analytics/week/"),
       ).length;
       expect(weekDetailCalls).toBeGreaterThan(0);
+    });
+  });
+
+  it("limits week detail fanout concurrency to two in-flight requests", async () => {
+    const analyticsWithFourWeeks: AnalyticsPayload = {
+      ...analyticsBase,
+      weekly: [
+        ...analyticsBase.weekly,
+        {
+          ...analyticsBase.weekly[0],
+          week_index: 3,
+          label: "Week 3",
+          start: "2026-01-21T00:00:00Z",
+          end: "2026-01-27T23:59:59Z",
+        },
+        {
+          ...analyticsBase.weekly[0],
+          week_index: 4,
+          label: "Week 4",
+          start: "2026-01-28T00:00:00Z",
+          end: "2026-02-03T23:59:59Z",
+        },
+      ],
+      weekly_platform_posts: [
+        ...analyticsBase.weekly_platform_posts,
+        {
+          ...analyticsBase.weekly_platform_posts[0],
+          week_index: 3,
+          label: "Week 3",
+          start: "2026-01-21T00:00:00Z",
+          end: "2026-01-27T23:59:59Z",
+        },
+        {
+          ...analyticsBase.weekly_platform_posts[0],
+          week_index: 4,
+          label: "Week 4",
+          start: "2026-01-28T00:00:00Z",
+          end: "2026-02-03T23:59:59Z",
+        },
+      ],
+      weekly_platform_engagement: [
+        ...analyticsBase.weekly_platform_engagement,
+        {
+          ...analyticsBase.weekly_platform_engagement[0],
+          week_index: 3,
+          label: "Week 3",
+          start: "2026-01-21T00:00:00Z",
+          end: "2026-01-27T23:59:59Z",
+        },
+        {
+          ...analyticsBase.weekly_platform_engagement[0],
+          week_index: 4,
+          label: "Week 4",
+          start: "2026-01-28T00:00:00Z",
+          end: "2026-02-03T23:59:59Z",
+        },
+      ],
+      weekly_daily_activity: [
+        ...analyticsBase.weekly_daily_activity,
+        {
+          ...analyticsBase.weekly_daily_activity[0],
+          week_index: 3,
+          label: "Week 3",
+          start: "2026-01-21T00:00:00Z",
+          end: "2026-01-27T23:59:59Z",
+        },
+        {
+          ...analyticsBase.weekly_daily_activity[0],
+          week_index: 4,
+          label: "Week 4",
+          start: "2026-01-28T00:00:00Z",
+          end: "2026-02-03T23:59:59Z",
+        },
+      ],
+    };
+
+    const weekDetailResolvers = new Map<number, () => void>();
+    let startedWeekDetails = 0;
+    let inFlightWeekDetails = 0;
+    let maxInFlightWeekDetails = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsWithFourWeeks);
+      const weekDetailMatch = /\/social\/analytics\/week\/(\d+)\?/.exec(url);
+      if (weekDetailMatch) {
+        const weekIndex = Number(weekDetailMatch[1]);
+        startedWeekDetails += 1;
+        inFlightWeekDetails += 1;
+        maxInFlightWeekDetails = Math.max(maxInFlightWeekDetails, inFlightWeekDetails);
+        return new Promise<Response>((resolve) => {
+          weekDetailResolvers.set(weekIndex, () => {
+            inFlightWeekDetails = Math.max(0, inFlightWeekDetails - 1);
+            resolve(jsonResponse(defaultWeekDetailResponse(weekIndex)));
+          });
+        });
+      }
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/runs/summary?")) return jsonResponse({ summaries: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByTestId("weekly-total-metrics-1");
+    await waitFor(() => {
+      expect(startedWeekDetails).toBe(2);
+    });
+    expect(maxInFlightWeekDetails).toBeLessThanOrEqual(2);
+
+    act(() => {
+      weekDetailResolvers.get(1)?.();
+    });
+    await waitFor(() => {
+      expect(startedWeekDetails).toBeGreaterThanOrEqual(3);
+    });
+
+    act(() => {
+      for (const resolve of weekDetailResolvers.values()) {
+        resolve();
+      }
+      weekDetailResolvers.clear();
     });
   });
 
@@ -1845,7 +1984,51 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await waitFor(() => {
       expect(weekOneMetricsLine).toHaveTextContent("2 hashtags");
       expect(weekOneMetricsLine).toHaveTextContent("3 mentions");
-      expect(weekOneMetricsLine).toHaveTextContent("2 tags");
+      expect(weekOneMetricsLine).toHaveTextContent("1 tag");
+    });
+  });
+
+  it("shows -- collaborators fallback token when collaborators metric is selected and detail data is pending", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/shows/show-1/s6/social/official?social_metrics=posts,likes,comments,hashtags,mentions,tags,collaborators",
+    );
+
+    const weekDetailResolvers = new Map<number, () => void>();
+    const deferredFetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      const weekDetailMatch = /\/social\/analytics\/week\/(\d+)\?/.exec(url);
+      if (weekDetailMatch) {
+        const weekIndex = Number(weekDetailMatch[1]);
+        return new Promise<Response>((resolve) => {
+          weekDetailResolvers.set(weekIndex, () => resolve(jsonResponse(defaultWeekDetailResponse(weekIndex))));
+        });
+      }
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes("/social/runs/summary?")) return jsonResponse({ summaries: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", deferredFetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const weekOneMetricsLine = await screen.findByTestId("weekly-total-metrics-1");
+    await waitFor(() => {
+      expect(weekOneMetricsLine).toHaveTextContent("-- collaborators");
     });
   });
 
@@ -2649,6 +2832,57 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       "src",
       "https://images.test/discussion-thumb.jpg",
     );
+  });
+
+  it("renders video thumbnail placeholders for leaderboard cards instead of broken img tags", async () => {
+    const analyticsWithVideoThumbs: AnalyticsPayload = {
+      ...analyticsBase,
+      leaderboards: {
+        bravo_content: [
+          {
+            platform: "twitter",
+            source_id: "tw-1",
+            text: "Video clip",
+            engagement: 42,
+            url: "https://x.com/example/status/1",
+            timestamp: "2026-01-07T00:00:00Z",
+            thumbnail_url: "https://video.twimg.com/ext_tw_video/12345/pu/vid/avc1/1280x720/main.mp4?tag=12",
+          },
+        ],
+        viewer_discussion: [
+          {
+            platform: "twitter",
+            source_id: "tw-comment-1",
+            text: "Quote tweet reaction",
+            engagement: 14,
+            url: "https://x.com/example/status/2",
+            timestamp: "2026-01-07T00:00:00Z",
+            sentiment: "positive",
+            thumbnail_url: "https://cdn.test/social/twitter/x/thumbnail.mp4",
+          },
+        ],
+      },
+    };
+    mockSeasonSocialFetch(analyticsWithVideoThumbs);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="bravo"
+      />,
+    );
+
+    expect(await screen.findByText("Bravo Content Leaderboard")).toBeInTheDocument();
+    const leaderboardButton = screen.getByRole("button", { name: "Open leaderboard media lightbox" });
+    const discussionButton = screen.getByRole("button", { name: "Open discussion media lightbox" });
+
+    expect(within(leaderboardButton).queryByRole("img")).not.toBeInTheDocument();
+    expect(within(discussionButton).queryByRole("img")).not.toBeInTheDocument();
+    expect(within(leaderboardButton).getByText("Video")).toBeInTheDocument();
+    expect(within(discussionButton).getByText("Video")).toBeInTheDocument();
   });
 
   it("opens leaderboard media in lightbox and shows social stats in metadata", async () => {

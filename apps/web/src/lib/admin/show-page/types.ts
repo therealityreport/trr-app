@@ -91,21 +91,31 @@ export type PersonRefreshMode = "full" | "ingest_only" | "profile_only";
 
 export type HealthStatus = "ready" | "missing" | "stale";
 export type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "wikipedia" | "wikidata" | "fandom";
-export type PersonLinkSourceState = "found" | "missing" | "pending" | "rejected";
+export type PersonLinkSourceState = "found" | "missing";
 
 export type PersonLinkSourceSummary<TLink = unknown> = {
   key: PersonLinkSourceKey;
   label: string;
   state: PersonLinkSourceState;
   url: string | null;
+  urls: { url: string; label: string; iconUrl?: string | null }[];
   link: TLink | null;
+};
+
+export type PersonAdditionalLinkPill = {
+  id: string;
+  label: string;
+  url: string;
+  iconUrl?: string | null;
 };
 
 export type PersonLinkCoverageCard<TLink = unknown> = {
   personId: string;
   personName: string;
   seasons: number[];
+  approvedLinkCount: number;
   sources: PersonLinkSourceSummary<TLink>[];
+  additionalApprovedLinks: PersonAdditionalLinkPill[];
 };
 
 export type ShowGalleryVisibleBySection = Partial<Record<AssetSectionKey, number>>;

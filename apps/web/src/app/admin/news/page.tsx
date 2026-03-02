@@ -1,15 +1,78 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+
+interface BrandLogoRow {
+  id: string;
+  target_type: string;
+  target_key: string;
+  target_label: string;
+  source_url: string | null;
+  source_domain: string | null;
+  hosted_logo_url: string | null;
+  hosted_logo_black_url: string | null;
+  hosted_logo_white_url: string | null;
+  is_primary: boolean;
+  updated_at: string | null;
+}
 
 export default function AdminNewsPage() {
   const { user, checking, hasAccess } = useAdminGuard();
+  const [query, setQuery] = useState("");
+  const [rows, setRows] = useState<BrandLogoRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      fetchAdminWithAuth(input, init, {
+        preferredUser: user,
+      }),
+    [user]
+  );
+
+  const loadLogos = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const loadByType = async (targetType: "publication" | "social"): Promise<BrandLogoRow[]> => {
+        const response = await fetchWithAuth(
+          `/api/admin/trr-api/brands/logos?target_type=${targetType}&q=${encodeURIComponent(query)}&limit=200`,
+          { cache: "no-store" }
+        );
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error || `Failed to load ${targetType} logos`);
+        }
+        const payload = (await response.json().catch(() => ({}))) as { rows?: BrandLogoRow[] };
+        return Array.isArray(payload.rows) ? payload.rows : [];
+      };
+      const [publicationRows, socialRows] = await Promise.all([loadByType("publication"), loadByType("social")]);
+      setRows([...publicationRows, ...socialRows]);
+    } catch (loadError) {
+      setRows([]);
+      setError(loadError instanceof Error ? loadError.message : "Failed to load logos");
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchWithAuth, query]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess) return;
+    void loadLogos();
+  }, [checking, hasAccess, loadLogos, user]);
+
+  const publicationRows = useMemo(() => rows.filter((row) => row.target_type === "publication"), [rows]);
+  const socialRows = useMemo(() => rows.filter((row) => row.target_type === "social"), [rows]);
 
   if (checking) {
     return (
@@ -50,12 +113,97 @@ export default function AdminNewsPage() {
         </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
+          <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search publication/social logos..."
+                className="min-w-[280px] flex-1 rounded border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-400 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => void loadLogos()}
+                disabled={loading}
+                className="rounded border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+              >
+                {loading ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+            {error ? (
+              <p className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+            ) : null}
+          </section>
+
+          <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-zinc-900">Publications ({publicationRows.length})</h2>
+            </div>
+            {publicationRows.length === 0 ? (
+              <p className="text-sm text-zinc-500">No publication logos found for this filter.</p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {publicationRows.map((row) => (
+                  <article key={row.id} className="rounded border border-zinc-200 p-3">
+                    <p className="truncate text-sm font-semibold text-zinc-900">{row.target_label}</p>
+                    <p className="truncate text-xs text-zinc-500">{row.target_key}</p>
+                    <div className="mt-2 flex gap-2">
+                      {row.hosted_logo_url ? (
+                        <div className="relative h-12 w-24 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                          <Image src={row.hosted_logo_url} alt={row.target_label} fill className="object-contain p-1" unoptimized />
+                        </div>
+                      ) : null}
+                      {row.hosted_logo_black_url ? (
+                        <div className="relative h-12 w-24 overflow-hidden rounded border border-zinc-200 bg-white">
+                          <Image src={row.hosted_logo_black_url} alt={`${row.target_label} black`} fill className="object-contain p-1" unoptimized />
+                        </div>
+                      ) : null}
+                      {row.hosted_logo_white_url ? (
+                        <div className="relative h-12 w-24 overflow-hidden rounded border border-zinc-200 bg-zinc-900">
+                          <Image src={row.hosted_logo_white_url} alt={`${row.target_label} white`} fill className="object-contain p-1" unoptimized />
+                        </div>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Coming Soon</p>
-            <h2 className="mt-2 text-2xl font-bold text-zinc-900">Publications / News</h2>
-            <p className="mt-2 text-sm text-zinc-600">
-              This page is reserved for publication and news outlet brand management.
-            </p>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-zinc-900">Social ({socialRows.length})</h2>
+            </div>
+            {socialRows.length === 0 ? (
+              <p className="text-sm text-zinc-500">No social logos found for this filter.</p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {socialRows.map((row) => (
+                  <article key={row.id} className="rounded border border-zinc-200 p-3">
+                    <p className="truncate text-sm font-semibold text-zinc-900">{row.target_label}</p>
+                    <p className="truncate text-xs text-zinc-500">{row.target_key}</p>
+                    <div className="mt-2 flex gap-2">
+                      {row.hosted_logo_url ? (
+                        <div className="relative h-12 w-24 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                          <Image src={row.hosted_logo_url} alt={row.target_label} fill className="object-contain p-1" unoptimized />
+                        </div>
+                      ) : null}
+                      {row.hosted_logo_black_url ? (
+                        <div className="relative h-12 w-24 overflow-hidden rounded border border-zinc-200 bg-white">
+                          <Image src={row.hosted_logo_black_url} alt={`${row.target_label} black`} fill className="object-contain p-1" unoptimized />
+                        </div>
+                      ) : null}
+                      {row.hosted_logo_white_url ? (
+                        <div className="relative h-12 w-24 overflow-hidden rounded border border-zinc-200 bg-zinc-900">
+                          <Image src={row.hosted_logo_white_url} alt={`${row.target_label} white`} fill className="object-contain p-1" unoptimized />
+                        </div>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         </main>
       </div>

@@ -88,6 +88,11 @@ describe("networks-streaming repository detail", () => {
     );
     const queryTexts = queryMock.mock.calls.map((call: unknown[]) => String(call[0] ?? ""));
     expect(queryTexts.some((sql) => sql.includes("FROM admin.network_streaming_logo_assets"))).toBe(false);
+    const showQuery = queryTexts.find((sql) => sql.includes("entity_show_source"));
+    expect(showQuery).toBeDefined();
+    expect(showQuery).toContain("AS computed_slug");
+    expect(showQuery).toContain("COALESCE(NULLIF(s.slug, ''), s.computed_slug)");
+    expect(showQuery).not.toContain("AS slug,");
   });
 
   it("returns detail for production company entity type", async () => {

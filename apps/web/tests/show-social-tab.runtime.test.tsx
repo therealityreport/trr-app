@@ -29,8 +29,10 @@ describe("ShowSocialTab runtime", () => {
     );
 
     expect(screen.getByRole("tabpanel")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Social platform tabs" })).toBeInTheDocument();
     expect(screen.getByText("Social Scope")).toBeInTheDocument();
     expect(screen.getByText("analytics section")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Instagram" }));
     expect(onSelectSocialPlatformTab).toHaveBeenCalledWith("instagram");
@@ -56,6 +58,7 @@ describe("ShowSocialTab runtime", () => {
     );
 
     expect(screen.getByText(/Social dependency warning:/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Social dependency warning");
     expect(screen.getByText("Platform tabs are available after selecting a season.")).toBeInTheDocument();
     expect(screen.getByText("fallback section")).toBeInTheDocument();
   });

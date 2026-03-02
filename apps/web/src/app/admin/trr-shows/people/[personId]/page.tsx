@@ -679,7 +679,7 @@ const normalizeFaceCrops = (value: unknown): FaceCropTag[] => {
 };
 
 const PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS = 600_000;
-const PERSON_PAGE_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
+const PERSON_PAGE_STREAM_MAX_DURATION_MS = 45 * 60 * 1000;
 const PERSON_PAGE_STREAM_START_DEADLINE_MS = 120_000;
 const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
 const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
@@ -2640,6 +2640,7 @@ export default function PersonProfilePage() {
   const personRefreshRequestCounterRef = useRef(0);
   const textOverlayDetectControllerRef = useRef<AbortController | null>(null);
   const showBrokenRowsRef = useRef(showBrokenRows);
+  const recentViewRequestKeyRef = useRef<string | null>(null);
 
   const appendRefreshLog = useCallback(
     (entry: Omit<RefreshLogEntry, "id" | "ts"> & { ts?: number }) => {
@@ -2922,6 +2923,8 @@ export default function PersonProfilePage() {
     () => galleryFilterCreditsSource.some((credit) => isWwhlShowName(credit.show_name)),
     [galleryFilterCreditsSource]
   );
+  const canSelectWwhlWithoutMatches = hasWwhlCredit;
+  const canSelectOtherShowWithoutMatches = selectedOtherShow !== null;
 
   useEffect(() => {
     if (selectedOtherShowKey === "all") return;
@@ -2952,7 +2955,7 @@ export default function PersonProfilePage() {
     showIdForApi,
   ]);
 
-  const { hasWwhlMatches, hasOtherShowMatches, hasUnknownShowMatches, hasNonThisShowMatches } =
+  const { hasWwhlMatches, hasEventMatches, hasOtherShowMatches, hasUnknownShowMatches, hasNonThisShowMatches } =
     mediaViewAvailability;
 
   const hasSelectedOtherShowMatches = useMemo(() => {
@@ -2992,10 +2995,13 @@ export default function PersonProfilePage() {
       currentFilter: galleryShowFilter,
       showContextEnabled: Boolean(showIdParam),
       hasWwhlMatches,
+      hasEventMatches,
       hasOtherShowMatches,
       hasUnknownShowMatches,
       hasSelectedOtherShowMatches,
       hasNonThisShowMatches,
+      canSelectWwhlWithoutMatches,
+      canSelectOtherShowWithoutMatches,
     });
     if (nextFilter !== galleryShowFilter) {
       setGalleryShowFilter(nextFilter);
@@ -3003,10 +3009,13 @@ export default function PersonProfilePage() {
   }, [
     galleryShowFilter,
     hasNonThisShowMatches,
+    hasEventMatches,
     hasOtherShowMatches,
     hasUnknownShowMatches,
     hasSelectedOtherShowMatches,
     hasWwhlMatches,
+    canSelectOtherShowWithoutMatches,
+    canSelectWwhlWithoutMatches,
     showIdParam,
   ]);
 
@@ -3068,6 +3077,9 @@ export default function PersonProfilePage() {
         }
         if (galleryShowFilter === "wwhl") {
           return bucketMatches.matchesWwhl;
+        }
+        if (galleryShowFilter === "events") {
+          return bucketMatches.matchesEvents;
         }
         if (galleryShowFilter === "other-shows") {
           return selectedOtherShow
@@ -4965,7 +4977,7 @@ export default function PersonProfilePage() {
     appendRefreshLog({
       source: "page_refresh",
       stage: "syncing",
-      message: mode === "sync" ? "Sync stage started" : "Refresh Images started",
+      message: mode === "sync" ? "Sync stage started" : "Get Images started",
       level: "info",
       runId: requestId,
     });
@@ -5221,6 +5233,45 @@ export default function PersonProfilePage() {
                     : typeof mirroredCountRaw === "string"
                       ? Number.parseInt(mirroredCountRaw, 10)
                       : null;
+                const reviewedRowsRaw = (payload as { reviewed_rows?: unknown }).reviewed_rows;
+                const reviewedRows =
+                  typeof reviewedRowsRaw === "number"
+                    ? reviewedRowsRaw
+                    : typeof reviewedRowsRaw === "string"
+                      ? Number.parseInt(reviewedRowsRaw, 10)
+                      : null;
+                const changedRowsRaw = (payload as { changed_rows?: unknown }).changed_rows;
+                const changedRows =
+                  typeof changedRowsRaw === "number"
+                    ? changedRowsRaw
+                    : typeof changedRowsRaw === "string"
+                      ? Number.parseInt(changedRowsRaw, 10)
+                      : null;
+                const totalRowsRaw = (payload as { total_rows?: unknown }).total_rows;
+                const totalRows =
+                  typeof totalRowsRaw === "number"
+                    ? totalRowsRaw
+                    : typeof totalRowsRaw === "string"
+                      ? Number.parseInt(totalRowsRaw, 10)
+                      : null;
+                const failedRowsRaw = (payload as { failed_rows?: unknown }).failed_rows;
+                const failedRows =
+                  typeof failedRowsRaw === "number"
+                    ? failedRowsRaw
+                    : typeof failedRowsRaw === "string"
+                      ? Number.parseInt(failedRowsRaw, 10)
+                      : null;
+                const skippedRowsRaw = (
+                  payload as { skipped_rows?: unknown; skipped_existing_rows?: unknown; skipped_manual_rows?: unknown }
+                ).skipped_rows ??
+                  (payload as { skipped_existing_rows?: unknown }).skipped_existing_rows ??
+                  (payload as { skipped_manual_rows?: unknown }).skipped_manual_rows;
+                const skippedRows =
+                  typeof skippedRowsRaw === "number"
+                    ? skippedRowsRaw
+                    : typeof skippedRowsRaw === "string"
+                      ? Number.parseInt(skippedRowsRaw, 10)
+                      : null;
                 const skipReason =
                   typeof (payload as { skip_reason?: unknown }).skip_reason === "string"
                     ? ((payload as { skip_reason: string }).skip_reason)
@@ -5336,6 +5387,26 @@ export default function PersonProfilePage() {
                     retryAfterS:
                       typeof retryAfterS === "number" && Number.isFinite(retryAfterS)
                         ? retryAfterS
+                        : null,
+                    reviewedRows:
+                      typeof reviewedRows === "number" && Number.isFinite(reviewedRows)
+                        ? reviewedRows
+                        : null,
+                    changedRows:
+                      typeof changedRows === "number" && Number.isFinite(changedRows)
+                        ? changedRows
+                        : null,
+                    totalRows:
+                      typeof totalRows === "number" && Number.isFinite(totalRows)
+                        ? totalRows
+                        : null,
+                    failedRows:
+                      typeof failedRows === "number" && Number.isFinite(failedRows)
+                        ? failedRows
+                        : null,
+                    skippedRows:
+                      typeof skippedRows === "number" && Number.isFinite(skippedRows)
+                        ? skippedRows
                         : null,
                   });
                 const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
@@ -5491,6 +5562,7 @@ export default function PersonProfilePage() {
                 const formattedErrorText = terminalProxyConnectError
                   ? buildProxyTerminalErrorMessage({
                       stage: errorPayload?.stage ?? null,
+                      checkpoint: errorPayload?.checkpoint ?? null,
                       error: errorPayload?.error ?? null,
                       detail: errorPayload?.detail ?? null,
                       errorCode: errorPayload?.error_code ?? null,
@@ -5506,16 +5578,16 @@ export default function PersonProfilePage() {
                     })
                   : errorPayload?.error && errorPayload?.detail
                     ? `${stage}${errorPayload.error}: ${errorPayload.detail}`
-                    : `${stage}${errorPayload?.error || "Failed to refresh images"}`;
+                    : `${stage}${errorPayload?.error || "Failed to get images"}`;
                 setRefreshPipelineSteps((prev) =>
                   updatePersonRefreshPipelineSteps(
                     prev ?? createPersonRefreshPipelineSteps(pipelineMode),
-                    {
-                      rawStage: errorPayload?.stage ?? null,
-                      message: errorPayload?.error ?? "Failed to refresh images",
-                      detail: errorPayload?.detail ?? null,
-                      current: null,
-                      total: null,
+                      {
+                        rawStage: errorPayload?.stage ?? null,
+                        message: errorPayload?.error ?? "Failed to get images",
+                        detail: errorPayload?.detail ?? null,
+                        current: null,
+                        total: null,
                       forceStatus: "failed",
                     },
                   ),
@@ -5555,7 +5627,7 @@ export default function PersonProfilePage() {
                   stage: errorPayload?.stage ?? "error",
                   message: terminalProxyConnectError
                     ? "Backend stream connect failed"
-                    : errorPayload?.error || "Failed to refresh images",
+                    : errorPayload?.error || "Failed to get images",
                   detail: formattedErrorText,
                   level: "error",
                   runId: payloadRequestId,
@@ -5690,8 +5762,8 @@ export default function PersonProfilePage() {
         fetchCoverPhoto(),
       ]);
     } catch (err) {
-      console.error("Failed to refresh images:", err);
-      const baseErrorMessage = err instanceof Error ? err.message : "Failed to refresh images";
+      console.error("Failed to get images:", err);
+      const baseErrorMessage = err instanceof Error ? err.message : "Failed to get images";
       const checkpoint = refreshProgress?.checkpoint;
       const streamState = refreshProgress?.streamState;
       const backendHost = refreshProgress?.backendHost;
@@ -5701,7 +5773,7 @@ export default function PersonProfilePage() {
           ? `Refresh stream failed during ${checkpoint}${backendHost ? ` (${backendHost})` : ""}. ${baseErrorMessage}`
           : baseErrorMessage;
       const errorMessage =
-        streamState === "failed" && checkpoint && contextualErrorMessage === "Failed to refresh images"
+        streamState === "failed" && checkpoint && contextualErrorMessage === "Failed to get images"
           ? `Refresh stream failed during ${checkpoint}.`
           : contextualErrorMessage;
       setRefreshError(errorMessage);
@@ -5720,7 +5792,7 @@ export default function PersonProfilePage() {
       appendRefreshLog({
         source: "page_refresh",
         stage: "refresh_error",
-        message: "Refresh Images failed",
+        message: "Get Images failed",
         detail: errorMessage,
         level: "error",
         runId: requestId,
@@ -5758,6 +5830,7 @@ export default function PersonProfilePage() {
       ReprocessStageKey,
       {
         body: {
+          run_metadata: boolean;
           run_count: boolean;
           run_id_text: boolean;
           run_crop: boolean;
@@ -5770,35 +5843,35 @@ export default function PersonProfilePage() {
       }
     > = {
       all: {
-        body: { run_count: true, run_id_text: true, run_crop: true, run_resize: true },
-        startLabel: "Count & Crop started",
-        startMessage: "Reprocessing existing images...",
-        defaultSuccessMessage: "Reprocessing complete.",
-        failureLabel: "Count & Crop failed",
+        body: { run_metadata: true, run_count: true, run_id_text: true, run_crop: true, run_resize: true },
+        startLabel: "Refresh Details started",
+        startMessage: "Refreshing existing image details...",
+        defaultSuccessMessage: "Refresh Details complete.",
+        failureLabel: "Refresh Details failed",
       },
       count: {
-        body: { run_count: true, run_id_text: false, run_crop: false, run_resize: false },
-        startLabel: "Count stage started",
-        startMessage: "Reprocessing count stage...",
-        defaultSuccessMessage: "Count stage complete.",
-        failureLabel: "Count stage failed",
+        body: { run_metadata: false, run_count: true, run_id_text: false, run_crop: true, run_resize: false },
+        startLabel: "Count & Crop stage started",
+        startMessage: "Reprocessing count + crop stage...",
+        defaultSuccessMessage: "Count & Crop stage complete.",
+        failureLabel: "Count & Crop stage failed",
       },
       crop: {
-        body: { run_count: false, run_id_text: false, run_crop: true, run_resize: false },
+        body: { run_metadata: false, run_count: false, run_id_text: false, run_crop: true, run_resize: false },
         startLabel: "Crop stage started",
         startMessage: "Reprocessing crop stage...",
         defaultSuccessMessage: "Crop stage complete.",
         failureLabel: "Crop stage failed",
       },
       id_text: {
-        body: { run_count: false, run_id_text: true, run_crop: false, run_resize: false },
+        body: { run_metadata: false, run_count: false, run_id_text: true, run_crop: false, run_resize: false },
         startLabel: "ID Text stage started",
         startMessage: "Reprocessing text-detection stage...",
         defaultSuccessMessage: "ID Text stage complete.",
         failureLabel: "ID Text stage failed",
       },
       resize: {
-        body: { run_count: false, run_id_text: false, run_crop: false, run_resize: true },
+        body: { run_metadata: false, run_count: false, run_id_text: false, run_crop: false, run_resize: true },
         startLabel: "Auto-Crop stage started",
         startMessage: "Reprocessing resize/auto-crop stage...",
         defaultSuccessMessage: "Auto-Crop stage complete.",
@@ -5819,6 +5892,12 @@ export default function PersonProfilePage() {
       runId: requestId,
       rawStage: "reprocess_start",
       lastEventAt: Date.now(),
+      checkpoint: "connect_start",
+      streamState: "connecting",
+      errorCode: null,
+      attemptElapsedMs: null,
+      attemptTimeoutMs: null,
+      backendHost: null,
     });
     setRefreshNotice(null);
     setRefreshError(null);
@@ -5841,7 +5920,11 @@ export default function PersonProfilePage() {
             "Content-Type": "application/json",
             "x-trr-request-id": requestId,
           },
-          body: JSON.stringify(selectedStage.body),
+          body: JSON.stringify({
+            ...selectedStage.body,
+            show_id: showIdForApi ?? undefined,
+            show_name: activeShowName || undefined,
+          }),
         }
       );
 
@@ -5931,6 +6014,45 @@ export default function PersonProfilePage() {
                 : typeof mirroredCountRaw === "string"
                   ? Number.parseInt(mirroredCountRaw, 10)
                   : null;
+            const reviewedRowsRaw = (payload as { reviewed_rows?: unknown }).reviewed_rows;
+            const reviewedRows =
+              typeof reviewedRowsRaw === "number"
+                ? reviewedRowsRaw
+                : typeof reviewedRowsRaw === "string"
+                  ? Number.parseInt(reviewedRowsRaw, 10)
+                  : null;
+            const changedRowsRaw = (payload as { changed_rows?: unknown }).changed_rows;
+            const changedRows =
+              typeof changedRowsRaw === "number"
+                ? changedRowsRaw
+                : typeof changedRowsRaw === "string"
+                  ? Number.parseInt(changedRowsRaw, 10)
+                  : null;
+            const totalRowsRaw = (payload as { total_rows?: unknown }).total_rows;
+            const totalRows =
+              typeof totalRowsRaw === "number"
+                ? totalRowsRaw
+                : typeof totalRowsRaw === "string"
+                  ? Number.parseInt(totalRowsRaw, 10)
+                  : null;
+            const failedRowsRaw = (payload as { failed_rows?: unknown }).failed_rows;
+            const failedRows =
+              typeof failedRowsRaw === "number"
+                ? failedRowsRaw
+                : typeof failedRowsRaw === "string"
+                  ? Number.parseInt(failedRowsRaw, 10)
+                  : null;
+            const skippedRowsRaw = (
+              payload as { skipped_rows?: unknown; skipped_existing_rows?: unknown; skipped_manual_rows?: unknown }
+            ).skipped_rows ??
+              (payload as { skipped_existing_rows?: unknown }).skipped_existing_rows ??
+              (payload as { skipped_manual_rows?: unknown }).skipped_manual_rows;
+            const skippedRows =
+              typeof skippedRowsRaw === "number"
+                ? skippedRowsRaw
+                : typeof skippedRowsRaw === "string"
+                  ? Number.parseInt(skippedRowsRaw, 10)
+                  : null;
             const skipReason =
               typeof (payload as { skip_reason?: unknown }).skip_reason === "string"
                 ? ((payload as { skip_reason: string }).skip_reason)
@@ -5964,10 +6086,75 @@ export default function PersonProfilePage() {
               typeof (payload as { request_id?: unknown }).request_id === "string"
                 ? ((payload as { request_id: string }).request_id)
                 : null;
+            const checkpoint =
+              typeof (payload as { checkpoint?: unknown }).checkpoint === "string"
+                ? ((payload as { checkpoint: string }).checkpoint)
+                : null;
+            const streamStateRaw = (payload as { stream_state?: unknown }).stream_state;
+            const streamState =
+              streamStateRaw === "connecting" ||
+              streamStateRaw === "connected" ||
+              streamStateRaw === "streaming" ||
+              streamStateRaw === "failed" ||
+              streamStateRaw === "completed"
+                ? streamStateRaw
+                : null;
+            const errorCode =
+              typeof (payload as { error_code?: unknown }).error_code === "string"
+                ? ((payload as { error_code: string }).error_code)
+                : null;
+            const attemptRaw = (payload as { attempt?: unknown }).attempt;
+            const attempt =
+              typeof attemptRaw === "number"
+                ? attemptRaw
+                : typeof attemptRaw === "string"
+                  ? Number.parseInt(attemptRaw, 10)
+                  : null;
+            const maxAttemptsRaw = (payload as { max_attempts?: unknown }).max_attempts;
+            const maxAttempts =
+              typeof maxAttemptsRaw === "number"
+                ? maxAttemptsRaw
+                : typeof maxAttemptsRaw === "string"
+                  ? Number.parseInt(maxAttemptsRaw, 10)
+                  : null;
+            const attemptElapsedRaw = (payload as { attempt_elapsed_ms?: unknown }).attempt_elapsed_ms;
+            const attemptElapsedMs =
+              typeof attemptElapsedRaw === "number"
+                ? attemptElapsedRaw
+                : typeof attemptElapsedRaw === "string"
+                  ? Number.parseInt(attemptElapsedRaw, 10)
+                  : null;
+            const attemptTimeoutRaw = (payload as { attempt_timeout_ms?: unknown }).attempt_timeout_ms;
+            const attemptTimeoutMs =
+              typeof attemptTimeoutRaw === "number"
+                ? attemptTimeoutRaw
+                : typeof attemptTimeoutRaw === "string"
+                  ? Number.parseInt(attemptTimeoutRaw, 10)
+                  : null;
+            const backendHost =
+              typeof (payload as { backend_host?: unknown }).backend_host === "string"
+                ? ((payload as { backend_host: string }).backend_host)
+                : null;
             const resolvedRunId = payloadRequestId ?? runId ?? requestId;
             const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
             setRefreshLiveCounts(nextLiveCounts);
-            const baseDetailMessage = buildPersonRefreshDetailMessage({
+            const connectDetailMessage = buildProxyConnectDetailMessage({
+              stage: rawPhase,
+              message,
+              attempt:
+                typeof attempt === "number" && Number.isFinite(attempt) ? attempt : null,
+              maxAttempts:
+                typeof maxAttempts === "number" && Number.isFinite(maxAttempts) ? maxAttempts : null,
+              attemptElapsedMs:
+                typeof attemptElapsedMs === "number" && Number.isFinite(attemptElapsedMs)
+                  ? attemptElapsedMs
+                  : null,
+              attemptTimeoutMs:
+                typeof attemptTimeoutMs === "number" && Number.isFinite(attemptTimeoutMs)
+                  ? attemptTimeoutMs
+                  : null,
+            });
+            const baseDetailMessage = connectDetailMessage ?? buildPersonRefreshDetailMessage({
               rawStage: rawPhase,
               message,
               heartbeat,
@@ -5990,6 +6177,26 @@ export default function PersonProfilePage() {
                 typeof retryAfterS === "number" && Number.isFinite(retryAfterS)
                   ? retryAfterS
                   : null,
+              reviewedRows:
+                typeof reviewedRows === "number" && Number.isFinite(reviewedRows)
+                  ? reviewedRows
+                  : null,
+              changedRows:
+                typeof changedRows === "number" && Number.isFinite(changedRows)
+                  ? changedRows
+                  : null,
+              totalRows:
+                typeof totalRows === "number" && Number.isFinite(totalRows)
+                  ? totalRows
+                  : null,
+              failedRows:
+                typeof failedRows === "number" && Number.isFinite(failedRows)
+                  ? failedRows
+                  : null,
+              skippedRows:
+                typeof skippedRows === "number" && Number.isFinite(skippedRows)
+                  ? skippedRows
+                  : null,
             });
             const enrichedMessage = appendLiveCountsToMessage(baseDetailMessage ?? message ?? "", nextLiveCounts);
             setRefreshProgress({
@@ -6001,6 +6208,18 @@ export default function PersonProfilePage() {
               runId: resolvedRunId,
               rawStage: rawPhase,
               lastEventAt: Date.now(),
+              checkpoint,
+              streamState,
+              errorCode,
+              attemptElapsedMs:
+                typeof attemptElapsedMs === "number" && Number.isFinite(attemptElapsedMs)
+                  ? attemptElapsedMs
+                  : null,
+              attemptTimeoutMs:
+                typeof attemptTimeoutMs === "number" && Number.isFinite(attemptTimeoutMs)
+                  ? attemptTimeoutMs
+                  : null,
+              backendHost,
             });
             setRefreshPipelineSteps((prev) =>
               updatePersonRefreshPipelineSteps(
@@ -6020,7 +6239,7 @@ export default function PersonProfilePage() {
             appendRefreshLog({
               source: "page_refresh",
               stage: rawPhase ?? "reprocess_progress",
-              message: enrichedMessage || baseDetailMessage || message || "Count & Crop progress update",
+              message: enrichedMessage || baseDetailMessage || message || "Refresh Details progress update",
               level: "info",
               runId: resolvedRunId,
             });
@@ -6077,16 +6296,64 @@ export default function PersonProfilePage() {
             });
           } else if (eventType === "error") {
             hadError = true;
-            const message =
+            const errorPayload =
               payload && typeof payload === "object"
-                ? (payload as { error?: string; detail?: string; request_id?: string })
+                ? (payload as {
+                    stage?: string;
+                    error?: string;
+                    detail?: string;
+                    request_id?: string;
+                    checkpoint?: string;
+                    stream_state?: string;
+                    error_code?: string;
+                    is_terminal?: boolean;
+                    backend_host?: string;
+                    attempts_used?: number | string;
+                    max_attempts?: number | string;
+                  })
                 : null;
             const payloadRequestId =
-              typeof message?.request_id === "string" ? message.request_id : requestId;
-            const errorText =
-              message?.error && message?.detail
-                ? `${message.error}: ${message.detail}`
-                : message?.error || "Failed to reprocess images";
+              typeof errorPayload?.request_id === "string" ? errorPayload.request_id : requestId;
+            const attemptUsedRaw = errorPayload?.attempts_used;
+            const maxAttemptsRaw = errorPayload?.max_attempts;
+            const attemptsUsed =
+              typeof attemptUsedRaw === "number"
+                ? attemptUsedRaw
+                : typeof attemptUsedRaw === "string"
+                  ? Number.parseInt(attemptUsedRaw, 10)
+                  : null;
+            const maxAttempts =
+              typeof maxAttemptsRaw === "number"
+                ? maxAttemptsRaw
+                : typeof maxAttemptsRaw === "string"
+                  ? Number.parseInt(maxAttemptsRaw, 10)
+                  : null;
+            const isTerminal = errorPayload?.is_terminal === true;
+            const terminalProxyConnectError =
+              isTerminal &&
+              errorPayload?.stage === "proxy_connecting" &&
+              (errorPayload?.checkpoint === "connect_exhausted" ||
+                errorPayload?.stream_state === "failed");
+            const errorText = terminalProxyConnectError
+              ? buildProxyTerminalErrorMessage({
+                  stage: errorPayload?.stage ?? null,
+                  checkpoint: errorPayload?.checkpoint ?? null,
+                  error: errorPayload?.error ?? null,
+                  detail: errorPayload?.detail ?? null,
+                  errorCode: errorPayload?.error_code ?? null,
+                  backendHost: errorPayload?.backend_host ?? null,
+                  attemptsUsed:
+                    typeof attemptsUsed === "number" && Number.isFinite(attemptsUsed)
+                      ? attemptsUsed
+                      : null,
+                  maxAttempts:
+                    typeof maxAttempts === "number" && Number.isFinite(maxAttempts)
+                      ? maxAttempts
+                      : null,
+                })
+              : errorPayload?.error && errorPayload?.detail
+                ? `${errorPayload.error}: ${errorPayload.detail}`
+                : errorPayload?.error || "Failed to reprocess images";
             setRefreshError(errorText);
             setRefreshPipelineSteps((prev) =>
               updatePersonRefreshPipelineSteps(
@@ -6096,22 +6363,52 @@ export default function PersonProfilePage() {
                     payload && typeof payload === "object" && typeof payload.stage === "string"
                       ? payload.stage
                       : null,
-                  message: message?.error ?? "Failed to reprocess images",
-                  detail: message?.detail ?? null,
+                  message: errorPayload?.error ?? "Failed to reprocess images",
+                  detail: errorPayload?.detail ?? null,
                   current: null,
                   total: null,
                   forceStatus: "failed",
                 },
               ),
             );
+            setRefreshProgress((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    checkpoint:
+                      typeof errorPayload?.checkpoint === "string" ? errorPayload.checkpoint : prev.checkpoint,
+                    streamState:
+                      errorPayload?.stream_state === "connecting" ||
+                      errorPayload?.stream_state === "connected" ||
+                      errorPayload?.stream_state === "streaming" ||
+                      errorPayload?.stream_state === "failed" ||
+                      errorPayload?.stream_state === "completed"
+                        ? errorPayload.stream_state
+                        : prev.streamState,
+                    errorCode:
+                      typeof errorPayload?.error_code === "string"
+                        ? errorPayload.error_code
+                        : prev.errorCode,
+                    backendHost:
+                      typeof errorPayload?.backend_host === "string"
+                        ? errorPayload.backend_host
+                        : prev.backendHost,
+                    detailMessage: errorText,
+                    lastEventAt: Date.now(),
+                  }
+                : prev,
+            );
             appendRefreshLog({
               source: "page_refresh",
               stage: "reprocess_error",
-              message: message?.error || "Failed to reprocess images",
-              detail: message?.detail,
+              message: errorPayload?.error || "Failed to reprocess images",
+              detail: errorPayload?.detail ?? errorText,
               level: "error",
               runId: payloadRequestId,
             });
+            const backendErr = new Error(errorText);
+            backendErr.name = "BackendError";
+            throw backendErr;
           }
 
           boundaryIndex = buffer.indexOf("\n\n");
@@ -6119,24 +6416,7 @@ export default function PersonProfilePage() {
       }
 
       if (!sawComplete && !hadError) {
-        setRefreshNotice(selectedStage.defaultSuccessMessage);
-        setRefreshProgress({
-          current: null,
-          total: null,
-          phase: "COMPLETED",
-          rawStage: "complete",
-          message: `${selectedStage.defaultSuccessMessage} Reloading photos...`,
-          detailMessage: `${selectedStage.defaultSuccessMessage} Reloading photos...`,
-          runId: requestId,
-          lastEventAt: null,
-        });
-        appendRefreshLog({
-          source: "page_refresh",
-          stage: "reprocess_complete",
-          message: selectedStage.defaultSuccessMessage,
-          level: "success",
-          runId: requestId,
-        });
+        throw new Error("Reprocess stream ended before completion.");
       }
 
       // Reload photos to show updated crops/counts
@@ -6179,6 +6459,8 @@ export default function PersonProfilePage() {
     personId,
     refreshLiveCounts,
     buildPersonRefreshRequestId,
+    showIdForApi,
+    activeShowName,
   ]);
 
   // Initial load
@@ -6612,6 +6894,31 @@ export default function PersonProfilePage() {
       label: breadcrumbShowName,
     });
   }, [breadcrumbShowName, showSlugForRouting]);
+
+  useEffect(() => {
+    if (!hasAccess || !person?.id) return;
+    const requestKey = `${person.id}:${personRouteShowContext ?? ""}`;
+    if (recentViewRequestKeyRef.current === requestKey) return;
+    recentViewRequestKeyRef.current = requestKey;
+
+    const run = async () => {
+      try {
+        await fetchWithAuth("/api/admin/recent-people", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            personId: person.id,
+            showId: personRouteShowContext ?? null,
+          }),
+        });
+      } catch (error) {
+        recentViewRequestKeyRef.current = null;
+        console.warn("[people-page] Failed to record recent person view", error);
+      }
+    };
+
+    void run();
+  }, [fetchWithAuth, hasAccess, person?.id, personRouteShowContext]);
 
   const breadcrumbPersonHref = (() => {
     const queryString = searchParams.toString();
@@ -7241,7 +7548,7 @@ export default function PersonProfilePage() {
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
                     </svg>
-                    {refreshingImages ? "Refreshing..." : "Refresh Images"}
+                    {refreshingImages ? "Getting..." : "Get Images"}
                   </button>
                     <button
                       onClick={() => void handleReprocessImages()}
@@ -7252,7 +7559,7 @@ export default function PersonProfilePage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
-                    {reprocessingImages ? "Processing..." : "Count & Crop"}
+                    {reprocessingImages ? "Refreshing..." : "Refresh Details"}
                   </button>
                   <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1">
                     <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-500">
@@ -7269,10 +7576,10 @@ export default function PersonProfilePage() {
                     <button
                       onClick={() => void handleReprocessImages("count")}
                       disabled={refreshingImages || reprocessingImages}
-                      title="Run count stage for existing images."
+                      title="Run count + crop stage for existing images."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
                     >
-                      Count
+                      Count & Crop
                     </button>
                     <button
                       onClick={() => void handleReprocessImages("crop")}
@@ -7353,7 +7660,12 @@ export default function PersonProfilePage() {
                 )}
               </div>
 
-              {(showIdParam || knownShowOptions.length > 0 || hasWwhlMatches || hasWwhlCredit || hasUnknownShowMatches) && (
+              {(showIdParam ||
+                knownShowOptions.length > 0 ||
+                hasWwhlMatches ||
+                hasWwhlCredit ||
+                hasEventMatches ||
+                hasUnknownShowMatches) && (
                 <div className="mb-4 flex flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
                     Shows
@@ -7400,6 +7712,19 @@ export default function PersonProfilePage() {
                         }`}
                       >
                           {WWHL_LABEL}
+                      </button>
+                    )}
+                    {hasEventMatches && (
+                      <button
+                        type="button"
+                        onClick={() => setGalleryShowFilter("events")}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          galleryShowFilter === "events"
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        Events
                       </button>
                     )}
                     {hasUnknownShowMatches && (

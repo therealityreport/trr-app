@@ -78,6 +78,9 @@ const nextConfig: NextConfig = {
           source: "/:showId/social/reddit",
           destination: "/admin/trr-shows/:showId?tab=social&social_view=reddit",
         },
+        // Community + window URLs under /:showId/social/reddit/:communitySlug/*
+        // are handled by App Router aliases in src/app/[showId]/social/reddit/*
+        // so route params stay available to the page layer.
         {
           source: "/:showId/social/reddit/:communitySlug/s:seasonNumber(\\d+)",
           destination: "/admin/social-media/reddit/:communitySlug?showSlug=:showId&season=:seasonNumber",

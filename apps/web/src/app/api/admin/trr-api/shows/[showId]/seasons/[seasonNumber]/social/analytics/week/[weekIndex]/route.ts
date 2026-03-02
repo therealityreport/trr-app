@@ -53,7 +53,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const seasonIdHint = seasonIdHintRaw ?? undefined;
     forwardedSearchParams.delete("season_id");
     if (!forwardedSearchParams.has("max_comments_per_post")) {
-      forwardedSearchParams.set("max_comments_per_post", "25");
+      forwardedSearchParams.set("max_comments_per_post", "0");
     }
     // post_limit and post_offset are passed through unchanged to support paginated requests from the admin UI.
 
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         seasonIdHint,
         fallbackError: "Failed to fetch week detail",
         retries: 0,
-        timeoutMs: 45_000,
+        timeoutMs: 40_000,
       },
     );
     return NextResponse.json(data);

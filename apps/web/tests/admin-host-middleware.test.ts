@@ -109,6 +109,18 @@ describe("admin host proxy", () => {
     );
   });
 
+  it("redirects /people root on public host to admin origin", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/people");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/people");
+  });
+
   it("redirects root show routes on public host to admin origin", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -226,6 +238,19 @@ describe("admin host proxy", () => {
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 
     const request = new NextRequest("http://admin.localhost:3000/people/mary-cosby");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("allows /people root on admin host", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/people");
     const response = proxy(request);
 
     expect(response.status).toBe(200);

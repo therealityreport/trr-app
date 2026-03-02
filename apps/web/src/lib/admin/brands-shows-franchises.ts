@@ -13,6 +13,23 @@ export interface BrandShowFranchiseRow {
   include_allpages_scan: boolean;
 }
 
+export interface GenericLinkRule {
+  id: string;
+  family_id: string | null;
+  link_group: string;
+  link_kind: string;
+  label: string | null;
+  url: string;
+  coverage_type: string;
+  coverage_value: string | null;
+  source: string;
+  auto_apply: boolean;
+  is_active: boolean;
+  priority: number;
+  metadata: Record<string, unknown>;
+  updated_at: string | null;
+}
+
 export interface FranchiseRule {
   key: string;
   name: string;
@@ -42,6 +59,9 @@ export interface FranchiseRuleApplyResult {
   links_upserted: number;
   skipped_explicit: number;
   skipped_already_fallback: number;
+  skipped_existing_manual?: number;
+  updated_derived_count?: number;
+  errors?: Array<Record<string, unknown>>;
   missing_only: boolean;
   dry_run: boolean;
   applied: Array<{

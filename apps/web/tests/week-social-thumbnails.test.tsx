@@ -63,8 +63,18 @@ const weekPayload = {
           thumbnail_url: null,
           media_urls: ["https://images.test/ig-preview.jpg"],
           post_format: "reel",
-          profile_tags: ["@tagged_user"],
-          collaborators: ["@collab_user"],
+          profile_tags: ["tagged_user"],
+          collaborators: ["collab_user"],
+          user: {
+            username: "bravotv",
+            avatar_url: "https://images.test/bravotv-avatar.jpg",
+          },
+          hosted_tagged_profile_pics: {
+            collab_user: "https://images.test/collab-user-avatar.jpg",
+          },
+          collaborators_detail: [
+            { username: "collab_user", profile_pic_url: "https://images.test/collab-user-avatar-fallback.jpg" },
+          ],
           hashtags: ["RHOSLC"],
           mentions: ["@bravotv"],
           duration_seconds: 14,
@@ -143,11 +153,10 @@ async function clickPostDetailCardByThumbnailAlt(altText: string) {
 async function waitForWeekDetailReady() {
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: "Week 1" })).toBeInTheDocument();
-    expect(screen.queryByText("Loading week detail...")).not.toBeInTheDocument();
     const gallery = screen.queryByTestId("week-post-gallery");
     const noPostsMessage = screen.queryByText(/No posts found for this (week|day)\./);
     expect(gallery || noPostsMessage).toBeTruthy();
-  });
+  }, { timeout: 10_000 });
 }
 
 const byeWeekPayload = {
@@ -260,9 +269,11 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByLabelText("Instagram platform")).toBeInTheDocument();
     expect(screen.getByLabelText("TikTok platform")).toBeInTheDocument();
     expect(screen.getByLabelText("YouTube platform")).toBeInTheDocument();
-    const youtubeHandleLink = screen.getByRole("link", { name: "@Bravo" });
+    const youtubeHandleLink = screen.getByRole("link", { name: "@bravo and @bravotv" });
     expect(youtubeHandleLink).toHaveAttribute("href", "https://youtube.com/watch?v=abc");
-    const backLink = screen.getByRole("link", { name: /Back to Season Social Analytics/i });
+    expect(screen.getByText("OFFICIAL ANALYTICS")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Back Home" })).toBeInTheDocument();
+    const backLink = screen.getByRole("link", { name: "Back" });
     expect(backLink.getAttribute("href")).not.toContain("source_scope=");
 
     const instagramThumb = screen.getByAltText("Instagram post thumbnail");
@@ -292,6 +303,97 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("14s")).toBeInTheDocument();
     expect(screen.getByText("@tagged_user")).toBeInTheDocument();
     expect(screen.getByText("@collab_user")).toBeInTheDocument();
+    expect(screen.getByTestId("post-header-handles-ig-1")).toHaveTextContent("@bravotv and @collab_user");
+    const instagramAvatars = screen.getByTestId("post-header-avatars-ig-1");
+    expect(within(instagramAvatars).getByAltText("@bravotv avatar")).toHaveAttribute(
+      "src",
+      "https://images.test/bravotv-avatar.jpg",
+    );
+    expect(within(instagramAvatars).getByAltText("@collab_user avatar")).toHaveAttribute(
+      "src",
+      "https://images.test/collab-user-avatar.jpg",
+    );
+    const instagramIcon = screen.getByLabelText("Instagram platform");
+    const instagramHandles = screen.getByTestId("post-header-handles-ig-1");
+    expect(Boolean(instagramIcon.compareDocumentPosition(instagramAvatars) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(instagramAvatars.compareDocumentPosition(instagramHandles) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("renders author-first header handles with bravotv dedupe and fallback avatars", async () => {
+    const headerPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const instagramPost = headerPayload.platforms.instagram.posts[0] as (typeof weekPayload.platforms.instagram.posts)[number] & {
+      user?: { username?: string; avatar_url?: string | null };
+      hosted_tagged_profile_pics?: Record<string, string>;
+      collaborators_detail?: Array<{ username?: string; profile_pic_url?: string | null }>;
+    };
+    instagramPost.author = "DirectTV";
+    instagramPost.collaborators = ["collab_user", "@BravoTV"];
+    instagramPost.mentions = [];
+    instagramPost.user = {
+      username: "directtv",
+      avatar_url: "https://images.test/directtv-avatar.jpg",
+    };
+    instagramPost.hosted_tagged_profile_pics = {};
+    instagramPost.collaborators_detail = [
+      { username: "collab_user", profile_pic_url: "https://images.test/collab-user-detail-avatar.jpg" },
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => headerPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    const handles = screen.getByTestId("post-header-handles-ig-1");
+    const avatars = screen.getByTestId("post-header-avatars-ig-1");
+    expect(handles).toHaveTextContent("@directtv, @collab_user, and @bravotv");
+    expect(within(avatars).getByAltText("@directtv avatar")).toHaveAttribute("src", "https://images.test/directtv-avatar.jpg");
+    expect(within(avatars).getByAltText("@collab_user avatar")).toHaveAttribute(
+      "src",
+      "https://images.test/collab-user-detail-avatar.jpg",
+    );
+    const bravotvFallback = within(avatars).getByLabelText("@bravotv avatar");
+    expect(bravotvFallback.tagName).toBe("SPAN");
+  });
+
+  it("normalizes tagged and collaborator chips to a single @ prefix", async () => {
+    const taggedPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const instagramPost = taggedPayload.platforms.instagram.posts[0];
+    instagramPost.profile_tags = ["@bravotv", "@@meredithmarks", "@lisabarlow14"];
+    instagramPost.collaborators = ["@@bravotv"];
+    instagramPost.mentions = [];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => taggedPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(screen.getByText("@meredithmarks")).toBeInTheDocument();
+    expect(screen.getByText("@lisabarlow14")).toBeInTheDocument();
+    expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
+    expect(screen.queryByText("@@bravotv")).not.toBeInTheDocument();
+    expect(screen.queryByText("@@meredithmarks")).not.toBeInTheDocument();
   });
 
   it("initially requests first 20 posts and appends second page on Load more", async () => {
@@ -382,11 +484,15 @@ describe("WeekDetailPage thumbnails", () => {
     render(<WeekDetailPage />);
 
     await waitForWeekDetailReady();
-    expect(fetchCalls).toHaveLength(1);
-    const firstQuery = new URLSearchParams(fetchCalls[0].split("?")[1] ?? "");
+    const detailCalls = fetchCalls.filter((url) => {
+      const query = new URLSearchParams(url.split("?")[1] ?? "");
+      return query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20";
+    });
+    expect(detailCalls).toHaveLength(1);
+    const firstQuery = new URLSearchParams(detailCalls[0].split("?")[1] ?? "");
     expect(firstQuery.get("post_limit")).toBe("20");
     expect(firstQuery.get("post_offset")).toBe("0");
-    expect(firstQuery.get("max_comments_per_post")).toBe("25");
+    expect(firstQuery.get("max_comments_per_post")).toBe("0");
 
     expect(screen.getByRole("button", { name: /load more posts/i })).toBeInTheDocument();
     expect(screen.getByText("Post 20")).toBeInTheDocument();
@@ -396,13 +502,326 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText("Post 21")).toBeInTheDocument();
     });
-    expect(fetchCalls).toHaveLength(2);
-    const secondQuery = new URLSearchParams(fetchCalls[1].split("?")[1] ?? "");
+    const detailCallsAfterLoadMore = fetchCalls.filter((url) => {
+      const query = new URLSearchParams(url.split("?")[1] ?? "");
+      return query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20";
+    });
+    expect(detailCallsAfterLoadMore).toHaveLength(2);
+    const secondQuery = new URLSearchParams(detailCallsAfterLoadMore[1].split("?")[1] ?? "");
     expect(secondQuery.get("post_offset")).toBe("20");
     expect(secondQuery.get("post_limit")).toBe("20");
     expect(screen.getByText("Post 30")).toBeInTheDocument();
     expect(screen.getByText("All loaded: 30/30 posts")).toBeInTheDocument();
     expect(screen.queryByText("Post 31")).not.toBeInTheDocument();
+  });
+
+  it("re-fetches first page from backend on sort changes without global page reload", async () => {
+    const likesPayload = {
+      ...weekPayload,
+      platforms: {
+        instagram: {
+          posts: [
+            {
+              source_id: "ig-like-1",
+              author: "bravotv",
+              text: "Likes leader",
+              url: "https://instagram.com/p/like-1",
+              posted_at: "2026-01-02T00:00:00.000Z",
+              engagement: 1000,
+              total_comments_available: 0,
+              comments: [],
+              likes: 999,
+              comments_count: 5,
+              views: 100,
+              sort_rank: 0,
+              thumbnail_url: "https://images.test/likes-1.jpg",
+            },
+            {
+              source_id: "ig-like-2",
+              author: "bravotv",
+              text: "Likes runner",
+              url: "https://instagram.com/p/like-2",
+              posted_at: "2026-01-01T00:00:00.000Z",
+              engagement: 900,
+              total_comments_available: 0,
+              comments: [],
+              likes: 700,
+              comments_count: 4,
+              views: 150,
+              sort_rank: 1,
+              thumbnail_url: "https://images.test/likes-2.jpg",
+            },
+          ],
+          totals: { posts: 2, total_comments: 9, total_engagement: 1900 },
+        },
+      },
+      totals: {
+        posts: 2,
+        total_comments: 9,
+        total_engagement: 1900,
+      },
+      pagination: {
+        limit: 20,
+        offset: 0,
+        returned: 2,
+        total: 2,
+        has_more: false,
+      },
+    };
+    const viewsPayload = {
+      ...likesPayload,
+      platforms: {
+        instagram: {
+          posts: [
+            {
+              source_id: "ig-view-1",
+              author: "bravotv",
+              text: "Views leader",
+              url: "https://instagram.com/p/view-1",
+              posted_at: "2026-01-03T00:00:00.000Z",
+              engagement: 3000,
+              total_comments_available: 0,
+              comments: [],
+              likes: 100,
+              comments_count: 3,
+              views: 5000,
+              sort_rank: 0,
+              thumbnail_url: "https://images.test/views-1.jpg",
+            },
+            {
+              source_id: "ig-view-2",
+              author: "bravotv",
+              text: "Views runner",
+              url: "https://instagram.com/p/view-2",
+              posted_at: "2026-01-02T00:00:00.000Z",
+              engagement: 2500,
+              total_comments_available: 0,
+              comments: [],
+              likes: 90,
+              comments_count: 2,
+              views: 4000,
+              sort_rank: 1,
+              thumbnail_url: "https://images.test/views-2.jpg",
+            },
+          ],
+          totals: { posts: 2, total_comments: 5, total_engagement: 5500 },
+        },
+      },
+      totals: {
+        posts: 2,
+        total_comments: 5,
+        total_engagement: 5500,
+      },
+      pagination: {
+        limit: 20,
+        offset: 0,
+        returned: 2,
+        total: 2,
+        has_more: false,
+      },
+    };
+
+    const weekCalls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        weekCalls.push(url);
+        const query = new URLSearchParams(url.split("?")[1] ?? "");
+        if (query.get("sort_field") === "views") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => viewsPayload,
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => likesPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(screen.getByText("Likes leader")).toBeInTheDocument();
+    const detailCalls = weekCalls.filter((url) => {
+      const query = new URLSearchParams(url.split("?")[1] ?? "");
+      return query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20";
+    });
+    expect(detailCalls).toHaveLength(1);
+    const firstQuery = new URLSearchParams(detailCalls[0].split("?")[1] ?? "");
+    expect(firstQuery.get("sort_field")).toBe("likes");
+    expect(firstQuery.get("sort_dir")).toBe("desc");
+    expect(firstQuery.get("post_offset")).toBe("0");
+
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "views" } });
+    expect(screen.queryByText("Loading week detail...")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText("Views leader")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Likes leader")).not.toBeInTheDocument();
+    const detailCallsAfterSort = weekCalls.filter((url) => {
+      const query = new URLSearchParams(url.split("?")[1] ?? "");
+      return query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20";
+    });
+    expect(detailCallsAfterSort).toHaveLength(2);
+    const secondQuery = new URLSearchParams(detailCallsAfterSort[1].split("?")[1] ?? "");
+    expect(secondQuery.get("sort_field")).toBe("views");
+    expect(secondQuery.get("sort_dir")).toBe("desc");
+    expect(secondQuery.get("post_offset")).toBe("0");
+    expect(secondQuery.get("post_limit")).toBe("20");
+  });
+
+  it("re-fetches first page for selected platform tabs and keeps all tab counts visible", async () => {
+    const facebookPosts = Array.from({ length: 7 }, (_, index) => ({
+      source_id: `fb-${index + 1}`,
+      author: "bravotv",
+      text: `Facebook ${index + 1}`,
+      url: `https://facebook.com/bravo/posts/${index + 1}`,
+      posted_at: `2026-01-01T00:${String(index).padStart(2, "0")}:00.000Z`,
+      engagement: 100 + index,
+      total_comments_available: 0,
+      comments: [],
+      likes: 20 + index,
+      comments_count: 3,
+      shares: 2,
+      views: 200 + index,
+      sort_rank: index,
+      thumbnail_url: `https://images.test/fb-${index + 1}.jpg`,
+    }));
+    const twitterPosts = Array.from({ length: 30 }, (_, index) => ({
+      source_id: `x-${index + 1}`,
+      author: "bravotv",
+      text: `Twitter ${index + 1}`,
+      url: `https://x.com/bravotv/status/${index + 1}`,
+      posted_at: `2026-01-02T00:${String(index).padStart(2, "0")}:00.000Z`,
+      engagement: 500 + index,
+      total_comments_available: 0,
+      comments: [],
+      likes: 200 + index,
+      retweets: 10,
+      replies_count: 4,
+      quotes: 1,
+      views: 5000 + index,
+      sort_rank: index,
+      thumbnail_url: `https://images.test/x-${index + 1}.jpg`,
+      hashtags: [],
+      mentions: [],
+    }));
+
+    const allSummaryPayload = {
+      ...weekPayload,
+      platforms: {
+        ...weekPayload.platforms,
+        facebook: {
+          posts: [facebookPosts[0]],
+          totals: { posts: 7, total_comments: 21, total_engagement: 700 },
+        },
+        twitter: {
+          posts: [twitterPosts[0]],
+          totals: { posts: 30, total_comments: 120, total_engagement: 9000 },
+        },
+        threads: {
+          posts: [],
+          totals: { posts: 20, total_comments: 80, total_engagement: 3000 },
+        },
+      },
+      totals: { posts: 105, total_comments: 300, total_engagement: 25000 },
+      pagination: { limit: 1, offset: 0, returned: 1, total: 105, has_more: true },
+    };
+
+    const facebookDetailsPayload = {
+      ...allSummaryPayload,
+      platforms: {
+        facebook: {
+          posts: facebookPosts,
+          totals: { posts: 7, total_comments: 21, total_engagement: 700 },
+        },
+      },
+      totals: { posts: 7, total_comments: 21, total_engagement: 700 },
+      pagination: { limit: 20, offset: 0, returned: 7, total: 7, has_more: false },
+    };
+
+    const twitterDetailsPayload = {
+      ...allSummaryPayload,
+      platforms: {
+        twitter: {
+          posts: twitterPosts.slice(0, 20),
+          totals: { posts: 30, total_comments: 120, total_engagement: 9000 },
+        },
+      },
+      totals: { posts: 30, total_comments: 120, total_engagement: 9000 },
+      pagination: { limit: 20, offset: 0, returned: 20, total: 30, has_more: true },
+    };
+
+    const weekCalls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes("/social/analytics/week/1")) {
+        throw new Error(`Unexpected URL: ${url}`);
+      }
+      weekCalls.push(url);
+      const query = new URLSearchParams(url.split("?")[1] ?? "");
+      const platforms = query.get("platforms");
+      if (platforms === "facebook") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => facebookDetailsPayload,
+        } as Response;
+      }
+      if (platforms === "twitter") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => twitterDetailsPayload,
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => allSummaryPayload,
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+    const replaceCallsBeforeTabSwitch = mockRouter.replace.mock.calls.length;
+
+    expect(screen.getByRole("button", { name: /Facebook\(7\)/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Twitter\/X\(30\)/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Threads\(20\)/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Facebook\(7\)/i }));
+    await waitFor(() => {
+      expect(screen.getByText("Facebook 7")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Loading week detail...")).not.toBeInTheDocument();
+    expect(mockRouter.replace.mock.calls.length).toBe(replaceCallsBeforeTabSwitch);
+    expect(screen.getAllByText(/Facebook \d+/).length).toBe(7);
+
+    fireEvent.click(screen.getByRole("button", { name: /Twitter\/X\(30\)/i }));
+    await waitFor(() => {
+      expect(screen.getByText("Twitter 20")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Loading week detail...")).not.toBeInTheDocument();
+    expect(mockRouter.replace.mock.calls.length).toBe(replaceCallsBeforeTabSwitch);
+    expect(screen.queryByText("Twitter 21")).not.toBeInTheDocument();
+
+    const detailQueries = weekCalls
+      .map((url) => new URLSearchParams(url.split("?")[1] ?? ""))
+      .filter((query) => query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20");
+    expect(detailQueries[0]?.get("platforms")).toBeNull();
+    expect(detailQueries[1]?.get("platforms")).toBe("facebook");
+    expect(detailQueries[2]?.get("platforms")).toBe("twitter");
+    expect(detailQueries[1]?.get("post_offset")).toBe("0");
+    expect(detailQueries[2]?.get("post_offset")).toBe("0");
   });
 
   it("renders hashtag and mention chips for youtube/facebook/threads with text fallback when token arrays are absent", async () => {
@@ -481,6 +900,114 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("@fb_handle")).toBeInTheDocument();
     expect(screen.getByText("#THTag")).toBeInTheDocument();
     expect(screen.getByText("@th_handle")).toBeInTheDocument();
+  });
+
+  it("uses combined Twitter reposts and replies+quotes comment coverage semantics", async () => {
+    const twitterCoveragePayload = {
+      ...weekPayload,
+      platforms: {
+        instagram: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        tiktok: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        youtube: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        twitter: {
+          posts: [
+            {
+              source_id: "x-coverage-1",
+              author: "BravoTV",
+              text: "Coverage test",
+              url: "https://x.com/BravoTV/status/1956000357282406729",
+              posted_at: "2026-01-01T00:00:00.000Z",
+              engagement: 100,
+              total_comments_available: 0,
+              comments: [],
+              likes: 10,
+              replies_count: 10,
+              retweets: 10,
+              quotes: 5,
+              views: 1000,
+              media_urls: ["https://images.test/x-coverage.jpg"],
+            },
+          ],
+          totals: { posts: 1, total_comments: 10, total_engagement: 100 },
+        },
+      },
+      totals: { posts: 1, total_comments: 10, total_engagement: 100 },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => twitterCoveragePayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitForWeekDetailReady();
+    expect(screen.getAllByText((_, el) => (el?.textContent ?? "").includes("15 Reposts")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText((_, el) => (el?.textContent ?? "").includes("0/15* Replies")).length).toBeGreaterThan(0);
+  });
+
+  it("renders exact integer formatting for Twitter engagement row metrics", async () => {
+    const payload = {
+      ...weekPayload,
+      platforms: {
+        ...weekPayload.platforms,
+        twitter: {
+          posts: [
+            {
+              source_id: "x-exact-1",
+              author: "BravoTV",
+              text: "Exact row metrics",
+              url: "https://x.com/BravoTV/status/1956000357282406729",
+              posted_at: "2026-01-01T00:00:00.000Z",
+              engagement: 0,
+              total_comments_available: 0,
+              comments: [],
+              likes: 7092,
+              replies_count: 338,
+              retweets: 1800,
+              quotes: 44,
+              views: 617900,
+              media_urls: ["https://images.test/x-exact.jpg"],
+            },
+          ],
+          totals: { posts: 1, total_comments: 338, total_engagement: 0 },
+        },
+      },
+      totals: { posts: 1, total_comments: 338, total_engagement: 0 },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitForWeekDetailReady();
+    expect(
+      screen.getAllByText((_, el) => (el?.textContent ?? "").includes("7,092 Likes")).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText((_, el) => (el?.textContent ?? "").includes("1,844 Reposts")).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText((_, el) => (el?.textContent ?? "").includes("617,900 Views")).length,
+    ).toBeGreaterThan(0);
   });
 
   it("opens post media lightbox and shows social stats in the metadata panel", async () => {
@@ -846,14 +1373,14 @@ describe("WeekDetailPage thumbnails", () => {
 
     await waitForWeekDetailReady();
 
-    expect(screen.getByText("38.1%")).toBeInTheDocument();
-    expect(screen.getByText("542/1.4K* Comments (Saved/Actual)")).toBeInTheDocument();
+    expect(screen.getByText("37.0%")).toBeInTheDocument();
+    expect(screen.getByText("542/1.5K* Comments (Saved/Actual)")).toBeInTheDocument();
     allRender.unmount();
     mockSearch.value = "source_scope=bravo&social_platform=twitter";
     render(<WeekDetailPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("36.5%")).toBeInTheDocument();
+      expect(screen.getByText("35.4%")).toBeInTheDocument();
     });
     expect(screen.getByText("506/1.4K* Comments (Saved/Actual)")).toBeInTheDocument();
   });
@@ -914,8 +1441,8 @@ describe("WeekDetailPage thumbnails", () => {
             posted_at: "2026-01-01T00:00:00.000Z",
             thumbnail_url: "https://images.test/ig-preview.jpg",
             post_format: "reel",
-            profile_tags: ["@tagged_user"],
-            collaborators: ["@collab_user"],
+            profile_tags: ["tagged_user"],
+            collaborators: ["collab_user"],
             hashtags: ["RHOSLC"],
             mentions: ["@bravotv"],
             duration_seconds: 14,
@@ -1378,7 +1905,7 @@ describe("WeekDetailPage thumbnails", () => {
     await clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Comments & Replies" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Replies|Comments & Replies/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Quotes" })).toBeInTheDocument();
     });
     expect(screen.getByText("Reply thread comment")).toBeInTheDocument();
@@ -1395,6 +1922,139 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.queryByText("Reply thread comment")).not.toBeInTheDocument();
     const drawerThumb = screen.getAllByAltText("Twitter/X post thumbnail").at(-1);
     expect(drawerThumb?.className).toContain("object-contain");
+  });
+
+  it("renders exact integer formatting for Twitter stats in post details", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => crossPlatformCoveragePayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/twitter/x-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "twitter",
+            source_id: "x-1",
+            author: "BravoTV",
+            text: "X post",
+            url: "https://x.com/BravoTV/status/1",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: "https://images.test/x-preview.jpg",
+            stats: {
+              likes: 7092,
+              replies_count: 10,
+              retweets: 1800,
+              quotes: 1800,
+              views: 617900,
+              engagement: 626807,
+            },
+            total_comments_in_db: 12,
+            total_quotes_in_db: 1800,
+            comments: [],
+            quotes: [
+              {
+                comment_id: "quote-1",
+                author: "quote-user",
+                text: "quote one",
+                likes: 1,
+                is_reply: false,
+                created_at: "2026-01-01T02:00:00.000Z",
+                user: {
+                  username: "quote-user",
+                  display_name: "Quote User",
+                },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitForWeekDetailReady();
+    await clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("7,092")).toBeInTheDocument();
+    expect(screen.getByText("617,900")).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => (el?.textContent ?? "").startsWith("All Comments (12/")),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Quotes" }));
+    await waitFor(() => {
+      expect(screen.getByText("All Quotes (1,800)")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Saved in Supabase: 1 of 1,800 platform-reported quotes.")).toBeInTheDocument();
+  });
+
+  it("prefers non-video detail thumbnail candidates for Twitter post drawer", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => crossPlatformCoveragePayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/twitter/x-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "twitter",
+            source_id: "x-1",
+            author: "BravoTV",
+            text: "Detail thumbnail fallback",
+            url: "https://x.com/BravoTV/status/1",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: "https://video.twimg.com/ext_tw_video/detail.mp4",
+            media_urls: [
+              "https://video.twimg.com/ext_tw_video/detail.mp4",
+              "https://images.test/twitter-detail-still.jpg",
+            ],
+            stats: {
+              likes: 1,
+              replies_count: 1,
+              retweets: 1,
+              quotes: 1,
+              views: 1,
+              engagement: 5,
+            },
+            total_comments_in_db: 0,
+            total_quotes_in_db: 0,
+            comments: [],
+            quotes: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitForWeekDetailReady();
+    await clickPostDetailCardByThumbnailAlt("Twitter/X post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+
+    const drawerThumb = screen.getAllByAltText("Twitter/X post thumbnail").at(-1);
+    expect(drawerThumb).toBeDefined();
+    expect(drawerThumb).toHaveAttribute("src", "https://images.test/twitter-detail-still.jpg");
+    expect(drawerThumb).not.toHaveAttribute("src", expect.stringContaining(".mp4"));
   });
 
   it("queues incremental week comment sync from Week view", async () => {
@@ -1558,6 +2218,209 @@ describe("WeekDetailPage thumbnails", () => {
     expect(body.date_start).toBe(weekPayload.week.start);
     expect(body.date_end).toBe(weekPayload.week.end);
     expect(body.platforms).toBeUndefined();
+  });
+
+  it("loads platform totals from the dedicated week summary endpoint", async () => {
+    const summaryPayload = {
+      week: weekPayload.week,
+      season: weekPayload.season,
+      source_scope: "bravo",
+      platforms: {
+        instagram: { total_posts: 5, totals: { posts: 5 } },
+        tiktok: { total_posts: 4, totals: { posts: 4 } },
+        youtube: { total_posts: 3, totals: { posts: 3 } },
+        twitter: { total_posts: 2, totals: { posts: 2 } },
+        facebook: { total_posts: 1, totals: { posts: 1 } },
+        threads: { total_posts: 0, totals: { posts: 0 } },
+      },
+      totals: { posts: 15, total_comments: 0, total_engagement: 0 },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return { ok: true, status: 200, json: async () => summaryPayload } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(true);
+  });
+
+  it("aggregates paginated jobs and normalizes sync log account handles", async () => {
+    const makeJobs = (count: number, startIndex: number) =>
+      Array.from({ length: count }, (_, index) => {
+        const idNum = startIndex + index;
+        return {
+          id: `job-${idNum}`,
+          run_id: "95d7c341-baa0-4589-a56a-a4a26ee15d65",
+          platform: "instagram",
+          status: "completed",
+          job_type: "comments",
+          items_found: 1,
+          created_at: `2026-01-01T00:${String(idNum % 60).padStart(2, "0")}:00.000Z`,
+          completed_at: `2026-01-01T00:${String(idNum % 60).padStart(2, "0")}:30.000Z`,
+          config: { stage: "comments", account: "@@bravotv" },
+          metadata: { stage_counters: { posts: 0, comments: 1 } },
+        } as SocialJob;
+      });
+
+    const firstPage = makeJobs(250, 0);
+    const secondPage = makeJobs(30, 250);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            week: weekPayload.week,
+            season: weekPayload.season,
+            source_scope: "bravo",
+            platforms: {},
+            totals: { posts: 0, total_comments: 0, total_engagement: 0 },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+      }
+      if (url.includes("/social/ingest") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            run_id: "95d7c341-baa0-4589-a56a-a4a26ee15d65",
+            queued_or_started_jobs: 280,
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/runs?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            runs: [
+              {
+                id: "95d7c341-baa0-4589-a56a-a4a26ee15d65",
+                status: "completed",
+                summary: {
+                  total_jobs: 280,
+                  completed_jobs: 280,
+                  failed_jobs: 0,
+                  active_jobs: 0,
+                  items_found_total: 280,
+                  stage_counts: {
+                    comments: { total: 280, completed: 280, failed: 0, active: 0 },
+                  },
+                },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/jobs?")) {
+        const parsed = new URL(url, "http://localhost");
+        const offset = Number(parsed.searchParams.get("offset") ?? "0");
+        if (offset === 0) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              jobs: firstPage,
+              pagination: { limit: 250, offset: 0, returned: 250, has_more: true },
+            }),
+          } as Response;
+        }
+        if (offset === 250) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              jobs: secondPage,
+              pagination: { limit: 250, offset: 250, returned: 30, has_more: false },
+            }),
+          } as Response;
+        }
+      }
+      if (url.includes("/social/analytics/comments-coverage?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_saved_comments: 280,
+            total_reported_comments: 280,
+            coverage_pct: 100,
+            up_to_date: true,
+            stale_posts_count: 0,
+            posts_scanned: 1,
+            by_platform: {},
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+    fireEvent.click(await screen.findByRole("button", { name: /Ingest/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sync Progress/)).toBeInTheDocument();
+      expect(screen.getByText(/Coverage 280\/280 \(100\.0%\) · Up-to-Date\./)).toBeInTheDocument();
+    });
+
+    const jobsCalls = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes("/social/jobs?"));
+    expect(jobsCalls.some((url) => url.includes("offset=0"))).toBe(true);
+    expect(jobsCalls.some((url) => url.includes("offset=250"))).toBe(true);
+    expect(screen.queryByText(/@@bravotv/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/@bravotv comments completed/i).length).toBeGreaterThan(0);
+  });
+
+  it("stops syncing with retry guidance when ingest kickoff times out", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            week: weekPayload.week,
+            season: weekPayload.season,
+            source_scope: "bravo",
+            platforms: {},
+            totals: { posts: 0, total_comments: 0, total_engagement: 0 },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+      }
+      if (url.includes("/social/ingest") && init?.method === "POST") {
+        throw new Error("Ingest kickoff request timed out");
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+    fireEvent.click(await screen.findByRole("button", { name: /Ingest/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Retry in a minute/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Sync Progress/i)).not.toBeInTheDocument();
+    });
   });
 
   it("queues a full sync run even when selected posts are already up to date", async () => {

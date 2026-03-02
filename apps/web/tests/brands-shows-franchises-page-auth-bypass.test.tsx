@@ -66,6 +66,20 @@ describe("brands shows-and-franchises page auth behavior", () => {
         if (url.includes("/api/admin/trr-api/brands/shows-franchises")) {
           return Promise.resolve(jsonResponse({ rows: [], count: 0, groups: [] }));
         }
+        if (url.includes("/api/admin/trr-api/brands/families?active_only=true")) {
+          return Promise.resolve(
+            jsonResponse({
+              rows: [{ id: "fam-1", family_key: "nbcu", display_name: "NBCU" }],
+              count: 1,
+            }),
+          );
+        }
+        if (url.includes("/api/admin/trr-api/brands/families/fam-1/links")) {
+          return Promise.resolve(jsonResponse({ rows: [], count: 0 }));
+        }
+        if (url.includes("/api/admin/trr-api/brands/logos")) {
+          return Promise.resolve(jsonResponse({ rows: [] }));
+        }
         return Promise.reject(new Error(`Unexpected URL: ${url}`));
       },
     );
@@ -75,7 +89,7 @@ describe("brands shows-and-franchises page auth behavior", () => {
     render(<BrandsShowsAndFranchisesPage />);
 
     await waitFor(() => {
-      expect(mocks.fetchAdminWithAuth).toHaveBeenCalledTimes(2);
+      expect(mocks.fetchAdminWithAuth.mock.calls.length).toBeGreaterThanOrEqual(5);
       expect(screen.getByRole("heading", { name: "Shows & Franchises" })).toBeInTheDocument();
     });
 

@@ -22,7 +22,18 @@ type Scope = "bravo" | "creator" | "community";
 type SyncStrategy = "incremental" | "full_refresh";
 type WeeklyMetric = "posts" | "comments" | "completeness";
 type BenchmarkCompareMode = "previous" | "trailing";
-export type SocialAnalyticsView = "bravo" | "sentiment" | "hashtags" | "advanced" | "reddit";
+export type SocialAnalyticsView =
+  | "bravo"
+  | "sentiment"
+  | "hashtags"
+  | "advanced"
+  | "reddit"
+  | "tiktok-overview"
+  | "tiktok-cast"
+  | "tiktok-hashtags"
+  | "tiktok-sounds"
+  | "tiktok-health"
+  | "tiktok-sentiment";
 type WeeklyPlatformRow = NonNullable<AnalyticsResponse["weekly_platform_posts"]>[number];
 
 type SocialJob = {
@@ -399,6 +410,7 @@ type MirrorCoverageResponse = {
 };
 
 type CommentRefreshPolicy = "balanced" | "missing_only";
+type IngestMode = "posts_only" | "posts_and_comments" | "comments_only" | "details_refresh";
 
 type WeekDetailPost = {
   source_id?: string;
@@ -507,12 +519,13 @@ const SOCIAL_DENSITY_QUERY_KEY = "social_density";
 const SOCIAL_ALERTS_QUERY_KEY = "social_alerts";
 const SOCIAL_TABLE_METRICS_QUERY_KEY = "social_metrics";
 const SOCIAL_METRIC_MODE_QUERY_KEY = "social_metric_mode";
-type SocialTableMetric = "posts" | "likes" | "comments" | "hashtags" | "mentions" | "tags";
+type SocialTableMetric = "posts" | "likes" | "comments" | "hashtags" | "mentions" | "tags" | "collaborators";
 type SocialMetricMode = "total" | "saved";
 type WeekDetailTokenTriplet = {
   hashtags: number;
   mentions: number;
   tags: number;
+  collaborators: number;
 };
 type WeekDetailTokenCounts = {
   total: WeekDetailTokenTriplet;
@@ -525,9 +538,11 @@ const SOCIAL_TABLE_METRIC_OPTIONS: Array<{ key: SocialTableMetric; label: string
   { key: "hashtags", label: "Hashtags" },
   { key: "mentions", label: "Mentions" },
   { key: "tags", label: "Tags" },
+  { key: "collaborators", label: "Collaborators" },
 ];
 const SOCIAL_TABLE_METRIC_KEYS = SOCIAL_TABLE_METRIC_OPTIONS.map((item) => item.key);
-const SOCIAL_TABLE_DETAIL_METRICS = new Set<SocialTableMetric>(["hashtags", "mentions", "tags"]);
+const SOCIAL_TABLE_DEFAULT_METRIC_KEYS = SOCIAL_TABLE_METRIC_KEYS.filter((key) => key !== "collaborators");
+const SOCIAL_TABLE_DETAIL_METRICS = new Set<SocialTableMetric>(["hashtags", "mentions", "tags", "collaborators"]);
 type SocialDensity = "compact" | "comfortable";
 const HASHTAG_REGEX = /(^|\s)#([a-z0-9_]+)/gi;
 const MENTION_REGEX = /(^|\s)@([a-z0-9_.]+)/gi;
@@ -899,6 +914,7 @@ const REQUEST_TIMEOUT_MS = {
 const ANALYTICS_POLL_REFRESH_MS = 30_000;
 const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 10_000;
 const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
+const WEEK_DETAIL_FETCH_CONCURRENCY = 2;
 
 export const POLL_FAILURES_BEFORE_RETRY_BANNER = 2;
 export const shouldSetPollingRetry = (consecutiveFailures: number): boolean =>
@@ -950,6 +966,18 @@ const isAbortError = (error: unknown): boolean => {
   if (error instanceof DOMException) return error.name === "AbortError";
   if (!error || typeof error !== "object") return false;
   return (error as { name?: string }).name === "AbortError";
+};
+
+const buildCanonicalRoute = (relativeUrl: string): string => {
+  try {
+    const url = new URL(relativeUrl, "http://localhost");
+    const sortedParams = new URLSearchParams(url.search);
+    sortedParams.sort();
+    const query = sortedParams.toString();
+    return `${url.pathname}${query ? `?${query}` : ""}`;
+  } catch {
+    return relativeUrl;
+  }
 };
 
 const parseDateOrNull = (value: unknown): Date | null => {
@@ -1032,6 +1060,15 @@ const fetchAdminWithTimeout = async (
 ): Promise<Response> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const upstreamSignal = init.signal;
+  const abortFromUpstream = () => controller.abort();
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) {
+      controller.abort();
+    } else {
+      upstreamSignal.addEventListener("abort", abortFromUpstream, { once: true });
+    }
+  }
   try {
     return await fetchAdminWithAuth(
       input,
@@ -1047,6 +1084,9 @@ const fetchAdminWithTimeout = async (
     }
     throw error;
   } finally {
+    if (upstreamSignal) {
+      upstreamSignal.removeEventListener("abort", abortFromUpstream);
+    }
     clearTimeout(timeoutId);
   }
 };
@@ -1276,7 +1316,7 @@ const extractMentions = (text: string | null | undefined): string[] => {
 const normalizeSocialTableMetrics = (
   value: string | null | undefined,
 ): SocialTableMetric[] => {
-  if (!value) return SOCIAL_TABLE_METRIC_KEYS;
+  if (!value) return SOCIAL_TABLE_DEFAULT_METRIC_KEYS;
   if (value.trim().toLowerCase() === "none") return [];
   const provided = new Set(
     String(value)
@@ -1285,7 +1325,7 @@ const normalizeSocialTableMetrics = (
       .filter((item): item is SocialTableMetric => SOCIAL_TABLE_METRIC_KEYS.includes(item as SocialTableMetric)),
   );
   const ordered = SOCIAL_TABLE_METRIC_KEYS.filter((key) => provided.has(key));
-  return ordered.length > 0 ? ordered : SOCIAL_TABLE_METRIC_KEYS;
+  return ordered.length > 0 ? ordered : SOCIAL_TABLE_DEFAULT_METRIC_KEYS;
 };
 
 const serializeSocialTableMetrics = (metrics: SocialTableMetric[]): string | null => {
@@ -1294,7 +1334,10 @@ const serializeSocialTableMetrics = (metrics: SocialTableMetric[]): string | nul
   if (ordered.length === 0) {
     return "none";
   }
-  if (ordered.length === SOCIAL_TABLE_METRIC_KEYS.length) {
+  const isDefaultSelection =
+    ordered.length === SOCIAL_TABLE_DEFAULT_METRIC_KEYS.length &&
+    ordered.every((metric, index) => metric === SOCIAL_TABLE_DEFAULT_METRIC_KEYS[index]);
+  if (isDefaultSelection) {
     return null;
   }
   return ordered.join(",");
@@ -1307,6 +1350,7 @@ const createEmptyWeekDetailTokenTriplet = (): WeekDetailTokenTriplet => ({
   hashtags: 0,
   mentions: 0,
   tags: 0,
+  collaborators: 0,
 });
 
 const createEmptyHashtagUsageByPlatform = (): HashtagUsageByPlatform => ({
@@ -1344,10 +1388,12 @@ const deriveWeekDetailTokenCounts = (detail: WeekDetailResponse): WeekDetailToke
   const hashtags = new Set<string>();
   const mentions = new Set<string>();
   const tags = new Set<string>();
+  const collabs = new Set<string>();
   for (const platform of PLATFORM_ORDER) {
     const platformHashtags = new Set<string>();
     const platformMentions = new Set<string>();
     const platformTags = new Set<string>();
+    const platformCollabs = new Set<string>();
     const posts = detail.platforms?.[platform]?.posts ?? [];
     for (const post of posts) {
       // Always merge stored hashtags with caption-derived ones
@@ -1382,8 +1428,8 @@ const deriveWeekDetailTokenCounts = (detail: WeekDetailResponse): WeekDetailToke
       for (const collaborator of post.collaborators ?? []) {
         const normalized = normalizeMention(collaborator);
         if (normalized) {
-          tags.add(normalized);
-          platformTags.add(normalized);
+          collabs.add(normalized);
+          platformCollabs.add(normalized);
         }
       }
     }
@@ -1391,12 +1437,14 @@ const deriveWeekDetailTokenCounts = (detail: WeekDetailResponse): WeekDetailToke
       hashtags: platformHashtags.size,
       mentions: platformMentions.size,
       tags: platformTags.size,
+      collaborators: platformCollabs.size,
     };
   }
   counts.total = {
     hashtags: hashtags.size,
     mentions: mentions.size,
     tags: tags.size,
+    collaborators: collabs.size,
   };
   return counts;
 };
@@ -1498,8 +1546,18 @@ const formatJobActivitySummary = (activity: Record<string, unknown> | null): str
   return segments.join(" · ");
 };
 
+const isVideoLikeThumbnailUrl = (url: string): boolean => {
+  const normalized = url.toLowerCase();
+  if (SOCIAL_MEDIA_VIDEO_EXT_RE.test(normalized)) return true;
+  try {
+    return new URL(normalized).hostname.toLowerCase().includes("video.twimg.com");
+  } catch {
+    return false;
+  }
+};
+
 const detectSocialMediaType = (url: string): SocialMediaType =>
-  SOCIAL_MEDIA_VIDEO_EXT_RE.test(url.toLowerCase()) ? "video" : "image";
+  isVideoLikeThumbnailUrl(url) ? "video" : "image";
 
 const isLikelyMirroredSocialUrl = (url: string | null | undefined): boolean => {
   if (typeof url !== "string" || url.trim().length === 0) return false;
@@ -1736,7 +1794,7 @@ export default function SeasonSocialAnalyticsSection({
     week: number | null;
     day: string | null;
     platform: "all" | Platform;
-    ingestMode: "posts_only" | "posts_and_comments" | "comments_only";
+    ingestMode: IngestMode;
     rowMissingOnly: boolean;
     dateStart?: string;
     dateEnd?: string;
@@ -1750,6 +1808,9 @@ export default function SeasonSocialAnalyticsSection({
   const ingestPanelRef = useRef<HTMLElement | null>(null);
   const runSeasonIngestButtonRef = useRef<HTMLButtonElement | null>(null);
   const weekDetailTokenRequestsRef = useRef<Set<string>>(new Set());
+  const weekDetailAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const weekDetailTokenCountsByWeekRef = useRef<Record<number, WeekDetailTokenCounts>>({});
+  const weekDetailTokenCountsLoadingWeeksRef = useRef<Set<number>>(new Set());
   const episodeWeekRedirectRef = useRef<string | null>(null);
   const componentMountedRef = useRef(true);
   const activeAnalyticsViewRef = useRef<SocialAnalyticsView>(analyticsView);
@@ -1848,6 +1909,14 @@ export default function SeasonSocialAnalyticsSection({
     };
   }, []);
 
+  useEffect(() => {
+    weekDetailTokenCountsByWeekRef.current = weekDetailTokenCountsByWeek;
+  }, [weekDetailTokenCountsByWeek]);
+
+  useEffect(() => {
+    weekDetailTokenCountsLoadingWeeksRef.current = weekDetailTokenCountsLoadingWeeks;
+  }, [weekDetailTokenCountsLoadingWeeks]);
+
   const isActiveView = useCallback(
     (expectedView: SocialAnalyticsView) =>
       componentMountedRef.current && activeAnalyticsViewRef.current === expectedView,
@@ -1923,7 +1992,7 @@ export default function SeasonSocialAnalyticsSection({
       setSocialPreferenceInUrl(SOCIAL_TABLE_METRICS_QUERY_KEY, "none");
       return;
     }
-    setSocialPreferenceInUrl(SOCIAL_TABLE_METRICS_QUERY_KEY, null);
+    setSocialPreferenceInUrl(SOCIAL_TABLE_METRICS_QUERY_KEY, SOCIAL_TABLE_METRIC_KEYS.join(","));
   }, [selectedTableMetrics.length, setSocialPreferenceInUrl]);
 
   const setSocialMetricMode = useCallback(
@@ -2021,6 +2090,8 @@ export default function SeasonSocialAnalyticsSection({
       platform: platformForWeek,
       query: nextQuery,
     });
+    const currentHref = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+    if (buildCanonicalRoute(nextHref) === buildCanonicalRoute(currentHref)) return;
     const redirectKey = `${pathname}|${nextHref}|${seasonEpisodeNumberFromPath}`;
     if (episodeWeekRedirectRef.current === redirectKey) return;
     episodeWeekRedirectRef.current = redirectKey;
@@ -2376,6 +2447,58 @@ export default function SeasonSocialAnalyticsSection({
     showId,
   ]);
 
+  const buildTargetOverrides = useCallback(
+    (platforms?: Platform[] | null): {
+      accounts_override: string[];
+      hashtags_override: string[];
+      keywords_override: string[];
+    } => {
+      const platformSet = platforms && platforms.length > 0 ? new Set(platforms) : null;
+      const accountsOverride: string[] = [];
+      const hashtagsOverride: string[] = [];
+      const keywordsOverride: string[] = [];
+      const seenAccounts = new Set<string>();
+      const seenHashtags = new Set<string>();
+      const seenKeywords = new Set<string>();
+
+      for (const target of targets) {
+        const platform = String(target.platform || "").trim().toLowerCase();
+        if (!PLATFORM_ORDER.includes(platform as Platform)) continue;
+        if (target.is_active === false) continue;
+        if (platformSet && !platformSet.has(platform as Platform)) continue;
+
+        for (const rawAccount of target.accounts ?? []) {
+          const normalized = String(rawAccount ?? "").trim();
+          const key = normalized.toLowerCase();
+          if (!normalized || seenAccounts.has(key)) continue;
+          seenAccounts.add(key);
+          accountsOverride.push(normalized);
+        }
+        for (const rawHashtag of target.hashtags ?? []) {
+          const normalized = String(rawHashtag ?? "").trim().replace(/^#+/, "");
+          const key = normalized.toLowerCase();
+          if (!normalized || seenHashtags.has(key)) continue;
+          seenHashtags.add(key);
+          hashtagsOverride.push(normalized);
+        }
+        for (const rawKeyword of target.keywords ?? []) {
+          const normalized = String(rawKeyword ?? "").trim();
+          const key = normalized.toLowerCase();
+          if (!normalized || seenKeywords.has(key)) continue;
+          seenKeywords.add(key);
+          keywordsOverride.push(normalized);
+        }
+      }
+
+      return {
+        accounts_override: accountsOverride,
+        hashtags_override: hashtagsOverride,
+        keywords_override: keywordsOverride,
+      };
+    },
+    [targets],
+  );
+
   const fetchJobs = useCallback(async (
     runId?: string | null,
     options?: { preserveLastGoodIfEmpty?: boolean; limit?: number },
@@ -2547,6 +2670,7 @@ export default function SeasonSocialAnalyticsSection({
       weekIndex: number;
       platform: "all" | Platform;
       sourceScope: Scope;
+      signal?: AbortSignal;
     }) => {
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
@@ -2559,7 +2683,7 @@ export default function SeasonSocialAnalyticsSection({
       }
       const response = await fetchAdminWithTimeout(
         `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/week/${scopeWindow.weekIndex}?${params.toString()}`,
-        { headers, cache: "no-store" },
+        { headers, cache: "no-store", signal: scopeWindow.signal },
         REQUEST_TIMEOUT_MS.weekDetail,
         "Week detail request timed out",
       );
@@ -3157,14 +3281,19 @@ export default function SeasonSocialAnalyticsSection({
 
         const headers = await getAuthHeaders();
         if (cancelled) return;
+        const nextIngestMode: IngestMode =
+          session.ingestMode === "posts_and_comments" ? "details_refresh" : session.ingestMode;
         const payload: {
           source_scope: Scope;
           platforms?: Platform[];
+          accounts_override?: string[];
+          hashtags_override?: string[];
+          keywords_override?: string[];
           max_posts_per_target: number;
           max_comments_per_post: number;
           max_replies_per_post: number;
           fetch_replies: boolean;
-          ingest_mode: "posts_only" | "posts_and_comments" | "comments_only";
+          ingest_mode: IngestMode;
           sync_strategy: "incremental";
           comment_refresh_policy?: CommentRefreshPolicy;
           comment_anchor_source_ids?: Partial<Record<Platform, string[]>>;
@@ -3173,11 +3302,11 @@ export default function SeasonSocialAnalyticsSection({
           date_end?: string;
         } = {
           source_scope: scope,
-          max_posts_per_target: 100000,
+          max_posts_per_target: 0,
           max_comments_per_post: 100000,
           max_replies_per_post: 100000,
           fetch_replies: true,
-          ingest_mode: session.ingestMode,
+          ingest_mode: nextIngestMode,
           sync_strategy: "incremental",
           allow_inline_dev_fallback: true,
         };
@@ -3189,6 +3318,10 @@ export default function SeasonSocialAnalyticsSection({
         if (nextPlatforms && nextPlatforms.length > 0) {
           payload.platforms = nextPlatforms;
         }
+        const targetOverrides = buildTargetOverrides(nextPlatforms);
+        payload.accounts_override = targetOverrides.accounts_override;
+        payload.hashtags_override = targetOverrides.hashtags_override;
+        payload.keywords_override = targetOverrides.keywords_override;
         if (session.rowMissingOnly && session.ingestMode === "comments_only" && session.week !== null && !session.day) {
           const missingTargets = await buildMissingCommentTargets({
             weekIndex: session.week,
@@ -3240,6 +3373,7 @@ export default function SeasonSocialAnalyticsSection({
         }
         if (cancelled) return;
         session.pass = nextPass;
+        session.ingestMode = nextIngestMode;
         setActiveRunId(runId);
         setSelectedRunId(runId);
         setJobs([]);
@@ -3266,6 +3400,7 @@ export default function SeasonSocialAnalyticsSection({
     activeRun,
     activeRunId,
     fetchAnalytics,
+    buildTargetOverrides,
     buildMissingCommentTargets,
     fetchCommentsCoverage,
     fetchMirrorCoverage,
@@ -3463,7 +3598,7 @@ export default function SeasonSocialAnalyticsSection({
     week?: number;
     day?: string;
     platform?: "all" | Platform;
-    ingestMode?: "posts_only" | "posts_and_comments" | "comments_only";
+    ingestMode?: IngestMode;
     rowMissingOnly?: boolean;
   }) => {
     setRunningIngest(true);
@@ -3494,11 +3629,14 @@ export default function SeasonSocialAnalyticsSection({
       const payload: {
         source_scope: Scope;
         platforms?: Platform[];
+        accounts_override?: string[];
+        hashtags_override?: string[];
+        keywords_override?: string[];
         max_posts_per_target: number;
         max_comments_per_post: number;
         max_replies_per_post: number;
         fetch_replies: boolean;
-        ingest_mode: "posts_only" | "posts_and_comments" | "comments_only";
+        ingest_mode: IngestMode;
         sync_strategy: SyncStrategy;
         comment_refresh_policy?: CommentRefreshPolicy;
         comment_anchor_source_ids?: Partial<Record<Platform, string[]>>;
@@ -3507,7 +3645,7 @@ export default function SeasonSocialAnalyticsSection({
         date_end?: string;
       } = {
         source_scope: scope,
-        max_posts_per_target: 100000,
+        max_posts_per_target: 0,
         max_comments_per_post: 100000,
         max_replies_per_post: 100000,
         fetch_replies: true,
@@ -3574,6 +3712,10 @@ export default function SeasonSocialAnalyticsSection({
             ? (PLATFORM_LABELS[rowMissingTargets.platforms[0]] ?? rowMissingTargets.platforms[0])
             : `${rowMissingTargets.platforms.length} targeted platforms`;
       }
+      const targetOverrides = buildTargetOverrides(payload.platforms ?? null);
+      payload.accounts_override = targetOverrides.accounts_override;
+      payload.hashtags_override = targetOverrides.hashtags_override;
+      payload.keywords_override = targetOverrides.keywords_override;
       setIngestMessage(`Starting ${label} · ${platformLabel} · ${modeLabel}...`);
 
       const response = await fetchAdminWithAuth(
@@ -3605,7 +3747,10 @@ export default function SeasonSocialAnalyticsSection({
         throw new Error(result.message ?? "Ingest started without a run id");
       }
 
-      const autoContinueEnabled = effectiveIngestMode === "posts_and_comments" || effectiveIngestMode === "comments_only";
+      const autoContinueEnabled =
+        effectiveIngestMode === "posts_and_comments" ||
+        effectiveIngestMode === "comments_only" ||
+        effectiveIngestMode === "details_refresh";
       autoSyncGenerationRef.current += 1;
       autoSyncSessionRef.current = {
         week: effectiveWeek,
@@ -3661,6 +3806,7 @@ export default function SeasonSocialAnalyticsSection({
     }
   }, [
     analytics,
+    buildTargetOverrides,
     fetchJobs,
     fetchRunSummaries,
     fetchRuns,
@@ -3746,33 +3892,50 @@ export default function SeasonSocialAnalyticsSection({
     const requiresTokenMetrics = needsWeekDetailTokenMetrics && (analyticsView === "bravo" || analyticsView === "advanced");
     if (!requiresTokenMetrics && !needsWeekDetailHashtagAnalytics) return;
     if (weeklyPlatformRows.length === 0) return;
+    const abortControllers = weekDetailAbortControllersRef.current;
 
+    const currentTokenCounts = weekDetailTokenCountsByWeekRef.current;
+    const currentLoadingWeeks = weekDetailTokenCountsLoadingWeeksRef.current;
     const missingWeeks = weeklyPlatformRows
       .map((row) => row.week_index)
       .filter(
         (weekIndex) =>
-          !(weekIndex in weekDetailTokenCountsByWeek) && !weekDetailTokenCountsLoadingWeeks.has(weekIndex),
+          !(weekIndex in currentTokenCounts) && !currentLoadingWeeks.has(weekIndex),
       );
+    if (missingWeeks.length === 0) return;
 
-    for (const weekIndex of missingWeeks) {
-      const requestKey = `${seasonId}:${scope}:${platformFilter}:${weekIndex}`;
-      if (weekDetailTokenRequestsRef.current.has(requestKey)) {
-        continue;
-      }
-      weekDetailTokenRequestsRef.current.add(requestKey);
-      setWeekDetailTokenCountsLoadingWeeks((current) => {
-        const next = new Set(current);
-        next.add(weekIndex);
-        return next;
-      });
+    let cancelled = false;
+    let nextWeekIndex = 0;
 
-      void (async () => {
+    const runWorker = async () => {
+      while (nextWeekIndex < missingWeeks.length) {
+        const currentIndex = nextWeekIndex;
+        nextWeekIndex += 1;
+        const weekIndex = missingWeeks[currentIndex];
+        if (typeof weekIndex !== "number") continue;
+
+        const requestKey = `${seasonId}:${scope}:${platformFilter}:${weekIndex}`;
+        if (weekDetailTokenRequestsRef.current.has(requestKey)) {
+          continue;
+        }
+        weekDetailTokenRequestsRef.current.add(requestKey);
+        setWeekDetailTokenCountsLoadingWeeks((current) => {
+          const next = new Set(current);
+          next.add(weekIndex);
+          return next;
+        });
+
+        const controller = new AbortController();
+        abortControllers.set(requestKey, controller);
+
         try {
           const detail = await fetchWeekDetail({
             weekIndex,
             platform: platformFilter,
             sourceScope: scope,
+            signal: controller.signal,
           });
+          if (cancelled) return;
           if (requiresTokenMetrics) {
             const counts = deriveWeekDetailTokenCounts(detail);
             setWeekDetailTokenCountsByWeek((current) => ({
@@ -3787,7 +3950,10 @@ export default function SeasonSocialAnalyticsSection({
               [weekIndex]: hashtagUsage,
             }));
           }
-        } catch {
+        } catch (error) {
+          if (cancelled || isAbortError(error)) {
+            return;
+          }
           if (requiresTokenMetrics) {
             setWeekDetailTokenCountsByWeek((current) => ({
               ...current,
@@ -3801,6 +3967,7 @@ export default function SeasonSocialAnalyticsSection({
             }));
           }
         } finally {
+          abortControllers.delete(requestKey);
           weekDetailTokenRequestsRef.current.delete(requestKey);
           setWeekDetailTokenCountsLoadingWeeks((current) => {
             const next = new Set(current);
@@ -3808,8 +3975,20 @@ export default function SeasonSocialAnalyticsSection({
             return next;
           });
         }
-      })();
-    }
+      }
+    };
+
+    void Promise.all(
+      Array.from({ length: Math.min(WEEK_DETAIL_FETCH_CONCURRENCY, missingWeeks.length) }, () => runWorker()),
+    );
+
+    return () => {
+      cancelled = true;
+      for (const controller of abortControllers.values()) {
+        controller.abort();
+      }
+      abortControllers.clear();
+    };
   }, [
     analyticsView,
     fetchWeekDetail,
@@ -3818,9 +3997,6 @@ export default function SeasonSocialAnalyticsSection({
     platformFilter,
     scope,
     seasonId,
-    setWeekDetailHashtagUsageByWeek,
-    weekDetailTokenCountsByWeek,
-    weekDetailTokenCountsLoadingWeeks,
     weeklyPlatformRows,
   ]);
 
@@ -5719,6 +5895,9 @@ export default function SeasonSocialAnalyticsSection({
                       if (metric === "mentions") {
                         return formatMetricCountLabel(tokenCounts.mentions, "mention");
                       }
+                      if (metric === "collaborators") {
+                        return formatMetricCountLabel(tokenCounts.collaborators, "collaborator");
+                      }
                       return formatMetricCountLabel(tokenCounts.tags, "tag");
                     });
                     const totalMetricTokens = buildMetricTokens({
@@ -5781,6 +5960,9 @@ export default function SeasonSocialAnalyticsSection({
                         }
                         if (metric === "mentions") {
                           return "-- mentions";
+                        }
+                        if (metric === "collaborators") {
+                          return "-- collaborators";
                         }
                         return "-- tags";
                       });
@@ -5995,14 +6177,20 @@ export default function SeasonSocialAnalyticsSection({
                               className="shrink-0"
                               aria-label="Open leaderboard media lightbox"
                             >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={item.thumbnail_url}
-                                alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} leaderboard thumbnail`}
-                                loading="lazy"
-                                referrerPolicy="no-referrer"
-                                className="h-12 w-12 rounded-md border border-zinc-200 object-cover"
-                              />
+                              {isVideoLikeThumbnailUrl(item.thumbnail_url) ? (
+                                <div className="flex h-12 w-12 items-center justify-center rounded-md border border-zinc-200 bg-zinc-900 text-[10px] font-semibold uppercase tracking-wide text-zinc-100">
+                                  Video
+                                </div>
+                              ) : (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={item.thumbnail_url}
+                                  alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} leaderboard thumbnail`}
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                  className="h-12 w-12 rounded-md border border-zinc-200 object-cover"
+                                />
+                              )}
                             </button>
                           )}
                           <div className="min-w-0 flex-1">
@@ -6054,14 +6242,20 @@ export default function SeasonSocialAnalyticsSection({
                             className="shrink-0"
                             aria-label="Open discussion media lightbox"
                           >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={item.thumbnail_url}
-                              alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} discussion thumbnail`}
-                              loading="lazy"
-                              referrerPolicy="no-referrer"
-                              className="h-12 w-12 rounded-md border border-zinc-200 object-cover"
-                            />
+                            {isVideoLikeThumbnailUrl(item.thumbnail_url) ? (
+                              <div className="flex h-12 w-12 items-center justify-center rounded-md border border-zinc-200 bg-zinc-900 text-[10px] font-semibold uppercase tracking-wide text-zinc-100">
+                                Video
+                              </div>
+                            ) : (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={item.thumbnail_url}
+                                alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} discussion thumbnail`}
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="h-12 w-12 rounded-md border border-zinc-200 object-cover"
+                              />
+                            )}
                           </button>
                         )}
                         <div className="min-w-0 flex-1">

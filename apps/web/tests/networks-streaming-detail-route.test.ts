@@ -85,6 +85,10 @@ describe("networks-streaming detail route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.display_name).toBe("Bravo");
+    expect(payload.family).toBeNull();
+    expect(payload.family_suggestions).toEqual([]);
+    expect(payload.shared_links).toEqual([]);
+    expect(payload.wikipedia_show_urls).toEqual([]);
     expect(getNetworkStreamingDetailMock).toHaveBeenCalledWith({
       entity_type: "network",
       entity_key: undefined,

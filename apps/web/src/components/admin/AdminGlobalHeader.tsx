@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import AdminSideMenu from "@/components/admin/AdminSideMenu";
+import AdminGlobalSearch from "@/components/admin/AdminGlobalSearch";
 import { HealthIndicator } from "@/components/admin/SystemHealthModal";
 import SystemHealthModal from "@/components/admin/SystemHealthModal";
 import { ADMIN_NAV_ITEMS } from "@/lib/admin/admin-navigation";
@@ -69,7 +70,13 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
             />
           </Link>
 
-          <HealthIndicator onClick={() => setHealthOpen(true)} />
+          <div className="absolute right-4 flex items-center gap-2">
+            <AdminGlobalSearch />
+            <HealthIndicator
+              onClick={() => setHealthOpen(true)}
+              className="group relative flex items-center gap-1.5 rounded-full px-2.5 py-1.5 transition hover:bg-zinc-100"
+            />
+          </div>
         </div>
 
         {children ? <div className={bodyClassName}>{children}</div> : null}

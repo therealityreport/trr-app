@@ -36,4 +36,26 @@ describe("formatPersonRefreshSummary", () => {
     const text = formatPersonRefreshSummary(summary);
     expect(text).toContain("Text overlay already up to date (no pending images).");
   });
+
+  it("appends failed parts and retry notes when present", () => {
+    const summary = {
+      auto_counts_attempted: 20,
+      auto_counts_succeeded: 18,
+      auto_counts_failed: 2,
+      failed_parts: [
+        { part: "people_count_face_crops", failed: 2 },
+        { part: "resizing", failed: 1 },
+      ],
+      retry_attempts: {
+        auto_count: 2,
+        word_id: 1,
+        centering_cropping: 1,
+        resizing: 2,
+      },
+    };
+
+    const text = formatPersonRefreshSummary(summary);
+    expect(text).toContain("Failed parts: people count face crops (2), resizing (1).");
+    expect(text).toContain("Partial retries ran for 2 stages.");
+  });
 });

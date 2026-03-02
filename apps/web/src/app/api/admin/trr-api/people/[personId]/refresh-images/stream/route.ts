@@ -1,11 +1,17 @@
 import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import {
+  isRetryableSseNetworkError,
+  normalizeSseProxyError,
+  runBackendHealthPreflight,
+} from "@/lib/server/sse-proxy";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 800;
+export const maxDuration = 3600;
 const DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS = 20_000;
 const DEFAULT_CONNECT_HEARTBEAT_INTERVAL_MS = 2_000;
+const DEFAULT_CONNECT_PREFLIGHT_TIMEOUT_MS = 3_000;
 const BACKEND_FETCH_ATTEMPTS = 5;
 const BACKEND_FETCH_RETRY_BASE_DELAY_MS = 200;
 const BACKEND_FETCH_RETRY_MAX_DELAY_MS = 2_000;
@@ -36,6 +42,7 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 const getProxyConfig = (): {
   connectAttemptTimeoutMs: number;
   connectHeartbeatIntervalMs: number;
+  connectPreflightTimeoutMs: number;
 } => ({
   connectAttemptTimeoutMs: readPositiveIntEnv(
     "TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS",
@@ -44,6 +51,10 @@ const getProxyConfig = (): {
   connectHeartbeatIntervalMs: readPositiveIntEnv(
     "TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS",
     DEFAULT_CONNECT_HEARTBEAT_INTERVAL_MS
+  ),
+  connectPreflightTimeoutMs: readPositiveIntEnv(
+    "TRR_STREAM_CONNECT_PREFLIGHT_TIMEOUT_MS",
+    DEFAULT_CONNECT_PREFLIGHT_TIMEOUT_MS
   ),
 });
 
@@ -59,15 +70,8 @@ const buildErrorResponse = (
   });
 
 const isRetryableNetworkError = (error: unknown): boolean => {
+  if (isRetryableSseNetworkError(error)) return true;
   if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  if (
-    message.includes("fetch failed") ||
-    message.includes("signal is aborted without reason") ||
-    message.includes("network")
-  ) {
-    return true;
-  }
   const cause = (error as Error & { cause?: { code?: string } }).cause;
   const code = String(cause?.code ?? "");
   return RETRYABLE_FETCH_ERROR_CODES.has(code);
@@ -137,6 +141,16 @@ const getErrorCode = (error: unknown): string => {
   return "UNKNOWN";
 };
 
+const isSocketTerminationError = (error: unknown): boolean => {
+  const code = getErrorCode(error);
+  if (code === "UND_ERR_SOCKET" || code === "ECONNRESET" || code === "EPIPE") {
+    return true;
+  }
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("terminated") || message.includes("socket");
+};
+
 const getBackendHost = (backendUrl: string): string => {
   try {
     const url = new URL(backendUrl);
@@ -147,6 +161,10 @@ const getBackendHost = (backendUrl: string): string => {
 };
 
 const getErrorDetail = (error: unknown): string => {
+  const normalized = normalizeSseProxyError(error);
+  if (normalized.code === "TIMEOUT" || normalized.code === "ABORTED") {
+    return normalized.detail;
+  }
   if (error instanceof Error) {
     if (error.name === "AbortError") {
       return "Timed out waiting for backend refresh stream response.";
@@ -248,6 +266,45 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             ...payload,
           });
         };
+
+        emitProxyProgress({
+          message: "Checking backend health before opening stream...",
+          current: 0,
+          total: BACKEND_FETCH_ATTEMPTS,
+          attempt: 0,
+          max_attempts: BACKEND_FETCH_ATTEMPTS,
+          checkpoint: "backend_preflight_start",
+          backend_host: backendHost,
+        });
+        const preflight = await runBackendHealthPreflight(backendUrl, {
+          timeoutMs: proxyConfig.connectPreflightTimeoutMs,
+          requestId,
+        });
+        if (!preflight.ok) {
+          emitEvent("error", {
+            stage: "proxy_connecting",
+            error: "Backend preflight failed",
+            detail: `${preflight.detail} (health_url=${preflight.healthUrl}; backend_host=${backendHost})`,
+            error_code: preflight.errorCode,
+            backend_host: backendHost,
+            checkpoint: "backend_preflight_failed",
+            stream_state: "failed",
+            is_terminal: true,
+            attempts_used: 0,
+            max_attempts: BACKEND_FETCH_ATTEMPTS,
+          });
+          controller.close();
+          return;
+        }
+        emitProxyProgress({
+          message: "Backend health check passed. Connecting to backend refresh stream...",
+          current: 0,
+          total: BACKEND_FETCH_ATTEMPTS,
+          attempt: 0,
+          max_attempts: BACKEND_FETCH_ATTEMPTS,
+          checkpoint: "backend_preflight_ok",
+          backend_host: backendHost,
+        });
 
         let backendResponse: Response | null = null;
         let lastError: unknown = null;
@@ -473,16 +530,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             });
           }
         } catch (error) {
-          emitEvent("error", {
-            stage: "proxy_stream",
-            error: "Backend stream disconnected",
-            detail: getErrorDetail(error),
-            error_code: getErrorCode(error),
-            checkpoint: "backend_stream_error",
-            stream_state: "failed",
-            is_terminal: true,
-            backend_host: backendHost,
-          });
+          if (sawBackendComplete && isSocketTerminationError(error)) {
+            // Undici may raise a socket termination while closing after a complete event.
+          } else {
+            emitEvent("error", {
+              stage: "proxy_stream",
+              error: "Backend stream disconnected",
+              detail: getErrorDetail(error),
+              error_code: getErrorCode(error),
+              checkpoint: "backend_stream_error",
+              stream_state: "failed",
+              is_terminal: true,
+              backend_host: backendHost,
+            });
+          }
         } finally {
           try {
             await reader.cancel();

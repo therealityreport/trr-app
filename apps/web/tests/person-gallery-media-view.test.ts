@@ -108,12 +108,47 @@ describe("person gallery media view helpers", () => {
       currentFilter: "wwhl",
       showContextEnabled: true,
       hasWwhlMatches: false,
+      hasEventMatches: false,
       hasOtherShowMatches: true,
       hasUnknownShowMatches: false,
       hasSelectedOtherShowMatches: true,
       hasNonThisShowMatches: true,
+      canSelectWwhlWithoutMatches: false,
+      canSelectOtherShowWithoutMatches: false,
     });
     expect(fallback).toBe("this-show");
+  });
+
+  it("keeps WWHL selected with zero matches when credit-eligible", () => {
+    const fallback = resolveGalleryShowFilterFallback({
+      currentFilter: "wwhl",
+      showContextEnabled: true,
+      hasWwhlMatches: false,
+      hasEventMatches: false,
+      hasOtherShowMatches: true,
+      hasUnknownShowMatches: false,
+      hasSelectedOtherShowMatches: true,
+      hasNonThisShowMatches: true,
+      canSelectWwhlWithoutMatches: true,
+      canSelectOtherShowWithoutMatches: false,
+    });
+    expect(fallback).toBe("wwhl");
+  });
+
+  it("keeps selected other-show filter with zero matches when credit-eligible", () => {
+    const fallback = resolveGalleryShowFilterFallback({
+      currentFilter: "other-shows",
+      showContextEnabled: true,
+      hasWwhlMatches: true,
+      hasEventMatches: false,
+      hasOtherShowMatches: false,
+      hasUnknownShowMatches: false,
+      hasSelectedOtherShowMatches: false,
+      hasNonThisShowMatches: true,
+      canSelectWwhlWithoutMatches: false,
+      canSelectOtherShowWithoutMatches: true,
+    });
+    expect(fallback).toBe("other-shows");
   });
 
   it("does not classify movie captions as episode captions", () => {
@@ -279,6 +314,118 @@ describe("person gallery media view helpers", () => {
     expect(buckets.matchesWwhl).toBe(true);
   });
 
+  it("routes IMDb event rows to events bucket", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Alan Cumming at The 77th Primetime Emmy Awards",
+        metadata: {
+          imdb_image_type: "event",
+          content_type: "EVENT",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "T",
+      allKnownShowNameMatches: ["the traitors"],
+      allKnownShowAcronymMatches: new Set(["T"]),
+      allKnownShowIds: ["show-traitors"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesEvents).toBe(true);
+    expect(buckets.matchesUnknownShows).toBe(false);
+  });
+
+  it("routes unresolved IMDb episode rows to WWHL via imdb_fallback_show_name", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Alan Cumming and Milo Ventimiglia in Milo Ventimiglia & Alan Cumming (2023)",
+        title_names: ["Milo Ventimiglia & Alan Cumming"],
+        metadata: {
+          show_context_source: "imdb_episode_unresolved",
+          imdb_fallback_show_name: "Watch What Happens Live with Andy Cohen",
+          episode_title: "Milo Ventimiglia & Alan Cumming",
+          imdb_title_type: "TVEpisode",
+          imdb_image_type: "still_frame",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "T",
+      allKnownShowNameMatches: ["the traitors", "watch what happens live with andy cohen"],
+      allKnownShowAcronymMatches: new Set(["T", "WWHL"]),
+      allKnownShowIds: ["show-traitors", "show-wwhl"],
+      otherShowNameMatches: ["watch what happens live with andy cohen"],
+      otherShowAcronymMatches: new Set(["WWHL"]),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(false);
+    expect(buckets.matchesWwhl).toBe(true);
+    expect(buckets.matchesUnknownShows).toBe(false);
+  });
+
+  it("routes trusted IMDb fallback rows to WWHL when show_name is blank", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Alan Cumming and Milo Ventimiglia in Milo Ventimiglia & Alan Cumming (2023)",
+        title_names: ["Milo Ventimiglia & Alan Cumming"],
+        metadata: {
+          show_context_source: "imdb_title_fallback",
+          show_name: null,
+          imdb_fallback_show_name: "Watch What Happens Live with Andy Cohen",
+          episode_title: "Milo Ventimiglia & Alan Cumming",
+          imdb_title_type: "TVEpisode",
+          imdb_image_type: "still_frame",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "T",
+      allKnownShowNameMatches: ["the traitors", "watch what happens live with andy cohen"],
+      allKnownShowAcronymMatches: new Set(["T", "WWHL"]),
+      allKnownShowIds: ["show-traitors", "show-wwhl"],
+      otherShowNameMatches: ["watch what happens live with andy cohen"],
+      otherShowAcronymMatches: new Set(["WWHL"]),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(false);
+    expect(buckets.matchesWwhl).toBe(true);
+    expect(buckets.matchesUnknownShows).toBe(false);
+  });
+
+  it("routes IMDb rows to WWHL when fallback show name is present even without episode evidence", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Alan Cumming on a talk show",
+        title_names: ["Alan Cumming"],
+        metadata: {
+          show_context_source: "request_context",
+          imdb_fallback_show_name: "Watch What Happens Live with Andy Cohen",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "T",
+      allKnownShowNameMatches: ["the traitors", "watch what happens live with andy cohen"],
+      allKnownShowAcronymMatches: new Set(["T", "WWHL"]),
+      allKnownShowIds: ["show-traitors", "show-wwhl"],
+      otherShowNameMatches: ["watch what happens live with andy cohen"],
+      otherShowAcronymMatches: new Set(["WWHL"]),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(false);
+    expect(buckets.matchesWwhl).toBe(true);
+  });
+
   it("keeps trusted IMDb episode metadata in this-show bucket when show text is absent", () => {
     const buckets = computePersonPhotoShowBuckets({
       photo: makePhoto({
@@ -333,5 +480,151 @@ describe("person gallery media view helpers", () => {
 
     expect(buckets.matchesThisShow).toBe(true);
     expect(buckets.matchesUnknownShows).toBe(false);
+  });
+
+  it("does not trust request-context inferred IMDb metadata without corroborating show name", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Alan Cumming in The Power of the Seer (2025)",
+        title_names: ["The Power of the Seer"],
+        metadata: {
+          episode_title: "The Power of the Seer",
+          show_id: "show-traitors",
+          show_name: "Different Show",
+          show_context_source: "request_context_inferred",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "T",
+      allKnownShowNameMatches: ["the traitors", "watch what happens live with andy cohen"],
+      allKnownShowAcronymMatches: new Set(["T", "WWHL"]),
+      allKnownShowIds: ["show-traitors", "show-wwhl"],
+      otherShowNameMatches: ["watch what happens live with andy cohen"],
+      otherShowAcronymMatches: new Set(["WWHL"]),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(false);
+    expect(buckets.matchesUnknownShows).toBe(true);
+  });
+
+  it("uses imdb_fallback_show_name for episode-evidenced IMDb rows in this-show bucket", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Revenge Is a Dish Best Served Cold (2025)",
+        title_names: ["Revenge Is a Dish Best Served Cold"],
+        metadata: {
+          show_context_source: "imdb_episode_unresolved",
+          imdb_fallback_show_name: "The Traitors",
+          episode_title: "Revenge Is a Dish Best Served Cold",
+          season_number: 3,
+          episode_number: 2,
+          imdb_image_type: "still_frame",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors (US)",
+      activeShowAcronym: "TT",
+      allKnownShowNameMatches: ["the traitors", "watch what happens live with andy cohen"],
+      allKnownShowAcronymMatches: new Set(["TT", "WWHL"]),
+      allKnownShowIds: ["show-traitors", "show-wwhl"],
+      otherShowNameMatches: ["watch what happens live with andy cohen"],
+      otherShowAcronymMatches: new Set(["WWHL"]),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(true);
+    expect(buckets.matchesUnknownShows).toBe(false);
+  });
+
+  it("matches selected other-show pill by normalized show name variants", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Episode Still (2025)",
+        metadata: {
+          show_context_source: "imdb_episode_unresolved",
+          imdb_fallback_show_name: "The Traitors",
+          episode_title: "Episode Still",
+          imdb_title_type: "TVEPISODE",
+        },
+      }),
+      showIdForApi: "show-rhobh",
+      activeShowName: "The Real Housewives of Beverly Hills",
+      activeShowAcronym: "RHOBH",
+      allKnownShowNameMatches: ["the real housewives of beverly hills", "the traitors (us)"],
+      allKnownShowAcronymMatches: new Set(["RHOBH", "TTUS"]),
+      allKnownShowIds: ["show-rhobh"],
+      otherShowNameMatches: ["the traitors (us)"],
+      otherShowAcronymMatches: new Set(["TTUS"]),
+      selectedOtherShow: {
+        showId: null,
+        showName: "The Traitors (US)",
+        acronym: "TTUS",
+      },
+    });
+
+    expect(buckets.matchesSelectedOtherShow).toBe(true);
+    expect(buckets.matchesOtherShows).toBe(true);
+  });
+
+  it("keeps request_context IMDb metadata untrusted without corroborating text/acronym evidence", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Episode 2 (2025)",
+        metadata: {
+          show_context_source: "request_context",
+          show_name: "The Traitors",
+          episode_title: "Revenge Is a Dish Best Served Cold",
+          season_number: 3,
+          episode_number: 2,
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "TT",
+      allKnownShowNameMatches: ["the traitors"],
+      allKnownShowAcronymMatches: new Set(["TT"]),
+      allKnownShowIds: ["show-traitors"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(false);
+    expect(buckets.matchesUnknownShows).toBe(true);
+  });
+
+  it("treats request_context_rejected IMDb metadata as explicitly untrusted", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Alan Cumming in The Power of the Seer (2025)",
+        metadata: {
+          show_context_source: "request_context_rejected",
+          show_name: "The Traitors",
+          imdb_fallback_show_name: "The Traitors",
+          episode_title: "The Power of the Seer",
+          season_number: 3,
+          episode_number: 2,
+          imdb_title_type: "TVEpisode",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "TT",
+      allKnownShowNameMatches: ["the traitors"],
+      allKnownShowAcronymMatches: new Set(["TT"]),
+      allKnownShowIds: ["show-traitors"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(false);
   });
 });
