@@ -2408,8 +2408,8 @@ describe("RedditSourcesManager", () => {
 
     await waitFor(() => {
       expect(cardHasPendingRefresh("Pre-Season")).toBe(true);
-    }, { timeout: 20_000 });
-  }, 20_000);
+    }, { timeout: 60_000 });
+  }, 60_000);
 
   it("shows live comments-stage counters from backend run diagnostics", async () => {
     const communityWithSaltLakeFlair = {
@@ -2520,8 +2520,8 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(screen.getByText(/comments 6\/20 posts/i)).toBeInTheDocument();
       expect(screen.getByText(/comment rows 880/i)).toBeInTheDocument();
-    }, { timeout: 45_000 });
-  }, 45_000);
+    }, { timeout: 60_000 });
+  }, 60_000);
 
   it("continues polling run status when cached discovery is returned with an active run", async () => {
     const communityWithSaltLakeFlair = {

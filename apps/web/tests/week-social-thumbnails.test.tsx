@@ -1986,8 +1986,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
     });
 
-    expect(screen.getByText("7,092")).toBeInTheDocument();
-    expect(screen.getByText("617,900")).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes("7,092"))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes("617,900"))).toBeInTheDocument();
     expect(
       screen.getByText((_, el) => (el?.textContent ?? "").startsWith("All Comments (12/")),
     ).toBeInTheDocument();

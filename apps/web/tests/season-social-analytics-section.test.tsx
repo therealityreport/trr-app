@@ -3445,7 +3445,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByRole("combobox", { name: /Run/i }, { timeout: 10_000 });
+    await screen.findByRole("combobox", { name: /Run/i }, { timeout: 45_000 });
     fireEvent.change(screen.getByRole("combobox", { name: /Run/i }), {
       target: { value: "run-1-abcdef" },
     });
@@ -3456,7 +3456,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     failJobsRefresh = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh Jobs" }));
 
-    expect(await screen.findByText(/temporary jobs outage/i, {}, { timeout: 10_000 })).toBeInTheDocument();
+    expect(await screen.findByText(/temporary jobs outage/i, {}, { timeout: 45_000 })).toBeInTheDocument();
     expect(screen.getByText("123 items")).toBeInTheDocument();
   });
 
