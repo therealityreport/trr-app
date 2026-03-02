@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Route } from "next";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
@@ -326,7 +326,7 @@ async function fetchAdminJsonWithTimeout<T>({
   }
 }
 
-export default function AdminRedditWindowPostsPage() {
+function AdminRedditWindowPostsPageContent() {
   const { user, checking, hasAccess } = useAdminGuard();
   const params = useParams<{
     showId?: string;
@@ -943,5 +943,13 @@ export default function AdminRedditWindowPostsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function AdminRedditWindowPostsPage() {
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-sm text-zinc-500">Loading...</div>}>
+      <AdminRedditWindowPostsPageContent />
+    </Suspense>
   );
 }

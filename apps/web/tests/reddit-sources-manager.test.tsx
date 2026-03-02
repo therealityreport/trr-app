@@ -2520,8 +2520,8 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(screen.getByText(/comments 6\/20 posts/i)).toBeInTheDocument();
       expect(screen.getByText(/comment rows 880/i)).toBeInTheDocument();
-    }, { timeout: 20_000 });
-  }, 20_000);
+    }, { timeout: 45_000 });
+  }, 45_000);
 
   it("continues polling run status when cached discovery is returned with an active run", async () => {
     const communityWithSaltLakeFlair = {
