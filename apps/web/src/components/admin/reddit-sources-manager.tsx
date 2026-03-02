@@ -3893,7 +3893,7 @@ export default function RedditSourcesManager({
           });
     if (!canonicalHref) return;
     if (canonicalHref === currentHref) return;
-    router.replace(canonicalHref);
+    router.replace(canonicalHref as Parameters<typeof router.replace>[0]);
   }, [
     activeSeasonSelection,
     isDedicatedCommunityView,
