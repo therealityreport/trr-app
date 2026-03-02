@@ -59,6 +59,61 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
   - `code-reviewer`
 - default_skill_chain_exception_reason: ``
 
+## Latest Update (2026-03-02) — Reddit window refresh polling timeout hardening
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-qa`
+  - `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- delegation_map:
+  - role: `Design Context Owner`
+    scope: `admin reddit window refresh run polling`
+    deliverable: `defined failure-path expectation for queued/running run status polling and timeout fallback`
+    verification_command: `pnpm -C apps/web run test tests/reddit-sources-manager.test.tsx -t "shows queued spinner and queue depth while backend refresh is pending|shows live comments-stage counters from backend run diagnostics|continues polling run status when cached discovery is returned with an active run"`
+    status: `completed`
+  - role: `UI Implementer`
+    scope: `period card progress text and status updates`
+    deliverable: `ensured queued state remains visible while backend refresh is running and restored queued wording for UI/regex compatibility`
+    verification_command: `pnpm -C apps/web run test tests/reddit-sources-manager.test.tsx -t "shows queued spinner and queue depth while backend refresh is pending"`
+    status: `completed`
+  - role: `API Integration Owner`
+    scope: `client fetch-with-timeout helper`
+    deliverable: `added Promise.race timeout fallback so unresolved fetch mocks and slow run-status calls fail as timed out and unblock polling`
+    verification_command: `pnpm -C apps/web run test tests/reddit-sources-manager.test.tsx -t "shows live comments-stage counters from backend run diagnostics|continues polling run status when cached discovery is returned with an active run"`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `redissources-manager regression coverage`
+    deliverable: `re-ran targeted failing RedditSourcesManager refresh tests`
+    verification_command: `pnpm -C apps/web run test tests/reddit-sources-manager.test.tsx -t "shows queued spinner and queue depth while backend refresh is pending|shows live comments-stage counters from backend run diagnostics|continues polling run status when cached discovery is returned with an active run"`
+    status: `completed`
+- risk_class: `low` (status UX timing and timeout handling update in admin surface)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `fetchWithTimeout now races fetchAdminWithAuth with an explicit timeout promise so non-compliant/unresponsive mocks/timeouts reject instead of hanging forever.`
+  - `queued refresh status messaging now includes "refresh queued in backend" text used by UI acceptance checks and live status expectations.`
+  - `ongoing refresh test scenarios now correctly show pending indicator and diagnostics text for queued/running states.`
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run tests/reddit-sources-manager.test.tsx -t "shows queued spinner and queue depth while backend refresh is pending|shows live comments-stage counters from backend run diagnostics|continues polling run status when cached discovery is returned with an active run"` (pass; `3 tests`)
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: ``
+
 ## Latest Update (2026-03-01) — Reddit window resolver timeout/single-flight stabilization
 
 - primary_skill: `senior-frontend`
