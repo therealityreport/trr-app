@@ -49,27 +49,31 @@ export async function GET(request: NextRequest) {
     const backendUrl = getBackendApiUrl("/admin/brands/families/by-entity");
     const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     if (backendUrl && serviceRoleKey) {
-      const upstream = new URL(backendUrl);
-      upstream.searchParams.set("entity_type", detail.entity_type);
-      upstream.searchParams.set("entity_key", detail.entity_key);
-      const response = await fetch(upstream.toString(), {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${serviceRoleKey}`,
-        },
-        cache: "no-store",
-      });
-      if (response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as {
-          family?: unknown;
-          family_suggestions?: unknown[];
-          shared_links?: unknown[];
-          wikipedia_show_urls?: unknown[];
-        };
-        familyContext.family = payload.family ?? null;
-        familyContext.family_suggestions = Array.isArray(payload.family_suggestions) ? payload.family_suggestions : [];
-        familyContext.shared_links = Array.isArray(payload.shared_links) ? payload.shared_links : [];
-        familyContext.wikipedia_show_urls = Array.isArray(payload.wikipedia_show_urls) ? payload.wikipedia_show_urls : [];
+      try {
+        const upstream = new URL(backendUrl);
+        upstream.searchParams.set("entity_type", detail.entity_type);
+        upstream.searchParams.set("entity_key", detail.entity_key);
+        const response = await fetch(upstream.toString(), {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          cache: "no-store",
+        });
+        if (response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as {
+            family?: unknown;
+            family_suggestions?: unknown[];
+            shared_links?: unknown[];
+            wikipedia_show_urls?: unknown[];
+          };
+          familyContext.family = payload.family ?? null;
+          familyContext.family_suggestions = Array.isArray(payload.family_suggestions) ? payload.family_suggestions : [];
+          familyContext.shared_links = Array.isArray(payload.shared_links) ? payload.shared_links : [];
+          familyContext.wikipedia_show_urls = Array.isArray(payload.wikipedia_show_urls) ? payload.wikipedia_show_urls : [];
+        }
+      } catch (error) {
+        console.error("[api] Failed to load streaming detail family enrichment", error);
       }
     }
 
