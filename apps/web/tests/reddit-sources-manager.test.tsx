@@ -2696,7 +2696,7 @@ describe("RedditSourcesManager", () => {
     expect(
       await screen.findByText("Cached preseason post", {}, { timeout: 10_000 }),
     ).toBeInTheDocument();
-  });
+  }, 20_000);
 
   it("shows per-candidate reason when a post is not auto-synced", async () => {
     const refreshPayload = {

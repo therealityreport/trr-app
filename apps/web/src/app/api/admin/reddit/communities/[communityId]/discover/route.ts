@@ -65,6 +65,11 @@ type RedditRunPayload = {
   run_id: string;
   status: "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
   error?: string | null;
+  totals?: {
+    fetched_rows: number;
+    matched_rows: number;
+    tracked_flair_rows: number;
+  } | null;
   queue?: {
     running_total?: number;
     queued_total?: number;
