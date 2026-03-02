@@ -3858,9 +3858,10 @@ export default function TrrShowDetailPage() {
               const rows = parseProgressNumber(eventPayload.rows);
               const heartbeat = eventPayload.heartbeat === true;
               const messageRaw = typeof eventPayload.message === "string" ? eventPayload.message : null;
-              let progressMessage = messageRaw || `${stageLabel}: in progress`;
+              const fallbackStageLabel = stageLabel ?? "Working";
+              let progressMessage = messageRaw || `${fallbackStageLabel}: in progress`;
               if (!messageRaw) {
-                progressMessage = stageLabel;
+                progressMessage = fallbackStageLabel;
               }
               if (rows !== null && rows >= 0) {
                 progressMessage = `${progressMessage} (${rows} rows)`;
