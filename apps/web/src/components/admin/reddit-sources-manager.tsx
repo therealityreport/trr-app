@@ -4838,7 +4838,7 @@ export default function RedditSourcesManager({
             })
           : null;
       if (communityWindowHref) {
-        router.push(communityWindowHref);
+        router.push(communityWindowHref as Parameters<typeof router.push>[0]);
         return;
       }
       setError("Unable to resolve season context for this window yet. Wait for season data to finish loading and try again.");
