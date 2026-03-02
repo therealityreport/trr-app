@@ -1,6 +1,7 @@
 import ShowAdminPage from "@/app/admin/trr-shows/[showId]/page";
 import SeasonAdminPage from "@/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page";
 import { redirect } from "next/navigation";
+import type { Route } from "next";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,7 @@ export default async function RootShowSeasonAliasPage({
     rest,
   });
   if (redditWindowRedirectHref) {
-    redirect(redditWindowRedirectHref);
+    redirect(redditWindowRedirectHref as Route);
   }
 
   return <ShowAdminPage />;

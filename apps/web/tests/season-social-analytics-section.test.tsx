@@ -3445,7 +3445,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Run");
+    await screen.findByRole("combobox", { name: /Run/i }, { timeout: 10_000 });
     fireEvent.change(screen.getByRole("combobox", { name: /Run/i }), {
       target: { value: "run-1-abcdef" },
     });
