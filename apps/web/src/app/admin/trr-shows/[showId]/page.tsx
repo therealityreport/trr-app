@@ -3891,10 +3891,11 @@ export default function TrrShowDetailPage() {
           throw new Error("validation_error|Discovery stream ended without a completion payload.");
         }
 
-        const resultCandidate = completePayload.result;
+        const payloadRecord = completePayload as Record<string, unknown>;
+        const resultCandidate = payloadRecord.result;
         const data = (resultCandidate && typeof resultCandidate === "object"
           ? (resultCandidate as Record<string, unknown>)
-          : completePayload) as {
+          : payloadRecord) as {
           discovered?: number;
           duration_ms?: number;
           status_counts?: {
