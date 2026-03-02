@@ -159,6 +159,8 @@ export default function PeopleHomePage() {
           `/api/admin/trr-api/people/home?limit=${DEFAULT_LIMIT}`,
           {
             cache: "no-store",
+          },
+          {
             preferredUser: user,
           },
         );
@@ -227,6 +229,8 @@ export default function PeopleHomePage() {
           `/api/admin/trr-api/search?q=${encodeURIComponent(trimmed)}&limit=8`,
           {
             cache: "no-store",
+          },
+          {
             preferredUser: user,
           },
         );

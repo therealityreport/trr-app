@@ -58,6 +58,53 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
   - `code-reviewer`
 - default_skill_chain_exception_reason: ``
 
+## Latest Update (2026-03-02) — Fix people page auth option typing and flaky pending-refresh assertion
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.apply_patch`
+  - fallback: `functions.exec_command`
+- delegation_map:
+  - role: `API Integration Owner`
+    scope: `admin people page auth helper usage`
+    deliverable: `moved preferredUser from RequestInit into FetchAdminWithAuth options`
+    verification_command: `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec tsc -p tsconfig.typecheck.json --noEmit`
+    status: `completed`
+  - role: `QA Owner`
+    scope: `reddit pending refresh regression`
+    deliverable: `extended waitFor timeout to 20_000ms in flaky cached-discovery path`
+    verification_command: `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run -c vitest.config.ts tests/reddit-sources-manager.test.tsx -t "continues polling run status when cached discovery is returned with an active run"`
+    status: `completed`
+- risk_class: `low`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/people/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-sources-manager.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `fetchAdminWithAuth` calls in `people/page.tsx` now pass `preferredUser` via the `options` argument, matching the helper signature and removing `RequestInit` type violations.
+  - The pending-refresh assertion now waits up to `20_000`ms to reduce intermittent CI failures in the full test suite.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec tsc -p tsconfig.typecheck.json --noEmit`
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run -c vitest.config.ts tests/reddit-sources-manager.test.tsx`
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: ``
+
 ## Latest Update (2026-03-02) — Complete SSE payload record normalization in show refresh parse path
 
 - primary_skill: `senior-frontend`

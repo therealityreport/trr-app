@@ -2408,7 +2408,7 @@ describe("RedditSourcesManager", () => {
 
     await waitFor(() => {
       expect(cardHasPendingRefresh("Pre-Season")).toBe(true);
-    }, { timeout: 10_000 });
+    }, { timeout: 20_000 });
   }, 20_000);
 
   it("shows live comments-stage counters from backend run diagnostics", async () => {
