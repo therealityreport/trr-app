@@ -728,7 +728,7 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
       typeof run.active_jobs === "number" && run.active_jobs > 0
         ? ` · ${fmtNum(run.active_jobs)} active jobs`
         : "";
-    return `${label}: queued in backend (run ${run.run_id.slice(0, 8)})${queuePositionText}${activeJobsText}${queuedHintText}${listingText}${searchText}`;
+    return `${label}: refresh queued in backend (run ${run.run_id.slice(0, 8)})${queuePositionText}${activeJobsText}${queuedHintText}${listingText}${searchText}`;
   }
   if (run.status === "running") {
     const runningHintText =
@@ -1907,14 +1907,9 @@ export default function RedditSourcesManager({
     ): Promise<Response> => {
       const { timeoutMs, ...requestInit } = init ?? {};
       const controller = new AbortController();
+      const timeoutMsValue = timeoutMs ?? REQUEST_TIMEOUT_MS.default;
       let timedOut = false;
-      const timeout = setTimeout(
-        () => {
-          timedOut = true;
-          controller.abort();
-        },
-        timeoutMs ?? REQUEST_TIMEOUT_MS.default,
-      );
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const upstreamSignal = requestInit.signal;
       const abortFromUpstream = () => {
         controller.abort();
@@ -1926,12 +1921,23 @@ export default function RedditSourcesManager({
           upstreamSignal.addEventListener("abort", abortFromUpstream, { once: true });
         }
       }
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error("Request timed out. Please try again."));
+          timedOut = true;
+          controller.abort();
+        }, timeoutMsValue);
+      });
       try {
-        return await fetchAdminWithAuth(
-          input,
-          { ...requestInit, signal: controller.signal },
-          { allowDevAdminBypass: true },
-        );
+        const response = await Promise.race([
+          fetchAdminWithAuth(
+            input,
+            { ...requestInit, signal: controller.signal },
+            { allowDevAdminBypass: true },
+          ),
+          timeoutPromise,
+        ]);
+        return response;
       } catch (err) {
         if ((err as { name?: string } | null)?.name === "AbortError") {
           if (timedOut) {
@@ -1944,7 +1950,9 @@ export default function RedditSourcesManager({
         if (upstreamSignal) {
           upstreamSignal.removeEventListener("abort", abortFromUpstream);
         }
-        clearTimeout(timeout);
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
       }
     },
     [],
