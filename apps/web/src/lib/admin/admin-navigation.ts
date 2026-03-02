@@ -27,6 +27,13 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     hasShowsSubmenu: true,
   },
   {
+    key: "people",
+    title: "People",
+    href: "/people",
+    description: "Find and review cast and crew profiles across shows with ranking rails and quick search.",
+    badge: "People",
+  },
+  {
     key: "games",
     title: "Games",
     href: "/admin/games",

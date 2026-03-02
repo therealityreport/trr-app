@@ -80,7 +80,10 @@ describe("Admin surveys fetch stability", () => {
     authMocks.fetchAdminWithAuth.mockReset();
     authMocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
+      if (
+        url.includes("/api/admin/trr-api/social/ingest/queue-status") ||
+        url.includes("/api/admin/trr-api/social/ingest/health-dot")
+      ) {
         return queueStatusResponse.clone();
       }
       if (url.includes("/api/admin/surveys?full=true")) {

@@ -1,5 +1,7 @@
-import WeekDetailPageView from "@/components/admin/social-week/WeekDetailPageView";
+import WeekDetailPageViewLoader from "@/components/admin/social-week/WeekDetailPageViewLoader";
+
+export const dynamic = "force-dynamic";
 
 export default function WeekDetailPlatformPage() {
-  return <WeekDetailPageView />;
+  return <WeekDetailPageViewLoader />;
 }

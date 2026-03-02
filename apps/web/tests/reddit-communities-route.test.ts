@@ -3,12 +3,14 @@ import { NextRequest } from "next/server";
 
 const {
   requireAdminMock,
+  listRedditCommunitiesMock,
   listRedditCommunitiesWithThreadsMock,
   createRedditCommunityMock,
   normalizeSubredditMock,
   isValidSubredditMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  listRedditCommunitiesMock: vi.fn(),
   listRedditCommunitiesWithThreadsMock: vi.fn(),
   createRedditCommunityMock: vi.fn(),
   normalizeSubredditMock: vi.fn((value: string) => value.replace(/^r\//i, "")),
@@ -20,6 +22,7 @@ vi.mock("@/lib/server/auth", () => ({
 }));
 
 vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
+  listRedditCommunities: listRedditCommunitiesMock,
   listRedditCommunitiesWithThreads: listRedditCommunitiesWithThreadsMock,
   createRedditCommunity: createRedditCommunityMock,
   normalizeSubreddit: normalizeSubredditMock,
@@ -34,6 +37,7 @@ const SEASON_ID = "22222222-2222-4222-8222-222222222222";
 describe("/api/admin/reddit/communities route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    listRedditCommunitiesMock.mockReset();
     listRedditCommunitiesWithThreadsMock.mockReset();
     createRedditCommunityMock.mockReset();
     normalizeSubredditMock.mockClear();
@@ -44,7 +48,7 @@ describe("/api/admin/reddit/communities route", () => {
   });
 
   it("returns communities list with season-aware filters", async () => {
-    listRedditCommunitiesWithThreadsMock.mockResolvedValue([
+    listRedditCommunitiesMock.mockResolvedValue([
       {
         id: "community-1",
         subreddit: "BravoRealHousewives",
@@ -66,7 +70,38 @@ describe("/api/admin/reddit/communities route", () => {
     expect(payload.communities[0]).toMatchObject({
       post_flares: ["Episode Discussion", "Live Thread"],
       post_flares_updated_at: "2026-02-17T00:00:00.000Z",
+      assigned_thread_count: 0,
+      assigned_threads: [],
     });
+    expect(listRedditCommunitiesMock).toHaveBeenCalledWith({
+      trrShowId: SHOW_ID,
+      includeInactive: false,
+    });
+    expect(listRedditCommunitiesWithThreadsMock).not.toHaveBeenCalled();
+  });
+
+  it("includes assigned threads when include_assigned_threads=1", async () => {
+    listRedditCommunitiesWithThreadsMock.mockResolvedValue([
+      {
+        id: "community-1",
+        subreddit: "BravoRealHousewives",
+        post_flares: ["Episode Discussion"],
+        post_flares_updated_at: "2026-02-17T00:00:00.000Z",
+        assigned_thread_count: 1,
+        assigned_threads: [{ id: "thread-1", title: "Episode Thread" }],
+      },
+    ]);
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities?trr_show_id=${SHOW_ID}&trr_season_id=${SEASON_ID}&include_assigned_threads=1`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.communities[0]?.assigned_thread_count).toBe(1);
     expect(listRedditCommunitiesWithThreadsMock).toHaveBeenCalledWith({
       trrShowId: SHOW_ID,
       trrSeasonId: SEASON_ID,
@@ -86,6 +121,7 @@ describe("/api/admin/reddit/communities route", () => {
 
     expect(response.status).toBe(400);
     expect(payload.error).toContain("trr_show_id");
+    expect(listRedditCommunitiesMock).not.toHaveBeenCalled();
     expect(listRedditCommunitiesWithThreadsMock).not.toHaveBeenCalled();
   });
 

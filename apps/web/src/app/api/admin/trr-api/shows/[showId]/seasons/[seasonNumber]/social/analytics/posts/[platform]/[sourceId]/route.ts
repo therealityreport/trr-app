@@ -132,6 +132,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const seasonIdHint = seasonIdHintRaw ?? undefined;
     forwardedSearchParams.delete("season_id");
 
+    const refreshTimeoutMs = platform === "youtube" ? 120_000 : 30_000;
     const data = await fetchSeasonBackendJson(
       showId,
       seasonNumber,
@@ -142,13 +143,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: await request.text(),
-        fallbackError: "Failed to refresh post comments",
+        fallbackError: "Failed to refresh post",
         retries: 0,
-        timeoutMs: 30_000,
+        timeoutMs: refreshTimeoutMs,
       },
     );
     return NextResponse.json(data);
   } catch (error) {
-    return socialProxyErrorResponse(error, "[api] Failed to refresh post comments");
+    return socialProxyErrorResponse(error, "[api] Failed to refresh post");
   }
 }

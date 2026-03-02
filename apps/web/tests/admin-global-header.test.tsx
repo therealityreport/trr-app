@@ -18,6 +18,7 @@ describe("AdminGlobalHeader", () => {
     usePathnameMock.mockReturnValue("/admin");
     localStorage.clear();
     document.body.className = "";
+    vi.unstubAllGlobals();
   });
 
   it("renders the TRR logo and page header body content", () => {
@@ -44,6 +45,7 @@ describe("AdminGlobalHeader", () => {
     for (const label of [
       "Dev Dashboard",
       "Shows",
+      "People",
       "Games",
       "Survey Editor",
       "Social Media",
@@ -114,5 +116,62 @@ describe("AdminGlobalHeader", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Games" }));
     await waitFor(() => expect(nav).toHaveAttribute("aria-hidden", "true"));
+  });
+
+  it("renders grouped global search results", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes("/api/admin/trr-api/search?")) {
+        return new Response(
+          JSON.stringify({
+            shows: [{ id: "show-1", name: "The Traitors", slug: "the-traitors-us" }],
+            people: [
+              {
+                id: "person-1",
+                full_name: "Alan Cumming",
+                known_for: "Host",
+                person_slug: "alan-cumming--aaaaaaaa",
+                show_context: "the-traitors-us",
+              },
+            ],
+            episodes: [
+              {
+                id: "episode-1",
+                title: "Episode 1",
+                episode_number: 1,
+                season_number: 1,
+                show_name: "The Traitors",
+                show_slug: "the-traitors-us",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: "not mocked" }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminGlobalHeader />);
+
+    const input = screen.getByRole("searchbox", {
+      name: "Search shows, people, and episodes",
+    });
+    fireEvent.change(input, { target: { value: "ala" } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Shows" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "People" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Episodes" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("link", { name: "The Traitors" })).toHaveAttribute(
+      "href",
+      "/the-traitors-us",
+    );
+    expect(screen.getByRole("link", { name: /Alan Cumming/i })).toHaveAttribute(
+      "href",
+      "/people/alan-cumming--aaaaaaaa?showId=the-traitors-us",
+    );
   });
 });

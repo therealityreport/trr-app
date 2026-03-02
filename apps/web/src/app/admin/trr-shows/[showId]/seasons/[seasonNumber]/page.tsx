@@ -21,6 +21,7 @@ import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import SeasonSocialAnalyticsSection, {
   type SocialAnalyticsView,
 } from "@/components/admin/season-social-analytics-section";
+import TikTokSeasonAnalyticsSection from "@/components/admin/tiktok-season-analytics-section";
 import SeasonSurveysTab from "@/components/admin/season-tabs/SeasonSurveysTab";
 import SeasonOverviewTab from "@/components/admin/season-tabs/SeasonOverviewTab";
 import SeasonEpisodesTab from "@/components/admin/season-tabs/SeasonEpisodesTab";
@@ -386,7 +387,13 @@ const SEASON_BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
 const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
 
 const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "bravo", label: "OFFICIAL ANALYTICS" },
+  { id: "tiktok-overview", label: "TIKTOK OVERVIEW" },
+  { id: "tiktok-cast", label: "TIKTOK CAST" },
+  { id: "tiktok-hashtags", label: "TIKTOK HASHTAGS" },
+  { id: "tiktok-sounds", label: "TIKTOK SOUNDS" },
+  { id: "tiktok-health", label: "TIKTOK CONTENT HEALTH" },
+  { id: "tiktok-sentiment", label: "TIKTOK SENTIMENT" },
+  { id: "bravo", label: "OFFICIAL ANALYTICS (LEGACY)" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
@@ -407,9 +414,23 @@ const normalizeSocialAnalyticsViewInput = (value: string | null | undefined): st
 };
 
 const formatSocialAnalyticsViewLabel = (view: SocialAnalyticsView): string => {
-  if (view === "bravo") return "Official";
+  if (view === "bravo") return "Official (Legacy)";
+  if (view === "tiktok-overview") return "TikTok Overview";
+  if (view === "tiktok-cast") return "TikTok Cast";
+  if (view === "tiktok-hashtags") return "TikTok Hashtags";
+  if (view === "tiktok-sounds") return "TikTok Sounds";
+  if (view === "tiktok-health") return "TikTok Content Health";
+  if (view === "tiktok-sentiment") return "TikTok Sentiment";
   return `${view.charAt(0).toUpperCase()}${view.slice(1)}`;
 };
+
+const isTikTokAnalyticsView = (view: SocialAnalyticsView): view is
+  | "tiktok-overview"
+  | "tiktok-cast"
+  | "tiktok-hashtags"
+  | "tiktok-sounds"
+  | "tiktok-health"
+  | "tiktok-sentiment" => view.startsWith("tiktok-");
 
 const BATCH_JOB_OPERATION_LABELS = {
   count: "Count",
@@ -1186,6 +1207,12 @@ export default function SeasonDetailPage() {
     () => parseSeasonCastRouteState(new URLSearchParams(searchParams.toString())),
     [searchParams]
   );
+  const focusEpisodeParam = useMemo(() => {
+    const value = searchParams.get("focusEpisode");
+    if (!value) return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }, [searchParams]);
   const abortInFlightPersonRefreshRuns = useCallback(() => {
     for (const controller of Object.values(personRefreshAbortControllersRef.current)) {
       controller.abort();
@@ -1199,6 +1226,41 @@ export default function SeasonDetailPage() {
       setAssetsView(seasonRouteState.assetsSubTab);
     }
   }, [seasonRouteState.assetsSubTab, seasonRouteState.tab]);
+
+  const [focusedEpisodeId, setFocusedEpisodeId] = useState<string | null>(null);
+  const episodeRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    if (seasonRouteState.tab !== "episodes") return;
+    if (!focusEpisodeParam) {
+      setFocusedEpisodeId(null);
+      return;
+    }
+    const hasTargetEpisode = episodes.some((episode) => episode.id === focusEpisodeParam);
+    if (!hasTargetEpisode) {
+      setFocusedEpisodeId(null);
+      return;
+    }
+
+    setFocusedEpisodeId(focusEpisodeParam);
+
+    const scrollTimer = window.setTimeout(() => {
+      const targetRow = episodeRowRefs.current[focusEpisodeParam];
+      targetRow?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
+
+    const clearTimer = window.setTimeout(() => {
+      setFocusedEpisodeId((current) => (current === focusEpisodeParam ? null : current));
+    }, 2600);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [episodes, focusEpisodeParam, seasonRouteState.tab]);
 
   useEffect(() => {
     setCastSortBy(seasonCastRouteState.sortBy);
@@ -1257,6 +1319,7 @@ export default function SeasonDetailPage() {
       label: show.name,
     });
   }, [show?.name, showSlugForRouting]);
+  const seasonCanonicalReplaceRef = useRef<string | null>(null);
 
   const setTab = useCallback(
     (tab: TabId) => {
@@ -1333,7 +1396,7 @@ export default function SeasonDetailPage() {
     const queryValue = normalizeSocialAnalyticsViewInput(searchParams.get("social_view"));
     if (isSocialAnalyticsView(queryValue)) return queryValue;
     const pathValue = normalizeSocialAnalyticsViewInput(parseSocialAnalyticsViewFromPath(pathname));
-    return isSocialAnalyticsView(pathValue) ? pathValue : "bravo";
+    return isSocialAnalyticsView(pathValue) ? pathValue : "tiktok-overview";
   }, [pathname, searchParams]);
 
   const setSocialAnalyticsView = useCallback(
@@ -1508,13 +1571,21 @@ export default function SeasonDetailPage() {
     const canonicalPath = canonicalRouteUrl.split("?")[0] ?? canonicalRouteUrl;
     const currentPath = pathname;
     const pathMismatch = currentPath !== canonicalPath;
-    if (!pathMismatch && !currentHasLegacyRoutingQuery) return;
+    if (!pathMismatch && !currentHasLegacyRoutingQuery) {
+      seasonCanonicalReplaceRef.current = null;
+      return;
+    }
 
     const currentCleanedQuery = preservedQuery.toString();
     const canonicalQuery = canonicalRouteUrl.includes("?")
       ? (canonicalRouteUrl.split("?")[1] ?? "")
       : "";
-    if (!pathMismatch && currentCleanedQuery === canonicalQuery) return;
+    if (!pathMismatch && currentCleanedQuery === canonicalQuery) {
+      seasonCanonicalReplaceRef.current = null;
+      return;
+    }
+    if (seasonCanonicalReplaceRef.current === canonicalRouteUrl) return;
+    seasonCanonicalReplaceRef.current = canonicalRouteUrl;
     router.replace(canonicalRouteUrl as Route, { scroll: false });
   }, [
     pathname,
@@ -4894,11 +4965,20 @@ export default function SeasonDetailPage() {
                 {episodes.map((episode) => {
                   const imdbRatingText = formatFixed1(episode.imdb_rating);
                   const tmdbVoteAverageText = formatFixed1(episode.tmdb_vote_average);
+                  const isFocusedEpisode = focusedEpisodeId === episode.id;
 
                   return (
                     <div
                       key={episode.id}
-                      className="flex items-start gap-4 rounded-lg border border-zinc-100 bg-zinc-50/50 p-4"
+                      ref={(node) => {
+                        episodeRowRefs.current[episode.id] = node;
+                      }}
+                      data-focused={isFocusedEpisode ? "true" : undefined}
+                      className={`flex items-start gap-4 rounded-lg border p-4 transition ${
+                        isFocusedEpisode
+                          ? "border-blue-300 bg-blue-50 shadow-[0_0_0_2px_rgba(37,99,235,0.15)]"
+                          : "border-zinc-100 bg-zinc-50/50"
+                      }`}
                     >
                       {episode.url_original_still && (
                         <button
@@ -6436,14 +6516,24 @@ export default function SeasonDetailPage() {
             <SeasonSocialTab
               seasonSupplementalWarning={seasonSupplementalWarning}
               analyticsSection={
-                <SeasonSocialAnalyticsSection
-                  showId={showId}
-                  showSlug={showSlugForRouting}
-                  seasonNumber={season.season_number}
-                  seasonId={season.id}
-                  showName={show.name}
-                  analyticsView={socialAnalyticsView}
-                />
+                isTikTokAnalyticsView(socialAnalyticsView) ? (
+                  <TikTokSeasonAnalyticsSection
+                    showId={showId}
+                    seasonNumber={season.season_number}
+                    seasonId={season.id}
+                    showName={show.name}
+                    analyticsView={socialAnalyticsView}
+                  />
+                ) : (
+                  <SeasonSocialAnalyticsSection
+                    showId={showId}
+                    showSlug={showSlugForRouting}
+                    seasonNumber={season.season_number}
+                    seasonId={season.id}
+                    showName={show.name}
+                    analyticsView={socialAnalyticsView}
+                  />
+                )
               }
             />
           )}

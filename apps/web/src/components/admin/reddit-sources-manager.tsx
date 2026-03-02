@@ -1,9 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import {
+  buildShowRedditCommunityWindowUrl,
   buildShowRedditCommunityUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
@@ -295,6 +296,8 @@ interface EpisodePeriodOption {
   end: string;
 }
 
+type CommunityContextSeed = Pick<RedditCommunity, "id" | "trr_show_id" | "trr_show_name" | "subreddit">;
+
 interface CommunityFlaresRefreshResponse {
   community?: RedditCommunityResponse;
   flares?: string[];
@@ -307,13 +310,15 @@ interface DiscoveryFetchOptions {
   seasonId?: string | null;
   periodStart?: string | null;
   periodEnd?: string | null;
+  containerKey?: string | null;
+  periodLabel?: string | null;
+  coverageMode?: "standard" | "adaptive_deep" | "max_coverage";
   exhaustive?: boolean;
   searchBackfill?: boolean;
   refresh?: boolean;
   waitForCompletion?: boolean;
   forceFlair?: string | null;
   forceFlares?: string[];
-  seedPostUrls?: string[];
   maxPages?: number;
   timeoutMs?: number;
 }
@@ -322,6 +327,7 @@ interface DiscoveryFetchResult {
   discovery: DiscoveryPayload | null;
   warning: string | null;
   run: RefreshRunStatus | null;
+  source: "cache" | "live_run" | null;
 }
 
 interface RefreshRunStatus {
@@ -334,10 +340,40 @@ interface RefreshRunStatus {
     tracked_flair_rows?: number;
   };
   diagnostics?: {
+    coverage_mode?: "standard" | "adaptive_deep" | "max_coverage";
+    passes_run?: number;
+    passes?: Array<{
+      pass_index?: number;
+      max_pages?: number;
+      backfill_queries?: number;
+      backfill_pages_per_query?: number;
+      listing_pages_fetched?: number;
+      search_pages_fetched?: number;
+      fetched_rows?: number;
+      matched_rows?: number;
+      tracked_flair_rows?: number;
+      window_exhaustive_complete?: boolean | null;
+      search_backfill_complete?: boolean | null;
+    }>;
+    final_completeness?: {
+      listing_complete?: boolean;
+      backfill_complete?: boolean;
+    };
     listing_pages_fetched?: number;
     max_pages_applied?: number;
     search_backfill?: {
       pages_fetched?: number;
+    };
+    progress?: {
+      stage?: string;
+      listing_pages_fetched?: number;
+      search_pages_fetched?: number;
+      rows_discovered_raw?: number;
+      rows_matched?: number;
+      comments_targets_total?: number;
+      comments_targets_done?: number;
+      comments_rows_upserted?: number;
+      updated_at?: string;
     };
   };
   queue?: {
@@ -347,6 +383,8 @@ interface RefreshRunStatus {
     other_queued?: number;
     queued_ahead?: number;
   };
+  queue_position?: number | null;
+  active_jobs?: number | null;
   updated_at?: string | null;
 }
 
@@ -408,19 +446,6 @@ const parseDateMs = (value: string | null | undefined): number | null => {
   return ms;
 };
 
-const parseSeedPostUrlsInput = (value: string | null | undefined): string[] => {
-  if (!value) return [];
-  const deduped = new Map<string, string>();
-  for (const chunk of value.split(/[\n,]/)) {
-    const trimmed = chunk.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (deduped.has(key)) continue;
-    deduped.set(key, trimmed);
-  }
-  return [...deduped.values()];
-};
-
 const normalizeFlairKey = (value: string | null | undefined): string => toCanonicalFlairKey(value);
 
 const describeFlairMode = (mode: DiscoveryThread["flair_mode"]): string | null => {
@@ -459,9 +484,12 @@ const REQUEST_TIMEOUT_MS = {
   discoverRefresh: 180_000,
   runStatus: 30_000,
   seasonContext: 75_000,
+  periodOptions: 20_000,
   episodeRefresh: 90_000,
   episodeSave: 90_000,
 } as const;
+const ENABLE_REDDIT_PERF_TIMINGS =
+  process.env.NODE_ENV !== "test" && process.env.NEXT_PUBLIC_REDDIT_DEBUG_TIMINGS !== "0";
 
 const CONTAINER_RUN_POLL_INTERVAL_MS = 3_000;
 const CONTAINER_RUN_POLL_MAX_ATTEMPTS = 80;
@@ -479,6 +507,23 @@ const TERMINAL_REFRESH_RUN_STATUSES = new Set<RefreshRunStatus["status"]>([
   "failed",
   "cancelled",
 ]);
+
+const logRedditPerfTiming = (
+  event: string,
+  startedAtMs: number,
+  context: Record<string, unknown> = {},
+): void => {
+  if (!ENABLE_REDDIT_PERF_TIMINGS) return;
+  const now =
+    typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+  console.info("[reddit_ui_perf]", {
+    event,
+    elapsed_ms: Math.max(0, Math.round(now - startedAtMs)),
+    ...context,
+  });
+};
 const isRefreshRunStatus = (value: unknown): value is RefreshRunStatus["status"] =>
   typeof value === "string" && REFRESH_RUN_STATUSES.includes(value as RefreshRunStatus["status"]);
 const isRefreshRunActiveStatus = (status: RefreshRunStatus["status"]): boolean =>
@@ -499,23 +544,164 @@ const parseRefreshRunQueue = (value: unknown): RefreshRunStatus["queue"] | undef
   };
 };
 
+const parseRefreshRunDiagnostics = (value: unknown): RefreshRunStatus["diagnostics"] | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const diagnostics = value as Record<string, unknown>;
+  const searchBackfillRaw = diagnostics.search_backfill;
+  const progressRaw = diagnostics.progress;
+  const passesRaw = Array.isArray(diagnostics.passes) ? diagnostics.passes : [];
+  const finalCompletenessRaw =
+    diagnostics.final_completeness && typeof diagnostics.final_completeness === "object"
+      ? (diagnostics.final_completeness as Record<string, unknown>)
+      : null;
+  const coverageModeRaw = diagnostics.coverage_mode;
+  const coverageMode =
+    coverageModeRaw === "adaptive_deep" || coverageModeRaw === "max_coverage" || coverageModeRaw === "standard"
+      ? coverageModeRaw
+      : undefined;
+  const parsedPasses = passesRaw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const pass = item as Record<string, unknown>;
+      return {
+        pass_index: parseOptionalNumber(pass.pass_index),
+        max_pages: parseOptionalNumber(pass.max_pages),
+        backfill_queries: parseOptionalNumber(pass.backfill_queries),
+        backfill_pages_per_query: parseOptionalNumber(pass.backfill_pages_per_query),
+        listing_pages_fetched: parseOptionalNumber(pass.listing_pages_fetched),
+        search_pages_fetched: parseOptionalNumber(pass.search_pages_fetched),
+        fetched_rows: parseOptionalNumber(pass.fetched_rows),
+        matched_rows: parseOptionalNumber(pass.matched_rows),
+        tracked_flair_rows: parseOptionalNumber(pass.tracked_flair_rows),
+        window_exhaustive_complete:
+          typeof pass.window_exhaustive_complete === "boolean" ? pass.window_exhaustive_complete : null,
+        search_backfill_complete:
+          typeof pass.search_backfill_complete === "boolean" ? pass.search_backfill_complete : null,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+  return {
+    coverage_mode: coverageMode,
+    passes_run: parseOptionalNumber(diagnostics.passes_run),
+    passes: parsedPasses,
+    final_completeness: finalCompletenessRaw
+      ? {
+          listing_complete:
+            typeof finalCompletenessRaw.listing_complete === "boolean"
+              ? finalCompletenessRaw.listing_complete
+              : undefined,
+          backfill_complete:
+            typeof finalCompletenessRaw.backfill_complete === "boolean"
+              ? finalCompletenessRaw.backfill_complete
+              : undefined,
+        }
+      : undefined,
+    listing_pages_fetched: parseOptionalNumber(diagnostics.listing_pages_fetched),
+    max_pages_applied: parseOptionalNumber(diagnostics.max_pages_applied),
+    search_backfill:
+      searchBackfillRaw && typeof searchBackfillRaw === "object"
+        ? {
+            pages_fetched: parseOptionalNumber((searchBackfillRaw as Record<string, unknown>).pages_fetched),
+          }
+        : undefined,
+    progress:
+      progressRaw && typeof progressRaw === "object"
+        ? {
+            stage:
+              typeof (progressRaw as Record<string, unknown>).stage === "string"
+                ? ((progressRaw as Record<string, unknown>).stage as string)
+                : undefined,
+            listing_pages_fetched: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).listing_pages_fetched,
+            ),
+            search_pages_fetched: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).search_pages_fetched,
+            ),
+            rows_discovered_raw: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).rows_discovered_raw,
+            ),
+            rows_matched: parseOptionalNumber((progressRaw as Record<string, unknown>).rows_matched),
+            comments_targets_total: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).comments_targets_total,
+            ),
+            comments_targets_done: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).comments_targets_done,
+            ),
+            comments_rows_upserted: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).comments_rows_upserted,
+            ),
+            updated_at:
+              typeof (progressRaw as Record<string, unknown>).updated_at === "string"
+                ? ((progressRaw as Record<string, unknown>).updated_at as string)
+                : undefined,
+          }
+        : undefined,
+  };
+};
+
 const isContainerRefreshActive = (progress: ContainerRefreshProgress | undefined): boolean =>
   Boolean(progress && isRefreshRunActiveStatus(progress.status));
 
+const REQUEST_CANCELLED_ERROR_MESSAGE = "";
+
+class RequestCancelledError extends Error {
+  constructor(message: string = REQUEST_CANCELLED_ERROR_MESSAGE) {
+    super(message);
+    this.name = "RequestCancelledError";
+  }
+}
+
+const isRequestCancelledError = (err: unknown): boolean =>
+  err instanceof RequestCancelledError ||
+  (typeof err === "object" &&
+    err !== null &&
+    (err as { name?: string }).name === "RequestCancelledError");
+
 const toErrorMessage = (err: unknown, fallback: string): string =>
-  err instanceof Error && err.message.trim().length > 0 ? err.message : fallback;
+  isRequestCancelledError(err)
+    ? ""
+    : err instanceof Error && err.message.trim().length > 0
+      ? err.message
+      : fallback;
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
 
 const isTimeoutErrorMessage = (message: string): boolean => /\btimed out\b|\btimeout\b/i.test(message);
+const isNoCacheYetWarning = (message: string | null | undefined): boolean =>
+  typeof message === "string" && /no cached posts found yet/i.test(message);
 
 const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus): string => {
-  const listingPages = run.diagnostics?.listing_pages_fetched;
-  const searchPages = run.diagnostics?.search_backfill?.pages_fetched;
+  const liveProgress = run.diagnostics?.progress;
+  const listingPages = liveProgress?.listing_pages_fetched ?? run.diagnostics?.listing_pages_fetched;
+  const searchPages = liveProgress?.search_pages_fetched ?? run.diagnostics?.search_backfill?.pages_fetched;
+  const discoveredRows = liveProgress?.rows_discovered_raw;
+  const matchedRows = liveProgress?.rows_matched;
+  const commentTargetsTotal = liveProgress?.comments_targets_total;
+  const commentTargetsDone = liveProgress?.comments_targets_done;
+  const commentsUpserted = liveProgress?.comments_rows_upserted;
   const listingText = typeof listingPages === "number" ? ` · listings ${fmtNum(listingPages)}` : "";
   const searchText = typeof searchPages === "number" ? ` · search pages ${fmtNum(searchPages)}` : "";
+  const rowText =
+    typeof discoveredRows === "number" || typeof matchedRows === "number"
+      ? ` · rows ${fmtNum(discoveredRows ?? 0)} raw / ${fmtNum(matchedRows ?? 0)} matched`
+      : "";
+  const commentTargetText =
+    typeof commentTargetsTotal === "number"
+      ? ` · comments ${fmtNum(commentTargetsDone ?? 0)}/${fmtNum(commentTargetsTotal)} posts`
+      : "";
+  const commentsUpsertedText =
+    typeof commentsUpserted === "number" ? ` · comment rows ${fmtNum(commentsUpserted)}` : "";
+  const stageTextByKey: Record<string, string> = {
+    discovering_posts: "discovering posts",
+    persisting_posts: "saving posts",
+    persisting_period_matches: "saving period matches",
+    fetching_comments: "fetching comments",
+    finalizing: "finalizing run",
+  };
+  const normalizedStage = (liveProgress?.stage ?? "").trim().toLowerCase();
+  const stageText = stageTextByKey[normalizedStage] ?? "scraping in progress";
   const otherRunning = run.queue?.other_running;
   const queuedAhead = run.queue?.queued_ahead;
   const otherQueued = run.queue?.other_queued;
@@ -534,26 +720,48 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
   }
   const queuedHintText = queuedHintParts.length > 0 ? ` · ${queuedHintParts.join(" · ")}` : "";
   if (run.status === "queued") {
-    return `${label}: queued in backend (run ${run.run_id.slice(0, 8)})${queuedHintText}${listingText}${searchText}`;
+    const queuePositionText =
+      typeof run.queue_position === "number" && run.queue_position > 0
+        ? ` · queue #${fmtNum(run.queue_position)}`
+        : "";
+    const activeJobsText =
+      typeof run.active_jobs === "number" && run.active_jobs > 0
+        ? ` · ${fmtNum(run.active_jobs)} active jobs`
+        : "";
+    return `${label}: refresh queued in backend (run ${run.run_id.slice(0, 8)})${queuePositionText}${activeJobsText}${queuedHintText}${listingText}${searchText}`;
   }
   if (run.status === "running") {
     const runningHintText =
       typeof otherRunning === "number" && otherRunning > 0
         ? ` · ${fmtNum(otherRunning)} other running`
         : "";
-    return `${label}: scraping in progress (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}`;
+    return `${label}: ${stageText} (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}${commentTargetText}${commentsUpsertedText}`;
   }
   if (run.status === "completed" || run.status === "partial") {
     const tracked = run.totals?.tracked_flair_rows;
     const fetched = run.totals?.fetched_rows;
+    const passesRun = run.diagnostics?.passes_run;
+    const listingComplete = run.diagnostics?.final_completeness?.listing_complete;
+    const backfillComplete = run.diagnostics?.final_completeness?.backfill_complete;
     const totalsText =
       typeof tracked === "number" || typeof fetched === "number"
         ? ` · tracked ${fmtNum(tracked ?? 0)} · fetched ${fmtNum(fetched ?? 0)}`
         : "";
+    const passText =
+      typeof passesRun === "number" && passesRun > 1
+        ? ` after ${fmtNum(passesRun)} passes`
+        : "";
+    const completenessHints: string[] = [];
     if (run.status === "partial") {
-      return `${label}: refresh completed with partial coverage${totalsText}`;
+      if (listingComplete === false) completenessHints.push("listing incomplete");
+      if (backfillComplete === false) completenessHints.push("backfill incomplete");
     }
-    return `${label}: refresh completed${totalsText}`;
+    const completenessText =
+      completenessHints.length > 0 ? ` · ${completenessHints.join(" · ")}` : "";
+    if (run.status === "partial") {
+      return `${label}: refresh completed with partial coverage${passText}${completenessText}${totalsText}`;
+    }
+    return `${label}: refresh completed${passText}${totalsText}`;
   }
   if (run.status === "failed") {
     return `${label}: refresh failed${run.error ? ` · ${run.error}` : ""}`;
@@ -915,28 +1123,14 @@ const resolveDiscussionSlotDate = (
   return episodeAirDate;
 };
 
-const resolveMediaPreviewType = (value: string | null | undefined): "image" | "video" | null => {
-  if (!value) return null;
-  try {
-    const parsed = new URL(value);
-    const pathname = parsed.pathname.toLowerCase();
-    if (/\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(pathname)) {
-      return "image";
-    }
-    if (/\.(mp4|mov|webm|m3u8|gifv)$/i.test(pathname)) {
-      return "video";
-    }
-    const host = parsed.hostname.toLowerCase();
-    if (host === "i.redd.it" || host.endsWith(".redd.it")) {
-      return "image";
-    }
-    if (host === "v.redd.it") {
-      return "video";
-    }
-    return null;
-  } catch {
-    return null;
+const buildWindowSlugFromContainerKey = (containerKey: string): string => {
+  if (containerKey === "period-preseason") return "w0";
+  const episodeMatch = containerKey.match(/^episode-(\d+)$/i);
+  if (episodeMatch) {
+    return `e${episodeMatch[1]}`;
   }
+  if (containerKey === "period-postseason") return "w-postseason";
+  return containerKey.replace(/^period-/, "w-");
 };
 
 const EASTERN_TIMEZONE = "America/New_York";
@@ -1061,7 +1255,7 @@ interface EpisodeWindowBounds {
   start: string | null;
   end: string | null;
   type: "episode" | "period";
-  source?: "period" | "fallback";
+  source?: "period" | "fallback" | "cache";
   episodeNumber?: number;
 }
 
@@ -1102,18 +1296,18 @@ const renderEpisodeMatrixCards = (
       label: string;
       start: string | null;
       end: string | null;
-      source?: "period" | "fallback";
+      source?: "period" | "fallback" | "cache";
     }>;
     unassignedFlairCountBySeasonBoundaryPeriod?: Map<string, number>;
     totalTrackedFlairCountBySeasonBoundaryPeriod?: Map<string, number>;
     linkedPostsByContainer?: Map<string, EpisodeDiscussionCandidate[]>;
     refreshProgressByContainer?: Record<string, ContainerRefreshProgress | undefined>;
     onOpenContainerPosts?: (containerKey: string) => void;
+    onViewAllContainerPosts?: (containerKey: string) => void;
     onRefreshContainerPosts?: (containerKey: string) => void;
-    onSeedInputChange?: (containerKey: string, value: string) => void;
     refreshingContainerKey?: string | null;
-    seedInputByContainer?: Record<string, string>;
     refreshPostsDisabled?: boolean;
+    periodsLoading?: boolean;
   },
 ) => {
   const allBoundaryPeriods = options?.seasonalBoundaryPeriods ?? [];
@@ -1129,7 +1323,7 @@ const renderEpisodeMatrixCards = (
     label: string;
     start: string | null;
     end: string | null;
-    source?: "period" | "fallback";
+    source?: "period" | "fallback" | "cache";
   }) => {
     const containerKey = `period-${period.key}`;
     const containerPosts = options?.linkedPostsByContainer?.get(containerKey) ?? [];
@@ -1138,7 +1332,6 @@ const renderEpisodeMatrixCards = (
     const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
     const viewAllCount =
       typeof totalTrackedCount === "number" ? totalTrackedCount : containerPosts.length;
-    const seedInputValue = options?.seedInputByContainer?.[containerKey] ?? "";
     return (
       <article key={`episode-boundary-${period.key}`} className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1153,13 +1346,17 @@ const renderEpisodeMatrixCards = (
                 options?.refreshPostsDisabled || options?.refreshingContainerKey === containerKey
               }
               onClick={() => options?.onRefreshContainerPosts?.(containerKey)}
+              aria-label="Refresh Posts"
+              title="Scrape posts for this window (add new and update existing)"
               className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
             >
-              {options?.refreshingContainerKey === containerKey ? "Refreshing..." : "Refresh Posts"}
+              {options?.refreshingContainerKey === containerKey ? "⏳" : "🕷️"}
             </button>
             <button
               type="button"
-              onClick={() => options?.onOpenContainerPosts?.(containerKey)}
+              onClick={() =>
+                (options?.onViewAllContainerPosts ?? options?.onOpenContainerPosts)?.(containerKey)
+              }
               className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
             >
               {`View All Posts (${fmtNum(viewAllCount)})`}
@@ -1178,13 +1375,6 @@ const renderEpisodeMatrixCards = (
             </>
           )}
         </p>
-        <textarea
-          value={seedInputValue}
-          onChange={(event) => options?.onSeedInputChange?.(containerKey, event.target.value)}
-          rows={2}
-          placeholder="Optional seed post URLs (comma or newline separated)"
-          className="mt-2 w-full rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] text-zinc-700"
-        />
         {isContainerRefreshActive(progress) && (
           <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-blue-700" role="status">
             <span
@@ -1196,11 +1386,6 @@ const renderEpisodeMatrixCards = (
         )}
         {progress?.message && (
           <p className="mt-1 text-[11px] text-blue-700">{progress.message}</p>
-        )}
-        {period.source === "fallback" && (
-          <p className="mt-1 text-[11px] text-zinc-500">
-            Using fallback period window (season social period data unavailable).
-          </p>
         )}
       </article>
     );
@@ -1223,7 +1408,6 @@ const renderEpisodeMatrixCards = (
       const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
       const viewAllCount =
         typeof totalTrackedCount === "number" ? totalTrackedCount : containerPosts.length;
-      const seedInputValue = options?.seedInputByContainer?.[containerKey] ?? "";
       const visibleCells = cells.filter(([, cell]) => cell.post_count > 0);
       const episodeAirDate =
         row.episode_air_date ??
@@ -1271,26 +1455,23 @@ const renderEpisodeMatrixCards = (
                   options?.refreshPostsDisabled || options?.refreshingContainerKey === containerKey
                 }
                 onClick={() => options?.onRefreshContainerPosts?.(containerKey)}
+                aria-label="Refresh Posts"
+                title="Scrape posts for this episode window (add new and update existing)"
                 className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
               >
-                {options?.refreshingContainerKey === containerKey ? "Refreshing..." : "Refresh Posts"}
+                {options?.refreshingContainerKey === containerKey ? "⏳" : "🕷️"}
               </button>
               <button
                 type="button"
-                onClick={() => options?.onOpenContainerPosts?.(containerKey)}
+                onClick={() =>
+                  (options?.onViewAllContainerPosts ?? options?.onOpenContainerPosts)?.(containerKey)
+                }
                 className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50"
               >
                 {`View All Posts (${fmtNum(viewAllCount)})`}
               </button>
             </div>
           </div>
-          <textarea
-            value={seedInputValue}
-            onChange={(event) => options?.onSeedInputChange?.(containerKey, event.target.value)}
-            rows={2}
-            placeholder="Optional seed post URLs (comma or newline separated)"
-            className="mt-2 w-full rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] text-zinc-700"
-          />
           <div className="mt-2 flex flex-wrap gap-2">
             {visibleCells.length === 0 ? (
               <p className="text-xs text-zinc-500">No linked discussion posts found.</p>
@@ -1550,6 +1731,27 @@ const resolveRouteShowSlugFromPath = (
   return first;
 };
 
+const resolveRouteRedditCommunityContextFromPath = (
+  pathname: string | null | undefined,
+): { showSlug: string | null; communitySlug: string | null; seasonNumber: number | null } => {
+  if (!pathname) {
+    return { showSlug: null, communitySlug: null, seasonNumber: null };
+  }
+  const match = pathname.match(/^\/([^/]+)\/social\/reddit(?:\/([^/]+)(?:\/s(\d+))?)?/i);
+  if (!match) {
+    return { showSlug: null, communitySlug: null, seasonNumber: null };
+  }
+  const showSlug = match[1] ? decodeURIComponent(match[1]).trim() : null;
+  const communitySlug = match[2] ? decodeURIComponent(match[2]).trim() : null;
+  const seasonRaw = match[3] ?? null;
+  const parsedSeason = seasonRaw ? Number.parseInt(seasonRaw, 10) : Number.NaN;
+  return {
+    showSlug: showSlug && showSlug.length > 0 ? showSlug : null,
+    communitySlug: communitySlug && communitySlug.length > 0 ? communitySlug : null,
+    seasonNumber: Number.isFinite(parsedSeason) && parsedSeason > 0 ? parsedSeason : null,
+  };
+};
+
 export default function RedditSourcesManager({
   mode,
   showId,
@@ -1564,6 +1766,7 @@ export default function RedditSourcesManager({
   enableEpisodeSync = false,
   onCommunityContextChange,
 }: RedditSourcesManagerProps) {
+  const router = useRouter();
   const pathname = usePathname();
   const [communities, setCommunities] = useState<RedditCommunity[]>([]);
   const [coveredShows, setCoveredShows] = useState<CoveredShow[]>([]);
@@ -1596,7 +1799,10 @@ export default function RedditSourcesManager({
   const [threadNotes, setThreadNotes] = useState("");
   const [assignThreadToSeason, setAssignThreadToSeason] = useState(mode === "season");
 
-  const [discovery, setDiscovery] = useState<DiscoveryPayload | null>(null);
+  const [seasonDiscovery, setSeasonDiscovery] = useState<DiscoveryPayload | null>(null);
+  const [windowDiscoveryByContainer, setWindowDiscoveryByContainer] = useState<
+    Record<string, DiscoveryPayload | undefined>
+  >({});
   const [showOnlyMatches, setShowOnlyMatches] = useState(true);
   const [selectedNetworkTargetInput, setSelectedNetworkTargetInput] = useState("");
   const [selectedFranchiseTargetInput, setSelectedFranchiseTargetInput] = useState("");
@@ -1616,7 +1822,6 @@ export default function RedditSourcesManager({
   const [containerRefreshProgressByKey, setContainerRefreshProgressByKey] = useState<
     Record<string, ContainerRefreshProgress | undefined>
   >({});
-  const [seedInputByContainer, setSeedInputByContainer] = useState<Record<string, string>>({});
   const [episodeSaving, setEpisodeSaving] = useState(false);
   const [assignedThreadsExpanded, setAssignedThreadsExpanded] = useState(true);
   const [showCommunitySettingsModal, setShowCommunitySettingsModal] = useState(false);
@@ -1630,24 +1835,44 @@ export default function RedditSourcesManager({
   const [syncReasonCodeFilter, setSyncReasonCodeFilter] = useState<"all" | SyncCandidateReasonCode>(
     "all",
   );
-  const [episodeWindowModalContainerKey, setEpisodeWindowModalContainerKey] = useState<string | null>(null);
-  const [episodeWindowModalLoading, setEpisodeWindowModalLoading] = useState(false);
-  const [episodeWindowModalError, setEpisodeWindowModalError] = useState<string | null>(null);
-  const [episodeWindowModalOtherPosts, setEpisodeWindowModalOtherPosts] = useState<EpisodeWindowPostItem[]>([]);
+  const [isTabVisible, setIsTabVisible] = useState<boolean>(() => {
+    if (typeof document === "undefined") return true;
+    return document.visibilityState === "visible";
+  });
   const isBusy = busyAction !== null;
+  const discovery = seasonDiscovery;
+  const [communitiesIncludeAssignedThreads, setCommunitiesIncludeAssignedThreads] = useState(false);
   const seasonOptionsCacheRef = useRef<Map<string, ShowSeasonOption[]>>(new Map());
   const periodOptionsCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
+  const periodOptionsByShowCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
+  const periodOptionsRef = useRef<EpisodePeriodOption[]>([]);
+  const seasonIdByShowAndNumberRef = useRef<Map<string, string>>(new Map());
   const showMetadataCacheRef = useRef<Map<string, { showLabel: string; showSlug: string | null }>>(
     new Map(),
   );
+  const communitiesRequestInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const coveredShowsRequestInFlightRef = useRef<Promise<void> | null>(null);
+  const seasonOptionsRequestInFlightRef = useRef<Map<string, Promise<ShowSeasonOption[]>>>(new Map());
+  const seasonEpisodesRequestInFlightRef = useRef<Map<string, Promise<SeasonEpisodeRow[]>>>(new Map());
+  const periodOptionsRequestInFlightRef = useRef<Map<string, Promise<EpisodePeriodOption[] | null>>>(new Map());
+  const seasonIdResolutionInFlightRef = useRef<Map<string, Promise<string | null>>>(new Map());
+  const communityBootstrapStartedAtRef = useRef<number | null>(null);
+  const bootstrapRequestEpochRef = useRef(0);
+  const communityContextStartedAtRef = useRef<number | null>(null);
+  const firstCachePayloadLoggedRef = useRef(false);
   const dedicatedSeasonMenuRef = useRef<HTMLDivElement | null>(null);
   const episodeContextRequestTokenRef = useRef(0);
-  const episodeContextAbortRef = useRef<AbortController | null>(null);
-  const episodeWindowModalRequestTokenRef = useRef(0);
   const windowCacheHydrationTokenRef = useRef(0);
+  const hydratedWindowContainersRef = useRef<Set<string>>(new Set());
+  const hydratingWindowContainersRef = useRef<Set<string>>(new Set());
+  const discoveryRequestInFlightRef = useRef<Map<string, Promise<DiscoveryFetchResult>>>(new Map());
   const containerRefreshPollTokenRef = useRef<Record<string, number>>({});
   const routeShowSlugFromPath = useMemo(
     () => resolveRouteShowSlugFromPath(pathname),
+    [pathname],
+  );
+  const routeRedditPathContext = useMemo(
+    () => resolveRouteRedditCommunityContextFromPath(pathname),
     [pathname],
   );
 
@@ -1660,6 +1885,21 @@ export default function RedditSourcesManager({
     [],
   );
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handleVisibility = () => {
+      setIsTabVisible(document.visibilityState === "visible");
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    periodOptionsRef.current = periodOptions;
+  }, [periodOptions]);
+
   const fetchWithTimeout = useCallback(
     async (
       input: RequestInfo | URL,
@@ -1667,12 +1907,13 @@ export default function RedditSourcesManager({
     ): Promise<Response> => {
       const { timeoutMs, ...requestInit } = init ?? {};
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        timeoutMs ?? REQUEST_TIMEOUT_MS.default,
-      );
+      const timeoutMsValue = timeoutMs ?? REQUEST_TIMEOUT_MS.default;
+      let timedOut = false;
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const upstreamSignal = requestInit.signal;
-      const abortFromUpstream = () => controller.abort();
+      const abortFromUpstream = () => {
+        controller.abort();
+      };
       if (upstreamSignal) {
         if (upstreamSignal.aborted) {
           controller.abort();
@@ -1680,22 +1921,38 @@ export default function RedditSourcesManager({
           upstreamSignal.addEventListener("abort", abortFromUpstream, { once: true });
         }
       }
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error("Request timed out. Please try again."));
+          timedOut = true;
+          controller.abort();
+        }, timeoutMsValue);
+      });
       try {
-        return await fetchAdminWithAuth(
-          input,
-          { ...requestInit, signal: controller.signal },
-          { allowDevAdminBypass: true },
-        );
+        const response = await Promise.race([
+          fetchAdminWithAuth(
+            input,
+            { ...requestInit, signal: controller.signal },
+            { allowDevAdminBypass: true },
+          ),
+          timeoutPromise,
+        ]);
+        return response;
       } catch (err) {
         if ((err as { name?: string } | null)?.name === "AbortError") {
-          throw new Error("Request timed out. Please try again.");
+          if (timedOut) {
+            throw new Error("Request timed out. Please try again.");
+          }
+          throw new RequestCancelledError();
         }
         throw err;
       } finally {
         if (upstreamSignal) {
           upstreamSignal.removeEventListener("abort", abortFromUpstream);
         }
-        clearTimeout(timeout);
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
       }
     },
     [],
@@ -1772,76 +2029,149 @@ export default function RedditSourcesManager({
   );
 
   const fetchCoveredShows = useCallback(async () => {
-    if (mode !== "global") return;
-    const headers = await getAuthHeaders();
-    const response = await fetchWithTimeout("/api/admin/covered-shows", {
-      headers,
-      cache: "no-store",
-      timeoutMs: REQUEST_TIMEOUT_MS.communities,
-    });
-    if (!response.ok) {
-      throw new Error("Failed to fetch covered shows");
+    if (mode !== "global" || hideCommunityList) return;
+    if (coveredShowsRequestInFlightRef.current) {
+      await coveredShowsRequestInFlightRef.current;
+      return;
     }
-    const payload = (await response.json()) as { shows?: CoveredShow[] };
-    const shows = payload.shows ?? [];
-    setCoveredShows(shows);
-    if (!communityShowId && shows.length > 0) {
-      setCommunityShowId(shows[0].trr_show_id);
-      setCommunityShowName(shows[0].show_name);
-    }
-  }, [communityShowId, fetchWithTimeout, getAuthHeaders, mode]);
-
-  const fetchCommunities = useCallback(async () => {
-    const headers = await getAuthHeaders();
-    const params = new URLSearchParams();
-    if (mode === "season") {
-      if (showId) params.set("trr_show_id", showId);
-      if (seasonId) params.set("trr_season_id", seasonId);
-      params.set("include_global_threads_for_season", "true");
-    }
-    const qs = params.toString();
-    const response = await fetchWithTimeout(`/api/admin/reddit/communities${qs ? `?${qs}` : ""}`, {
-      headers,
-      cache: "no-store",
-      timeoutMs: REQUEST_TIMEOUT_MS.communities,
-    });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? "Failed to fetch reddit communities");
-    }
-    const payload = (await response.json()) as { communities?: RedditCommunityResponse[] };
-    const list = sortCommunityList((payload.communities ?? []).map(toCommunityModel));
-    setCommunities(list);
-    setSelectedCommunityId((prev) => {
-      if (initialCommunityId) {
-        const initialMatch = resolveInitialCommunityMatch(list, initialCommunityId);
-        if (initialMatch) return initialMatch.id;
-        // In dedicated community mode, do not silently jump to another community
-        // if the requested slug/id is missing from the refreshed list.
-        if (hideCommunityList) {
-          if (prev && list.some((community) => community.id === prev)) return prev;
-          return null;
-        }
+    const requestPromise = (async () => {
+      const headers = await getAuthHeaders();
+      const response = await fetchWithTimeout("/api/admin/covered-shows", {
+        headers,
+        cache: "no-store",
+        timeoutMs: REQUEST_TIMEOUT_MS.communities,
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch covered shows");
       }
-      if (prev && list.some((community) => community.id === prev)) return prev;
-      return list[0]?.id ?? null;
+      const payload = (await response.json()) as { shows?: CoveredShow[] };
+      const shows = payload.shows ?? [];
+      setCoveredShows(shows);
+      if (!communityShowId && shows.length > 0) {
+        setCommunityShowId(shows[0].trr_show_id);
+        setCommunityShowName(shows[0].show_name);
+      }
+    })();
+    coveredShowsRequestInFlightRef.current = requestPromise;
+    try {
+      await requestPromise;
+    } finally {
+      if (coveredShowsRequestInFlightRef.current === requestPromise) {
+        coveredShowsRequestInFlightRef.current = null;
+      }
+    }
+  }, [communityShowId, fetchWithTimeout, getAuthHeaders, hideCommunityList, mode]);
+
+  const fetchCommunities = useCallback(async (options?: { includeAssignedThreads?: boolean }) => {
+    const includeAssignedThreads = options?.includeAssignedThreads ?? true;
+    const requestKey = JSON.stringify({
+      includeAssignedThreads,
+      mode,
+      showId: showId ?? null,
+      seasonId: seasonId ?? null,
+      initialCommunityId: initialCommunityId ?? null,
+      hideCommunityList,
     });
-  }, [fetchWithTimeout, getAuthHeaders, hideCommunityList, initialCommunityId, mode, seasonId, showId]);
+    const inFlightRequests = communitiesRequestInFlightRef.current;
+    const existing = inFlightRequests.get(requestKey);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const requestPromise = (async () => {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      params.set("include_assigned_threads", includeAssignedThreads ? "1" : "0");
+      if (mode === "season") {
+        if (showId) params.set("trr_show_id", showId);
+        if (seasonId) params.set("trr_season_id", seasonId);
+        params.set("include_global_threads_for_season", "true");
+      }
+      const qs = params.toString();
+      const response = await fetchWithTimeout(`/api/admin/reddit/communities${qs ? `?${qs}` : ""}`, {
+        headers,
+        cache: "no-store",
+        timeoutMs: REQUEST_TIMEOUT_MS.communities,
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Failed to fetch reddit communities");
+      }
+      const payload = (await response.json()) as { communities?: RedditCommunityResponse[] };
+      const list = sortCommunityList((payload.communities ?? []).map(toCommunityModel));
+      setCommunities(list);
+      setCommunitiesIncludeAssignedThreads(includeAssignedThreads);
+      setSelectedCommunityId((prev) => {
+        if (initialCommunityId) {
+          const initialMatch = resolveInitialCommunityMatch(list, initialCommunityId);
+          if (initialMatch) return initialMatch.id;
+          // In dedicated community mode, do not silently jump to another community
+          // if the requested slug/id is missing from the refreshed list.
+          if (hideCommunityList) {
+            if (prev && list.some((community) => community.id === prev)) return prev;
+            return null;
+          }
+        }
+        if (prev && list.some((community) => community.id === prev)) return prev;
+        return list[0]?.id ?? null;
+      });
+    })();
+
+    inFlightRequests.set(requestKey, requestPromise);
+    try {
+      await requestPromise;
+    } finally {
+      if (inFlightRequests.get(requestKey) === requestPromise) {
+        inFlightRequests.delete(requestKey);
+      }
+    }
+  }, [
+    fetchWithTimeout,
+    getAuthHeaders,
+    hideCommunityList,
+    initialCommunityId,
+    mode,
+    seasonId,
+    showId,
+  ]);
 
   const refreshData = useCallback(async () => {
+    const requestEpoch = bootstrapRequestEpochRef.current + 1;
+    bootstrapRequestEpochRef.current = requestEpoch;
+    const startedAt =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    communityBootstrapStartedAtRef.current = startedAt;
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([fetchCommunities(), fetchCoveredShows()]);
+      await Promise.all([
+        fetchCommunities({ includeAssignedThreads: false }),
+        fetchCoveredShows(),
+      ]);
+      if (bootstrapRequestEpochRef.current !== requestEpoch) return;
+      logRedditPerfTiming("community_bootstrap_ready", startedAt, {
+        include_assigned_threads: false,
+      });
     } catch (err) {
+      if (bootstrapRequestEpochRef.current !== requestEpoch) return;
+      if (isRequestCancelledError(err)) {
+        return;
+      }
       setError(err instanceof Error ? err.message : "Failed to load reddit sources");
     } finally {
+      if (bootstrapRequestEpochRef.current !== requestEpoch) return;
       setLoading(false);
     }
   }, [fetchCommunities, fetchCoveredShows]);
 
   useEffect(() => {
     void refreshData();
+    return () => {
+      bootstrapRequestEpochRef.current += 1;
+    };
   }, [refreshData]);
 
   useEffect(() => {
@@ -1853,6 +2183,11 @@ export default function RedditSourcesManager({
   }, [communities, initialCommunityId, selectedCommunityId]);
 
   useEffect(() => {
+    communityContextStartedAtRef.current =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    firstCachePayloadLoggedRef.current = false;
     setSelectedNetworkTargetInput("");
     setSelectedFranchiseTargetInput("");
     setEpisodePatternInput("");
@@ -1871,22 +2206,77 @@ export default function RedditSourcesManager({
     setShowDedicatedSeasonMenu(false);
     setSelectedShowLabel(null);
     setSelectedShowSlug(null);
+    setSeasonDiscovery(null);
+    setWindowDiscoveryByContainer({});
     setSyncStatusFilter("all");
     setSyncReasonCodeFilter("all");
     setRefreshingContainerKey(null);
     setContainerRefreshProgressByKey({});
-    setSeedInputByContainer({});
     containerRefreshPollTokenRef.current = {};
-    setEpisodeWindowModalContainerKey(null);
-    setEpisodeWindowModalLoading(false);
-    setEpisodeWindowModalError(null);
-    setEpisodeWindowModalOtherPosts([]);
+    hydratingWindowContainersRef.current.clear();
+    discoveryRequestInFlightRef.current.clear();
+    seasonOptionsRequestInFlightRef.current.clear();
+    seasonEpisodesRequestInFlightRef.current.clear();
+    periodOptionsRequestInFlightRef.current.clear();
+    seasonIdResolutionInFlightRef.current.clear();
   }, [selectedCommunityId]);
 
   const selectedCommunity = useMemo(
     () => communities.find((community) => community.id === selectedCommunityId) ?? null,
     [communities, selectedCommunityId],
   );
+  const selectedCommunityIdValue = selectedCommunity?.id ?? null;
+  const selectedCommunityShowId = selectedCommunity?.trr_show_id ?? null;
+  const selectedCommunityShowName = selectedCommunity?.trr_show_name ?? null;
+  const selectedCommunitySubreddit = selectedCommunity?.subreddit ?? null;
+  const selectedCommunityContextSeed = useMemo<CommunityContextSeed | null>(() => {
+    if (
+      !selectedCommunityIdValue ||
+      !selectedCommunityShowId ||
+      !selectedCommunityShowName ||
+      !selectedCommunitySubreddit
+    ) {
+      return null;
+    }
+    return {
+      id: selectedCommunityIdValue,
+      trr_show_id: selectedCommunityShowId,
+      trr_show_name: selectedCommunityShowName,
+      subreddit: selectedCommunitySubreddit,
+    };
+  }, [
+    selectedCommunityIdValue,
+    selectedCommunityShowId,
+    selectedCommunityShowName,
+    selectedCommunitySubreddit,
+  ]);
+
+  useEffect(() => {
+    if (!selectedCommunityContextSeed) return;
+    if (loading) return;
+    if (communitiesIncludeAssignedThreads) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const startedAt =
+          typeof performance !== "undefined" && typeof performance.now === "function"
+            ? performance.now()
+            : Date.now();
+        await fetchCommunities({ includeAssignedThreads: true });
+        if (cancelled) return;
+        logRedditPerfTiming("communities_threads_hydrated", startedAt, {
+          community_id: selectedCommunityContextSeed.id,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        console.warn("[reddit] Failed to hydrate assigned threads payload", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [communitiesIncludeAssignedThreads, fetchCommunities, loading, selectedCommunityContextSeed]);
+
   const selectedRelevantPostFlares = useMemo(
     () => (selectedCommunity ? getRelevantPostFlares(selectedCommunity) : []),
     [selectedCommunity],
@@ -2147,6 +2537,42 @@ export default function RedditSourcesManager({
       }
     }
 
+    for (const [containerKey, payload] of Object.entries(windowDiscoveryByContainer)) {
+      if (!payload) continue;
+      if (containerKey !== "period-preseason" && containerKey !== "period-postseason" && !/^episode-\d+$/i.test(containerKey)) {
+        continue;
+      }
+      const cachedWindowStart = toIsoDate(payload.window_start ?? null);
+      const cachedWindowEnd = toIsoDate(payload.window_end ?? null);
+      if (!cachedWindowStart && !cachedWindowEnd) continue;
+
+      const existing = bounds.get(containerKey);
+      const inferredEpisodeNumber =
+        existing?.episodeNumber ??
+        (containerKey.startsWith("episode-")
+          ? Number.parseInt(containerKey.replace("episode-", ""), 10)
+          : undefined);
+      const inferredType: EpisodeWindowBounds["type"] =
+        existing?.type ?? (containerKey.startsWith("episode-") ? "episode" : "period");
+      const inferredLabel =
+        existing?.label ??
+        (containerKey === "period-preseason"
+          ? "Pre-Season"
+          : containerKey === "period-postseason"
+            ? "Post-Season"
+            : `Episode ${Number.isFinite(inferredEpisodeNumber ?? Number.NaN) ? inferredEpisodeNumber : "?"}`);
+
+      bounds.set(containerKey, {
+        key: containerKey,
+        label: inferredLabel,
+        start: cachedWindowStart ?? existing?.start ?? null,
+        end: cachedWindowEnd ?? existing?.end ?? null,
+        type: inferredType,
+        source: "cache",
+        episodeNumber: inferredType === "episode" ? inferredEpisodeNumber : undefined,
+      });
+    }
+
     const firstEpisodeAirDate =
       episodeAirDateByNumber.get(1) ??
       rows.find((row) => row.episode_number === 1)?.episode_air_date ??
@@ -2183,7 +2609,13 @@ export default function RedditSourcesManager({
     }
 
     return bounds;
-  }, [episodeAirDateByNumber, episodeCandidates, episodeMatrixRowsForDisplay, periodOptions]);
+  }, [
+    episodeAirDateByNumber,
+    episodeCandidates,
+    episodeMatrixRowsForDisplay,
+    periodOptions,
+    windowDiscoveryByContainer,
+  ]);
 
   const seasonalBoundaryPeriods = useMemo(
     () =>
@@ -2316,30 +2748,6 @@ export default function RedditSourcesManager({
     [episodeCandidates, syncCandidateResultByPostId, syncReasonCodeFilter, syncStatusFilter],
   );
 
-  const selectedEpisodeWindowBounds = useMemo(
-    () =>
-      episodeWindowModalContainerKey
-        ? episodeWindowBoundsByContainer.get(episodeWindowModalContainerKey) ?? null
-        : null,
-    [episodeWindowBoundsByContainer, episodeWindowModalContainerKey],
-  );
-
-  const selectedEpisodeWindowDiscussionPosts = useMemo<EpisodeWindowPostItem[]>(() => {
-    if (!episodeWindowModalContainerKey) return [];
-    const linkedPosts = linkedDiscussionPostsByContainer.get(episodeWindowModalContainerKey) ?? [];
-    return linkedPosts.map((post) => ({
-      redditPostId: post.reddit_post_id,
-      title: post.title,
-      text: post.text,
-      url: post.url,
-      score: post.score,
-      numComments: post.num_comments,
-      postedAt: post.posted_at,
-      flair: post.link_flair_text,
-      discussionType: post.discussion_type,
-    }));
-  }, [episodeWindowModalContainerKey, linkedDiscussionPostsByContainer]);
-
   const filterTrackedDiscoveryPostsForContainer = useCallback(
     (threads: DiscoveryThread[], containerKey: string): EpisodeWindowPostItem[] => {
       const bounds = episodeWindowBoundsByContainer.get(containerKey);
@@ -2411,23 +2819,23 @@ export default function RedditSourcesManager({
 
   const trackedFlairTotalCountByContainerWindow = useMemo(() => {
     const map = new Map<string, number>();
-    const threads = discovery?.threads ?? [];
-    if (threads.length === 0) return map;
     for (const key of episodeWindowBoundsByContainer.keys()) {
+      const threads = windowDiscoveryByContainer[key]?.threads ?? [];
+      if (threads.length === 0) continue;
       map.set(key, filterTrackedDiscoveryPostsForContainer(threads, key).length);
     }
     return map;
-  }, [discovery?.threads, episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer]);
+  }, [episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer, windowDiscoveryByContainer]);
 
   const unassignedFlairCountByContainerWindow = useMemo(() => {
     const map = new Map<string, number>();
-    const threads = discovery?.threads ?? [];
-    if (threads.length === 0) return map;
     for (const key of episodeWindowBoundsByContainer.keys()) {
+      const threads = windowDiscoveryByContainer[key]?.threads ?? [];
+      if (threads.length === 0) continue;
       map.set(key, filterUnassignedDiscoveryPostsForContainer(threads, key).length);
     }
     return map;
-  }, [discovery?.threads, episodeWindowBoundsByContainer, filterUnassignedDiscoveryPostsForContainer]);
+  }, [episodeWindowBoundsByContainer, filterUnassignedDiscoveryPostsForContainer, windowDiscoveryByContainer]);
 
   const matrixUnassignedFlairCountBySlot = useMemo(() => {
     if (unassignedFlairCountByContainerWindow.size === 0) {
@@ -2490,32 +2898,18 @@ export default function RedditSourcesManager({
   }, [seasonalBoundaryPeriods, trackedFlairTotalCountByContainerWindow]);
 
   const trackedFlairWindowPostCount = useMemo(() => {
-    const threads = discovery?.threads ?? [];
-    if (threads.length === 0 || episodeWindowBoundsByContainer.size === 0) return 0;
+    if (episodeWindowBoundsByContainer.size === 0) return 0;
     const postIds = new Set<string>();
     for (const key of episodeWindowBoundsByContainer.keys()) {
+      const threads = windowDiscoveryByContainer[key]?.threads ?? [];
+      if (threads.length === 0) continue;
       const posts = filterTrackedDiscoveryPostsForContainer(threads, key);
       for (const post of posts) {
         postIds.add(post.redditPostId);
       }
     }
     return postIds.size;
-  }, [discovery?.threads, episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer]);
-
-  useEffect(() => {
-    if (!episodeWindowModalContainerKey) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setEpisodeWindowModalContainerKey(null);
-      setEpisodeWindowModalError(null);
-      setEpisodeWindowModalLoading(false);
-      setEpisodeWindowModalOtherPosts([]);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [episodeWindowModalContainerKey]);
+  }, [episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer, windowDiscoveryByContainer]);
 
   useEffect(() => {
     if (syncStatusFilter === "no_sync_result" && syncReasonCodeFilter !== "all") {
@@ -2539,7 +2933,7 @@ export default function RedditSourcesManager({
 
   const loadPeriodOptionsForSeason = useCallback(
     async (
-      community: RedditCommunity,
+      community: CommunityContextSeed,
       season: ShowSeasonOption,
       options?: { signal?: AbortSignal; requestToken?: number },
     ) => {
@@ -2551,92 +2945,166 @@ export default function RedditSourcesManager({
           setPeriodOptions(cachedPeriods);
           setSelectedPeriodKey("all-periods");
         }
+        periodOptionsByShowCacheRef.current.set(community.trr_show_id, cachedPeriods);
         return;
       }
 
       const headers = await getAuthHeaders();
       const analyticsParams = new URLSearchParams();
       analyticsParams.set("season_id", season.id);
-      const analyticsResponse = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${community.trr_show_id}/seasons/${season.season_number}/social/analytics?${analyticsParams.toString()}`,
-        {
-          headers,
-          cache: "no-store",
-          signal: options?.signal,
-          timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
-        },
-      );
-      if (!analyticsResponse.ok) {
-        console.warn("[reddit_episode_period_context_fetch_failed]", {
-          show_id: community.trr_show_id,
-          season_id: season.id,
-          season_number: season.season_number,
-          status: analyticsResponse.status,
-        });
-        periodOptionsCacheRef.current.set(periodCacheKey, []);
+      const inFlightPeriodOptions = periodOptionsRequestInFlightRef.current.get(periodCacheKey);
+      const periodOptionsPromise =
+        inFlightPeriodOptions ??
+        (async (): Promise<EpisodePeriodOption[] | null> => {
+          const analyticsResponse = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${community.trr_show_id}/seasons/${season.season_number}/social/analytics?${analyticsParams.toString()}`,
+            {
+              headers,
+              cache: "no-store",
+              signal: options?.signal,
+              timeoutMs: REQUEST_TIMEOUT_MS.periodOptions,
+            },
+          );
+          if (!analyticsResponse.ok) {
+            console.warn("[reddit_episode_period_context_fetch_failed]", {
+              show_id: community.trr_show_id,
+              season_id: season.id,
+              season_number: season.season_number,
+              status: analyticsResponse.status,
+            });
+            return null;
+          }
+          const analyticsPayload = (await analyticsResponse.json().catch(() => ({}))) as {
+            weekly?: SocialAnalyticsPeriodRow[];
+            summary?: {
+              window?: {
+                start?: string | null;
+                end?: string | null;
+              };
+            };
+            window?: {
+              start?: string | null;
+              end?: string | null;
+            };
+          };
+          const periods = buildPeriodOptions(
+            Array.isArray(analyticsPayload.weekly) ? analyticsPayload.weekly : [],
+          );
+          if (periods.length > 0) {
+            return periods;
+          }
+          const fallbackStart =
+            analyticsPayload.summary?.window?.start ?? analyticsPayload.window?.start ?? null;
+          const fallbackEnd =
+            analyticsPayload.summary?.window?.end ?? analyticsPayload.window?.end ?? null;
+          const fallbackStartIso = toIsoDate(fallbackStart);
+          const fallbackEndIso = toIsoDate(fallbackEnd);
+          if (fallbackStartIso && fallbackEndIso) {
+            return [
+              {
+                key: "all-periods",
+                label: "All Periods",
+                start: fallbackStartIso,
+                end: fallbackEndIso,
+              },
+            ];
+          }
+          return [];
+        })();
+      if (!inFlightPeriodOptions) {
+        periodOptionsRequestInFlightRef.current.set(periodCacheKey, periodOptionsPromise);
+      }
+      const preserveKnownPeriodsForSeason = (): boolean => {
+        const cached = periodOptionsCacheRef.current.get(periodCacheKey);
+        if (Array.isArray(cached) && cached.length > 0) {
+          if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+            setPeriodOptions(cached);
+            setSelectedPeriodKey((current) =>
+              cached.some((period) => period.key === current) ? current : "all-periods",
+            );
+          }
+          return true;
+        }
+        if (periodOptionsRef.current.length > 0) {
+          if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+            setPeriodOptions(periodOptionsRef.current);
+            setSelectedPeriodKey((current) =>
+              periodOptionsRef.current.some((period) => period.key === current)
+                ? current
+                : "all-periods",
+            );
+          }
+          return true;
+        }
+        const showCached = periodOptionsByShowCacheRef.current.get(community.trr_show_id);
+        if (Array.isArray(showCached) && showCached.length > 0) {
+          if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+            setPeriodOptions(showCached);
+            setSelectedPeriodKey((current) =>
+              showCached.some((period) => period.key === current) ? current : "all-periods",
+            );
+          }
+          return true;
+        }
+        return false;
+      };
+      let resolvedPeriods: EpisodePeriodOption[] | null = null;
+      try {
+        resolvedPeriods = await periodOptionsPromise;
+      } finally {
+        if (
+          !inFlightPeriodOptions &&
+          periodOptionsRequestInFlightRef.current.get(periodCacheKey) === periodOptionsPromise
+        ) {
+          periodOptionsRequestInFlightRef.current.delete(periodCacheKey);
+        }
+      }
+
+      if (resolvedPeriods === null) {
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
-          setPeriodOptions([]);
-          setSelectedPeriodKey("all-periods");
+          const preserved = preserveKnownPeriodsForSeason();
+          if (!preserved) {
+            console.warn("[reddit_period_options_unavailable]", {
+              show_id: community.trr_show_id,
+              season_id: season.id,
+              season_number: season.season_number,
+              reason: "social_analytics_unavailable",
+            });
+          }
         }
         return;
       }
-      const analyticsPayload = (await analyticsResponse.json().catch(() => ({}))) as {
-        weekly?: SocialAnalyticsPeriodRow[];
-        summary?: {
-          window?: {
-            start?: string | null;
-            end?: string | null;
-          };
-        };
-        window?: {
-          start?: string | null;
-          end?: string | null;
-        };
-      };
-
-      const periods = buildPeriodOptions(Array.isArray(analyticsPayload.weekly) ? analyticsPayload.weekly : []);
+      const periods = resolvedPeriods;
       if (periods.length > 0) {
         periodOptionsCacheRef.current.set(periodCacheKey, periods);
+        periodOptionsByShowCacheRef.current.set(community.trr_show_id, periods);
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           setPeriodOptions(periods);
           setSelectedPeriodKey("all-periods");
         }
         return;
       }
-
-      const fallbackStart =
-        analyticsPayload.summary?.window?.start ?? analyticsPayload.window?.start ?? null;
-      const fallbackEnd =
-        analyticsPayload.summary?.window?.end ?? analyticsPayload.window?.end ?? null;
-      const fallbackStartIso = toIsoDate(fallbackStart);
-      const fallbackEndIso = toIsoDate(fallbackEnd);
-      if (fallbackStartIso && fallbackEndIso) {
-        const fallbackPeriods: EpisodePeriodOption[] = [
-          {
-            key: "all-periods",
-            label: "All Periods",
-            start: fallbackStartIso,
-            end: fallbackEndIso,
-          },
-        ];
-        periodOptionsCacheRef.current.set(periodCacheKey, fallbackPeriods);
-        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
-          setPeriodOptions(fallbackPeriods);
-          setSelectedPeriodKey("all-periods");
-        }
-      } else {
-        periodOptionsCacheRef.current.set(periodCacheKey, []);
-        if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
-          setPeriodOptions([]);
+      if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+        const preserved = preserveKnownPeriodsForSeason();
+        if (!preserved) {
+          console.warn("[reddit_period_options_empty]", {
+            show_id: community.trr_show_id,
+            season_id: season.id,
+            season_number: season.season_number,
+          });
         }
       }
     },
-    [fetchWithTimeout, getAuthHeaders, isEpisodeContextRequestActive],
+    [
+      fetchWithTimeout,
+      getAuthHeaders,
+      isEpisodeContextRequestActive,
+    ],
   );
 
   const loadShowMetadataForCommunity = useCallback(
     async (
-      community: RedditCommunity,
+      community: CommunityContextSeed,
       options?: { signal?: AbortSignal; requestToken?: number },
     ): Promise<{ showLabel: string; showSlug: string | null }> => {
       const cached = showMetadataCacheRef.current.get(community.trr_show_id);
@@ -2702,58 +3170,77 @@ export default function RedditSourcesManager({
         }
         return;
       }
-      const headers = await getAuthHeaders();
-      const response = await fetchWithTimeout(
-        `/api/admin/trr-api/seasons/${seasonIdValue}/episodes?limit=250&offset=0`,
-        {
-          headers,
-          cache: "no-store",
-          signal: options?.signal,
-          timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
-        },
-      );
-      if (!response.ok) {
-        throw new Error("Failed to load season episodes for discussion dates");
-      }
-      const payload = (await response.json().catch(() => ({}))) as {
-        episodes?: Array<{
-          id?: string | null;
-          episode_number?: number | string | null;
-          name?: string | null;
-          title?: string | null;
-          air_date?: string | null;
-        }>;
-      };
-      const normalizedEpisodes = (Array.isArray(payload.episodes) ? payload.episodes : [])
-        .map((episode) => {
-          const parsedEpisodeNumber =
-            typeof episode.episode_number === "number"
-              ? Math.trunc(episode.episode_number)
-              : typeof episode.episode_number === "string"
-                ? Number.parseInt(episode.episode_number, 10)
-                : Number.NaN;
-          if (!Number.isFinite(parsedEpisodeNumber) || parsedEpisodeNumber <= 0) {
-            return null;
+      const inFlightEpisodes = seasonEpisodesRequestInFlightRef.current.get(seasonIdValue);
+      const episodesPromise =
+        inFlightEpisodes ??
+        (async (): Promise<SeasonEpisodeRow[]> => {
+          const headers = await getAuthHeaders();
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/seasons/${seasonIdValue}/episodes?limit=250&offset=0`,
+            {
+              headers,
+              cache: "no-store",
+              signal: options?.signal,
+              timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+            },
+          );
+          if (!response.ok) {
+            throw new Error("Failed to load season episodes for discussion dates");
           }
-          return {
-            id: typeof episode.id === "string" && episode.id.trim().length > 0
-              ? episode.id
-              : `episode-${parsedEpisodeNumber}`,
-            episode_number: parsedEpisodeNumber,
-            title:
-              typeof episode.name === "string" && episode.name.trim().length > 0
-                ? episode.name
-                : typeof episode.title === "string" && episode.title.trim().length > 0
-                  ? episode.title
-                  : null,
-            air_date:
-              typeof episode.air_date === "string" && episode.air_date.trim().length > 0
-                ? episode.air_date
-                : null,
-          } satisfies SeasonEpisodeRow;
-        })
-        .filter((episode): episode is SeasonEpisodeRow => Boolean(episode))
-        .sort((a, b) => a.episode_number - b.episode_number);
+          const payload = (await response.json().catch(() => ({}))) as {
+            episodes?: Array<{
+              id?: string | null;
+              episode_number?: number | string | null;
+              name?: string | null;
+              title?: string | null;
+              air_date?: string | null;
+            }>;
+          };
+          return (Array.isArray(payload.episodes) ? payload.episodes : [])
+            .map((episode) => {
+              const parsedEpisodeNumber =
+                typeof episode.episode_number === "number"
+                  ? Math.trunc(episode.episode_number)
+                  : typeof episode.episode_number === "string"
+                    ? Number.parseInt(episode.episode_number, 10)
+                    : Number.NaN;
+              if (!Number.isFinite(parsedEpisodeNumber) || parsedEpisodeNumber <= 0) {
+                return null;
+              }
+              return {
+                id: typeof episode.id === "string" && episode.id.trim().length > 0
+                  ? episode.id
+                  : `episode-${parsedEpisodeNumber}`,
+                episode_number: parsedEpisodeNumber,
+                title:
+                  typeof episode.name === "string" && episode.name.trim().length > 0
+                    ? episode.name
+                    : typeof episode.title === "string" && episode.title.trim().length > 0
+                      ? episode.title
+                      : null,
+                air_date:
+                  typeof episode.air_date === "string" && episode.air_date.trim().length > 0
+                    ? episode.air_date
+                    : null,
+              } satisfies SeasonEpisodeRow;
+            })
+            .filter((episode): episode is SeasonEpisodeRow => Boolean(episode))
+            .sort((a, b) => a.episode_number - b.episode_number);
+        })();
+      if (!inFlightEpisodes) {
+        seasonEpisodesRequestInFlightRef.current.set(seasonIdValue, episodesPromise);
+      }
+      let normalizedEpisodes: SeasonEpisodeRow[] = [];
+      try {
+        normalizedEpisodes = await episodesPromise;
+      } finally {
+        if (
+          !inFlightEpisodes &&
+          seasonEpisodesRequestInFlightRef.current.get(seasonIdValue) === episodesPromise
+        ) {
+          seasonEpisodesRequestInFlightRef.current.delete(seasonIdValue);
+        }
+      }
 
       if (isEpisodeContextRequestActive(options?.requestToken ?? 0, options?.signal)) {
         setSeasonEpisodes(normalizedEpisodes);
@@ -2763,8 +3250,12 @@ export default function RedditSourcesManager({
   );
 
   const loadSeasonAndPeriodContext = useCallback(
-    async (community: RedditCommunity, options?: { signal?: AbortSignal; requestToken?: number }) => {
+    async (community: CommunityContextSeed, options?: { signal?: AbortSignal; requestToken?: number }) => {
       const requestToken = options?.requestToken ?? episodeContextRequestTokenRef.current;
+      const startedAt =
+        typeof performance !== "undefined" && typeof performance.now === "function"
+          ? performance.now()
+          : Date.now();
       setPeriodsLoading(true);
       setEpisodeContextWarning(null);
       try {
@@ -2773,31 +3264,50 @@ export default function RedditSourcesManager({
         let seasons = seasonOptionsCacheRef.current.get(seasonCacheKey) ?? null;
         if (!seasons) {
           const headers = await getAuthHeaders();
-          const seasonsResponse = await fetchWithTimeout(
-            `/api/admin/trr-api/shows/${community.trr_show_id}/seasons?limit=100&include_episode_signal=true`,
-            {
-              headers,
-              cache: "no-store",
-              signal: options?.signal,
-              timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
-            },
-          );
-          if (!seasonsResponse.ok) {
-            throw new Error("Failed to load seasons for episode discussions");
+          const showIdKey = community.trr_show_id;
+          const inFlightSeasonOptions = seasonOptionsRequestInFlightRef.current.get(showIdKey);
+          const seasonOptionsPromise =
+            inFlightSeasonOptions ??
+            (async (): Promise<ShowSeasonOption[]> => {
+              const seasonsResponse = await fetchWithTimeout(
+                `/api/admin/trr-api/shows/${showIdKey}/seasons?limit=100&include_episode_signal=true`,
+                {
+                  headers,
+                  cache: "no-store",
+                  signal: options?.signal,
+                  timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+                },
+              );
+              if (!seasonsResponse.ok) {
+                throw new Error("Failed to load seasons for episode discussions");
+              }
+              const seasonsPayload = (await seasonsResponse.json().catch(() => ({}))) as {
+                seasons?: ShowSeasonOption[];
+              };
+              return Array.isArray(seasonsPayload.seasons)
+                ? [...seasonsPayload.seasons]
+                    .filter(
+                      (season): season is ShowSeasonOption =>
+                        Boolean(season?.id) &&
+                        typeof season.season_number === "number" &&
+                        Number.isFinite(season.season_number),
+                    )
+                    .sort((a, b) => b.season_number - a.season_number)
+                : [];
+            })();
+          if (!inFlightSeasonOptions) {
+            seasonOptionsRequestInFlightRef.current.set(showIdKey, seasonOptionsPromise);
           }
-          const seasonsPayload = (await seasonsResponse.json().catch(() => ({}))) as {
-            seasons?: ShowSeasonOption[];
-          };
-          seasons = Array.isArray(seasonsPayload.seasons)
-            ? [...seasonsPayload.seasons]
-                .filter(
-                  (season): season is ShowSeasonOption =>
-                    Boolean(season?.id) &&
-                    typeof season.season_number === "number" &&
-                    Number.isFinite(season.season_number),
-                )
-                .sort((a, b) => b.season_number - a.season_number)
-            : [];
+          try {
+            seasons = await seasonOptionsPromise;
+          } finally {
+            if (
+              !inFlightSeasonOptions &&
+              seasonOptionsRequestInFlightRef.current.get(showIdKey) === seasonOptionsPromise
+            ) {
+              seasonOptionsRequestInFlightRef.current.delete(showIdKey);
+            }
+          }
           seasonOptionsCacheRef.current.set(seasonCacheKey, seasons);
         }
         if (!isEpisodeContextRequestActive(requestToken, options?.signal)) {
@@ -2838,10 +3348,37 @@ export default function RedditSourcesManager({
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           setEpisodeSeasonId(resolvedSeason.id);
         }
-        await Promise.all([
-          loadSeasonEpisodesForSeason(resolvedSeason.id, options),
-          loadPeriodOptionsForSeason(community, resolvedSeason, options),
-        ]);
+        const periodOptionsPromise = loadPeriodOptionsForSeason(
+          community,
+          resolvedSeason,
+          options,
+        ).catch((err) => {
+          if (
+            isRequestCancelledError(err) ||
+            options?.signal?.aborted ||
+            !isEpisodeContextRequestActive(requestToken, options?.signal)
+          ) {
+            return;
+          }
+          console.warn("[reddit_period_options_background_failed]", err);
+        });
+        await loadSeasonEpisodesForSeason(resolvedSeason.id, {
+          ...options,
+          requestToken,
+        });
+        logRedditPerfTiming("core_context_ready", startedAt, {
+          community_id: community.id,
+          season_id: resolvedSeason.id,
+          season_number: resolvedSeason.season_number,
+        });
+        void periodOptionsPromise.then(() => {
+          if (!isEpisodeContextRequestActive(requestToken, options?.signal)) return;
+          logRedditPerfTiming("full_context_ready", startedAt, {
+            community_id: community.id,
+            season_id: resolvedSeason.id,
+            season_number: resolvedSeason.season_number,
+          });
+        });
       } finally {
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           setPeriodsLoading(false);
@@ -2861,23 +3398,17 @@ export default function RedditSourcesManager({
   );
 
   useEffect(() => {
-    if (!selectedCommunity) return;
+    if (!selectedCommunityContextSeed) return;
     const requestToken = episodeContextRequestTokenRef.current + 1;
     episodeContextRequestTokenRef.current = requestToken;
-    episodeContextAbortRef.current?.abort();
-    const controller = new AbortController();
-    episodeContextAbortRef.current = controller;
     void (async () => {
       try {
-        await loadSeasonAndPeriodContext(selectedCommunity, {
-          signal: controller.signal,
+        await loadSeasonAndPeriodContext(selectedCommunityContextSeed, {
           requestToken,
         });
       } catch (err) {
-        if (
-          !controller.signal.aborted &&
-          episodeContextRequestTokenRef.current === requestToken
-        ) {
+        if (isRequestCancelledError(err)) return;
+        if (episodeContextRequestTokenRef.current === requestToken) {
           setEpisodeContextWarning(
             toErrorMessage(
               err,
@@ -2888,12 +3419,28 @@ export default function RedditSourcesManager({
       }
     })();
     return () => {
-      controller.abort();
-      if (episodeContextAbortRef.current === controller) {
-        episodeContextAbortRef.current = null;
-      }
+      setPeriodsLoading(false);
     };
-  }, [loadSeasonAndPeriodContext, selectedCommunity]);
+  }, [loadSeasonAndPeriodContext, selectedCommunityContextSeed]);
+
+  useEffect(() => {
+    if (!selectedCommunityContextSeed) return;
+    if (seasonEpisodes.length > 0) return;
+    const requestToken = episodeContextRequestTokenRef.current;
+    if (requestToken <= 0) return;
+    const resolvedSeasonId = episodeSeasonId?.trim();
+    if (!resolvedSeasonId) return;
+
+    let cancelled = false;
+    void loadSeasonEpisodesForSeason(resolvedSeasonId, { requestToken }).catch((err) => {
+      if (cancelled || isRequestCancelledError(err)) return;
+      console.warn("[reddit_episode_rows_recovery_failed]", err);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [episodeSeasonId, loadSeasonEpisodesForSeason, seasonEpisodes.length, selectedCommunityContextSeed]);
 
   const buildCommunityViewHref = useCallback((community: Pick<RedditCommunity, "id" | "subreddit" | "trr_show_id" | "trr_show_name">): string => {
     const selectedCommunityShowSlug =
@@ -3315,6 +3862,50 @@ export default function RedditSourcesManager({
     },
     [isDedicatedCommunityView, seasonSelectionCommunitySlug, seasonSelectionShowSlug],
   );
+
+  useEffect(() => {
+    if (!seasonSelectionShowSlug) return;
+    const routeShowSlug = routeRedditPathContext.showSlug;
+    if (!routeShowSlug) return;
+    if (routeShowSlug.toLowerCase() !== seasonSelectionShowSlug.toLowerCase()) return;
+    if (routeRedditPathContext.seasonNumber != null) return;
+    if (
+      typeof activeSeasonSelection !== "number" ||
+      !Number.isFinite(activeSeasonSelection) ||
+      activeSeasonSelection <= 0
+    ) {
+      return;
+    }
+    const currentHref = pathname;
+    const canonicalHref = isDedicatedCommunityView
+      ? seasonSelectionCommunitySlug
+        ? buildShowRedditCommunityUrl({
+            showSlug: seasonSelectionShowSlug,
+            communitySlug: seasonSelectionCommunitySlug,
+            seasonNumber: activeSeasonSelection,
+          })
+        : null
+      : routeRedditPathContext.communitySlug
+        ? null
+        : buildShowRedditUrl({
+            showSlug: seasonSelectionShowSlug,
+            seasonNumber: activeSeasonSelection,
+          });
+    if (!canonicalHref) return;
+    if (canonicalHref === currentHref) return;
+    router.replace(canonicalHref as Parameters<typeof router.replace>[0]);
+  }, [
+    activeSeasonSelection,
+    isDedicatedCommunityView,
+    pathname,
+    routeRedditPathContext.communitySlug,
+    routeRedditPathContext.seasonNumber,
+    routeRedditPathContext.showSlug,
+    router,
+    seasonSelectionCommunitySlug,
+    seasonSelectionShowSlug,
+  ]);
+
   const handleSeasonSelectionChange = useCallback(
     (rawValue: string) => {
       const nextSeasonNumber = Number.parseInt(rawValue, 10);
@@ -3392,7 +3983,8 @@ export default function RedditSourcesManager({
         sortCommunityList([createdCommunity, ...prev.filter((community) => community.id !== createdCommunity.id)]),
       );
       setSelectedCommunityId(createdCommunity.id);
-      setDiscovery(null);
+      setSeasonDiscovery(null);
+      setWindowDiscoveryByContainer({});
       resetCommunityForm();
       setShowCommunityForm(false);
       void refreshCommunityFlares(createdCommunity.id);
@@ -3424,7 +4016,8 @@ export default function RedditSourcesManager({
       }
       await fetchCommunities();
       if (selectedCommunityId === communityId) {
-        setDiscovery(null);
+        setSeasonDiscovery(null);
+        setWindowDiscoveryByContainer({});
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete community");
@@ -3523,15 +4116,99 @@ export default function RedditSourcesManager({
     [],
   );
 
-  const setContainerSeedInput = useCallback((containerKey: string, value: string) => {
-    setSeedInputByContainer((current) => ({
-      ...current,
-      [containerKey]: value,
-    }));
-  }, []);
+  const resolveSeasonIdFastPath = useCallback(
+    async (community: RedditCommunity): Promise<string | null> => {
+      const targetSeasonNumber =
+        typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0
+          ? seasonNumber
+          : null;
+      if (!targetSeasonNumber) {
+        return null;
+      }
+      const cacheKey = `${community.trr_show_id}:${targetSeasonNumber}`;
+      const cachedSeasonId = seasonIdByShowAndNumberRef.current.get(cacheKey);
+      if (cachedSeasonId) {
+        return cachedSeasonId;
+      }
+
+      const cachedSeasonOptions = seasonOptionsCacheRef.current.get(community.trr_show_id);
+      if (Array.isArray(cachedSeasonOptions) && cachedSeasonOptions.length > 0) {
+        const matchedFromCache = cachedSeasonOptions.find(
+          (season) => season.season_number === targetSeasonNumber && Boolean(season.id),
+        );
+        if (matchedFromCache?.id) {
+          seasonIdByShowAndNumberRef.current.set(cacheKey, matchedFromCache.id);
+          return matchedFromCache.id;
+        }
+      }
+
+      const headers = await getAuthHeaders();
+      const startedAt =
+        typeof performance !== "undefined" && typeof performance.now === "function"
+          ? performance.now()
+          : Date.now();
+      const showIdKey = community.trr_show_id;
+      const inFlightSeasonOptions = seasonOptionsRequestInFlightRef.current.get(showIdKey);
+      const seasonOptionsPromise =
+        inFlightSeasonOptions ??
+        (async (): Promise<ShowSeasonOption[]> => {
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showIdKey}/seasons?limit=100&include_episode_signal=true`,
+            {
+              headers,
+              cache: "no-store",
+              timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+            },
+          );
+          if (!response.ok) {
+            return [];
+          }
+          const payload = (await response.json().catch(() => ({}))) as { seasons?: ShowSeasonOption[] };
+          return Array.isArray(payload.seasons)
+            ? payload.seasons.filter(
+                (season): season is ShowSeasonOption =>
+                  Boolean(season?.id) &&
+                  typeof season.season_number === "number" &&
+                  Number.isFinite(season.season_number),
+              )
+            : [];
+        })();
+      if (!inFlightSeasonOptions) {
+        seasonOptionsRequestInFlightRef.current.set(showIdKey, seasonOptionsPromise);
+      }
+      let seasons: ShowSeasonOption[] = [];
+      try {
+        seasons = await seasonOptionsPromise;
+      } finally {
+        if (!inFlightSeasonOptions && seasonOptionsRequestInFlightRef.current.get(showIdKey) === seasonOptionsPromise) {
+          seasonOptionsRequestInFlightRef.current.delete(showIdKey);
+        }
+      }
+      if (seasons.length === 0) {
+        return null;
+      }
+      seasonOptionsCacheRef.current.set(showIdKey, seasons);
+      for (const season of seasons) {
+        seasonIdByShowAndNumberRef.current.set(`${showIdKey}:${season.season_number}`, season.id);
+      }
+      const matched = seasons.find((season) => season.season_number === targetSeasonNumber) ?? null;
+      if (matched?.id) {
+        logRedditPerfTiming("season_id_fast_resolved", startedAt, {
+          show_id: showIdKey,
+          season_number: targetSeasonNumber,
+        });
+      }
+      return matched?.id ?? null;
+    },
+    [fetchWithTimeout, getAuthHeaders, seasonNumber],
+  );
 
   const resolveSeasonIdForRequests = useCallback(
     async (communityId?: string): Promise<string | null> => {
+      const startedAt =
+        typeof performance !== "undefined" && typeof performance.now === "function"
+          ? performance.now()
+          : Date.now();
       const maxSeasonNumberForContext =
         typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0
           ? seasonNumber
@@ -3577,18 +4254,69 @@ export default function RedditSourcesManager({
         seasonOptionsCacheRef.current.get(activeCommunity.trr_show_id),
       );
       if (cachedSeasonId) {
+        logRedditPerfTiming("season_id_resolved_from_cache", startedAt, {
+          show_id: activeCommunity.trr_show_id,
+        });
         return cachedSeasonId;
       }
-
-      try {
-        await loadSeasonAndPeriodContext(activeCommunity);
-      } catch {
-        return null;
+      const resolutionKey = `${activeCommunity.id}:${seasonId ?? "none"}:${seasonNumber ?? "none"}`;
+      const inFlightResolution = seasonIdResolutionInFlightRef.current.get(resolutionKey);
+      if (inFlightResolution) {
+        return await inFlightResolution;
       }
 
-      return pickSeasonId(seasonOptionsCacheRef.current.get(activeCommunity.trr_show_id));
+      const resolutionPromise = (async (): Promise<string | null> => {
+        try {
+          const fastSeasonId = await resolveSeasonIdFastPath(activeCommunity);
+          if (fastSeasonId) {
+            if (!episodeSeasonId) {
+              setEpisodeSeasonId(fastSeasonId);
+            }
+            logRedditPerfTiming("season_id_resolved_fast_path", startedAt, {
+              show_id: activeCommunity.trr_show_id,
+              season_id: fastSeasonId,
+            });
+            return fastSeasonId;
+          }
+        } catch {
+          // Fall back to full context load below when fast path fails.
+        }
+
+        try {
+          await loadSeasonAndPeriodContext(activeCommunity);
+        } catch {
+          return null;
+        }
+
+        const resolved = pickSeasonId(seasonOptionsCacheRef.current.get(activeCommunity.trr_show_id));
+        if (resolved) {
+          logRedditPerfTiming("season_id_resolved_full_context", startedAt, {
+            show_id: activeCommunity.trr_show_id,
+            season_id: resolved,
+          });
+        }
+        return resolved;
+      })();
+
+      seasonIdResolutionInFlightRef.current.set(resolutionKey, resolutionPromise);
+      try {
+        return await resolutionPromise;
+      } finally {
+        if (seasonIdResolutionInFlightRef.current.get(resolutionKey) === resolutionPromise) {
+          seasonIdResolutionInFlightRef.current.delete(resolutionKey);
+        }
+      }
     },
-    [episodeSeasonId, loadSeasonAndPeriodContext, seasonId, seasonNumber, seasonOptions, selectedCommunity],
+    [
+      episodeSeasonId,
+      loadSeasonAndPeriodContext,
+      resolveSeasonIdFastPath,
+      seasonId,
+      seasonNumber,
+      seasonOptions,
+      seasonIdResolutionInFlightRef,
+      selectedCommunity,
+    ],
   );
 
   const fetchDiscoveryForCommunity = useCallback(
@@ -3607,6 +4335,15 @@ export default function RedditSourcesManager({
       }
       if (options?.periodEnd) {
         params.set("period_end", options.periodEnd);
+      }
+      if (options?.containerKey) {
+        params.set("container_key", options.containerKey);
+      }
+      if (options?.periodLabel) {
+        params.set("period_label", options.periodLabel);
+      }
+      if (options?.coverageMode) {
+        params.set("coverage_mode", options.coverageMode);
       }
       if (options?.exhaustive) {
         params.set("exhaustive", "true");
@@ -3632,67 +4369,95 @@ export default function RedditSourcesManager({
       if (typeof options?.maxPages === "number" && Number.isFinite(options.maxPages)) {
         params.set("max_pages", String(Math.max(1, Math.trunc(options.maxPages))));
       }
-      if (options?.seedPostUrls && options.seedPostUrls.length > 0) {
-        for (const seedUrl of options.seedPostUrls) {
-          const normalized = seedUrl.trim();
-          if (!normalized) continue;
-          params.append("seed_post_url", normalized);
+      const qs = params.toString();
+      const requestUrl = `/api/admin/reddit/communities/${communityId}/discover${qs ? `?${qs}` : ""}`;
+      const requestKey = `${communityId}::${qs}`;
+      const shouldDedup = options?.refresh !== true;
+      const inFlightRequests = discoveryRequestInFlightRef.current;
+      if (shouldDedup) {
+        const existing = inFlightRequests.get(requestKey);
+        if (existing) return existing;
+      }
+
+      const requestPromise = (async (): Promise<DiscoveryFetchResult> => {
+        const response = await fetchWithTimeout(requestUrl, {
+          headers,
+          cache: "no-store",
+          timeoutMs: options?.timeoutMs ?? REQUEST_TIMEOUT_MS.discover,
+        });
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? "Failed to discover threads");
+        }
+        const payload = (await response.json()) as {
+          discovery?: DiscoveryPayload | null;
+          warning?: string;
+          run?: Record<string, unknown>;
+          source?: unknown;
+        };
+        const runPayload = payload.run;
+        const runStatus = runPayload?.status;
+        const source =
+          payload.source === "cache" || payload.source === "live_run"
+            ? payload.source
+            : null;
+        return {
+          discovery: payload.discovery ?? null,
+          warning: typeof payload.warning === "string" && payload.warning.trim() ? payload.warning : null,
+          source,
+          run:
+            typeof runPayload?.run_id === "string" &&
+            runPayload.run_id.trim().length > 0 &&
+            isRefreshRunStatus(runStatus)
+              ? {
+                  run_id: runPayload.run_id,
+                  status: runStatus,
+                  error: typeof runPayload.error === "string" ? runPayload.error : null,
+                  totals:
+                    runPayload.totals && typeof runPayload.totals === "object"
+                      ? {
+                          fetched_rows:
+                            typeof (runPayload.totals as Record<string, unknown>).fetched_rows === "number"
+                              ? ((runPayload.totals as Record<string, unknown>).fetched_rows as number)
+                              : undefined,
+                          matched_rows:
+                            typeof (runPayload.totals as Record<string, unknown>).matched_rows === "number"
+                              ? ((runPayload.totals as Record<string, unknown>).matched_rows as number)
+                              : undefined,
+                          tracked_flair_rows:
+                            typeof (runPayload.totals as Record<string, unknown>).tracked_flair_rows === "number"
+                              ? ((runPayload.totals as Record<string, unknown>).tracked_flair_rows as number)
+                              : undefined,
+                        }
+                      : undefined,
+                  diagnostics:
+                    runPayload.diagnostics && typeof runPayload.diagnostics === "object"
+                      ? parseRefreshRunDiagnostics(runPayload.diagnostics)
+                      : undefined,
+                  queue: parseRefreshRunQueue(runPayload.queue),
+                  queue_position:
+                    typeof runPayload.queue_position === "number"
+                      ? runPayload.queue_position
+                      : null,
+                  active_jobs:
+                    typeof runPayload.active_jobs === "number"
+                      ? runPayload.active_jobs
+                      : null,
+                  updated_at: typeof runPayload.updated_at === "string" ? runPayload.updated_at : null,
+                }
+              : null,
+        };
+      })();
+
+      if (!shouldDedup) return requestPromise;
+      inFlightRequests.set(requestKey, requestPromise);
+      try {
+        return await requestPromise;
+      } finally {
+        if (inFlightRequests.get(requestKey) === requestPromise) {
+          inFlightRequests.delete(requestKey);
         }
       }
-      const qs = params.toString();
-      const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}/discover${qs ? `?${qs}` : ""}`, {
-        headers,
-        cache: "no-store",
-        timeoutMs: options?.timeoutMs ?? REQUEST_TIMEOUT_MS.discover,
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Failed to discover threads");
-      }
-      const payload = (await response.json()) as {
-        discovery?: DiscoveryPayload | null;
-        warning?: string;
-        run?: Record<string, unknown>;
-      };
-      const runPayload = payload.run;
-      const runStatus = runPayload?.status;
-      return {
-        discovery: payload.discovery ?? null,
-        warning: typeof payload.warning === "string" && payload.warning.trim() ? payload.warning : null,
-        run:
-          typeof runPayload?.run_id === "string" &&
-          runPayload.run_id.trim().length > 0 &&
-          isRefreshRunStatus(runStatus)
-            ? {
-                run_id: runPayload.run_id,
-                status: runStatus,
-                error: typeof runPayload.error === "string" ? runPayload.error : null,
-                totals:
-                  runPayload.totals && typeof runPayload.totals === "object"
-                    ? {
-                        fetched_rows:
-                          typeof (runPayload.totals as Record<string, unknown>).fetched_rows === "number"
-                            ? ((runPayload.totals as Record<string, unknown>).fetched_rows as number)
-                            : undefined,
-                        matched_rows:
-                          typeof (runPayload.totals as Record<string, unknown>).matched_rows === "number"
-                            ? ((runPayload.totals as Record<string, unknown>).matched_rows as number)
-                            : undefined,
-                        tracked_flair_rows:
-                          typeof (runPayload.totals as Record<string, unknown>).tracked_flair_rows === "number"
-                            ? ((runPayload.totals as Record<string, unknown>).tracked_flair_rows as number)
-                            : undefined,
-                      }
-                    : undefined,
-                diagnostics:
-                  runPayload.diagnostics && typeof runPayload.diagnostics === "object"
-                    ? ((runPayload.diagnostics as RefreshRunStatus["diagnostics"]) ?? undefined)
-                    : undefined,
-                queue: parseRefreshRunQueue(runPayload.queue),
-                updated_at: typeof runPayload.updated_at === "string" ? runPayload.updated_at : null,
-              }
-            : null,
-      };
     },
     [fetchWithTimeout, getAuthHeaders, resolveSeasonIdForRequests],
   );
@@ -3737,9 +4502,11 @@ export default function RedditSourcesManager({
             : undefined,
         diagnostics:
           payload.diagnostics && typeof payload.diagnostics === "object"
-            ? ((payload.diagnostics as RefreshRunStatus["diagnostics"]) ?? undefined)
+            ? parseRefreshRunDiagnostics(payload.diagnostics)
             : undefined,
         queue: parseRefreshRunQueue(payload.queue),
+        queue_position: typeof payload.queue_position === "number" ? payload.queue_position : null,
+        active_jobs: typeof payload.active_jobs === "number" ? payload.active_jobs : null,
         updated_at: typeof payload.updated_at === "string" ? payload.updated_at : null,
       };
     },
@@ -3757,9 +4524,30 @@ export default function RedditSourcesManager({
     }): Promise<DiscoveryFetchResult> => {
       const nextToken = (containerRefreshPollTokenRef.current[input.containerKey] ?? 0) + 1;
       containerRefreshPollTokenRef.current[input.containerKey] = nextToken;
+      let transientErrors = 0;
 
       for (let attempt = 0; attempt < CONTAINER_RUN_POLL_MAX_ATTEMPTS; attempt += 1) {
-        const run = await fetchRefreshRunStatus(input.runId);
+        let run: RefreshRunStatus;
+        try {
+          run = await fetchRefreshRunStatus(input.runId);
+          transientErrors = 0;
+        } catch (error) {
+          const message = toErrorMessage(error, "Failed to fetch reddit refresh status");
+          const isTransient = /\btimeout\b|\btimed out\b|could not reach trr-backend|failed to fetch/i.test(
+            message.toLowerCase(),
+          );
+          if (isTransient && transientErrors < 5) {
+            transientErrors += 1;
+            setContainerRefreshProgress(input.containerKey, {
+              runId: input.runId,
+              status: "running",
+              message: `${input.label}: waiting for backend run status… (${transientErrors}/5 retrying)`,
+            });
+            await sleep(CONTAINER_RUN_POLL_INTERVAL_MS);
+            continue;
+          }
+          throw error;
+        }
         if (containerRefreshPollTokenRef.current[input.containerKey] !== nextToken) {
           throw new Error("Refresh polling superseded by newer request");
         }
@@ -3781,6 +4569,8 @@ export default function RedditSourcesManager({
         const cachedResult = await fetchDiscoveryForCommunity(input.communityId, {
           periodStart: input.periodStart,
           periodEnd: input.periodEnd,
+          containerKey: input.containerKey,
+          periodLabel: input.label,
           exhaustive: true,
           searchBackfill: true,
           refresh: false,
@@ -3794,6 +4584,7 @@ export default function RedditSourcesManager({
           discovery: cachedResult.discovery,
           warning: cachedResult.warning,
           run,
+          source: cachedResult.source,
         };
       }
 
@@ -3805,63 +4596,150 @@ export default function RedditSourcesManager({
   );
 
   useEffect(() => {
-    if (!selectedCommunity) return;
-    if (episodeWindowBoundsByContainer.size === 0) return;
+    hydratedWindowContainersRef.current.clear();
+    hydratingWindowContainersRef.current.clear();
+  }, [selectedCommunity?.id, episodeSeasonId]);
+
+  useEffect(() => {
+    if (!selectedCommunityContextSeed) return;
     if (loading || episodeRefreshing) return;
+    if (!isTabVisible) return;
     const token = windowCacheHydrationTokenRef.current + 1;
     windowCacheHydrationTokenRef.current = token;
     let isCancelled = false;
 
     const hydrateWindowCaches = async () => {
-      const payloads: DiscoveryPayload[] = [];
+      const payloadByContainer: Record<string, DiscoveryPayload> = {};
       const warnings: string[] = [];
 
-      const windows = [...episodeWindowBoundsByContainer.entries()];
-      for (const [, bounds] of windows) {
-        try {
-          const cachedResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
-            periodStart: bounds.start ?? null,
-            periodEnd: bounds.end ?? null,
-            exhaustive: true,
-            searchBackfill: true,
-            refresh: false,
-            maxPages: 500,
-            timeoutMs: REQUEST_TIMEOUT_MS.discover,
-          });
-          if (isCancelled || windowCacheHydrationTokenRef.current !== token) return;
-          if (cachedResult.discovery) {
-            payloads.push(cachedResult.discovery);
-          } else if (cachedResult.warning) {
-            warnings.push(`${bounds.label}: ${cachedResult.warning}`);
-          }
-        } catch (err) {
-          if (isCancelled || windowCacheHydrationTokenRef.current !== token) return;
-          warnings.push(
-            `${bounds.label}: ${toErrorMessage(err, "Failed to load cached posts for this window.")}`,
-          );
-        }
+      const priorityKeys = new Set<string>([
+        "period-preseason",
+        "episode-1",
+        "period-postseason",
+      ]);
+      if (selectedPeriodKey !== "all-periods") {
+        priorityKeys.add(selectedPeriodKey);
       }
 
+      const fallbackBoundsForKey = (containerKey: string): EpisodeWindowBounds => {
+        if (containerKey === "period-preseason") {
+          return {
+            key: containerKey,
+            label: "Pre-Season",
+            start: null,
+            end: null,
+            type: "period",
+            source: "fallback",
+          };
+        }
+        if (containerKey === "period-postseason") {
+          return {
+            key: containerKey,
+            label: "Post-Season",
+            start: null,
+            end: null,
+            type: "period",
+            source: "fallback",
+          };
+        }
+        const episodeMatch = containerKey.match(/^episode-(\d+)$/i);
+        if (episodeMatch) {
+          const episodeNumber = Number.parseInt(episodeMatch[1] ?? "0", 10);
+          return {
+            key: containerKey,
+            label: `Episode ${Number.isFinite(episodeNumber) && episodeNumber > 0 ? episodeNumber : "?"}`,
+            start: null,
+            end: null,
+            type: "episode",
+            source: "fallback",
+            episodeNumber: Number.isFinite(episodeNumber) && episodeNumber > 0 ? episodeNumber : undefined,
+          };
+        }
+        return {
+          key: containerKey,
+          label: containerKey,
+          start: null,
+          end: null,
+          type: "period",
+          source: "fallback",
+        };
+      };
+
+      const windowCandidates =
+        episodeWindowBoundsByContainer.size > 0
+          ? [...episodeWindowBoundsByContainer.entries()]
+          : [...priorityKeys].map(
+              (key): [string, EpisodeWindowBounds] => [key, fallbackBoundsForKey(key)],
+            );
+
+      const windows = windowCandidates.filter(
+        ([windowContainerKey]) =>
+          priorityKeys.has(windowContainerKey) &&
+          !hydratedWindowContainersRef.current.has(windowContainerKey) &&
+          !hydratingWindowContainersRef.current.has(windowContainerKey),
+      );
+      if (windows.length === 0) return;
+
+      let nextWindowIndex = 0;
+      const runWorker = async () => {
+        while (nextWindowIndex < windows.length) {
+          const currentIndex = nextWindowIndex;
+          nextWindowIndex += 1;
+          const [windowContainerKey, bounds] = windows[currentIndex] ?? [];
+          if (!windowContainerKey || !bounds) continue;
+          hydratingWindowContainersRef.current.add(windowContainerKey);
+          try {
+            const cachedResult = await fetchDiscoveryForCommunity(selectedCommunityContextSeed.id, {
+              periodStart: bounds.start ?? null,
+              periodEnd: bounds.end ?? null,
+              containerKey: windowContainerKey,
+              periodLabel: bounds.label,
+              exhaustive: true,
+              searchBackfill: true,
+              refresh: false,
+              maxPages: 500,
+              timeoutMs: REQUEST_TIMEOUT_MS.discover,
+            });
+            if (isCancelled || windowCacheHydrationTokenRef.current !== token) return;
+            hydratedWindowContainersRef.current.add(windowContainerKey);
+            if (cachedResult.discovery) {
+              payloadByContainer[windowContainerKey] = cachedResult.discovery;
+            } else if (cachedResult.warning && !isNoCacheYetWarning(cachedResult.warning)) {
+              warnings.push(`${bounds.label}: ${cachedResult.warning}`);
+            }
+          } catch (err) {
+            if (isCancelled || windowCacheHydrationTokenRef.current !== token) return;
+            hydratedWindowContainersRef.current.add(windowContainerKey);
+            warnings.push(
+              `${bounds.label}: ${toErrorMessage(err, "Failed to load cached posts for this window.")}`,
+            );
+          } finally {
+            hydratingWindowContainersRef.current.delete(windowContainerKey);
+          }
+        }
+      };
+
+      const workerCount = Math.min(2, windows.length);
+      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
       if (isCancelled || windowCacheHydrationTokenRef.current !== token) return;
 
-      if (payloads.length > 0) {
-        const mergedCached = mergeDiscoveryPayloads({
-          payloads,
-          trackedFlairLabel: trackedUnassignedFlairLabel,
-        });
-        if (mergedCached) {
-          setDiscovery((current) => {
-            if (!current) return mergedCached;
-            const merged = mergeDiscoveryPayloads({
-              payloads: [current, mergedCached],
-              trackedFlairLabel: trackedUnassignedFlairLabel,
+      const discoveredContainerKeys = Object.keys(payloadByContainer);
+      if (discoveredContainerKeys.length > 0) {
+        setWindowDiscoveryByContainer((current) => ({
+          ...current,
+          ...payloadByContainer,
+        }));
+        if (!firstCachePayloadLoggedRef.current) {
+          const startedAt = communityContextStartedAtRef.current ?? communityBootstrapStartedAtRef.current;
+          if (typeof startedAt === "number") {
+            logRedditPerfTiming("first_cached_window_payload", startedAt, {
+              community_id: selectedCommunityContextSeed.id,
+              containers: discoveredContainerKeys,
             });
-            return merged ?? current;
-          });
+          }
+          firstCachePayloadLoggedRef.current = true;
         }
-        return;
       }
-
       if (warnings.length > 0) {
         setEpisodeContextWarning(warnings[0] ?? null);
       }
@@ -3876,79 +4754,111 @@ export default function RedditSourcesManager({
     episodeRefreshing,
     episodeWindowBoundsByContainer,
     fetchDiscoveryForCommunity,
+    isTabVisible,
     loading,
-    selectedCommunity,
-    trackedUnassignedFlairLabel,
+    selectedPeriodKey,
+    selectedCommunityContextSeed,
+    episodeSeasonId,
   ]);
 
-  const closeEpisodeWindowModal = useCallback(() => {
-    episodeWindowModalRequestTokenRef.current += 1;
-    setEpisodeWindowModalContainerKey(null);
-    setEpisodeWindowModalError(null);
-    setEpisodeWindowModalLoading(false);
-    setEpisodeWindowModalOtherPosts([]);
-  }, []);
-
-  const openEpisodeWindowModal = useCallback(
-    async (containerKey: string) => {
-      if (!selectedCommunity) return;
-      if (!episodeWindowBoundsByContainer.has(containerKey)) return;
-      setEpisodeWindowModalContainerKey(containerKey);
-      setEpisodeWindowModalLoading(true);
-      setEpisodeWindowModalError(null);
-      setEpisodeWindowModalOtherPosts([]);
-      const requestToken = episodeWindowModalRequestTokenRef.current + 1;
-      episodeWindowModalRequestTokenRef.current = requestToken;
-      try {
-        const bounds = episodeWindowBoundsByContainer.get(containerKey);
-        const discoveryResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
-          periodStart: bounds?.start ?? null,
-          periodEnd: bounds?.end ?? null,
-          exhaustive: true,
-          searchBackfill: true,
-          maxPages: 500,
-        });
-        const discovered = discoveryResult.discovery;
-        if (!discovered) {
-          throw new Error(
-            discoveryResult.warning ?? "No cached posts found for this window yet. Run Refresh Posts first.",
-          );
+  const upsertWindowDiscovery = useCallback(
+    (containerKey: string, nextPayload: DiscoveryPayload) => {
+      setWindowDiscoveryByContainer((current) => {
+        const existing = current[containerKey];
+        if (!existing) {
+          return {
+            ...current,
+            [containerKey]: nextPayload,
+          };
         }
-        const otherPosts = filterUnassignedDiscoveryPostsForContainer(
-          discovered?.threads ?? [],
-          containerKey,
-        );
-        if (episodeWindowModalRequestTokenRef.current !== requestToken) return;
-        setEpisodeWindowModalOtherPosts(otherPosts);
-      } catch (err) {
-        if (episodeWindowModalRequestTokenRef.current !== requestToken) return;
-        setEpisodeWindowModalError(toErrorMessage(err, "Failed to load window posts"));
-      } finally {
-        if (episodeWindowModalRequestTokenRef.current === requestToken) {
-          setEpisodeWindowModalLoading(false);
-        }
-      }
-    },
-    [
-      episodeWindowBoundsByContainer,
-      fetchDiscoveryForCommunity,
-      filterUnassignedDiscoveryPostsForContainer,
-      selectedCommunity,
-    ],
-  );
-
-  const mergeDiscoveryIntoState = useCallback(
-    (nextPayload: DiscoveryPayload) => {
-      setDiscovery((current) => {
-        if (!current) return nextPayload;
         const merged = mergeDiscoveryPayloads({
-          payloads: [current, nextPayload],
+          payloads: [existing, nextPayload],
           trackedFlairLabel: trackedUnassignedFlairLabel,
         });
-        return merged ?? nextPayload;
+        return {
+          ...current,
+          [containerKey]: merged ?? nextPayload,
+        };
       });
     },
     [trackedUnassignedFlairLabel],
+  );
+
+  const openContainerPostsPage = useCallback(
+    (containerKey: string) => {
+      if (!selectedCommunity) return;
+      if (!episodeSeasonId) {
+        setError("Select a season before opening container posts.");
+        return;
+      }
+      const bounds = episodeWindowBoundsByContainer.get(containerKey);
+      if (!bounds) {
+        setError("No window bounds available for this container.");
+        return;
+      }
+      const selectedCommunityShowSlug = selectedShowSlug;
+      const inferredShowSlug = resolvePreferredShowRouteSlug({
+        fallback: resolveShowLabel(selectedCommunity.trr_show_name ?? showName ?? "", null),
+      });
+      const normalizedInferredShowSlug = inferredShowSlug === "show" ? null : inferredShowSlug;
+      const aliasCandidate =
+        [selectedCommunityShowSlug, showSlug, routeShowSlugFromPath].find((candidate) =>
+          typeof candidate === "string" && /^rh[a-z0-9]{2,}$/i.test(candidate) && !candidate.includes("-"),
+        ) ?? null;
+      const routeShowSlug =
+        aliasCandidate ??
+        selectedCommunityShowSlug ??
+        showSlug ??
+        routeShowSlugFromPath ??
+        routeRedditPathContext.showSlug ??
+        normalizedInferredShowSlug;
+      const normalizedCommunitySlug =
+        normalizeCommunitySlugForPath(selectedCommunity.subreddit) ||
+        routeRedditPathContext.communitySlug ||
+        "";
+      const windowSlug = buildWindowSlugFromContainerKey(containerKey);
+      const routeSeasonNumber =
+        typeof selectedSeasonNumber === "number" && Number.isFinite(selectedSeasonNumber)
+          ? selectedSeasonNumber
+          : typeof seasonNumber === "number" && Number.isFinite(seasonNumber)
+            ? seasonNumber
+            : typeof activeSeasonSelection === "number" && Number.isFinite(activeSeasonSelection)
+              ? activeSeasonSelection
+            : routeRedditPathContext.seasonNumber ??
+              (episodeSeasonId
+                ? seasonOptions.find((season) => season.id === episodeSeasonId)?.season_number ?? null
+                : null);
+      const communityWindowHref =
+        routeShowSlug && normalizedCommunitySlug && routeSeasonNumber
+          ? buildShowRedditCommunityWindowUrl({
+              showSlug: routeShowSlug,
+              communitySlug: normalizedCommunitySlug,
+              seasonNumber: routeSeasonNumber,
+              windowKey: windowSlug,
+            })
+          : null;
+      if (communityWindowHref) {
+        router.push(communityWindowHref as Parameters<typeof router.push>[0]);
+        return;
+      }
+      setError("Unable to resolve season context for this window yet. Wait for season data to finish loading and try again.");
+      return;
+    },
+    [
+      activeSeasonSelection,
+      episodeSeasonId,
+      episodeWindowBoundsByContainer,
+      routeShowSlugFromPath,
+      routeRedditPathContext,
+      router,
+      seasonNumber,
+      seasonOptions,
+      selectedCommunity,
+      selectedSeasonNumber,
+      selectedShowSlug,
+      showName,
+      showSlug,
+    ],
   );
 
   const handleRefreshPostsForContainer = useCallback(
@@ -3957,7 +4867,8 @@ export default function RedditSourcesManager({
       const bounds = episodeWindowBoundsByContainer.get(containerKey);
       if (!bounds) return;
       let discovered: DiscoveryPayload | null = null;
-      const seedPostUrls = parseSeedPostUrlsInput(seedInputByContainer[containerKey] ?? "");
+      const coverageMode = containerKey === "period-preseason" ? "adaptive_deep" : "standard";
+      const maxPagesForContainer = coverageMode === "adaptive_deep" ? 1000 : 500;
 
       containerRefreshPollTokenRef.current[containerKey] =
         (containerRefreshPollTokenRef.current[containerKey] ?? 0) + 1;
@@ -3973,12 +4884,14 @@ export default function RedditSourcesManager({
         const discoveryResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
           periodStart: bounds.start ?? null,
           periodEnd: bounds.end ?? null,
+          containerKey,
+          periodLabel: bounds.label,
           exhaustive: true,
           searchBackfill: true,
+          coverageMode,
           refresh: true,
           waitForCompletion: false,
-          seedPostUrls,
-          maxPages: 500,
+          maxPages: maxPagesForContainer,
           timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
         });
         discovered = discoveryResult.discovery;
@@ -4005,7 +4918,7 @@ export default function RedditSourcesManager({
             });
             discovered = polled.discovery;
             if (discovered) {
-              mergeDiscoveryIntoState(discovered);
+              upsertWindowDiscovery(containerKey, discovered);
             }
             if (polled.warning && !discovered) {
               setEpisodeContextWarning(polled.warning);
@@ -4023,7 +4936,7 @@ export default function RedditSourcesManager({
             discoveryResult.warning ?? `No discovery payload returned for ${bounds.label}.`,
           );
         }
-        mergeDiscoveryIntoState(discovered);
+        upsertWindowDiscovery(containerKey, discovered);
         if (discoveryResult.run) {
           setContainerRefreshProgress(containerKey, {
             runId: discoveryResult.run.run_id,
@@ -4041,7 +4954,7 @@ export default function RedditSourcesManager({
             });
             discovered = polled.discovery;
             if (discovered) {
-              mergeDiscoveryIntoState(discovered);
+              upsertWindowDiscovery(containerKey, discovered);
             }
             if (polled.warning && !discovered) {
               setEpisodeContextWarning(polled.warning);
@@ -4081,6 +4994,8 @@ export default function RedditSourcesManager({
           const cachedResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
             periodStart: bounds.start ?? null,
             periodEnd: bounds.end ?? null,
+            containerKey,
+            periodLabel: bounds.label,
             exhaustive: true,
             searchBackfill: true,
             refresh: false,
@@ -4093,7 +5008,7 @@ export default function RedditSourcesManager({
               cachedResult.warning ?? `No cached discovery payload returned for ${bounds.label}.`,
             );
           }
-          mergeDiscoveryIntoState(discovered);
+          upsertWindowDiscovery(containerKey, discovered);
           setContainerRefreshProgress(containerKey, {
             runId: "timeout-fallback",
             status: "partial",
@@ -4122,11 +5037,10 @@ export default function RedditSourcesManager({
     [
       episodeWindowBoundsByContainer,
       fetchDiscoveryForCommunity,
-      mergeDiscoveryIntoState,
       pollContainerRefreshRun,
       setContainerRefreshProgress,
       selectedCommunity,
-      seedInputByContainer,
+      upsertWindowDiscovery,
     ],
   );
 
@@ -4222,20 +5136,27 @@ export default function RedditSourcesManager({
         setEpisodeSeasonId(resolvedSeasonId);
       }
       try {
-        // Keep episode-discussion refresh lightweight; period-level live refresh is manual via each "Refresh Posts" button.
+        // Sync Posts triggers a backend scrape/update pass for the season window, then shows cached Supabase rows.
         const cachedResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
           periodStart: seasonDiscoveryWindow.start,
           periodEnd: seasonDiscoveryWindow.end,
+          coverageMode: "max_coverage",
           exhaustive: true,
           searchBackfill: true,
-          refresh: false,
-          maxPages: 500,
-          timeoutMs: REQUEST_TIMEOUT_MS.discover,
+          refresh: true,
+          waitForCompletion: false,
+          maxPages: 1000,
+          timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
         });
         if (cachedResult.discovery) {
-          setDiscovery(cachedResult.discovery);
+          setSeasonDiscovery(cachedResult.discovery);
         } else if (cachedResult.warning) {
           setEpisodeContextWarning(cachedResult.warning);
+        }
+        if (cachedResult.run && isRefreshRunActiveStatus(cachedResult.run.status)) {
+          setEpisodeContextWarning(
+            `Season sync running in backend (run ${cachedResult.run.run_id.slice(0, 8)}); showing cached Supabase posts while it updates.`,
+          );
         }
       } catch (discoverErr) {
         const discoverMessage = toErrorMessage(
@@ -4276,33 +5197,28 @@ export default function RedditSourcesManager({
       if (season) {
         const requestToken = episodeContextRequestTokenRef.current + 1;
         episodeContextRequestTokenRef.current = requestToken;
-        episodeContextAbortRef.current?.abort();
-        const controller = new AbortController();
-        episodeContextAbortRef.current = controller;
         if (!isDedicatedCommunityView) {
           setPeriodsLoading(true);
         }
         setSelectedPeriodKey("all-periods");
         void Promise.all([
           loadSeasonEpisodesForSeason(season.id, {
-            signal: controller.signal,
             requestToken,
           }),
           loadPeriodOptionsForSeason(selectedCommunity, season, {
-            signal: controller.signal,
             requestToken,
           }),
         ])
           .catch((err) => {
+            if (isRequestCancelledError(err)) {
+              return;
+            }
             setEpisodeContextWarning(
               toErrorMessage(err, "Failed to load social periods for selected season"),
             );
           })
           .finally(() => {
-            if (
-              !controller.signal.aborted &&
-              episodeContextRequestTokenRef.current === requestToken
-            ) {
+            if (episodeContextRequestTokenRef.current === requestToken) {
               setPeriodsLoading(false);
             }
           });
@@ -4550,72 +5466,6 @@ export default function RedditSourcesManager({
           </button>
         </div>
       </div>
-    );
-  };
-
-  const renderEpisodeWindowPostCard = (
-    post: EpisodeWindowPostItem,
-    options?: { showDiscussionType?: boolean },
-  ) => {
-    const mediaPreviewType = resolveMediaPreviewType(post.url);
-    return (
-      <article
-        key={`episode-window-post-${post.redditPostId}`}
-        className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <a
-            href={post.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-semibold text-zinc-900 hover:underline"
-          >
-            {post.title}
-          </a>
-          {options?.showDiscussionType && post.discussionType && (
-            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-              {formatDiscussionTypeLabel(post.discussionType)}
-            </span>
-          )}
-        </div>
-        <p className="mt-1 text-xs text-zinc-600">
-          Upvotes {fmtNum(post.score)} · Downvotes n/a · {fmtNum(post.numComments)} comments
-        </p>
-        {post.postedAt && <p className="mt-1 text-xs text-zinc-500">{fmtDateTime(post.postedAt)}</p>}
-        {post.flair && (
-          <p className="mt-1 text-xs text-zinc-500">
-            Flair: <span className="font-semibold text-zinc-700">{post.flair}</span>
-          </p>
-        )}
-        {post.text && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-700">{post.text}</p>}
-        <p className="mt-1 text-xs">
-          <a
-            href={post.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-blue-700 hover:underline"
-          >
-            Original URL
-          </a>
-        </p>
-        {mediaPreviewType === "image" && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={post.url}
-            alt={`Image preview for ${post.title}`}
-            loading="lazy"
-            className="mt-2 max-h-56 rounded-lg border border-zinc-200 object-contain"
-          />
-        )}
-        {mediaPreviewType === "video" && (
-          <video
-            src={post.url}
-            controls
-            preload="metadata"
-            className="mt-2 max-h-56 w-full rounded-lg border border-zinc-200 bg-black"
-          />
-        )}
-      </article>
     );
   };
 
@@ -4919,11 +5769,11 @@ export default function RedditSourcesManager({
               linkedPostsByContainer: linkedDiscussionPostsByContainer,
               refreshProgressByContainer: containerRefreshProgressByKey,
               onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
-              onSeedInputChange: setContainerSeedInput,
-              seedInputByContainer,
               refreshingContainerKey,
               refreshPostsDisabled: isBusy || episodeRefreshing,
-              onOpenContainerPosts: (containerKey) => void openEpisodeWindowModal(containerKey),
+              periodsLoading,
+              onOpenContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),
+              onViewAllContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),
             })}
           </div>
         )}
@@ -5260,6 +6110,18 @@ export default function RedditSourcesManager({
             >
               Add Thread
             </button>
+            {selectedCommunity && (
+              <button
+                type="button"
+                disabled={isBusy || episodeRefreshing || periodsLoading}
+                onClick={() => void handleRefreshEpisodeDiscussions()}
+                aria-label="Sync Posts"
+                title="Scrape posts, update metrics/comments, and sync discussion candidates"
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
+              </button>
+            )}
           </div>
         )}
         {isDedicatedCommunityView && selectedCommunity && (
@@ -5268,9 +6130,11 @@ export default function RedditSourcesManager({
               type="button"
               disabled={isBusy || episodeRefreshing || periodsLoading}
               onClick={() => void handleRefreshEpisodeDiscussions()}
+              aria-label="Sync Posts"
+              title="Scrape posts, update metrics/comments, and sync discussion candidates"
               className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {episodeRefreshing ? "Refreshing..." : "Refresh Discussions"}
+              {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
             </button>
             <button
               type="button"
@@ -5720,7 +6584,8 @@ export default function RedditSourcesManager({
                         type="button"
                         onClick={() => {
                           setSelectedCommunityId(community.id);
-                          setDiscovery(null);
+                          setSeasonDiscovery(null);
+                          setWindowDiscoveryByContainer({});
                         }}
                         className={`w-full rounded-lg border px-3 py-2 text-left transition ${
                           selectedCommunityId === community.id
@@ -6250,11 +7115,11 @@ export default function RedditSourcesManager({
                           linkedPostsByContainer: linkedDiscussionPostsByContainer,
                           refreshProgressByContainer: containerRefreshProgressByKey,
                           onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
-                          onSeedInputChange: setContainerSeedInput,
-                          seedInputByContainer,
                           refreshingContainerKey,
                           refreshPostsDisabled: isBusy || episodeRefreshing,
-                          onOpenContainerPosts: (containerKey) => void openEpisodeWindowModal(containerKey),
+                          periodsLoading,
+                          onOpenContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),
+                          onViewAllContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),
                         })
                       )
                     ) : selectedCommunity.assigned_threads.length === 0 ? (
@@ -6413,70 +7278,6 @@ export default function RedditSourcesManager({
               </>
             )}
           </section>
-        </div>
-      )}
-      {episodeWindowModalContainerKey && selectedEpisodeWindowBounds && (
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
-          onClick={closeEpisodeWindowModal}
-        >
-          <article
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${selectedEpisodeWindowBounds.label} posts`}
-            className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                  {selectedEpisodeWindowBounds.label}
-                </p>
-                <p className="text-xs text-zinc-500">
-                  {fmtDateTime(selectedEpisodeWindowBounds.start)} to {fmtDateTime(selectedEpisodeWindowBounds.end)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeEpisodeWindowModal}
-                className="rounded-lg border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-              >
-                Close
-              </button>
-            </div>
-
-            <section className="mb-4 space-y-2">
-              <h5 className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-600">
-                Episode Discussions
-              </h5>
-              {selectedEpisodeWindowDiscussionPosts.length === 0 ? (
-                <p className="text-xs text-zinc-500">No linked discussion posts in this container.</p>
-              ) : (
-                <div className="space-y-2">
-                  {selectedEpisodeWindowDiscussionPosts.map((post) =>
-                    renderEpisodeWindowPostCard(post, { showDiscussionType: true }),
-                  )}
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-2">
-              <h5 className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-600">
-                Other Unassigned Posts In Window
-              </h5>
-              {episodeWindowModalLoading ? (
-                <p className="text-xs text-zinc-500">Loading posts...</p>
-              ) : episodeWindowModalError ? (
-                <p className="text-xs text-red-600">{episodeWindowModalError}</p>
-              ) : episodeWindowModalOtherPosts.length === 0 ? (
-                <p className="text-xs text-zinc-500">No unassigned posts matched this window.</p>
-              ) : (
-                <div className="space-y-2">
-                  {episodeWindowModalOtherPosts.map((post) => renderEpisodeWindowPostCard(post))}
-                </div>
-              )}
-            </section>
-          </article>
         </div>
       )}
     </div>

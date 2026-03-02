@@ -17,6 +17,12 @@ export interface PersonPhotoCanonicalLike extends PersonPhotoLike {
   detail_url?: string | null;
   crop_display_url?: string | null;
   crop_detail_url?: string | null;
+  source_page_url?: string | null;
+  title_names?: string[] | null;
+  people_names?: string[] | null;
+  face_boxes?: unknown[] | null;
+  face_crops?: unknown[] | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 /**
@@ -104,6 +110,88 @@ function shouldReplaceCanonicalPhoto<T extends PersonPhotoCanonicalLike>(existin
   return false;
 }
 
+function hasNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function chooseRicherArray<TValue>(
+  primary: TValue[] | null | undefined,
+  secondary: TValue[] | null | undefined
+): TValue[] | null | undefined {
+  const primaryLen = Array.isArray(primary) ? primary.length : 0;
+  const secondaryLen = Array.isArray(secondary) ? secondary.length : 0;
+  if (secondaryLen > primaryLen) return secondary;
+  return primary;
+}
+
+const METADATA_TRANSFER_KEYS = [
+  "imdb_fallback_show_name",
+  "imdb_fallback_show_imdb_id",
+  "show_context_source",
+  "show_name",
+  "show_id",
+  "episode_imdb_id",
+  "imdb_title_type",
+  "imdb_image_type",
+] as const;
+
+function mergeMetadata(
+  primary: Record<string, unknown> | null | undefined,
+  secondary: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null {
+  const base = primary && typeof primary === "object" ? { ...primary } : {};
+  const fallback = secondary && typeof secondary === "object" ? secondary : null;
+  if (!fallback) {
+    return Object.keys(base).length > 0 ? base : null;
+  }
+
+  for (const key of METADATA_TRANSFER_KEYS) {
+    const currentValue = base[key];
+    const fallbackValue = fallback[key];
+    const hasCurrent =
+      hasNonEmptyString(currentValue) ||
+      (Array.isArray(currentValue) && currentValue.length > 0) ||
+      (currentValue !== null && currentValue !== undefined && typeof currentValue !== "string");
+    if (!hasCurrent && fallbackValue !== null && fallbackValue !== undefined) {
+      base[key] = fallbackValue;
+    }
+  }
+
+  const mergedFaceCrops = chooseRicherArray(
+    Array.isArray(base.face_crops) ? (base.face_crops as unknown[]) : null,
+    Array.isArray(fallback.face_crops) ? (fallback.face_crops as unknown[]) : null
+  );
+  if (Array.isArray(mergedFaceCrops) && mergedFaceCrops.length > 0) {
+    base.face_crops = mergedFaceCrops;
+  }
+
+  const mergedFaceBoxes = chooseRicherArray(
+    Array.isArray(base.face_boxes) ? (base.face_boxes as unknown[]) : null,
+    Array.isArray(fallback.face_boxes) ? (fallback.face_boxes as unknown[]) : null
+  );
+  if (Array.isArray(mergedFaceBoxes) && mergedFaceBoxes.length > 0) {
+    base.face_boxes = mergedFaceBoxes;
+  }
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+function mergeCanonicalPhoto<T extends PersonPhotoCanonicalLike>(primary: T, secondary: T): T {
+  const merged = { ...primary } as T;
+
+  if (!hasNonEmptyString(merged.source_page_url) && hasNonEmptyString(secondary.source_page_url)) {
+    merged.source_page_url = secondary.source_page_url;
+  }
+
+  merged.title_names = chooseRicherArray(merged.title_names, secondary.title_names);
+  merged.people_names = chooseRicherArray(merged.people_names, secondary.people_names);
+  merged.face_boxes = chooseRicherArray(merged.face_boxes, secondary.face_boxes);
+  merged.face_crops = chooseRicherArray(merged.face_crops, secondary.face_crops);
+  merged.metadata = mergeMetadata(merged.metadata, secondary.metadata);
+
+  return merged;
+}
+
 /**
  * Dedupe on canonical identity (source IDs / sha / hosted_url), preferring media_links rows on collisions.
  *
@@ -135,9 +223,10 @@ export function dedupePhotosByCanonicalKeysPreferMediaLinks<T extends PersonPhot
     }
 
     const existing = deduped[existingIndex];
-    if (shouldReplaceCanonicalPhoto(existing, photo)) {
-      deduped[existingIndex] = photo;
-    }
+    const nextCanonical = shouldReplaceCanonicalPhoto(existing, photo)
+      ? mergeCanonicalPhoto(photo, existing)
+      : mergeCanonicalPhoto(existing, photo);
+    deduped[existingIndex] = nextCanonical;
 
     // Always ensure all keys point at the canonical kept index so later collisions collapse correctly.
     for (const key of keys) byKeyIndex.set(key, existingIndex);

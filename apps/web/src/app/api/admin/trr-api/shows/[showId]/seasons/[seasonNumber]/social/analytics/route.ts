@@ -48,8 +48,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       queryString: forwardedSearchParams.toString(),
       seasonIdHint,
       fallbackError: "Failed to fetch social analytics",
-      retries: 0,
-      timeoutMs: 22_000,
+      retries: 2,
+      timeoutMs: 35_000,
     });
     return NextResponse.json(data);
   } catch (error) {

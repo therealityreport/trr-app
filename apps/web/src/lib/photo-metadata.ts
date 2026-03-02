@@ -1,5 +1,6 @@
 import type { TrrPersonPhoto, SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 import {
+  formatContentTypeLabel,
   normalizeContentTypeToken,
   resolveCanonicalContentType,
 } from "@/lib/media/content-type";
@@ -48,6 +49,9 @@ export interface PhotoMetadata {
   sourceLogo?: string | null;
   assetName?: string | null;
   imdbType?: string | null;
+  imdbCreditType?: string | null;
+  mediaTypeLabel?: string | null;
+  eventName?: string | null;
   episodeLabel?: string | null;
   sourceVariant?: string | null;
   sourcePageTitle?: string | null;
@@ -707,6 +711,41 @@ const resolveSectionTag = (args: {
   return inferredTag;
 };
 
+const formatTitleTokens = (value: string): string =>
+  value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1).toLowerCase())
+    .join(" ");
+
+const formatImdbTitleType = (value: string | null): string | null => {
+  if (!value) return null;
+  const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  if (!normalized) return null;
+  const specialCases: Record<string, string> = {
+    TVMOVIE: "TV Movie",
+    TVSERIES: "TV Series",
+    TVEPISODE: "TV Episode",
+    TVSPECIAL: "TV Special",
+    TVMINISERIES: "TV Mini Series",
+    TVSHORT: "TV Short",
+    VIDEO: "Video",
+    MOVIE: "Movie",
+    SHORT: "Short",
+    DOCUMENTARY: "Documentary",
+  };
+  if (specialCases[normalized]) return specialCases[normalized];
+  return formatTitleTokens(normalized.replace(/_/g, " "));
+};
+
+const formatImdbImageType = (value: string | null): string | null => {
+  if (!value) return null;
+  const normalized = value.trim().replace(/[_-]+/g, " ");
+  if (!normalized) return null;
+  return formatTitleTokens(normalized);
+};
+
 export function mapPhotoToMetadata(
   photo: TrrPersonPhoto,
   options?: { fallbackPeople?: string[] }
@@ -734,6 +773,12 @@ export function mapPhotoToMetadata(
       ? metadata.imdb_image_type
       : typeof (metadata.tags as Record<string, unknown> | undefined)?.image_type === "string"
         ? ((metadata.tags as Record<string, unknown>).image_type as string)
+      : null;
+  const imdbTitleTypeRaw =
+    typeof metadata.imdb_title_type === "string"
+      ? metadata.imdb_title_type
+      : typeof (metadata.tags as Record<string, unknown> | undefined)?.title_type === "string"
+        ? ((metadata.tags as Record<string, unknown>).title_type as string)
       : null;
   const imdbType = imdbTypeRaw ?? (isImdb ? photo.context_type ?? null : null);
   const inferredSectionTag = resolveSectionTag({
@@ -998,6 +1043,26 @@ export function mapPhotoToMetadata(
     "show_context_source",
     "showContextSource"
   );
+  const imdbCreditType = formatImdbTitleType(imdbTitleTypeRaw);
+  const eventNameRaw = getMetadataString(
+    metadata,
+    "event_name",
+    "eventName",
+    "source_page_title",
+    "sourcePageTitle",
+    "asset_name",
+    "assetName",
+  );
+  const mediaTypeLabel = (() => {
+    if (contentType) {
+      return formatContentTypeLabel(contentType);
+    }
+    return formatImdbImageType(imdbType);
+  })();
+  const eventName =
+    mediaTypeLabel?.toLowerCase() === "event"
+      ? eventNameRaw ?? titles[0] ?? null
+      : null;
 
   return {
     source: photo.source,
@@ -1019,6 +1084,9 @@ export function mapPhotoToMetadata(
     sourceLogo,
     assetName,
     imdbType,
+    imdbCreditType,
+    mediaTypeLabel,
+    eventName,
     episodeLabel,
     sourceVariant,
     sourcePageTitle,

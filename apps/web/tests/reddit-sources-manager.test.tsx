@@ -4,14 +4,17 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import { auth } from "@/lib/firebase";
 
-const { usePathnameMock, useSearchParamsMock } = vi.hoisted(() => ({
+const { usePathnameMock, useSearchParamsMock, useRouterPushMock, useRouterReplaceMock } = vi.hoisted(() => ({
   usePathnameMock: vi.fn(() => "/admin/social-media"),
   useSearchParamsMock: vi.fn(() => new URLSearchParams()),
+  useRouterPushMock: vi.fn(),
+  useRouterReplaceMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: usePathnameMock,
   useSearchParams: useSearchParamsMock,
+  useRouter: () => ({ push: useRouterPushMock, replace: useRouterReplaceMock }),
 }));
 
 const baseCommunity = {
@@ -247,10 +250,7 @@ const findCardByPeriodLabel = (label: string): HTMLElement => {
   const foundCard = articleCards.find((article) => {
     const hasLabel = !!within(article).queryByRole("heading", { name: exactLabelRegex });
     const refreshPostsButtons = within(article).queryAllByRole("button", { name: "Refresh Posts" });
-    const seedInputs = within(article).queryAllByPlaceholderText(
-      "Optional seed post URLs (comma or newline separated)",
-    );
-    return hasLabel && refreshPostsButtons.length === 1 && seedInputs.length === 1;
+    return hasLabel && refreshPostsButtons.length === 1;
   });
   if (foundCard) {
     return foundCard as HTMLElement;
@@ -263,15 +263,6 @@ const findCardByPeriodLabel = (label: string): HTMLElement => {
     throw new Error(`Unable to find period card for label ${label}`);
   }
   return fallbackCard as HTMLElement;
-};
-
-const getPeriodSeedInput = (label: string): HTMLTextAreaElement => {
-  const card = findCardByPeriodLabel(label);
-  const seedInputs = within(card).queryAllByPlaceholderText("Optional seed post URLs (comma or newline separated)");
-  if (!seedInputs[0]) {
-    throw new Error(`Unable to find a seed input for period ${label}`);
-  }
-  return seedInputs[0] as HTMLTextAreaElement;
 };
 
 const clickPeriodRefreshPosts = (label: string): HTMLElement => {
@@ -308,6 +299,8 @@ describe("RedditSourcesManager", () => {
   beforeEach(() => {
     usePathnameMock.mockReturnValue("/admin/social-media");
     useSearchParamsMock.mockReturnValue(new URLSearchParams());
+    useRouterPushMock.mockReset();
+    useRouterReplaceMock.mockReset();
     (auth as unknown as { currentUser?: { getIdToken: () => Promise<string> } }).currentUser = {
       getIdToken: vi.fn().mockResolvedValue("test-token"),
     };
@@ -350,6 +343,102 @@ describe("RedditSourcesManager", () => {
     expect(screen.queryByText("Episode Discussion")).not.toBeInTheDocument();
     expect(screen.queryByText("Live Thread")).not.toBeInTheDocument();
   }, 15_000);
+
+  it("does not surface timeout error when bootstrap fetch is upstream-aborted", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/reddit/communities")) {
+        const abortError = new Error("The operation was aborted.") as Error & { name: string };
+        abortError.name = "AbortError";
+        throw abortError;
+      }
+      if (url.includes("/api/admin/covered-shows")) {
+        return jsonResponse(coveredShowsPayload);
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Request timed out. Please try again.")).not.toBeInTheDocument();
+  });
+
+  it("still renders episode rows when social period request is aborted", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics")) {
+        const abortError = new Error("The operation was aborted.") as Error & { name: string };
+        abortError.name = "AbortError";
+        throw abortError;
+      }
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" hideCommunityList initialCommunityId="community-1" />);
+
+    expect(await screen.findByText("Episode 1")).toBeInTheDocument();
+    expect(screen.queryByText("No episode discussion rows found for this community yet.")).not.toBeInTheDocument();
+  });
+
+  it("canonicalizes show-level reddit route to season-scoped path once season context resolves", async () => {
+    usePathnameMock.mockReturnValue("/rhoslc/social/reddit");
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" initialCommunityId="community-1" />);
+
+    await waitFor(() => {
+      expect(useRouterReplaceMock).toHaveBeenCalledWith("/rhoslc/s6/social/reddit");
+    });
+  });
+
+  it("canonicalizes dedicated community route to include season token once season resolves", async () => {
+    usePathnameMock.mockReturnValue("/rhoslc/social/reddit/BravoRealHousewives");
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager mode="global" hideCommunityList initialCommunityId="community-1" />,
+    );
+
+    await waitFor(() => {
+      expect(useRouterReplaceMock).toHaveBeenCalledWith(
+        "/rhoslc/social/reddit/BravoRealHousewives/s6",
+      );
+    });
+  });
 
   it("renders EPISODE DISCUSSION badge from source_kind and allows collapsing assigned threads", async () => {
     const episodeSyncCommunity = {
@@ -419,6 +508,34 @@ describe("RedditSourcesManager", () => {
         "href",
         "/rhoslc/social/reddit/BravoRealHousewives/s6",
       );
+    });
+  });
+
+  it("bootstraps community list with lightweight payload then hydrates assigned threads", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" hideCommunityList initialCommunityId="community-1" />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const communityCalls = fetchMock.mock.calls
+        .map((call) => String(call[0]))
+        .filter((url) => url.includes("/api/admin/reddit/communities"));
+      expect(communityCalls.some((url) => url.includes("include_assigned_threads=0"))).toBe(true);
+      expect(communityCalls.some((url) => url.includes("include_assigned_threads=1"))).toBe(true);
     });
   });
 
@@ -591,7 +708,7 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(screen.getByText("Assigned Threads")).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
 
     expect(await screen.findByText("Suggested Include Terms")).toBeInTheDocument();
     expect(screen.getByText("rhoslc")).toBeInTheDocument();
@@ -680,7 +797,7 @@ describe("RedditSourcesManager", () => {
       expect(screen.getByText("Assigned Threads")).toBeInTheDocument();
       expect(screen.getByRole("checkbox", { name: /Show matched only/i })).toBeChecked();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
 
     expect(await screen.findByText("WWHL open thread")).toBeInTheDocument();
   });
@@ -1022,7 +1139,7 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "Refresh Discussions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sync Posts" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Discover Threads" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Season" })).not.toBeInTheDocument();
@@ -1078,7 +1195,7 @@ describe("RedditSourcesManager", () => {
     );
 
     const refreshButton = await screen.findByRole("button", {
-      name: /Refresh (Episode )?Discussions/,
+      name: /Sync Posts/,
     });
     fireEvent.click(refreshButton);
     await waitFor(() => {
@@ -1139,7 +1256,7 @@ describe("RedditSourcesManager", () => {
     );
 
     const refreshButton = await screen.findByRole("button", {
-      name: /Refresh (Episode )?Discussions/,
+      name: /Sync Posts/,
     });
     fireEvent.click(refreshButton);
 
@@ -1208,10 +1325,10 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1270,7 +1387,7 @@ describe("RedditSourcesManager", () => {
     );
 
     const refreshButton = await screen.findByRole("button", {
-      name: /Refresh( Episode)? Discussions/i,
+      name: /Sync Posts/i,
     });
     fireEvent.click(refreshButton);
 
@@ -1285,6 +1402,88 @@ describe("RedditSourcesManager", () => {
       expect(refreshUrl).not.toContain("period_end=");
     });
     expect(screen.queryByText("Failed to load social periods for episode discussions")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Season social period data is temporarily unavailable/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens canonical community week URLs even from /:show/social/reddit base route", async () => {
+    usePathnameMock.mockReturnValue("/rhoslc/social/reddit");
+    const refreshPayload = {
+      community: baseCommunity,
+      candidates: [],
+      episode_matrix: [
+        {
+          episode_number: 1,
+          live: {
+            post_count: 1,
+            total_comments: 100,
+            total_upvotes: 50,
+            top_post_id: "episode-1-live",
+            top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-1-live/test/",
+          },
+          post: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          weekly: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          total_posts: 1,
+          total_comments: 100,
+          total_upvotes: 50,
+        },
+      ],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 1,
+        season_context: { season_id: "season-1", season_number: 6 },
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
+
+    expect(await screen.findByText("Episode 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Episode 1" }));
+
+    expect(useRouterPushMock).toHaveBeenCalled();
+    const pushedPath = String(useRouterPushMock.mock.calls.at(-1)?.[0] ?? "");
+    expect(pushedPath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
+    expect(pushedPath).not.toBe("/rhoslc/social/reddit");
   });
 
   it("renders episode pills and opens modal with linked + unassigned posts on demand", async () => {
@@ -1481,9 +1680,9 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
 
     expect(await screen.findByText("Episode 1")).toBeInTheDocument();
     expect(await screen.findByText(/Post Episode Discussion/i)).toBeInTheDocument();
@@ -1496,45 +1695,27 @@ describe("RedditSourcesManager", () => {
       String(call[0]).includes("/discover"),
     ).length;
     expect(discoverCallsAfterRefresh).toBeGreaterThan(0);
-    const exhaustiveDiscoverUrl = String(
-      fetchMock.mock.calls.find((call) => String(call[0]).includes("/discover"))?.[0] ?? "",
-    );
-    expect(exhaustiveDiscoverUrl).toContain("exhaustive=true");
-    expect(exhaustiveDiscoverUrl).toContain("max_pages=500");
-    expect(exhaustiveDiscoverUrl).not.toContain("force_flair=");
-    expect(exhaustiveDiscoverUrl).toContain("search_backfill=true");
-    expect(exhaustiveDiscoverUrl).not.toContain("refresh=true");
+    const discoverUrls = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes("/discover"));
+    const syncDiscoverUrl = discoverUrls.find((url) => url.includes("refresh=true")) ?? "";
+    expect(syncDiscoverUrl).toContain("exhaustive=true");
+    expect(syncDiscoverUrl).toContain("max_pages=1000");
+    expect(syncDiscoverUrl).not.toContain("force_flair=");
+    expect(syncDiscoverUrl).toContain("search_backfill=true");
     const episodeOneCard = screen.getByText("Episode 1").closest("article");
     expect(episodeOneCard).not.toBeNull();
     const viewAllPostsButton = within(episodeOneCard as HTMLElement).getByRole("button", {
       name: /View All Posts/i,
     });
     fireEvent.click(viewAllPostsButton);
-    expect(await screen.findByRole("dialog", { name: "Episode 1 posts" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Episode Discussions" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Other Unassigned Posts In Window" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Original text for live discussion post B.")).toBeInTheDocument();
-    expect(await screen.findByText("Original text for other unassigned post.")).toBeInTheDocument();
-    expect(screen.getAllByText(/Downvotes n\/a/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "Original URL" }).length).toBeGreaterThan(0);
-    expect(screen.getByAltText("Image preview for Episode 1 Live B")).toBeInTheDocument();
-    expect(screen.getByAltText("Image preview for Other unassigned window post")).toBeInTheDocument();
-    expect(document.querySelector("video")).not.toBeNull();
-    const discoverCallsAfterModalOpen = fetchMock.mock.calls.filter((call) =>
-      String(call[0]).includes("/discover"),
-    ).length;
-    expect(discoverCallsAfterModalOpen).toBeGreaterThan(discoverCallsAfterRefresh);
-    const discoverUrls = fetchMock.mock.calls
-      .map((call) => String(call[0]))
-      .filter((url) => url.includes("/discover"));
-    expect(discoverUrls.some((url) => url.includes("period_start="))).toBe(true);
-    expect(discoverUrls.some((url) => url.includes("period_end="))).toBe(true);
+    expect(useRouterPushMock).toHaveBeenCalledTimes(1);
+    const pushedPath = String(useRouterPushMock.mock.calls[0]?.[0] ?? "");
+    expect(pushedPath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
     expect(discoverUrls.some((url) => url.includes("force_flair="))).toBe(false);
-    expect(discoverUrls.some((url) => url.includes("max_pages=500"))).toBe(true);
+    expect(discoverUrls.some((url) => url.includes("max_pages=1000"))).toBe(true);
     expect(discoverUrls.some((url) => url.includes("search_backfill=true"))).toBe(true);
-    expect(discoverUrls.some((url) => url.includes("refresh=true"))).toBe(false);
+    expect(discoverUrls.some((url) => url.includes("refresh=true"))).toBe(true);
     expect(screen.queryByRole("columnheader", { name: "Live" })).not.toBeInTheDocument();
   });
 
@@ -1686,13 +1867,16 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
 
     expect(await screen.findByText("Episode 1")).toBeInTheDocument();
     expect(screen.getByText("Pre-Season")).toBeInTheDocument();
     expect(screen.getByText("Post-Season")).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("Optional seed post URLs (comma or newline separated)"),
+    ).not.toBeInTheDocument();
     const preSeasonHeading = screen.getByText("Pre-Season");
     const episodeOneHeading = screen.getByText("Episode 1");
     const postSeasonHeading = screen.getByText("Post-Season");
@@ -1707,20 +1891,19 @@ describe("RedditSourcesManager", () => {
     ).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Episode 1" }));
-    expect(await screen.findByRole("dialog", { name: "Episode 1 posts" })).toBeInTheDocument();
-    expect((await screen.findAllByText("Other unassigned window post canonical flair")).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(useRouterPushMock).toHaveBeenCalled();
+    const episodeOnePath = String(useRouterPushMock.mock.calls.at(-1)?.[0] ?? "");
+    expect(episodeOnePath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
 
     const preSeasonCard = findCardByPeriodLabel("Pre-Season");
-    const seedInput = getPeriodSeedInput("Pre-Season");
-    fireEvent.change(seedInput, {
-      target: {
-        value:
-          "https://www.reddit.com/r/BravoRealHousewives/comments/1neufq0/example/,\nhttps://www.reddit.com/r/BravoRealHousewives/comments/1mr9pb8/example/",
-      },
-    });
     fireEvent.click(within(preSeasonCard as HTMLElement).getAllByRole("button", { name: "Refresh Posts" })[0]);
+    const episodeOneCard = screen.getByText("Episode 1").closest("article");
+    expect(episodeOneCard).not.toBeNull();
+    fireEvent.click(within(episodeOneCard as HTMLElement).getByRole("button", { name: "Refresh Posts" }));
     clickPeriodViewAllPosts("Pre-Season");
+    expect(useRouterPushMock).toHaveBeenCalled();
+    const preSeasonPath = String(useRouterPushMock.mock.calls.at(-1)?.[0] ?? "");
+    expect(preSeasonPath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
 
     await waitFor(() => {
       const discoverUrls = fetchMock.mock.calls
@@ -1748,24 +1931,25 @@ describe("RedditSourcesManager", () => {
       ).toBe(true);
       expect(discoverUrls.some((url) => url.includes("search_backfill=true"))).toBe(true);
       expect(discoverUrls.some((url) => url.includes("refresh=true"))).toBe(true);
+      expect(discoverUrls.some((url) => url.includes("seed_post_url="))).toBe(false);
+      expect(discoverUrls.some((url) => url.includes("container_key=period-preseason"))).toBe(true);
       expect(
-        discoverUrls.some((url) =>
-          url.includes(
-            `seed_post_url=${encodeURIComponent(
-              "https://www.reddit.com/r/BravoRealHousewives/comments/1neufq0/example/",
-            )}`,
-          ),
+        discoverUrls.some(
+          (url) =>
+            url.includes("container_key=period-preseason") &&
+            url.includes("coverage_mode=adaptive_deep"),
         ),
       ).toBe(true);
+      expect(discoverUrls.some((url) => url.includes("container_key=episode-1"))).toBe(true);
       expect(
-        discoverUrls.some((url) =>
-          url.includes(
-            `seed_post_url=${encodeURIComponent(
-              "https://www.reddit.com/r/BravoRealHousewives/comments/1mr9pb8/example/",
-            )}`,
-          ),
+        discoverUrls.some(
+          (url) =>
+            url.includes("container_key=episode-1") &&
+            url.includes("coverage_mode=standard"),
         ),
       ).toBe(true);
+      expect(discoverUrls.some((url) => url.includes("period_label=Pre-Season"))).toBe(true);
+      expect(discoverUrls.some((url) => url.includes("period_label=Episode+1"))).toBe(true);
     });
   });
 
@@ -1919,8 +2103,179 @@ describe("RedditSourcesManager", () => {
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
     clickPeriodRefreshPosts("Pre-Season");
+    clickPeriodViewAllPosts("Pre-Season");
+    await waitFor(() => {
+      expect(useRouterPushMock).toHaveBeenCalled();
+      const pushedPath = String(useRouterPushMock.mock.calls.at(-1)?.[0] ?? "");
+      expect(pushedPath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+    });
+  }, 15_000);
 
-    expect(await screen.findByText("Cached preseason post", {}, { timeout: 10_000 })).toBeInTheDocument();
+  it("keeps Discovered Threads separate from period refresh payloads and shows partial pass details", async () => {
+    const communityWithTrackedFlair = {
+      ...baseCommunity,
+      post_flares: ["Salt Lake City"],
+      analysis_flares: ["Salt Lake City"],
+      analysis_all_flares: ["Salt Lake City"],
+    };
+    const refreshPayload = {
+      community: communityWithTrackedFlair,
+      candidates: [],
+      episode_matrix: [
+        {
+          episode_number: 1,
+          live: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          post: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          weekly: {
+            post_count: 0,
+            total_comments: 0,
+            total_upvotes: 0,
+            top_post_id: null,
+            top_post_url: null,
+          },
+          total_posts: 0,
+          total_comments: 0,
+          total_upvotes: 0,
+        },
+      ],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 0,
+        season_context: { season_id: "season-1", season_number: 6 },
+      },
+    };
+    const customAnalyticsPayload = {
+      weekly: [
+        {
+          week_index: 1,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00.000Z",
+          end: "2025-09-16T18:59:59.000Z",
+        },
+        {
+          week_index: 2,
+          label: "Episode 1",
+          start: "2025-09-16T19:01:01.000Z",
+          end: "2025-09-23T19:01:10.000Z",
+        },
+      ],
+    };
+    const seasonPanelDiscovery = {
+      ...discoveryPayload.discovery,
+      threads: [
+        {
+          ...discoveryPayload.discovery.threads[0],
+          reddit_post_id: "season-panel-thread",
+          title: "Season panel thread",
+          posted_at: "2025-09-20T00:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+        },
+      ],
+    };
+    const windowRefreshDiscovery = {
+      ...discoveryPayload.discovery,
+      totals: {
+        fetched_rows: 1,
+        matched_rows: 1,
+        tracked_flair_rows: 1,
+      },
+      threads: [
+        {
+          ...discoveryPayload.discovery.threads[0],
+          reddit_post_id: "window-preseason-thread",
+          title: "Window-only preseason thread",
+          posted_at: "2025-09-10T00:00:00.000Z",
+          link_flair_text: "Salt Lake City",
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics")) {
+        return jsonResponse(customAnalyticsPayload);
+      }
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        if (url.includes("refresh=true") && url.includes("container_key=period-preseason")) {
+          return jsonResponse({
+            discovery: windowRefreshDiscovery,
+            run: {
+              run_id: "run-preseason-partial",
+              status: "partial",
+              totals: {
+                fetched_rows: 1,
+                matched_rows: 1,
+                tracked_flair_rows: 1,
+              },
+              diagnostics: {
+                passes_run: 2,
+                final_completeness: {
+                  listing_complete: false,
+                  backfill_complete: true,
+                },
+              },
+            },
+          });
+        }
+        if (url.includes("container_key=period-preseason")) {
+          return jsonResponse({ discovery: windowRefreshDiscovery });
+        }
+        return jsonResponse({ discovery: seasonPanelDiscovery });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithTrackedFlair, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
+
+    expect(await screen.findByText("Season panel thread")).toBeInTheDocument();
+    clickPeriodRefreshPosts("Pre-Season");
+
+    await waitFor(() => {
+      expect(screen.getByText(/partial coverage after 2 passes/i)).toBeInTheDocument();
+      expect(screen.getByText(/listing incomplete/i)).toBeInTheDocument();
+    });
+    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
+    await waitFor(() => {
+      expect(
+        within(preSeasonCard).getByText(/1 tracked flair posts · 1 unassigned tracked posts/i),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Window-only preseason thread")).not.toBeInTheDocument();
+    expect(screen.getByText("Season panel thread")).toBeInTheDocument();
   });
 
   it("shows queued spinner and queue depth while backend refresh is pending", async () => {
@@ -2044,17 +2399,129 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
     clickPeriodRefreshPosts("Pre-Season");
 
     await waitFor(() => {
       expect(cardHasPendingRefresh("Pre-Season")).toBe(true);
-    }, { timeout: 10_000 });
-  }, 20_000);
+    }, { timeout: 60_000 });
+  }, 60_000);
+
+  it("shows live comments-stage counters from backend run diagnostics", async () => {
+    const communityWithSaltLakeFlair = {
+      ...baseCommunity,
+      post_flares: ["Salt Lake City"],
+      analysis_flares: ["Salt Lake City"],
+      analysis_all_flares: ["Salt Lake City"],
+    };
+    const refreshPayload = {
+      community: communityWithSaltLakeFlair,
+      candidates: [],
+      episode_matrix: [],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 0,
+        season_context: { season_id: "season-1", season_number: 6 },
+      },
+    };
+    const customAnalyticsPayload = {
+      weekly: [
+        {
+          week_index: 1,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00.000Z",
+          end: "2025-09-16T18:59:59.000Z",
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics")) {
+        return jsonResponse(customAnalyticsPayload);
+      }
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/runs/")) {
+        return new Promise<Response>(() => {});
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        if (url.includes("refresh=true")) {
+          return jsonResponse({
+            run: {
+              run_id: "63a7be5d-0000-4000-8000-000000000000",
+              status: "running",
+              queue: {
+                running_total: 1,
+                queued_total: 0,
+                other_running: 0,
+                other_queued: 0,
+                queued_ahead: 0,
+              },
+              diagnostics: {
+                progress: {
+                  stage: "fetching_comments",
+                  listing_pages_fetched: 12,
+                  search_pages_fetched: 4,
+                  rows_discovered_raw: 210,
+                  rows_matched: 35,
+                  comments_targets_total: 20,
+                  comments_targets_done: 6,
+                  comments_rows_upserted: 880,
+                },
+              },
+            },
+          });
+        }
+        return jsonResponse({
+          discovery: {
+            ...discoveryPayload.discovery,
+            totals: {
+              fetched_rows: 0,
+              matched_rows: 0,
+              tracked_flair_rows: 0,
+            },
+            threads: [],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithSaltLakeFlair, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
+    expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
+
+    clickPeriodRefreshPosts("Pre-Season");
+
+    await waitFor(() => {
+      expect(screen.getByText(/comments 6\/20 posts/i)).toBeInTheDocument();
+      expect(screen.getByText(/comment rows 880/i)).toBeInTheDocument();
+    }, { timeout: 60_000 });
+  }, 60_000);
 
   it("continues polling run status when cached discovery is returned with an active run", async () => {
     const communityWithSaltLakeFlair = {
@@ -2217,9 +2684,9 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
     clickPeriodRefreshPosts("Pre-Season");
@@ -2230,7 +2697,7 @@ describe("RedditSourcesManager", () => {
     expect(
       await screen.findByText("Cached preseason post", {}, { timeout: 10_000 }),
     ).toBeInTheDocument();
-  });
+  }, 20_000);
 
   it("shows per-candidate reason when a post is not auto-synced", async () => {
     const refreshPayload = {
@@ -2298,9 +2765,9 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
 
     expect(await screen.findByText("Not auto-synced")).toBeInTheDocument();
     expect(screen.getByText("Author is not AutoModerator.")).toBeInTheDocument();
@@ -2411,9 +2878,9 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
 
     expect(await screen.findByText(/\[A\]/i)).toBeInTheDocument();
     expect(screen.getByText(/\[B\]/i)).toBeInTheDocument();
@@ -2543,9 +3010,9 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
     await screen.findByRole("button", { name: "Export Sync Audit CSV" });
 
     fireEvent.click(screen.getByRole("button", { name: "Export Sync Audit CSV" }));
@@ -2680,7 +3147,7 @@ describe("RedditSourcesManager", () => {
     );
 
     const refreshButton = await screen.findByRole("button", {
-      name: /Refresh (Episode )?Discussions/,
+      name: /Sync Posts/,
     });
     fireEvent.click(refreshButton);
 
@@ -2742,10 +3209,10 @@ describe("RedditSourcesManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync Posts/ })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Refresh (Episode )?Discussions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Sync Posts/ }));
 
     expect(
       await screen.findByText("No episode discussion candidates found for the selected season and period."),

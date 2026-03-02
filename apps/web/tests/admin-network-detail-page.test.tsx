@@ -79,7 +79,10 @@ describe("Admin network detail page", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
+      if (
+        url.includes("/api/admin/trr-api/social/ingest/queue-status") ||
+        url.includes("/api/admin/trr-api/social/ingest/health-dot")
+      ) {
         return Promise.resolve(queueStatusResponse.clone());
       }
       if (url.includes("/api/admin/networks-streaming/detail")) {

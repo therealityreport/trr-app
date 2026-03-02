@@ -19,7 +19,10 @@ export default function SeasonSocialTab({
     >
       <div className="space-y-3">
         {seasonSupplementalWarning && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+          <div
+            role="alert"
+            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
+          >
             Season supplemental data warning: {seasonSupplementalWarning}. Social analytics remains available.
           </div>
         )}

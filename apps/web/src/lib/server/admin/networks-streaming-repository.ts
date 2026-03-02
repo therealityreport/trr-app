@@ -917,7 +917,7 @@ export async function getNetworkStreamingDetail(
       shows_with_slug AS (
         SELECT
           s.*,
-          ${SHOW_SLUG_SQL} AS slug,
+          ${SHOW_SLUG_SQL} AS computed_slug,
           COUNT(*) OVER (PARTITION BY ${SHOW_SLUG_SQL}) AS slug_collision_count
         FROM core.shows AS s
       )
@@ -930,8 +930,8 @@ export async function getNetworkStreamingDetail(
         ) AS show_name,
         CASE
           WHEN s.slug_collision_count > 1
-            THEN s.slug || '--' || lower(left(s.id::text, 8))
-          ELSE s.slug
+            THEN COALESCE(NULLIF(s.slug, ''), s.computed_slug) || '--' || lower(left(s.id::text, 8))
+          ELSE COALESCE(NULLIF(s.slug, ''), s.computed_slug)
         END AS canonical_slug,
         si.hosted_url AS poster_url
       FROM entity_show_source es

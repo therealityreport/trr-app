@@ -16,6 +16,9 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 
 import { POST } from "@/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route";
 
+const BACKEND_STREAM_URL = "https://backend.example.com/api/v1/admin/person/person-1/refresh-images/stream";
+const BACKEND_HEALTH_URL = "https://backend.example.com/health";
+
 const makeRequest = (requestId?: string) =>
   new NextRequest("http://localhost/api/admin/trr-api/people/person-1/refresh-images/stream", {
     method: "POST",
@@ -58,12 +61,11 @@ describe("person refresh-images stream proxy route", () => {
     getBackendApiUrlMock.mockReset();
     vi.restoreAllMocks();
     requireAdminMock.mockResolvedValue(undefined);
-    getBackendApiUrlMock.mockReturnValue(
-      "https://backend.example.com/api/v1/admin/person/person-1/refresh-images/stream"
-    );
+    getBackendApiUrlMock.mockReturnValue(BACKEND_STREAM_URL);
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     process.env.TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS = "20000";
     process.env.TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS = "2000";
+    process.env.TRR_STREAM_CONNECT_PREFLIGHT_TIMEOUT_MS = "3000";
   });
 
   it("emits immediate proxy_connecting progress and forwards backend SSE", async () => {
@@ -71,6 +73,15 @@ describe("person refresh-images stream proxy route", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })
     );
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(makeRequest("req-person-2"), {
@@ -101,6 +112,7 @@ describe("person refresh-images stream proxy route", () => {
           evt.data.stream_state === "connected"
       )
     ).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(payload).toContain("\"sync_imdb\"");
   });
 
@@ -108,21 +120,24 @@ describe("person refresh-images stream proxy route", () => {
     process.env.TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS = "500";
     process.env.TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS = "20";
 
-    const fetchMock = vi.fn().mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          setTimeout(
-            () =>
-              resolve(
-                new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
-                  status: 200,
-                  headers: { "content-type": "text/event-stream" },
-                })
-              ),
-            80
-          );
-        })
-    );
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return new Promise((resolve) => {
+        setTimeout(
+          () =>
+            resolve(
+              new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
+                status: 200,
+                headers: { "content-type": "text/event-stream" },
+              })
+            ),
+          80
+        );
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(makeRequest("req-heartbeat"), {
@@ -147,12 +162,18 @@ describe("person refresh-images stream proxy route", () => {
   });
 
   it("forwards x-trr-request-id to backend", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      })
-    );
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(makeRequest("req-forward-1"), {
@@ -160,21 +181,30 @@ describe("person refresh-images stream proxy route", () => {
     });
     await response.text();
 
-    const callHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string> | undefined;
+    const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
+    const callHeaders = streamCall?.[1]?.headers as Record<string, string> | undefined;
     expect(callHeaders?.["x-trr-request-id"]).toBe("req-forward-1");
   });
 
   it("retries on transient backend fetch failure and emits retry progress", async () => {
     const transientError = new Error("fetch failed");
-    const fetchMock = vi
-      .fn()
-      .mockRejectedValueOnce(transientError)
-      .mockResolvedValueOnce(
+    let streamAttempts = 0;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      streamAttempts += 1;
+      if (streamAttempts === 1) {
+        return Promise.reject(transientError);
+      }
+      return Promise.resolve(
         new Response("event: progress\ndata: {\"stage\":\"sync_tmdb\"}\n\n", {
           status: 200,
           headers: { "content-type": "text/event-stream" },
         })
       );
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(makeRequest("req-person-1"), {
@@ -184,7 +214,7 @@ describe("person refresh-images stream proxy route", () => {
     const events = parseSseEvents(payload);
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(payload).toContain("\"sync_tmdb\"");
     expect(
       events.some(
@@ -199,7 +229,13 @@ describe("person refresh-images stream proxy route", () => {
   });
 
   it("surfaces backend non-OK responses as SSE error events", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response("backend unavailable", { status: 502 }));
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(new Response("backend unavailable", { status: 502 }));
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(makeRequest("req-person-1"), {
@@ -228,7 +264,13 @@ describe("person refresh-images stream proxy route", () => {
       address: "127.0.0.1",
       port: 8000,
     };
-    const fetchMock = vi.fn().mockRejectedValue(fetchError);
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.reject(fetchError);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await POST(makeRequest("req-person-4"), {
@@ -250,6 +292,44 @@ describe("person refresh-images stream proxy route", () => {
           evt.data.is_terminal === true
       )
     ).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("fails fast with BACKEND_UNRESPONSIVE when health preflight fails", async () => {
+    process.env.TRR_STREAM_CONNECT_PREFLIGHT_TIMEOUT_MS = "1000";
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.reject(new Error("fetch failed"));
+      }
+      return Promise.resolve(
+        new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest("req-preflight-fail"), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.text();
+    const events = parseSseEvents(payload);
+
+    expect(response.status).toBe(200);
+    expect(
+      events.some(
+        (evt) =>
+          evt.event === "error" &&
+          typeof evt.data === "object" &&
+          evt.data !== null &&
+          evt.data.stage === "proxy_connecting" &&
+          evt.data.checkpoint === "backend_preflight_failed" &&
+          evt.data.error_code === "BACKEND_UNRESPONSIVE" &&
+          evt.data.is_terminal === true
+      )
+    ).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

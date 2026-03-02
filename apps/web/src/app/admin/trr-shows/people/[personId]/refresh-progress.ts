@@ -102,6 +102,11 @@ export function buildPersonRefreshDetailMessage(input: {
   detail?: string | null;
   serviceUnavailable?: boolean;
   retryAfterS?: number | null;
+  reviewedRows?: number | null;
+  changedRows?: number | null;
+  totalRows?: number | null;
+  failedRows?: number | null;
+  skippedRows?: number | null;
 }): string | null {
   const baseMessage = typeof input.message === "string" ? input.message.trim() : "";
   const sourceLabel = formatRefreshSourceLabel(input.source);
@@ -116,6 +121,11 @@ export function buildPersonRefreshDetailMessage(input: {
   const skipReason = formatSkipReason(input.skipReason);
   const stageLabel = formatPersonRefreshPhaseLabel(input.rawStage);
   const detail = typeof input.detail === "string" ? input.detail.trim() : "";
+  const reviewedRows = normalizeCount(input.reviewedRows);
+  const changedRows = normalizeCount(input.changedRows);
+  const totalRows = normalizeCount(input.totalRows);
+  const failedRows = normalizeCount(input.failedRows);
+  const skippedRows = normalizeCount(input.skippedRows);
 
   const suffixParts: string[] = [];
   if (
@@ -138,6 +148,31 @@ export function buildPersonRefreshDetailMessage(input: {
     !new RegExp(`\\b${current}\\s*/\\s*${total}\\b`).test(baseMessage)
   ) {
     suffixParts.push(`step ${current}/${total}`);
+  }
+  if (
+    reviewedRows !== null &&
+    totalRows !== null &&
+    totalRows > 0 &&
+    !new RegExp(`reviewed\\s+${reviewedRows}\\s*/\\s*${totalRows}`, "i").test(baseMessage)
+  ) {
+    suffixParts.push(`reviewed ${reviewedRows}/${totalRows}`);
+  }
+  if (changedRows !== null && !new RegExp(`changed\\s+${changedRows}\\b`, "i").test(baseMessage)) {
+    suffixParts.push(`changed ${changedRows}`);
+  }
+  if (
+    failedRows !== null &&
+    failedRows > 0 &&
+    !new RegExp(`failed\\s+${failedRows}\\b`, "i").test(baseMessage)
+  ) {
+    suffixParts.push(`failed ${failedRows}`);
+  }
+  if (
+    skippedRows !== null &&
+    skippedRows > 0 &&
+    !new RegExp(`skipped\\s+${skippedRows}\\b`, "i").test(baseMessage)
+  ) {
+    suffixParts.push(`skipped ${skippedRows}`);
   }
   if (skipReason && !baseMessage.toLowerCase().includes(skipReason)) {
     suffixParts.push(`skip: ${skipReason}`);
@@ -210,6 +245,7 @@ export function buildProxyConnectDetailMessage(input: {
 
 export function buildProxyTerminalErrorMessage(input: {
   stage?: string | null;
+  checkpoint?: string | null;
   error?: string | null;
   detail?: string | null;
   errorCode?: string | null;
@@ -218,6 +254,8 @@ export function buildProxyTerminalErrorMessage(input: {
   maxAttempts?: number | null;
 }): string {
   const stage = normalizeStage(input.stage);
+  const checkpoint =
+    typeof input.checkpoint === "string" && input.checkpoint.trim() ? input.checkpoint.trim() : null;
   const error = typeof input.error === "string" && input.error.trim() ? input.error.trim() : null;
   const detail = typeof input.detail === "string" && input.detail.trim() ? input.detail.trim() : null;
   const errorCode = typeof input.errorCode === "string" && input.errorCode.trim() ? input.errorCode.trim() : null;
@@ -228,6 +266,14 @@ export function buildProxyTerminalErrorMessage(input: {
   const attemptSummary = maxAttempts ?? attemptsUsed;
 
   if (stage === "proxy_connecting") {
+    if (errorCode === "BACKEND_UNRESPONSIVE" || checkpoint === "backend_preflight_failed") {
+      const base = backendHost
+        ? `TRR-Backend is not responding (host: ${backendHost}).`
+        : "TRR-Backend is not responding.";
+      const hint =
+        " In workspace mode, use non-reload backend or wait for reload cycle to settle.";
+      return `${base}${hint}${detail ? ` ${detail}` : ""}`;
+    }
     const base =
       attemptSummary !== null
         ? `Backend stream connect failed after ${attemptSummary} attempts`
@@ -371,7 +417,7 @@ const REFRESH_PIPELINE_STEPS: PersonRefreshPipelineStepDefinition[] = [
   { id: "source_sync", label: "Source Sync", modes: new Set(["refresh"]) },
   { id: "metadata_enrichment", label: "Metadata", modes: new Set(["refresh"]) },
   { id: "upserting", label: "Saving Photos", modes: new Set(["refresh"]) },
-  { id: "metadata_repair", label: "IMDb Repair", modes: new Set(["refresh"]) },
+  { id: "metadata_repair", label: "IMDb Repair", modes: new Set(["refresh", "reprocess"]) },
   { id: "mirroring", label: "S3 Mirroring", modes: new Set(["refresh"]) },
   { id: "pruning", label: "Pruning", modes: new Set(["refresh"]) },
   { id: "auto_count", label: "People Count + Face Crops", modes: new Set(["refresh", "reprocess"]) },
@@ -462,7 +508,7 @@ function determineStepStatus(input: {
   const isCountComplete = hasCounts && (input.total ?? 0) >= 0 && (input.current ?? 0) >= (input.total ?? 0);
   if (input.skipReason || messageIndicatesSkip(message)) return "skipped";
   if (input.serviceUnavailable || messageIndicatesFailure(message)) {
-    return isCountComplete ? "completed" : "failed";
+    return "failed";
   }
   if (!input.heartbeat && (isCountComplete || messageIndicatesCompletion(message))) return "completed";
   if (input.previousStatus === "completed" || input.previousStatus === "skipped" || input.previousStatus === "failed") {
@@ -585,6 +631,7 @@ export function finalizePersonRefreshPipelineSteps(
   const showContextTagged = toSummaryNumber(summaryRecord, "show_context_tagged");
   const metadataEnrichmentFailed = toSummaryNumber(summaryRecord, "metadata_enrichment_failed");
   const metadataRepair = toSummaryNumber(summaryRecord, "existing_imdb_rows_repaired");
+  const metadataRepairAttempted = toSummaryNumber(summaryRecord, "metadata_repair_attempted");
 
   const updateStep = (id: PersonRefreshPipelineStepId, update: Partial<PersonRefreshPipelineStepState>) => {
     const index = next.findIndex((step) => step.id === id);
@@ -622,6 +669,21 @@ export function finalizePersonRefreshPipelineSteps(
     updateStep("pruning", {
       status: photosPruned > 0 ? "completed" : next.find((step) => step.id === "pruning")?.status ?? "skipped",
       result: `Pruned ${photosPruned.toLocaleString()} orphaned objects`,
+    });
+  } else {
+    updateStep("metadata_repair", {
+      status:
+        metadataRepairAttempted > 0
+          ? metadataEnrichmentFailed > 0
+            ? "failed"
+            : "completed"
+          : "skipped",
+      result:
+        metadataRepairAttempted > 0
+          ? metadataEnrichmentFailed > 0
+            ? `Repaired ${metadataRepair.toLocaleString()} IMDb rows (${metadataEnrichmentFailed.toLocaleString()} failed)`
+            : `Repaired ${metadataRepair.toLocaleString()} IMDb rows`
+          : "Not run",
     });
   }
 

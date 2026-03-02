@@ -49,19 +49,27 @@ export default function ShowSocialTab({
     >
       <div className="space-y-4">
         {socialDependencyError && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+          <div
+            role="alert"
+            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
+          >
             Social dependency warning: {socialDependencyError}. Showing available social data.
           </div>
         )}
         {!isRedditView && (
           <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
             {selectedSocialSeason ? (
-              <nav className="mb-4 flex flex-wrap gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
+              <nav
+                aria-label="Social platform tabs"
+                className="mb-4 flex flex-wrap gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2"
+              >
                 {socialPlatformOptions.map((tab) => (
                   <button
                     key={tab.key}
                     type="button"
                     onClick={() => onSelectSocialPlatformTab(tab.key)}
+                    aria-pressed={socialPlatformTab === tab.key}
+                    aria-current={socialPlatformTab === tab.key ? "page" : undefined}
                     className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
                       socialPlatformTab === tab.key
                         ? "bg-white text-zinc-900 shadow-sm"
@@ -90,9 +98,13 @@ export default function ShowSocialTab({
                 </p>
               </div>
               {socialSeasonOptions.length > 1 ? (
-                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                <label
+                  htmlFor="show-social-season-select"
+                  className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500"
+                >
                   Season
                   <select
+                    id="show-social-season-select"
                     value={selectedSocialSeasonId ?? ""}
                     onChange={(event) => onSelectSocialSeasonId(event.target.value || null)}
                     className="mt-1 block min-w-[220px] rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"

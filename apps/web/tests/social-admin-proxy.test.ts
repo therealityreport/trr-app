@@ -51,6 +51,10 @@ describe("social-admin-proxy", () => {
 
     expect(payload).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const firstHeaders = (firstInit?.headers ?? {}) as Record<string, string>;
+    expect(typeof firstHeaders["x-trace-id"]).toBe("string");
+    expect(firstHeaders["x-trace-id"].length).toBeGreaterThan(0);
   });
 
   it("maps persistent upstream 502 to retryable standardized envelope", async () => {
@@ -81,6 +85,7 @@ describe("social-admin-proxy", () => {
       error: string;
       code?: string;
       retryable?: boolean;
+      trace_id?: string;
       upstream_status?: number;
       upstream_detail?: unknown;
       upstream_detail_code?: string;
@@ -89,6 +94,8 @@ describe("social-admin-proxy", () => {
     expect(response.status).toBe(502);
     expect(payload.code).toBe("UPSTREAM_ERROR");
     expect(payload.retryable).toBe(true);
+    expect(typeof payload.trace_id).toBe("string");
+    expect((payload.trace_id ?? "").length).toBeGreaterThan(0);
     expect(payload.upstream_status).toBe(502);
     expect(payload.upstream_detail_code).toBe("SOCIAL_WORKER_UNAVAILABLE");
     expect(payload.upstream_detail).toEqual({
@@ -99,8 +106,9 @@ describe("social-admin-proxy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("uses seasonIdHint to bypass season lookup", async () => {
+  it("uses seasonIdHint only when it matches canonical season resolution", async () => {
     const hintedSeasonId = "11111111-1111-4111-8111-111111111111";
+    getSeasonByShowAndNumberMock.mockResolvedValue({ id: hintedSeasonId });
     getBackendApiUrlMock.mockImplementation(
       (path: string) => `http://backend.local/api/v1${path}`,
     );
@@ -121,9 +129,35 @@ describe("social-admin-proxy", () => {
     });
 
     expect(payload).toEqual({ ok: true });
-    expect(getSeasonByShowAndNumberMock).not.toHaveBeenCalled();
+    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${hintedSeasonId}/analytics?source_scope=bravo`);
+  });
+
+  it("ignores seasonIdHint when it mismatches canonical season resolution", async () => {
+    const hintedSeasonId = "11111111-1111-4111-8111-111111111111";
+    const canonicalSeasonId = "22222222-2222-4222-8222-222222222222";
+    getSeasonByShowAndNumberMock.mockResolvedValue({ id: canonicalSeasonId });
+    getBackendApiUrlMock.mockImplementation(
+      (path: string) => `http://backend.local/api/v1${path}`,
+    );
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+      seasonIdHint: hintedSeasonId,
+      fallbackError: "Failed to fetch social analytics",
+      retries: 0,
+      timeoutMs: 1000,
+    });
+
+    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${canonicalSeasonId}/analytics`);
   });
 
   it("falls back to season lookup when seasonIdHint is invalid", async () => {

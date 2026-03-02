@@ -63,6 +63,18 @@ const parseRootRedditCommunityPath = (
   };
 };
 
+const normalizeSlugCandidate = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const isAliasLikeShowSlug = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return /^rh[a-z0-9]{2,}$/i.test(normalized) && !normalized.includes("-");
+};
+
 export default function RedditCommunityViewPage() {
   const { user, checking, hasAccess } = useAdminGuard();
   const router = useRouter();
@@ -77,16 +89,19 @@ export default function RedditCommunityViewPage() {
       : typeof params.communityId === "string"
         ? params.communityId
         : "";
+  const rootPathContext = useMemo(() => parseRootRedditCommunityPath(pathname), [pathname]);
+  const pathShowSlug =
+    typeof params.showId === "string" && params.showId.trim().length > 0
+      ? params.showId.trim()
+      : null;
+  const pathnameShowSlug = normalizeSlugCandidate(rootPathContext?.showSlug);
   const queryShowSlug = (() => {
     const value = searchParams.get("showSlug") ?? searchParams.get("show") ?? null;
     if (!value) return null;
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
   })();
-  const routeShowSlug =
-    typeof params.showId === "string" && params.showId.trim().length > 0
-      ? params.showId.trim()
-      : queryShowSlug;
+  const routeShowSlug = pathnameShowSlug ?? pathShowSlug ?? queryShowSlug;
   const querySeasonNumber = (() => {
     const raw = searchParams.get("season");
     if (!raw) return null;
@@ -102,9 +117,23 @@ export default function RedditCommunityViewPage() {
   })();
   const backHref = resolveBackHref(searchParams.get("return_to"));
   const [communityContext, setCommunityContext] = useState<RedditCommunityContext | null>(null);
-  const showSlug = routeShowSlug ?? communityContext?.showSlug;
+  const [pinnedShowSlug, setPinnedShowSlug] = useState<string | null>(() => routeShowSlug);
+  const showSlug = useMemo(() => {
+    const contextShowSlug = normalizeSlugCandidate(communityContext?.showSlug);
+    const pathnameCandidate = normalizeSlugCandidate(pathnameShowSlug);
+    const pathCandidate = normalizeSlugCandidate(pathShowSlug);
+    const queryCandidate = normalizeSlugCandidate(queryShowSlug);
+    const pinnedCandidate = normalizeSlugCandidate(pinnedShowSlug);
+    const aliasPreferred =
+      [pathnameCandidate, contextShowSlug, pathCandidate, queryCandidate, pinnedCandidate].find((candidate) =>
+        isAliasLikeShowSlug(candidate),
+      ) ?? null;
+    if (aliasPreferred) return aliasPreferred;
+    return pathnameCandidate ?? pathCandidate ?? queryCandidate ?? pinnedCandidate ?? contextShowSlug ?? null;
+  }, [communityContext?.showSlug, pathShowSlug, pathnameShowSlug, pinnedShowSlug, queryShowSlug]);
   const seasonNumber = routeSeasonNumber ?? querySeasonNumber ?? communityContext?.seasonNumber;
-  const canonicalSeasonNumber = routeSeasonNumber ?? querySeasonNumber;
+  const canonicalSeasonNumber = routeSeasonNumber ?? querySeasonNumber ?? communityContext?.seasonNumber;
+  const canonicalSeasonId = communityContext?.seasonId ?? null;
   const communitySlug = communityContext?.communitySlug ?? initialCommunityKey;
   const showName = communityContext?.showFullName ?? communityContext?.showLabel ?? "Show";
   const hasSeasonContext =
@@ -134,6 +163,12 @@ export default function RedditCommunityViewPage() {
   }, [canonicalSeasonNumber, communitySlug, showSlug]);
 
   useEffect(() => {
+    const candidate = pathnameShowSlug ?? pathShowSlug ?? queryShowSlug;
+    if (!candidate) return;
+    setPinnedShowSlug((current) => (current === candidate ? current : candidate));
+  }, [pathShowSlug, pathnameShowSlug, queryShowSlug]);
+
+  useEffect(() => {
     if (!canonicalCommunityHref) return;
     if (pathname === canonicalCommunityHref) return;
     const current = parseRootRedditCommunityPath(pathname);
@@ -146,14 +181,7 @@ export default function RedditCommunityViewPage() {
           : null;
       const sameSeason = current.seasonNumber === canonicalSeason;
       // Avoid redirect churn for case-only differences in slug segments.
-      if (sameShow && sameCommunity && sameSeason) {
-        return;
-      }
-      // Accept both URL forms:
-      // /{show}/social/reddit/{community}
-      // /{show}/social/reddit/{community}/s{season}
-      // Do not inject or strip season token solely from async context updates.
-      if (sameShow && sameCommunity) {
+      if (sameShow && sameCommunity && (canonicalSeason === null || sameSeason)) {
         return;
       }
     }
@@ -312,7 +340,9 @@ export default function RedditCommunityViewPage() {
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <RedditSourcesManager
               mode="global"
-              showSlug={routeShowSlug ?? undefined}
+              showSlug={showSlug ?? undefined}
+              seasonId={canonicalSeasonId}
+              seasonNumber={canonicalSeasonNumber}
               initialCommunityId={initialCommunityKey}
               hideCommunityList
               backHref={redditHref}

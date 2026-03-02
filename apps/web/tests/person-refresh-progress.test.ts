@@ -108,6 +108,24 @@ describe("person refresh progress mapping", () => {
     ).toBe("SYNCING in progress · source: TMDb · 3s elapsed");
   });
 
+  it("includes reviewed/changed/failed counters when provided", () => {
+    expect(
+      buildPersonRefreshDetailMessage({
+        rawStage: "auto_count",
+        message: "Auto-counting people in images...",
+        current: 12,
+        total: 50,
+        reviewedRows: 12,
+        changedRows: 9,
+        totalRows: 50,
+        failedRows: 3,
+        skippedRows: 4,
+      }),
+    ).toBe(
+      "Auto-counting people in images... · step 12/50 · reviewed 12/50 · changed 9 · failed 3 · skipped 4",
+    );
+  });
+
   it("formats proxy connect heartbeat detail with attempt timing", () => {
     expect(
       buildProxyConnectDetailMessage({
@@ -132,6 +150,20 @@ describe("person refresh progress mapping", () => {
       }),
     ).toBe(
       "Backend stream connect failed after 5 attempts (code: CONNECT_TIMEOUT, host: 127.0.0.1:8000). Timed out waiting for backend refresh stream response.",
+    );
+  });
+
+  it("formats backend preflight failures with actionable runtime hint", () => {
+    expect(
+      buildProxyTerminalErrorMessage({
+        stage: "proxy_connecting",
+        checkpoint: "backend_preflight_failed",
+        detail: "Timed out waiting for backend stream response. (health_url=http://127.0.0.1:8000/health)",
+        errorCode: "BACKEND_UNRESPONSIVE",
+        backendHost: "127.0.0.1:8000",
+      }),
+    ).toBe(
+      "TRR-Backend is not responding (host: 127.0.0.1:8000). In workspace mode, use non-reload backend or wait for reload cycle to settle. Timed out waiting for backend stream response. (health_url=http://127.0.0.1:8000/health)",
     );
   });
 
@@ -167,6 +199,22 @@ describe("person refresh progress mapping", () => {
     expect(skipped.find((step) => step.id === "word_id")?.status).toBe("skipped");
   });
 
+  it("keeps failed status even when current equals total", () => {
+    const initial = createPersonRefreshPipelineSteps("refresh");
+    const failed = updatePersonRefreshPipelineSteps(initial, {
+      rawStage: "auto_count",
+      message: "Counted 0 images (306 failed).",
+      current: 306,
+      total: 306,
+    });
+    expect(failed.find((step) => step.id === "auto_count")?.status).toBe("failed");
+  });
+
+  it("includes metadata repair step in reprocess mode", () => {
+    const steps = createPersonRefreshPipelineSteps("reprocess");
+    expect(steps.some((step) => step.id === "metadata_repair")).toBe(true);
+  });
+
   it("finalizes step summaries with completed vs failed details", () => {
     const initial = createPersonRefreshPipelineSteps("refresh");
     const finalized = finalizePersonRefreshPipelineSteps(initial, "refresh", {
@@ -200,5 +248,35 @@ describe("person refresh progress mapping", () => {
     expect(sourceSync?.result).toContain("Fetched 12 photos");
     expect(autoCount?.result).toContain("Saved people tags for 7/9 images");
     expect(mirroring?.status).toBe("failed");
+  });
+
+  it("finalizes reprocess metadata repair summary", () => {
+    const initial = createPersonRefreshPipelineSteps("reprocess");
+    const finalized = finalizePersonRefreshPipelineSteps(initial, "reprocess", {
+      metadata_repair_attempted: 1,
+      existing_imdb_rows_repaired: 5,
+      metadata_enrichment_failed: 0,
+      auto_counts_attempted: 0,
+      auto_counts_succeeded: 0,
+      auto_counts_failed: 0,
+      text_overlay_attempted: 0,
+      text_overlay_succeeded: 0,
+      text_overlay_unknown: 0,
+      text_overlay_failed: 0,
+      centering_attempted: 0,
+      centering_succeeded: 0,
+      centering_failed: 0,
+      centering_skipped_manual: 0,
+      resize_attempted: 0,
+      resize_succeeded: 0,
+      resize_failed: 0,
+      resize_crop_attempted: 0,
+      resize_crop_succeeded: 0,
+      resize_crop_failed: 0,
+    });
+
+    const metadataRepair = finalized.find((step) => step.id === "metadata_repair");
+    expect(metadataRepair?.status).toBe("completed");
+    expect(metadataRepair?.result).toContain("Repaired 5 IMDb rows");
   });
 });

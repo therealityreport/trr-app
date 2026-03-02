@@ -32,6 +32,9 @@ describe("show settings links fandom visibility", () => {
     expect(contents).toMatch(/runShowLinkDiscovery/);
     expect(contents).toMatch(/\{linksRefreshing \? "Refreshing Links\.\.\." : "Refresh Links"\}/);
     expect(contents).toMatch(/linksRefreshing && linksRefreshProgress/);
+    expect(contents).toMatch(/\/links\/discover\/stream/);
+    expect(contents).not.toMatch(/\/links\/discover["']/);
+    expect(contents).toMatch(/\/links\?view=active/);
     expect(contents).not.toMatch(/Discovering\.\.\./);
   });
 
@@ -44,6 +47,16 @@ describe("show settings links fandom visibility", () => {
     expect(pageContents).toMatch(/key: "wikipedia", label: "Wikipedia"/);
     expect(pageContents).toMatch(/key: "wikidata", label: "Wikidata"/);
     expect(pageContents).toMatch(/source\.urls\.map/);
+    expect(pageContents).toMatch(/approvedUrl\.iconUrl/);
+    expect(pageContents).toMatch(/resolveLinkPageTitle/);
+    expect(pageContents).toMatch(/buildHostFaviconUrl/);
+    expect(pageContents).toMatch(/link\.iconUrl/);
+    expect(pageContents).toMatch(/if \(kind === "wikidata"\) return "wikidata";/);
+    expect(pageContents).not.toMatch(/kind\.includes\("knowledge"\)/);
+    expect(pageContents).toMatch(/approvedLinkCount/);
+    expect(pageContents).toMatch(/Other Verified Links/);
+    expect(pageContents).toMatch(/cards\.sort\(\(a, b\) => \{/);
+    expect(pageContents).toMatch(/b\.approvedLinkCount - a\.approvedLinkCount/);
     expect(constantsContents).toMatch(/key: "wikipedia", label: "Wikipedia"/);
     expect(constantsContents).toMatch(/key: "wikidata", label: "Wikidata"/);
     expect(pageContents).not.toMatch(/Knowledge Graph/);

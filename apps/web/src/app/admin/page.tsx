@@ -4,6 +4,7 @@ import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import AdminGlobalSearch from "@/components/admin/AdminGlobalSearch";
 import { buildAdminRootBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { ADMIN_DASHBOARD_TOOLS } from "@/lib/admin/admin-navigation";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -53,16 +54,13 @@ export default function AdminDashboardPage() {
 
         <main className="mx-auto max-w-6xl px-6 py-8">
           <section className="mb-8 rounded-2xl border border-zinc-200 bg-white/80 p-6 shadow-sm">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Access Level</p>
-                <p className="text-lg font-semibold text-zinc-900">The Reality Report Superfan</p>
-                <p className="break-words text-sm text-zinc-500">Display name verified as The Reality Report Superfan @the_reality_report1</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">Quick Search</p>
+                <h2 className="mt-1 text-2xl font-semibold text-zinc-900">Search shows, people, and episodes</h2>
+                <p className="text-sm text-zinc-500">Jump directly to an admin destination from the dashboard.</p>
               </div>
-              <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-                <p className="font-semibold">Authorized</p>
-                <p className="text-xs">Admin endpoints, exports, and tools are unlocked for this session.</p>
-              </div>
+              <AdminGlobalSearch variant="hero" />
             </div>
           </section>
 

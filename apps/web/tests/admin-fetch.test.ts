@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { adminFetch, adminStream, fetchWithTimeout } from "@/lib/admin/admin-fetch";
+import { adminFetch, adminMutation, adminStream, fetchWithTimeout } from "@/lib/admin/admin-fetch";
 
 const createAbortableNeverFetch = () =>
   vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
@@ -94,6 +94,23 @@ describe("admin-fetch", () => {
     expect(onEvent).toHaveBeenCalledWith({
       event: "complete",
       payload: { attempted: 2 },
+    });
+  });
+
+  it("normalizes 'signal is aborted without reason' errors to retryable timeout", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("signal is aborted without reason"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      adminMutation("/api/test", {
+        method: "POST",
+        timeoutMs: 1000,
+      })
+    ).rejects.toMatchObject({
+      name: "AdminRequestError",
+      status: 408,
+      retryable: true,
+      message: "Request timed out",
     });
   });
 });

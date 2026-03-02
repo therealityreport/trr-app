@@ -1,5 +1,6 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { getSeasonByShowAndNumber } from "@/lib/server/trr-api/trr-shows-repository";
@@ -18,6 +19,7 @@ export type SocialProxyErrorBody = {
   error: string;
   code?: ProxyErrorCode;
   retryable?: boolean;
+  trace_id?: string;
   upstream_status?: number;
   upstream_detail?: unknown;
   upstream_detail_code?: string;
@@ -27,6 +29,7 @@ class SocialProxyError extends Error {
   status: number;
   code: ProxyErrorCode;
   retryable: boolean;
+  traceId?: string;
   upstreamStatus?: number;
   upstreamDetail?: unknown;
   upstreamDetailCode?: string;
@@ -37,6 +40,7 @@ class SocialProxyError extends Error {
       status: number;
       code: ProxyErrorCode;
       retryable?: boolean;
+      traceId?: string;
       upstreamStatus?: number;
       upstreamDetail?: unknown;
       upstreamDetailCode?: string;
@@ -46,11 +50,16 @@ class SocialProxyError extends Error {
     this.status = options.status;
     this.code = options.code;
     this.retryable = Boolean(options.retryable);
+    this.traceId = options.traceId;
     this.upstreamStatus = options.upstreamStatus;
     this.upstreamDetail = options.upstreamDetail;
     this.upstreamDetailCode = options.upstreamDetailCode;
   }
 }
+
+const buildTraceId = (): string => {
+  return randomUUID().replace(/-/g, "");
+};
 
 const getServiceRoleKey = (): string => {
   const value = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
@@ -150,8 +159,11 @@ const isRetryableNetworkError = (error: unknown): boolean => {
   ].includes(code);
 };
 
-const toProxyError = (error: unknown): SocialProxyError => {
+const toProxyError = (error: unknown, fallbackTraceId?: string): SocialProxyError => {
   if (error instanceof SocialProxyError) {
+    if (!error.traceId && fallbackTraceId) {
+      error.traceId = fallbackTraceId;
+    }
     return error;
   }
   if (error instanceof Error) {
@@ -160,6 +172,7 @@ const toProxyError = (error: unknown): SocialProxyError => {
         status: 504,
         code: "UPSTREAM_TIMEOUT",
         retryable: true,
+        traceId: fallbackTraceId,
       });
     }
     if (isRetryableNetworkError(error)) {
@@ -169,24 +182,25 @@ const toProxyError = (error: unknown): SocialProxyError => {
           status: 502,
           code: "BACKEND_UNREACHABLE",
           retryable: true,
+          traceId: fallbackTraceId,
         },
       );
     }
     if (error.message === "unauthorized") {
-      return new SocialProxyError(error.message, { status: 401, code: "UNAUTHORIZED" });
+      return new SocialProxyError(error.message, { status: 401, code: "UNAUTHORIZED", traceId: fallbackTraceId });
     }
     if (error.message === "forbidden") {
-      return new SocialProxyError(error.message, { status: 403, code: "FORBIDDEN" });
+      return new SocialProxyError(error.message, { status: 403, code: "FORBIDDEN", traceId: fallbackTraceId });
     }
     if (error.message === "season not found") {
-      return new SocialProxyError(error.message, { status: 404, code: "SEASON_NOT_FOUND" });
+      return new SocialProxyError(error.message, { status: 404, code: "SEASON_NOT_FOUND", traceId: fallbackTraceId });
     }
     if (error.message === "seasonNumber is invalid") {
-      return new SocialProxyError(error.message, { status: 400, code: "BAD_REQUEST" });
+      return new SocialProxyError(error.message, { status: 400, code: "BAD_REQUEST", traceId: fallbackTraceId });
     }
-    return new SocialProxyError(error.message, { status: 500, code: "INTERNAL_ERROR" });
+    return new SocialProxyError(error.message, { status: 500, code: "INTERNAL_ERROR", traceId: fallbackTraceId });
   }
-  return new SocialProxyError("failed", { status: 500, code: "INTERNAL_ERROR" });
+  return new SocialProxyError("failed", { status: 500, code: "INTERNAL_ERROR", traceId: fallbackTraceId });
 };
 
 const appendQuery = (backendBase: string, queryString: string): string => {
@@ -205,6 +219,7 @@ type FetchWithRetryOptions = {
   body?: string;
   timeoutMs?: number;
   retries?: number;
+  traceId?: string;
   fallbackError: string;
 };
 
@@ -240,6 +255,14 @@ async function fetchBackend(
 ): Promise<Response> {
   const retries = Math.max(0, options.retries ?? 0);
   const maxAttempts = retries + 1;
+  const traceId = String(options.traceId || options.headers?.["x-trace-id"] || "").trim() || buildTraceId();
+  const requestHeaders: Record<string, string> = {
+    ...(options.headers ?? {}),
+    "x-trace-id": traceId,
+  };
+  if (!requestHeaders["x-request-id"]) {
+    requestHeaders["x-request-id"] = traceId;
+  }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -247,7 +270,7 @@ async function fetchBackend(
         backendUrl,
         {
           method: options.method ?? "GET",
-          headers: options.headers,
+          headers: requestHeaders,
           body: options.body,
           cache: "no-store",
         },
@@ -265,6 +288,8 @@ async function fetchBackend(
       const normalizedMessage = normalizeBackendErrorMessage(data, options.fallbackError);
       const hasDnsOrTransportFault =
         hasDnsOrTransportFaultText(normalizedMessage) || hasDnsOrTransportFaultDetail(upstreamDetail);
+      const responseTraceId =
+        response.headers?.get?.("x-trace-id") ?? response.headers?.get?.("x-request-id") ?? traceId;
       const proxyError = hasDnsOrTransportFault
         ? new SocialProxyError(
             "Could not reach TRR-Backend. Confirm TRR-Backend is running and TRR_API_URL is correct.",
@@ -272,6 +297,7 @@ async function fetchBackend(
               status: 502,
               code: "BACKEND_UNREACHABLE",
               retryable: true,
+              traceId: responseTraceId,
               upstreamStatus: response.status,
               upstreamDetail,
               upstreamDetailCode,
@@ -281,6 +307,7 @@ async function fetchBackend(
             status: response.status,
             code: "UPSTREAM_ERROR",
             retryable: isRetryableUpstreamStatus(response.status),
+            traceId: responseTraceId,
             upstreamStatus: response.status,
             upstreamDetail,
             upstreamDetailCode,
@@ -290,7 +317,7 @@ async function fetchBackend(
       }
       await sleep(150 * 2 ** (attempt - 1));
     } catch (error) {
-      const proxyError = toProxyError(error);
+      const proxyError = toProxyError(error, traceId);
       if (!proxyError.retryable || attempt >= maxAttempts) {
         throw proxyError;
       }
@@ -298,7 +325,7 @@ async function fetchBackend(
     }
   }
 
-  throw new SocialProxyError(options.fallbackError, { status: 500, code: "INTERNAL_ERROR" });
+  throw new SocialProxyError(options.fallbackError, { status: 500, code: "INTERNAL_ERROR", traceId });
 }
 
 export const resolveSeasonId = async (showId: string, seasonNumberRaw: string): Promise<string> => {
@@ -319,7 +346,9 @@ export const buildSeasonBackendUrl = async (
   seasonPath: string,
   seasonIdHint?: string | null,
 ): Promise<string> => {
-  const seasonId = isUuid(seasonIdHint) ? seasonIdHint : await resolveSeasonId(showId, seasonNumberRaw);
+  const resolvedSeasonId = await resolveSeasonId(showId, seasonNumberRaw);
+  const hintedSeasonId = isUuid(seasonIdHint) ? seasonIdHint : null;
+  const seasonId = hintedSeasonId && hintedSeasonId === resolvedSeasonId ? hintedSeasonId : resolvedSeasonId;
   const normalizedSeasonPath = seasonPath.startsWith("/") ? seasonPath : `/${seasonPath}`;
   const backendUrl = getBackendApiUrl(`/admin/socials/seasons/${seasonId}${normalizedSeasonPath}`);
   if (!backendUrl) {
@@ -345,10 +374,13 @@ export const fetchSeasonBackendJson = async (
 ): Promise<Record<string, unknown>> => {
   const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath, options.seasonIdHint);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
+  const traceId = String(options.traceId || options.headers?.["x-trace-id"] || "").trim() || buildTraceId();
   const response = await fetchBackend(backendUrl, {
     ...options,
+    traceId,
     headers: {
       Authorization: `Bearer ${getServiceRoleKey()}`,
+      "x-trace-id": traceId,
       ...(options.headers ?? {}),
     },
   });
@@ -361,10 +393,13 @@ export const fetchSocialBackendJson = async (
 ): Promise<Record<string, unknown>> => {
   const backendBase = buildSocialBackendUrl(socialPath);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
+  const traceId = String(options.traceId || options.headers?.["x-trace-id"] || "").trim() || buildTraceId();
   const response = await fetchBackend(backendUrl, {
     ...options,
+    traceId,
     headers: {
       Authorization: `Bearer ${getServiceRoleKey()}`,
+      "x-trace-id": traceId,
       ...(options.headers ?? {}),
     },
   });
@@ -379,10 +414,13 @@ export const fetchSeasonBackendResponse = async (
 ): Promise<Response> => {
   const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath, options.seasonIdHint);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
+  const traceId = String(options.traceId || options.headers?.["x-trace-id"] || "").trim() || buildTraceId();
   return fetchBackend(backendUrl, {
     ...options,
+    traceId,
     headers: {
       Authorization: `Bearer ${getServiceRoleKey()}`,
+      "x-trace-id": traceId,
       ...(options.headers ?? {}),
     },
   });
@@ -399,6 +437,9 @@ export const socialProxyErrorResponse = (
     code: proxyError.code,
     retryable: proxyError.retryable,
   };
+  if (proxyError.traceId) {
+    body.trace_id = proxyError.traceId;
+  }
   if (proxyError.upstreamStatus) {
     body.upstream_status = proxyError.upstreamStatus;
   }

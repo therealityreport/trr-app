@@ -3,6 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 
 describe("social week detail wiring", () => {
+  it("uses speed-first week route retry/timeout defaults", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route.ts",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/max_comments_per_post",\s*"0"/);
+    expect(contents).toMatch(/retries:\s*0/);
+    expect(contents).toMatch(/timeoutMs:\s*40_000/);
+  });
+
   it("forwards season_id and timezone in week detail fetch", () => {
     const filePath = path.resolve(
       __dirname,
@@ -40,6 +52,8 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/Week detail request timed out/);
     expect(contents).toMatch(/Sync runs request timed out/);
     expect(contents).toMatch(/Sync jobs request timed out/);
+    expect(contents).toMatch(/ingestKickoff:\s*25_000/);
+    expect(contents).toMatch(/Ingest kickoff request timed out/);
     expect(contents).toMatch(/SYNC_POLL_BACKOFF_MS/);
     expect(contents).toMatch(/syncPollFailureCountRef/);
     expect(contents).toMatch(/syncPollFailureCountRef\.current >= 2 && !isTransientDevRestartMessage\(message\)/);
@@ -57,17 +71,18 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/syncPollFailureCountRef\.current = Math\.max\(1, syncPollFailureCountRef\.current\)/);
   });
 
-  it("preserves social_view and social_platform in back link query", () => {
+  it("uses season social header chrome wiring with official analytics context", () => {
     const filePath = path.resolve(
       __dirname,
       "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/query\.set\("social_platform", socialPlatform\)/);
-    expect(contents).toMatch(/normalizedSocialView/);
-    expect(contents).toMatch(/query\.set\("social_view", normalizedSocialView\)/);
-    expect(contents).not.toMatch(/query\.set\("season_id", resolvedSeasonId\)/);
+    expect(contents).toMatch(/SocialAdminPageHeader/);
+    expect(contents).toMatch(/buildSeasonSocialBreadcrumb/);
+    expect(contents).toMatch(/subTabLabel:\s*"Official Analytics"/);
+    expect(contents).toMatch(/SeasonTabsNav tabs=\{SEASON_PAGE_TABS\} activeTab="social" onSelect=\{handleSeasonTabSelect\}/);
+    expect(contents).toMatch(/SEASON_SOCIAL_ANALYTICS_VIEWS/);
   });
 
   it("canonicalizes legacy social_platform query links to platform path URLs", () => {
@@ -79,7 +94,7 @@ describe("social week detail wiring", () => {
 
     expect(contents).toMatch(/nextQuery\.delete\("social_platform"\)/);
     expect(contents).toMatch(/platform:\s*socialPlatformFromQuery/);
-    expect(contents).toMatch(/compareAndReplace\(\s*router,\s*canonicalCurrentRoute,\s*nextRoute/);
+    expect(contents).toMatch(/compareAndReplaceGuarded\(nextRoute\)/);
     expect(contents).toMatch(/router\.replace\(nextRoute as Route,\s*{ scroll: false }\);/);
   });
 
@@ -106,6 +121,32 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/buildSeasonSocialWeekUrl\(\{\s*showSlug:\s*showSlugForRouting,/s);
   });
 
+  it("uses local state for platform tab clicks without week-route replacement", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/onClick=\{\(\) => \{\s*setPlatformFilter\(tab\.key\);\s*\}\}/s);
+    expect(contents).not.toMatch(
+      /onClick=\{\(\) => \{\s*setPlatformFilter\(tab\.key\);[\s\S]*buildSeasonSocialWeekUrl\(\{[\s\S]*\}\);[\s\S]*compareAndReplaceGuarded\(nextRoute\);[\s\S]*\}\}/s,
+    );
+  });
+
+  it("guards duplicate route replacements to avoid replace loops", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const lastRouteReplaceAttemptRef = useRef<string \| null>\(null\)/);
+    expect(contents).toMatch(/const compareAndReplaceGuarded = useCallback\(/);
+    expect(contents).toMatch(/if \(lastRouteReplaceAttemptRef\.current === canonicalNextRoute\) return;/);
+    expect(contents).toMatch(/lastRouteReplaceAttemptRef\.current = canonicalCurrentRoute;/);
+  });
+
   it("wires deep social breadcrumbs with linked show and social ancestors", () => {
     const filePath = path.resolve(
       __dirname,
@@ -117,8 +158,8 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/showHref:\s*breadcrumbShowHref/);
     expect(contents).toMatch(/seasonHref:\s*breadcrumbSeasonHref/);
     expect(contents).toMatch(/socialHref:\s*breadcrumbSocialHref/);
-    expect(contents).toMatch(/subTabLabel:\s*breadcrumbSubTabLabel/);
-    expect(contents).toMatch(/buildSeasonWeekBreadcrumb\(/);
+    expect(contents).toMatch(/subTabLabel:\s*"Official Analytics"/);
+    expect(contents).toMatch(/buildSeasonSocialBreadcrumb\(/);
   });
 
   it("uses stable job ids for sync log row keys", () => {
@@ -131,5 +172,18 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/syncLogs\.map\(\(entry\) => \(/);
     expect(contents).toMatch(/key=\{entry\.id\}/);
     expect(contents).not.toMatch(/key=\{`\$\{line\}-\$\{index\}`\}/);
+  });
+
+  it("renders additive refresh diagnostics and youtube transcript metadata", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/refresh\.comment_gap/);
+    expect(contents).toMatch(/Refresh completed with warnings:/);
+    expect(contents).toMatch(/Transcript/);
+    expect(contents).toMatch(/Media Asset Metadata/);
   });
 });

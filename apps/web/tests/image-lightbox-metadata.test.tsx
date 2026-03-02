@@ -146,6 +146,75 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getByText("The Traitors")).toBeInTheDocument();
   });
 
+  it("renders credit type and event metadata rows", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          contentType: "EVENT",
+          mediaTypeLabel: "Event",
+          eventName: "The 77th Primetime Emmy Awards",
+          imdbCreditType: "TV Movie",
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByText("Credit Type")).toBeInTheDocument();
+    expect(screen.getByText("TV Movie")).toBeInTheDocument();
+    expect(screen.getByText("Media Type")).toBeInTheDocument();
+    expect(screen.getAllByText("Event").length).toBeGreaterThan(0);
+    expect(screen.getByText("Event Name")).toBeInTheDocument();
+    expect(screen.getByText("The 77th Primetime Emmy Awards")).toBeInTheDocument();
+  });
+
+  it("renders fallback WWHL show and face crops in metadata coverage for merged canonical rows", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          showName: "Watch What Happens Live with Andy Cohen",
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.1,
+              y: 0.1,
+              width: 0.2,
+              height: 0.2,
+              person_name: "Alan Cumming",
+            },
+          ],
+          faceCrops: [
+            {
+              index: 1,
+              x: 0.08,
+              y: 0.06,
+              width: 0.26,
+              height: 0.26,
+              variantUrl: "https://cdn.example.com/face-crops/alan-wwhl.jpg",
+              size: 256,
+            },
+          ],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByText("Show")).toBeInTheDocument();
+    expect(screen.getByText("Watch What Happens Live with Andy Cohen")).toBeInTheDocument();
+    expect(screen.getAllByText("Face Crops").length).toBeGreaterThan(0);
+    expect(screen.getByAltText("Alan")).toBeInTheDocument();
+  });
+
   it("shows unified Content Type control with Profile Picture option", () => {
     render(
       <ImageLightbox
@@ -278,8 +347,49 @@ describe("ImageLightbox metadata panel", () => {
     openMetadataPanel();
 
     expect(screen.getAllByText("Face Crops").length).toBeGreaterThan(0);
-    expect(screen.getByText("Alan Cumming")).toBeInTheDocument();
-    expect(screen.getByAltText("Alan Cumming")).toBeInTheDocument();
+    expect(screen.getByText("Alan")).toBeInTheDocument();
+    expect(screen.getByAltText("Alan")).toBeInTheDocument();
+  });
+
+  it("renders fallback person crop chips when face detections are unavailable", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.05,
+              y: 0.08,
+              width: 0.32,
+              height: 0.44,
+              label: "Person 1",
+            },
+          ],
+          faceCrops: [
+            {
+              index: 1,
+              x: 0.03,
+              y: 0.02,
+              width: 0.46,
+              height: 0.46,
+              variantUrl: "https://cdn.example.com/face-crops/person-fallback.jpg",
+              size: 256,
+            },
+          ],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getAllByText("Face Crops").length).toBeGreaterThan(0);
+    expect(screen.getByText("Person 1")).toBeInTheDocument();
+    expect(screen.getByAltText("Person 1")).toBeInTheDocument();
   });
 
   it("renders Edit and Star/Flag labels in manage mode", () => {

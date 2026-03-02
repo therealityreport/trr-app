@@ -426,14 +426,28 @@ function MetadataPanel({
     ? `${effectiveDimensions.width} × ${effectiveDimensions.height}`
     : "—";
   const faceCropChips = useMemo(() => {
+    const firstName = (value: string | null | undefined): string => {
+      if (typeof value !== "string") return "";
+      const trimmed = value.trim();
+      if (!trimmed) return "";
+      if (/^(face|person)\s+\d+$/i.test(trimmed)) return trimmed;
+      const tokens = trimmed.split(/\s+/).filter(Boolean);
+      return tokens[0] || trimmed;
+    };
     const crops = Array.isArray(metadata.faceCrops) ? metadata.faceCrops : [];
     const boxes = Array.isArray(metadata.faceBoxes) ? metadata.faceBoxes : [];
+    const fallbackPeople = Array.isArray(metadata.people) ? metadata.people : [];
     return crops
       .slice()
       .sort((a, b) => a.index - b.index)
       .map((crop) => {
         const matchingBox = boxes.find((box) => box.index === crop.index);
-        const label = matchingBox?.person_name || matchingBox?.label || `Face ${crop.index}`;
+        const rawLabel =
+          matchingBox?.person_name ||
+          matchingBox?.label ||
+          fallbackPeople[crop.index - 1] ||
+          `Face ${crop.index}`;
+        const label = firstName(rawLabel);
         const url = typeof crop.variantUrl === "string" && crop.variantUrl.length > 0 ? crop.variantUrl : null;
         return {
           index: crop.index,
@@ -441,7 +455,7 @@ function MetadataPanel({
           url,
         };
       });
-  }, [metadata.faceBoxes, metadata.faceCrops]);
+  }, [metadata.faceBoxes, metadata.faceCrops, metadata.people]);
   const metadataCoverageRows: Array<{ label: string; value: string }> = [
     { label: "Source", value: metadata.source || "—" },
     { label: "Original Source", value: sourceBadgeLabel || "—" },
@@ -454,6 +468,20 @@ function MetadataPanel({
     {
       label: "Content Type",
       value: formatContentTypeLabel(metadata.contentType ?? metadata.sectionTag ?? "OTHER"),
+    },
+    { label: "Credit Type", value: metadata.imdbCreditType ?? "—" },
+    {
+      label: "Media Type",
+      value:
+        metadata.mediaTypeLabel ??
+        (metadata.imdbType ? metadata.imdbType.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "—"),
+    },
+    {
+      label: "Event Name",
+      value:
+        (metadata.mediaTypeLabel?.toLowerCase() === "event" || metadata.contentType === "EVENT")
+          ? metadata.eventName ?? metadata.sourcePageTitle ?? metadata.assetName ?? "—"
+          : "—",
     },
     { label: "Section", value: metadata.sectionLabel ?? "—" },
     { label: "Show", value: metadata.showName ?? "—" },

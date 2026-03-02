@@ -6,6 +6,7 @@ const CANONICAL_CONTENT_TYPES = [
   "EPISODE STILL",
   "CAST PHOTOS",
   "PROFILE PICTURE",
+  "EVENT",
   "BACKDROP",
   "POSTER",
   "LOGO",
@@ -24,6 +25,7 @@ const CONTENT_TYPE_LABELS: Record<CanonicalContentType, string> = {
   "EPISODE STILL": "Episode Still",
   "CAST PHOTOS": "Cast Photos",
   "PROFILE PICTURE": "Profile Picture",
+  EVENT: "Event",
   BACKDROP: "Backdrop",
   POSTER: "Poster",
   LOGO: "Logo",
@@ -54,6 +56,12 @@ const CONTENT_TYPE_ALIASES: Record<string, CanonicalContentType> = {
   "PROFILE PHOTO": "PROFILE PICTURE",
   PROFILE: "PROFILE PICTURE",
   HEADSHOT: "PROFILE PICTURE",
+  EVENT: "EVENT",
+  EVENTS: "EVENT",
+  PREMIERE: "EVENT",
+  PREMIERES: "EVENT",
+  "RED CARPET": "EVENT",
+  "AWARD SHOW": "EVENT",
   BACKDROP: "BACKDROP",
   BACKDROPS: "BACKDROP",
   POSTER: "POSTER",
@@ -75,6 +83,7 @@ const KIND_TO_CONTENT_TYPE: Record<string, CanonicalContentType> = {
   cast_photos: "CAST PHOTOS",
   profile: "PROFILE PICTURE",
   profile_picture: "PROFILE PICTURE",
+  event: "EVENT",
   backdrop: "BACKDROP",
   poster: "POSTER",
   logo: "LOGO",
@@ -115,6 +124,14 @@ const canonicalFromText = (text: string): CanonicalContentType | null => {
     normalized.includes("EPISODIC STILL")
   ) {
     return "EPISODE STILL";
+  }
+  if (
+    normalized.includes("EVENT") ||
+    normalized.includes("PREMIERE") ||
+    normalized.includes("RED CARPET") ||
+    normalized.includes("AWARD")
+  ) {
+    return "EVENT";
   }
   if (normalized.includes("PROMO") || normalized.includes("PROMOTIONAL")) return "PROMO";
   if (normalized.includes("BACKDROP")) return "BACKDROP";
@@ -166,6 +183,8 @@ export function contentTypeToAssetKind(value: string | null | undefined): string
       return "cast";
     case "PROFILE PICTURE":
       return "profile_picture";
+    case "EVENT":
+      return "event";
     case "BACKDROP":
       return "backdrop";
     case "POSTER":

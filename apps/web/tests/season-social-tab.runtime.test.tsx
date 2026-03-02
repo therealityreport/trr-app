@@ -13,6 +13,7 @@ describe("SeasonSocialTab runtime", () => {
 
     expect(screen.getByRole("tabpanel")).toBeInTheDocument();
     expect(screen.getByText(/Season supplemental data warning:/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Season supplemental data warning");
     expect(screen.getByText("analytics section")).toBeInTheDocument();
   });
 });

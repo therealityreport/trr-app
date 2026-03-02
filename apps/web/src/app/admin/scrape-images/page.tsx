@@ -121,6 +121,7 @@ interface ImportProgress {
 type ImageKind =
   | "poster"
   | "backdrop"
+  | "logo"
   | "episode_still"
   | "cast"
   | "promo"
@@ -131,6 +132,7 @@ type ImageKind =
 const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "poster", label: "Poster" },
   { value: "backdrop", label: "Backdrop" },
+  { value: "logo", label: "Logo" },
   { value: "episode_still", label: "Episode Still" },
   { value: "cast", label: "Cast Photos" },
   { value: "promo", label: "Promo" },
@@ -138,6 +140,44 @@ const IMAGE_KIND_OPTIONS: Array<{ value: ImageKind; label: string }> = [
   { value: "reunion", label: "Reunion" },
   { value: "other", label: "Other" },
 ];
+
+type LogoTargetType =
+  | "show"
+  | "network"
+  | "streaming"
+  | "production"
+  | "franchise"
+  | "publication"
+  | "social"
+  | "other";
+
+const LOGO_TARGET_OPTIONS: Array<{ value: LogoTargetType; label: string }> = [
+  { value: "show", label: "Show" },
+  { value: "network", label: "Network" },
+  { value: "streaming", label: "Streaming" },
+  { value: "production", label: "Production" },
+  { value: "franchise", label: "Franchise" },
+  { value: "publication", label: "Publication / News" },
+  { value: "social", label: "Social" },
+  { value: "other", label: "Other" },
+];
+
+interface LogoTargetSuggestion {
+  target_type: LogoTargetType;
+  target_key: string;
+  target_label: string;
+}
+
+interface LogoTargetSelection {
+  logo_target_type: LogoTargetType | "";
+  logo_target_key: string;
+  logo_target_label: string;
+  logo_set_primary: boolean;
+  search_query: string;
+}
+
+const BRAND_LOGO_ROUTING_V2_ENABLED =
+  (process.env.NEXT_PUBLIC_BRAND_LOGO_ROUTING_V2 ?? "true").toLowerCase() !== "false";
 
 // ============================================================================
 // Component
@@ -174,6 +214,14 @@ export default function ScrapeImagesPage() {
   const [imageKinds, setImageKinds] = useState<Record<string, ImageKind>>({});
   const [personAssignments, setPersonAssignments] = useState<Record<string, PersonOption[]>>({});
   const [bulkPeopleSelection, setBulkPeopleSelection] = useState<PersonOption[]>([]);
+  const [logoTargetsByImage, setLogoTargetsByImage] = useState<Record<string, LogoTargetSelection>>({});
+  const [logoTargetSuggestionsByImage, setLogoTargetSuggestionsByImage] = useState<
+    Record<string, LogoTargetSuggestion[]>
+  >({});
+  const [bulkLogoTargetType, setBulkLogoTargetType] = useState<LogoTargetType | "">("");
+  const [bulkLogoTargetKey, setBulkLogoTargetKey] = useState("");
+  const [bulkLogoTargetLabel, setBulkLogoTargetLabel] = useState("");
+  const [bulkLogoSetPrimary, setBulkLogoSetPrimary] = useState(false);
 
   // Import state
   const [importing, setImporting] = useState(false);
@@ -299,6 +347,128 @@ export default function ScrapeImagesPage() {
     },
     [previewData, entityMode, resolveExactPersonByName]
   );
+
+  const sourceDomain = (() => {
+    try {
+      const host = new URL(url.trim()).hostname.toLowerCase().replace(/^www\./, "");
+      return host || "";
+    } catch {
+      return "";
+    }
+  })();
+
+  const resolveShowLogoTarget = useCallback((): { key: string; label: string } => {
+    if (entityMode === "season") {
+      return {
+        key: selectedShow?.id ?? showId,
+        label: selectedShow?.name ?? "",
+      };
+    }
+    return { key: "", label: "" };
+  }, [entityMode, selectedShow, showId]);
+
+  const buildDefaultLogoTargetSelection = useCallback(
+    (targetType: LogoTargetType | ""): LogoTargetSelection => {
+      if (targetType === "show") {
+        const showTarget = resolveShowLogoTarget();
+        return {
+          logo_target_type: "show",
+          logo_target_key: showTarget.key,
+          logo_target_label: showTarget.label,
+          logo_set_primary: false,
+          search_query: "",
+        };
+      }
+      if (targetType === "publication") {
+        return {
+          logo_target_type: "publication",
+          logo_target_key: sourceDomain,
+          logo_target_label: sourceDomain,
+          logo_set_primary: false,
+          search_query: "",
+        };
+      }
+      return {
+        logo_target_type: targetType,
+        logo_target_key: "",
+        logo_target_label: "",
+        logo_set_primary: false,
+        search_query: "",
+      };
+    },
+    [resolveShowLogoTarget, sourceDomain]
+  );
+
+  const upsertLogoTargetByImage = useCallback(
+    (imageId: string, patch: Partial<LogoTargetSelection>) => {
+      setLogoTargetsByImage((prev) => {
+        const current = prev[imageId] ?? buildDefaultLogoTargetSelection("");
+        const next: LogoTargetSelection = { ...current, ...patch };
+        if (patch.logo_target_type !== undefined) {
+          if (patch.logo_target_type === "show") {
+            const showTarget = resolveShowLogoTarget();
+            next.logo_target_key = showTarget.key;
+            next.logo_target_label = showTarget.label;
+            next.search_query = "";
+          } else if (patch.logo_target_type === "publication") {
+            if (!next.logo_target_key) next.logo_target_key = sourceDomain;
+            if (!next.logo_target_label) next.logo_target_label = sourceDomain;
+          }
+        }
+        return { ...prev, [imageId]: next };
+      });
+    },
+    [buildDefaultLogoTargetSelection, resolveShowLogoTarget, sourceDomain]
+  );
+
+  const fetchLogoTargetSuggestions = useCallback(
+    async (imageId: string, targetType: LogoTargetType, query: string) => {
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithAuth(
+          `/api/admin/trr-api/brands/logo-targets?target_type=${encodeURIComponent(targetType)}&q=${encodeURIComponent(query)}&limit=25`,
+          { headers, cache: "no-store" }
+        );
+        if (!response.ok) return;
+        const payload = (await response.json().catch(() => ({}))) as { rows?: LogoTargetSuggestion[] };
+        const rows = Array.isArray(payload.rows) ? payload.rows : [];
+        setLogoTargetSuggestionsByImage((prev) => ({ ...prev, [imageId]: rows }));
+      } catch {
+        // Ignore suggestion failures and allow manual entry.
+      }
+    },
+    [fetchWithAuth, getAuthHeaders]
+  );
+
+  const isLogoTargetSelectionValid = useCallback(
+    (selection: LogoTargetSelection | undefined): boolean => {
+      if (!BRAND_LOGO_ROUTING_V2_ENABLED) return true;
+      if (!selection) return false;
+      if (!selection.logo_target_type) return false;
+      if (!selection.logo_target_key.trim()) return false;
+      if (!selection.logo_target_label.trim()) return false;
+      if (selection.logo_target_type === "show") {
+        return Boolean(resolveShowLogoTarget().key);
+      }
+      return true;
+    },
+    [resolveShowLogoTarget]
+  );
+
+  const logoSelectionValidationError = useCallback((): string | null => {
+    if (!BRAND_LOGO_ROUTING_V2_ENABLED) return null;
+    if (!previewData) return null;
+    for (const img of previewData.images) {
+      if (!selectedImages.has(img.id)) continue;
+      const selectedKind = imageKinds[img.id] || "other";
+      if (selectedKind !== "logo") continue;
+      const selection = logoTargetsByImage[img.id];
+      if (!isLogoTargetSelectionValid(selection)) {
+        return "All selected logo images require a target type, key, and label.";
+      }
+    }
+    return null;
+  }, [imageKinds, isLogoTargetSelectionValid, logoTargetsByImage, previewData, selectedImages]);
 
   // Search shows
   const searchShows = useCallback(
@@ -438,6 +608,12 @@ export default function ScrapeImagesPage() {
       setImageKinds({});
       setPersonAssignments({});
       setBulkPeopleSelection([]);
+      setLogoTargetsByImage({});
+      setLogoTargetSuggestionsByImage({});
+      setBulkLogoTargetType("");
+      setBulkLogoTargetKey("");
+      setBulkLogoTargetLabel("");
+      setBulkLogoSetPrimary(false);
       setImportResult(null);
 
       const previewPayload: Record<string, unknown> = { url: url.trim() };
@@ -532,6 +708,11 @@ export default function ScrapeImagesPage() {
       setError("No images to import");
       return;
     }
+    const logoValidationError = logoSelectionValidationError();
+    if (logoValidationError) {
+      setError(logoValidationError);
+      return;
+    }
 
     try {
       setError(null);
@@ -541,13 +722,31 @@ export default function ScrapeImagesPage() {
 
       const imagesToImport = previewData.images
         .filter((img) => selectedImages.has(img.id))
-        .map((img) => ({
-          candidate_id: img.id,
-          url: img.best_url,
-          caption: captions[img.id] || null,
-          kind: imageKinds[img.id] || "other",
-          person_ids: (personAssignments[img.id] ?? []).map((p) => p.id),
-        }));
+        .map((img) => {
+          const kind = imageKinds[img.id] || "other";
+          const logoTarget = logoTargetsByImage[img.id];
+          const logoTargetType = kind === "logo" ? logoTarget?.logo_target_type ?? "" : "";
+          const legacySourceLogo =
+            kind === "logo"
+              ? logoTargetType === "show"
+                ? "SHOW"
+                : logoTargetType === "publication"
+                  ? "SOURCE"
+                  : null
+              : null;
+          return {
+            candidate_id: img.id,
+            url: img.best_url,
+            caption: captions[img.id] || null,
+            kind,
+            person_ids: (personAssignments[img.id] ?? []).map((p) => p.id),
+            source_logo: legacySourceLogo,
+            logo_target_type: kind === "logo" ? logoTargetType || null : null,
+            logo_target_key: kind === "logo" ? logoTarget?.logo_target_key?.trim() || null : null,
+            logo_target_label: kind === "logo" ? logoTarget?.logo_target_label?.trim() || null : null,
+            logo_set_primary: kind === "logo" ? Boolean(logoTarget?.logo_set_primary) : false,
+          };
+        });
 
       // Build payload based on entity mode
       const payload =
@@ -654,6 +853,12 @@ export default function ScrapeImagesPage() {
       setImportProgress(null);
     }
   };
+
+  const selectedLogoImageIds =
+    previewData?.images
+      .filter((img) => selectedImages.has(img.id))
+      .filter((img) => (imageKinds[img.id] || "other") === "logo")
+      .map((img) => img.id) ?? [];
 
   // Loading state
   if (checking) {
@@ -980,6 +1185,13 @@ export default function ScrapeImagesPage() {
                           if (value === "cast") {
                             void autoFillCastFromContext(selectedImages);
                           }
+                          if (value === "logo" && BRAND_LOGO_ROUTING_V2_ENABLED) {
+                            for (const imageId of selectedImages) {
+                              setLogoTargetsByImage((prev) =>
+                                prev[imageId] ? prev : { ...prev, [imageId]: buildDefaultLogoTargetSelection("") }
+                              );
+                            }
+                          }
                           e.target.value = "";
                         }}
                         className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
@@ -991,6 +1203,68 @@ export default function ScrapeImagesPage() {
                           </option>
                         ))}
                       </select>
+                    </div>
+                  )}
+
+                  {BRAND_LOGO_ROUTING_V2_ENABLED && selectedLogoImageIds.length > 0 && (
+                    <div className="grid gap-2 rounded border border-amber-200 bg-amber-50 p-2">
+                      <span className="text-xs font-semibold text-amber-800">
+                        Bulk logo classification ({selectedLogoImageIds.length} selected logos)
+                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={bulkLogoTargetType}
+                          onChange={(e) => setBulkLogoTargetType(e.target.value as LogoTargetType | "")}
+                          className="rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                        >
+                          <option value="">Target type...</option>
+                          {LOGO_TARGET_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          value={bulkLogoTargetKey}
+                          onChange={(e) => setBulkLogoTargetKey(e.target.value)}
+                          placeholder="Target key"
+                          className="min-w-[130px] rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                        />
+                        <input
+                          type="text"
+                          value={bulkLogoTargetLabel}
+                          onChange={(e) => setBulkLogoTargetLabel(e.target.value)}
+                          placeholder="Target label"
+                          className="min-w-[130px] rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                        />
+                        <label className="flex items-center gap-1 text-xs text-zinc-700">
+                          <input
+                            type="checkbox"
+                            checked={bulkLogoSetPrimary}
+                            onChange={(e) => setBulkLogoSetPrimary(e.target.checked)}
+                          />
+                          Primary
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            for (const imageId of selectedLogoImageIds) {
+                              if (!bulkLogoTargetType) continue;
+                              upsertLogoTargetByImage(imageId, {
+                                logo_target_type: bulkLogoTargetType,
+                                logo_target_key: bulkLogoTargetKey,
+                                logo_target_label: bulkLogoTargetLabel,
+                                logo_set_primary: bulkLogoSetPrimary,
+                              });
+                            }
+                          }}
+                          disabled={!bulkLogoTargetType}
+                          className="rounded bg-amber-600 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Apply
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -1051,6 +1325,10 @@ export default function ScrapeImagesPage() {
               <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {previewData.images.map((img) => {
                   const isSelected = selectedImages.has(img.id);
+                  const selectedKind = imageKinds[img.id] || "other";
+                  const logoSelection =
+                    logoTargetsByImage[img.id] ?? buildDefaultLogoTargetSelection("");
+                  const logoSuggestions = logoTargetSuggestionsByImage[img.id] ?? [];
                   return (
                     <div
                       key={img.id}
@@ -1121,25 +1399,140 @@ export default function ScrapeImagesPage() {
                             className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
                             onClick={(e) => e.stopPropagation()}
                           />
-                          {entityMode === "season" && (
-                            <select
-                              value={imageKinds[img.id] || "other"}
-                              onChange={(e) => {
-                                const value = e.target.value as ImageKind;
-                                setImageKinds((prev) => ({ ...prev, [img.id]: value }));
-                                if (value === "cast") {
-                                  void autoFillCastFromContext([img.id]);
+                          <select
+                            value={selectedKind}
+                            onChange={(e) => {
+                              const value = e.target.value as ImageKind;
+                              setImageKinds((prev) => ({ ...prev, [img.id]: value }));
+                              if (value === "cast" && entityMode === "season") {
+                                void autoFillCastFromContext([img.id]);
+                              }
+                              if (value === "logo" && BRAND_LOGO_ROUTING_V2_ENABLED) {
+                                setLogoTargetsByImage((prev) =>
+                                  prev[img.id] ? prev : { ...prev, [img.id]: buildDefaultLogoTargetSelection("") }
+                                );
+                              }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                          >
+                            {IMAGE_KIND_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          {BRAND_LOGO_ROUTING_V2_ENABLED && selectedKind === "logo" && (
+                            <div className="space-y-1 rounded border border-amber-200 bg-amber-50 p-2">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                                Logo Target
+                              </p>
+                              <select
+                                value={logoSelection.logo_target_type}
+                                onChange={(e) =>
+                                  upsertLogoTargetByImage(img.id, {
+                                    logo_target_type: e.target.value as LogoTargetType | "",
+                                  })
                                 }
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="w-full rounded border border-zinc-200 bg-white px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
-                            >
-                              {IMAGE_KIND_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                              >
+                                <option value="">Select target...</option>
+                                {LOGO_TARGET_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+
+                              {logoSelection.logo_target_type &&
+                                ["network", "streaming", "production", "franchise", "social"].includes(
+                                  logoSelection.logo_target_type
+                                ) && (
+                                  <>
+                                    <div className="flex gap-1">
+                                      <input
+                                        type="text"
+                                        value={logoSelection.search_query}
+                                        onChange={(e) =>
+                                          upsertLogoTargetByImage(img.id, { search_query: e.target.value })
+                                        }
+                                        onClick={(e) => e.stopPropagation()}
+                                        placeholder="Search targets..."
+                                        className="min-w-0 flex-1 rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const targetType = logoSelection.logo_target_type as LogoTargetType;
+                                          void fetchLogoTargetSuggestions(img.id, targetType, logoSelection.search_query);
+                                        }}
+                                        className="rounded border border-zinc-300 px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-100"
+                                      >
+                                        Search
+                                      </button>
+                                    </div>
+                                    <select
+                                      value={logoSelection.logo_target_key}
+                                      onChange={(e) => {
+                                        const nextKey = e.target.value;
+                                        const matched = logoSuggestions.find(
+                                          (suggestion) => suggestion.target_key === nextKey
+                                        );
+                                        upsertLogoTargetByImage(img.id, {
+                                          logo_target_key: nextKey,
+                                          logo_target_label: matched?.target_label ?? logoSelection.logo_target_label,
+                                        });
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none"
+                                    >
+                                      <option value="">Select target...</option>
+                                      {logoSuggestions.map((suggestion) => (
+                                        <option key={`${suggestion.target_type}:${suggestion.target_key}`} value={suggestion.target_key}>
+                                          {suggestion.target_label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </>
+                                )}
+
+                              <input
+                                type="text"
+                                value={logoSelection.logo_target_key}
+                                onChange={(e) =>
+                                  upsertLogoTargetByImage(img.id, { logo_target_key: e.target.value })
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                placeholder="Target key"
+                                disabled={logoSelection.logo_target_type === "show" && entityMode === "season"}
+                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none disabled:bg-zinc-100"
+                              />
+                              <input
+                                type="text"
+                                value={logoSelection.logo_target_label}
+                                onChange={(e) =>
+                                  upsertLogoTargetByImage(img.id, { logo_target_label: e.target.value })
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                placeholder="Target label"
+                                disabled={logoSelection.logo_target_type === "show" && entityMode === "season"}
+                                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs focus:border-zinc-400 focus:outline-none disabled:bg-zinc-100"
+                              />
+                              <label className="flex items-center gap-2 text-[11px] text-zinc-700">
+                                <input
+                                  type="checkbox"
+                                  checked={logoSelection.logo_set_primary}
+                                  onChange={(e) =>
+                                    upsertLogoTargetByImage(img.id, { logo_set_primary: e.target.checked })
+                                  }
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                Set as primary
+                              </label>
+                            </div>
                           )}
                           <PeopleSearchMultiSelect
                             value={personAssignments[img.id] ?? []}
@@ -1236,6 +1629,7 @@ export default function ScrapeImagesPage() {
                     disabled={
                       importing ||
                       selectedImages.size === 0 ||
+                      Boolean(logoSelectionValidationError()) ||
                       (entityMode === "season" && (!showId || seasonNumber === "")) ||
                       (entityMode === "person" && !selectedPerson)
                     }
@@ -1259,6 +1653,9 @@ export default function ScrapeImagesPage() {
                     <p className="text-sm text-amber-600">
                       Please select a person above
                     </p>
+                  )}
+                  {logoSelectionValidationError() && (
+                    <p className="text-sm text-amber-600">{logoSelectionValidationError()}</p>
                   )}
                 </div>
               </div>
@@ -1344,6 +1741,15 @@ export default function ScrapeImagesPage() {
                     setImportResult(null);
                     setSelectedImages(new Set());
                     setCaptions({});
+                    setImageKinds({});
+                    setPersonAssignments({});
+                    setBulkPeopleSelection([]);
+                    setLogoTargetsByImage({});
+                    setLogoTargetSuggestionsByImage({});
+                    setBulkLogoTargetType("");
+                    setBulkLogoTargetKey("");
+                    setBulkLogoTargetLabel("");
+                    setBulkLogoSetPrimary(false);
                   }}
                   className="rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100"
                 >

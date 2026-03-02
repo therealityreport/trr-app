@@ -55,7 +55,7 @@ describe("reddit community view page", () => {
     useRouterMock.mockReturnValue({ replace: vi.fn() });
   });
 
-  it("keeps show/season community routes wired through canonical rewrites", () => {
+  it("keeps show/season community aliases wired through reddit community rewrites", () => {
     const nextConfigPath = resolve(process.cwd(), "next.config.ts");
     const nextConfigSource = readFileSync(nextConfigPath, "utf8");
     const showCommunityAliasPath = resolve(process.cwd(), "src/app/[showId]/social/reddit/[communitySlug]/page.tsx");
@@ -82,6 +82,18 @@ describe("reddit community view page", () => {
     expect(nextConfigSource).toContain(
       'destination: "/:showId/social/reddit/:communitySlug"',
     );
+    expect(nextConfigSource).toContain(
+      'source: "/:showId/social/reddit/:communitySlug/s:seasonNumber(\\\\d+)"',
+    );
+    expect(nextConfigSource).toContain(
+      'destination: "/admin/social-media/reddit/:communitySlug?showSlug=:showId&season=:seasonNumber"',
+    );
+    expect(nextConfigSource).toContain(
+      'source: "/:showId/social/reddit/:communitySlug"',
+    );
+    expect(nextConfigSource).toContain(
+      'destination: "/admin/social-media/reddit/:communitySlug?showSlug=:showId"',
+    );
     expect(
       existsSync(resolve(process.cwd(), "src/app/[showId]/s[seasonNumber]/[[...rest]]/page.tsx")),
     ).toBe(true);
@@ -94,6 +106,12 @@ describe("reddit community view page", () => {
     expect(readFileSync(showCommunitySeasonAliasPath, "utf8")).toContain(
       'export { default } from "@/app/admin/social-media/reddit/communities/[communityId]/page";',
     );
+    const rootSeasonAliasSource = readFileSync(
+      resolve(process.cwd(), "src/app/[showId]/s[seasonNumber]/[[...rest]]/page.tsx"),
+      "utf8",
+    );
+    expect(rootSeasonAliasSource).toContain("resolveRedditWindowRedirectHref");
+    expect(rootSeasonAliasSource).toContain("/admin/reddit-window-posts?");
   });
 
   it("loads focused community and honors return_to back link", () => {
@@ -121,6 +139,8 @@ describe("reddit community view page", () => {
         mode: "global",
         initialCommunityId: "BravoRealHousewives",
         hideCommunityList: true,
+        seasonNumber: undefined,
+        seasonId: null,
         episodeDiscussionsPlacement: "inline",
         enableEpisodeSync: true,
       }),
@@ -187,12 +207,86 @@ describe("reddit community view page", () => {
 
     return waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith(
-        "/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives",
+        "/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives/s6",
       );
     });
   });
 
-  it("redirects show-scoped community URLs to corrected community slug without forcing season token", async () => {
+  it("pins showSlug query alias and does not flip to long-form slug after query cleanup", async () => {
+    const replaceMock = vi.fn();
+    useRouterMock.mockReturnValue({ replace: replaceMock });
+    useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
+    useParamsMock.mockReturnValue({ communitySlug: "BravoRealHousewives" });
+    usePathnameMock.mockReturnValue("/admin/social-media/reddit/BravoRealHousewives");
+    useSearchParamsMock.mockReturnValue(new URLSearchParams({ showSlug: "rhoslc" }));
+
+    const { rerender } = render(<RedditCommunityViewPage />);
+
+    const managerPropsFirst = redditSourcesManagerMock.mock.calls.at(-1)?.[0] as
+      | { onCommunityContextChange?: (value: unknown) => void }
+      | undefined;
+    act(() => {
+      managerPropsFirst?.onCommunityContextChange?.({
+        communityLabel: "r/BravoRealHousewives",
+        communitySlug: "BravoRealHousewives",
+        showLabel: "RHOSLC",
+        showFullName: "The Real Housewives of Salt Lake City",
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonLabel: "S6",
+        showId: "show-1",
+        seasonId: "season-1",
+        seasonNumber: 6,
+      });
+    });
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith("/rhoslc/social/reddit/BravoRealHousewives/s6");
+    });
+
+    expect(
+      screen.getByRole("link", { name: "The Real Housewives of Salt Lake City" }),
+    ).toHaveAttribute("href", "/rhoslc");
+    expect(screen.getByRole("link", { name: "Reddit Analytics" })).toHaveAttribute(
+      "href",
+      "/rhoslc/s6/social/reddit",
+    );
+
+    replaceMock.mockClear();
+    useSearchParamsMock.mockReturnValue(new URLSearchParams());
+    rerender(<RedditCommunityViewPage />);
+
+    const managerPropsSecond = redditSourcesManagerMock.mock.calls.at(-1)?.[0] as
+      | { onCommunityContextChange?: (value: unknown) => void }
+      | undefined;
+    act(() => {
+      managerPropsSecond?.onCommunityContextChange?.({
+        communityLabel: "r/BravoRealHousewives",
+        communitySlug: "BravoRealHousewives",
+        showLabel: "RHOSLC",
+        showFullName: "The Real Housewives of Salt Lake City",
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonLabel: "S6",
+        showId: "show-1",
+        seasonId: "season-1",
+        seasonNumber: 6,
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("link", { name: "The Real Housewives of Salt Lake City" }),
+      ).toHaveAttribute("href", "/rhoslc");
+    });
+    expect(screen.getByRole("link", { name: "Reddit Analytics" })).toHaveAttribute(
+      "href",
+      "/rhoslc/s6/social/reddit",
+    );
+    expect(replaceMock).not.toHaveBeenCalledWith(
+      "/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives",
+    );
+  });
+
+  it("redirects show-scoped community URLs to corrected community slug with season token", async () => {
     const replaceMock = vi.fn();
     useRouterMock.mockReturnValue({ replace: replaceMock });
     useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
@@ -224,12 +318,47 @@ describe("reddit community view page", () => {
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith(
-        "/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives",
+        "/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives/s6",
       );
     });
   });
 
-  it("accepts show-scoped no-season community URLs without season canonical injection", async () => {
+  it("canonicalizes long-form show slug to rhoslc when alias context is available", async () => {
+    const replaceMock = vi.fn();
+    useRouterMock.mockReturnValue({ replace: replaceMock });
+    useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
+    useParamsMock.mockReturnValue({
+      showId: "the-real-housewives-of-salt-lake-city",
+      communitySlug: "BravoRealHousewives",
+    });
+    usePathnameMock.mockReturnValue("/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives");
+    useSearchParamsMock.mockReturnValue(new URLSearchParams());
+
+    render(<RedditCommunityViewPage />);
+
+    const managerProps = redditSourcesManagerMock.mock.calls.at(-1)?.[0] as
+      | { onCommunityContextChange?: (value: unknown) => void }
+      | undefined;
+    act(() => {
+      managerProps?.onCommunityContextChange?.({
+        communityLabel: "r/BravoRealHousewives",
+        communitySlug: "BravoRealHousewives",
+        showLabel: "RHOSLC",
+        showFullName: "The Real Housewives of Salt Lake City",
+        showSlug: "rhoslc",
+        seasonLabel: "S6",
+        showId: "show-1",
+        seasonId: "season-1",
+        seasonNumber: 6,
+      });
+    });
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith("/rhoslc/social/reddit/BravoRealHousewives/s6");
+    });
+  });
+
+  it("canonicalizes show-scoped no-season community URLs to include season token", async () => {
     const replaceMock = vi.fn();
     useRouterMock.mockReturnValue({ replace: replaceMock });
     useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
@@ -260,8 +389,89 @@ describe("reddit community view page", () => {
     });
 
     await waitFor(() => {
-      expect(replaceMock).not.toHaveBeenCalled();
+      expect(replaceMock).toHaveBeenCalledWith("/rhoslc/social/reddit/BravoRealHousewives/s6");
     });
+  });
+
+  it("keeps rhoslc slug from pathname when showId param is absent (rewrite shape)", async () => {
+    const replaceMock = vi.fn();
+    useRouterMock.mockReturnValue({ replace: replaceMock });
+    useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
+    useParamsMock.mockReturnValue({
+      communitySlug: "BravoRealHousewives",
+    });
+    usePathnameMock.mockReturnValue("/rhoslc/social/reddit/BravoRealHousewives");
+    useSearchParamsMock.mockReturnValue(new URLSearchParams());
+
+    render(<RedditCommunityViewPage />);
+
+    const managerProps = redditSourcesManagerMock.mock.calls.at(-1)?.[0] as
+      | { onCommunityContextChange?: (value: unknown) => void }
+      | undefined;
+    act(() => {
+      managerProps?.onCommunityContextChange?.({
+        communityLabel: "r/BravoRealHousewives",
+        communitySlug: "BravoRealHousewives",
+        showLabel: "RHOSLC",
+        showFullName: "The Real Housewives of Salt Lake City",
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonLabel: "S6",
+        showId: "show-1",
+        seasonId: "season-1",
+        seasonNumber: 6,
+      });
+    });
+
+    await waitFor(() => {
+      expect(replaceMock).not.toHaveBeenCalledWith(
+        "/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives",
+      );
+    });
+    expect(
+      screen.getByRole("link", { name: "The Real Housewives of Salt Lake City" }),
+    ).toHaveAttribute("href", "/rhoslc");
+    expect(screen.getByRole("link", { name: "Reddit Analytics" })).toHaveAttribute(
+      "href",
+      "/rhoslc/s6/social/reddit",
+    );
+  });
+
+  it("preserves pinned rhoslc slug while correcting community slug casing/typo", async () => {
+    const replaceMock = vi.fn();
+    useRouterMock.mockReturnValue({ replace: replaceMock });
+    useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
+    useParamsMock.mockReturnValue({
+      showId: "rhoslc",
+      communitySlug: "bravorealhouseswives",
+    });
+    usePathnameMock.mockReturnValue("/rhoslc/social/reddit/bravorealhouseswives");
+    useSearchParamsMock.mockReturnValue(new URLSearchParams());
+
+    render(<RedditCommunityViewPage />);
+
+    const managerProps = redditSourcesManagerMock.mock.calls.at(-1)?.[0] as
+      | { onCommunityContextChange?: (value: unknown) => void }
+      | undefined;
+    act(() => {
+      managerProps?.onCommunityContextChange?.({
+        communityLabel: "r/BravoRealHousewives",
+        communitySlug: "BravoRealHousewives",
+        showLabel: "RHOSLC",
+        showFullName: "The Real Housewives of Salt Lake City",
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        seasonLabel: "S6",
+        showId: "show-1",
+        seasonId: "season-1",
+        seasonNumber: 6,
+      });
+    });
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith("/rhoslc/social/reddit/BravoRealHousewives/s6");
+    });
+    expect(replaceMock).not.toHaveBeenCalledWith(
+      "/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives",
+    );
   });
 
   it("keeps season-scoped canonical community URLs without additional redirect", async () => {
@@ -279,6 +489,12 @@ describe("reddit community view page", () => {
     useSearchParamsMock.mockReturnValue(new URLSearchParams());
 
     render(<RedditCommunityViewPage />);
+
+    expect(redditSourcesManagerMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        seasonNumber: 6,
+      }),
+    );
 
     const managerProps = redditSourcesManagerMock.mock.calls.at(-1)?.[0] as
       | { onCommunityContextChange?: (value: unknown) => void }

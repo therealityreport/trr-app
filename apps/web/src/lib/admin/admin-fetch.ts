@@ -33,13 +33,16 @@ export const fetchWithTimeout = async (
   timeoutMs: number,
   externalSignal?: AbortSignal
 ): Promise<Response> => {
+  const timeoutAbortReason = new DOMException("Request timed out", "AbortError");
+  const externalAbortReason = new DOMException("Request aborted", "AbortError");
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutId = setTimeout(() => controller.abort(timeoutAbortReason), timeoutMs);
 
-  const forwardAbort = () => controller.abort();
+  const forwardAbort = () =>
+    controller.abort((externalSignal as AbortSignal & { reason?: unknown })?.reason ?? externalAbortReason);
   if (externalSignal) {
     if (externalSignal.aborted) {
-      controller.abort();
+      controller.abort((externalSignal as AbortSignal & { reason?: unknown })?.reason ?? externalAbortReason);
     } else {
       externalSignal.addEventListener("abort", forwardAbort, { once: true });
     }
@@ -62,6 +65,18 @@ export const adminFetch = async (
 
 const isRetryableStatus = (status: number): boolean =>
   status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+
+const isAbortLikeError = (error: unknown): boolean => {
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("signal is aborted without reason") ||
+    normalized.includes("aborted without reason") ||
+    normalized.includes("operation was aborted")
+  );
+};
 
 const normalizeErrorPayload = async (response: Response): Promise<AdminNormalizedError> => {
   let payload: Record<string, unknown> | null = null;
@@ -91,7 +106,7 @@ const normalizeThrownError = (error: unknown): AdminNormalizedError => {
       retryable: error.retryable,
     };
   }
-  if (error instanceof Error && error.name === "AbortError") {
+  if (isAbortLikeError(error)) {
     return {
       error: "Request timed out",
       status: 408,
