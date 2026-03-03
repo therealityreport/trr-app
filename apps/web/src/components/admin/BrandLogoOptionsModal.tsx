@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AdminModal from "@/components/admin/AdminModal";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
-import type { AuthUser } from "@/lib/admin/useAdminGuard";
+import type { User } from "firebase/auth";
 
 type BrandLogoRole = "wordmark" | "icon";
 
@@ -46,7 +46,7 @@ type ModalTargetType = "network" | "streaming" | "production" | "franchise" | "p
 type BrandLogoOptionsModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  preferredUser: AuthUser | null;
+  preferredUser: User | null;
   targetType: ModalTargetType;
   targetKey: string;
   targetLabel: string;
