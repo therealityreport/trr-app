@@ -2108,7 +2108,7 @@ function normalizeExternalUrl(raw: string | null | undefined): string | null {
   }
 }
 
-function normalizeInstagramPermalinkPath(pathname: string): string | null {
+function normalizeInstagramPermalinkPath(pathname: string): "p" | "reel" | "tv" | null {
   const normalizedPath = pathname.toLowerCase();
   if (normalizedPath.startsWith("/p/")) return "p";
   if (normalizedPath.startsWith("/reel/")) return "reel";
