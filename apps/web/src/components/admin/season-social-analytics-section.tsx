@@ -1186,6 +1186,59 @@ const formatDurationLabel = (seconds: number | null | undefined): string => {
   return `${minutes}m ${rem}s`;
 };
 
+type CastAttitudePrototypeRow = {
+  entity: string;
+  mentions: number;
+  engagement: number;
+  positive: number;
+  neutral: number;
+  negative: number;
+  netSentiment: number;
+};
+
+type ViewerAttitudePlatformRow = {
+  platform: string;
+  total: number;
+  positive: number;
+  neutral: number;
+  negative: number;
+};
+
+const CAST_ENTITY_TOKEN_RE = /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b/g;
+const CAST_ENTITY_STOP_WORDS = new Set([
+  "Andy Cohen",
+  "Bravo",
+  "Real Housewives",
+  "Salt Lake City",
+  "The Real",
+  "Watch What Happens",
+  "Daily Discussion",
+  "Discussion Thread",
+  "Episode Discussion",
+  "Live Discussion",
+  "Weekly Discussion",
+  "This Week",
+  "New York",
+  "Orange County",
+  "Beverly Hills",
+  "Miami",
+  "Atlanta",
+  "Potomac",
+]);
+
+const extractCastEntityCandidates = (text: string): string[] => {
+  if (!text) return [];
+  const tokens = text.match(CAST_ENTITY_TOKEN_RE) ?? [];
+  const deduped = new Set<string>();
+  for (const token of tokens) {
+    const normalized = token.trim().replace(/\s+/g, " ");
+    if (!normalized || normalized.length < 3) continue;
+    if (CAST_ENTITY_STOP_WORDS.has(normalized)) continue;
+    deduped.add(normalized);
+  }
+  return [...deduped];
+};
+
 const getWeeklyFlagToneClass = (severity: "info" | "warn"): string => {
   if (severity === "warn") return "border-amber-300 bg-amber-50 text-amber-800";
   return "border-zinc-300 bg-zinc-100 text-zinc-700";
@@ -4206,6 +4259,61 @@ export default function SeasonSocialAnalyticsSection({
       medianDurationSeconds,
     };
   }, [runSummaries]);
+  const castAttitudePrototypeRows = useMemo<CastAttitudePrototypeRow[]>(() => {
+    const rows = new Map<string, CastAttitudePrototypeRow>();
+    for (const item of analytics?.leaderboards.viewer_discussion ?? []) {
+      const entities = extractCastEntityCandidates(String(item.text ?? ""));
+      for (const entity of entities) {
+        const current =
+          rows.get(entity) ??
+          {
+            entity,
+            mentions: 0,
+            engagement: 0,
+            positive: 0,
+            neutral: 0,
+            negative: 0,
+            netSentiment: 0,
+          };
+        current.mentions += 1;
+        current.engagement += Number(item.engagement ?? 0);
+        if (item.sentiment === "positive") current.positive += 1;
+        else if (item.sentiment === "negative") current.negative += 1;
+        else current.neutral += 1;
+        current.netSentiment = current.positive - current.negative;
+        rows.set(entity, current);
+      }
+    }
+    return [...rows.values()]
+      .filter((row) => row.mentions > 0)
+      .sort((a, b) => {
+        if (b.mentions !== a.mentions) return b.mentions - a.mentions;
+        if (b.engagement !== a.engagement) return b.engagement - a.engagement;
+        return a.entity.localeCompare(b.entity);
+      })
+      .slice(0, 10);
+  }, [analytics?.leaderboards.viewer_discussion]);
+  const viewerAttitudeByPlatformRows = useMemo<ViewerAttitudePlatformRow[]>(() => {
+    const rows = new Map<string, ViewerAttitudePlatformRow>();
+    for (const item of analytics?.leaderboards.viewer_discussion ?? []) {
+      const key = item.platform;
+      const current =
+        rows.get(key) ??
+        {
+          platform: key,
+          total: 0,
+          positive: 0,
+          neutral: 0,
+          negative: 0,
+        };
+      current.total += 1;
+      if (item.sentiment === "positive") current.positive += 1;
+      else if (item.sentiment === "negative") current.negative += 1;
+      else current.neutral += 1;
+      rows.set(key, current);
+    }
+    return [...rows.values()].sort((a, b) => b.total - a.total || a.platform.localeCompare(b.platform));
+  }, [analytics?.leaderboards.viewer_discussion]);
   const workerHealthWarning = useMemo(() => {
     if (!workerHealth) {
       return null;
@@ -6235,6 +6343,96 @@ export default function SeasonSocialAnalyticsSection({
             </section>
           )}
 
+          {isSentimentView && (
+            <section className="grid gap-6 xl:grid-cols-2">
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <h4 className="mb-2 text-lg font-semibold text-zinc-900">Cast Mention Comparison (Prototype)</h4>
+                <p className="mb-4 text-xs text-zinc-500">
+                  Heuristic draft: compares candidate cast-name mentions in viewer highlights against sentiment labels.
+                </p>
+                {castAttitudePrototypeRows.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No cast mention candidates detected in viewer highlights yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {castAttitudePrototypeRows.map((row) => {
+                      const total = Math.max(1, row.mentions);
+                      const positivePct = (row.positive / total) * 100;
+                      const neutralPct = (row.neutral / total) * 100;
+                      const negativePct = Math.max(0, 100 - positivePct - neutralPct);
+                      return (
+                        <div key={row.entity} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-zinc-900">{row.entity}</p>
+                            <p className="text-xs text-zinc-600">
+                              {formatInteger(row.mentions)} mentions · {formatInteger(row.engagement)} engagement
+                            </p>
+                          </div>
+                          <div className="mt-2 h-2 overflow-hidden rounded bg-zinc-200">
+                            <div className="flex h-full">
+                              <span
+                                className="h-full bg-emerald-500"
+                                style={{ width: `${positivePct}%` }}
+                                aria-hidden="true"
+                              />
+                              <span
+                                className="h-full bg-zinc-400"
+                                style={{ width: `${neutralPct}%` }}
+                                aria-hidden="true"
+                              />
+                              <span
+                                className="h-full bg-red-500"
+                                style={{ width: `${negativePct}%` }}
+                                aria-hidden="true"
+                              />
+                            </div>
+                          </div>
+                          <p className="mt-1 text-[11px] text-zinc-600">
+                            +{row.positive} · ={row.neutral} · -{row.negative} · net {row.netSentiment}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <h4 className="mb-2 text-lg font-semibold text-zinc-900">Viewer Attitude by Platform</h4>
+                <p className="mb-4 text-xs text-zinc-500">
+                  Early matrix for comparing where audience tone is most positive vs critical.
+                </p>
+                {viewerAttitudeByPlatformRows.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No viewer discussion highlights available.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {viewerAttitudeByPlatformRows.map((row) => {
+                      const positivePct = row.total > 0 ? (row.positive / row.total) * 100 : 0;
+                      const negativePct = row.total > 0 ? (row.negative / row.total) * 100 : 0;
+                      const tone =
+                        positivePct === negativePct
+                          ? "Balanced"
+                          : positivePct > negativePct
+                            ? "Positive-leaning"
+                            : "Critical-leaning";
+                      return (
+                        <div key={row.platform} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-zinc-900">
+                              {PLATFORM_LABELS[row.platform] ?? row.platform}
+                            </p>
+                            <p className="text-xs text-zinc-600">{formatInteger(row.total)} highlights</p>
+                          </div>
+                          <p className="mt-1 text-[11px] text-zinc-600">
+                            +{row.positive} · ={row.neutral} · -{row.negative} · {tone}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+            </section>
+          )}
+
           {(isBravoView || isSentimentView) && (
             <section className="grid gap-6 xl:grid-cols-2">
             <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -6704,7 +6902,11 @@ export default function SeasonSocialAnalyticsSection({
                             onClick={() =>
                               setExpandedJobErrors((prev) => {
                                 const next = new Set(prev);
-                                next.has(job.id) ? next.delete(job.id) : next.add(job.id);
+                                if (next.has(job.id)) {
+                                  next.delete(job.id);
+                                } else {
+                                  next.add(job.id);
+                                }
                                 return next;
                               })
                             }

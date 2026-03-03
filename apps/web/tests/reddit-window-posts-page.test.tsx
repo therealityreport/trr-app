@@ -79,6 +79,25 @@ describe("admin reddit window posts page", () => {
 
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/discover?")) {
+        return jsonResponse({
+          discovery: {
+            fetched_at: "2026-03-01T00:00:00.000Z",
+            totals: { fetched_rows: 1, matched_rows: 1, tracked_flair_rows: 1 },
+            threads: [
+              {
+                reddit_post_id: "abc123",
+                title: "Sample thread",
+                url: "https://reddit.com/r/BravoRealHousewives/comments/abc123/sample/",
+                posted_at: "2026-03-01T00:00:00.000Z",
+                score: 12,
+                num_comments: 9,
+                link_flair_text: "Salt Lake City",
+              },
+            ],
+          },
+        });
+      }
       if (url.includes("/api/admin/reddit/communities")) {
         return jsonResponse({
           communities: [
@@ -186,11 +205,13 @@ describe("admin reddit window posts page", () => {
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
     });
+    // Period dates are now backfilled lazily from discovery window_start/window_end;
+    // no user-facing warning is shown during context resolution.
     expect(
-      screen.getByText(
+      screen.queryByText(
         "Season social period data is temporarily unavailable for this window; loading cached posts by container key.",
       ),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
   });
 
   it("runs resolver once for the same signature across rerenders", async () => {
@@ -255,5 +276,66 @@ describe("admin reddit window posts page", () => {
       ).length;
       expect(communityCallCount).toBe(1);
     });
+  });
+
+  it("renders per-post View Details links to canonical reddit post detail routes", async () => {
+    const replaceMock = vi.fn();
+    useRouterMock.mockReturnValue({ replace: replaceMock });
+    usePathnameMock.mockReturnValue("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+
+    fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/discover?")) {
+        return jsonResponse({
+          discovery: {
+            fetched_at: "2026-03-01T00:00:00.000Z",
+            totals: { fetched_rows: 1, matched_rows: 1, tracked_flair_rows: 1 },
+            window_start: "2025-08-14T04:00:00.000Z",
+            window_end: "2025-09-16T23:00:00.000Z",
+            threads: [
+              {
+                reddit_post_id: "abc123",
+                title: "Sample thread",
+                text: null,
+                url: "https://reddit.com/r/BravoRealHousewives/comments/abc123/sample/",
+                permalink: "/r/BravoRealHousewives/comments/abc123/sample/",
+                author: "test-user",
+                score: 12,
+                num_comments: 9,
+                posted_at: "2026-03-01T00:00:00.000Z",
+                link_flair_text: "Salt Lake City",
+                is_show_match: true,
+                passes_flair_filter: true,
+                match_type: "flair",
+              },
+            ],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({
+          communities: [
+            {
+              id: "community-1",
+              trr_show_id: "show-1",
+              trr_show_name: "The Real Housewives of Salt Lake City",
+              subreddit: "BravoRealHousewives",
+            },
+          ],
+        });
+      }
+      if (url.includes("/api/admin/trr-api/shows/show-1/seasons")) {
+        return jsonResponse({ seasons: [{ id: "season-6", season_number: 6 }] });
+      }
+      return jsonResponse({ error: "unexpected" }, 500);
+    });
+
+    render(<AdminRedditWindowPostsPage />);
+
+    const detailsLink = await screen.findByRole("link", { name: "View Details" });
+    expect(detailsLink.getAttribute("href")).toBe(
+      "/rhoslc/social/reddit/BravoRealHousewives/s6/w0/post/abc123?community_id=community-1&season_id=season-6",
+    );
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import BrandLogoOptionsModal from "@/components/admin/BrandLogoOptionsModal";
 import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import {
   BrandShowFranchiseRow,
@@ -73,7 +74,20 @@ type FranchiseLogoRow = {
   hosted_logo_black_url: string | null;
   hosted_logo_white_url: string | null;
   is_primary: boolean;
+  logo_role?: string | null;
+  source_provider?: string | null;
+  discovered_from?: string | null;
+  is_selected_for_role?: boolean | null;
 };
+
+type LogoPickerState = {
+  targetType: "franchise";
+  targetKey: string;
+  targetLabel: string;
+  logoRole: "wordmark" | "icon";
+};
+
+const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
 
 const SHOWS_FRANCHISES_ENABLED =
   (process.env.NEXT_PUBLIC_BRANDS_SHOWS_FRANCHISES_ENABLED ??
@@ -147,6 +161,10 @@ export default function BrandsShowsAndFranchisesPage() {
   const [genericLinkRules, setGenericLinkRules] = useState<GenericLinkRule[]>([]);
   const [franchiseLogoError, setFranchiseLogoError] = useState<string | null>(null);
   const [franchiseLogoLoading, setFranchiseLogoLoading] = useState(false);
+  const [syncingPageLogos, setSyncingPageLogos] = useState(false);
+  const [syncPageNotice, setSyncPageNotice] = useState<string | null>(null);
+  const [syncPageError, setSyncPageError] = useState<string | null>(null);
+  const [logoPickerState, setLogoPickerState] = useState<LogoPickerState | null>(null);
   const [familyRows, setFamilyRows] = useState<BrandFamilySummary[]>([]);
   const [selectedFamilyId, setSelectedFamilyId] = useState("");
   const [selectedFamilyRuleId, setSelectedFamilyRuleId] = useState("");
@@ -351,6 +369,49 @@ export default function BrandsShowsAndFranchisesPage() {
   const refreshAll = useCallback(async () => {
     await Promise.all([loadRules(), loadShows(), loadFranchiseLogos(), loadFamilies()]);
   }, [loadFamilies, loadFranchiseLogos, loadRules, loadShows]);
+
+  const syncShowsPageLogos = useCallback(async () => {
+    setSyncingPageLogos(true);
+    setSyncPageNotice(null);
+    setSyncPageError(null);
+    try {
+      const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          scope: "page",
+          page: "shows",
+          target_types: ["franchise", "show"],
+          only_missing: true,
+          force: false,
+          limit: 200,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        targets_scanned?: number;
+        imports_created?: number;
+        imports_updated?: number;
+        unresolved?: number;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to sync show/franchise logos");
+      }
+      setSyncPageNotice(
+        `Scanned ${Number(payload.targets_scanned ?? 0)} targets, imported ${
+          Number(payload.imports_created ?? 0) + Number(payload.imports_updated ?? 0)
+        }, unresolved ${Number(payload.unresolved ?? 0)}.`,
+      );
+      await Promise.all([loadShows(), loadFranchiseLogos()]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to sync show/franchise logos";
+      setSyncPageError(message);
+    } finally {
+      setSyncingPageLogos(false);
+    }
+  }, [fetchWithAuth, loadFranchiseLogos, loadShows]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !SHOWS_FRANCHISES_ENABLED) return;
@@ -566,9 +627,12 @@ export default function BrandsShowsAndFranchisesPage() {
         franchise_key: string;
         franchise_name: string;
         count: number;
-        primary_logo_url: string | null;
+        wordmark_url: string | null;
+        icon_url: string | null;
       }
     >();
+    const pickUrl = (row: FranchiseLogoRow): string | null =>
+      row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url || null;
     for (const row of franchiseLogoRows) {
       const key = String(row.target_key || "").trim();
       if (!key) continue;
@@ -576,14 +640,22 @@ export default function BrandsShowsAndFranchisesPage() {
         franchise_key: key,
         franchise_name: row.target_label || key,
         count: 0,
-        primary_logo_url: null,
+        wordmark_url: null,
+        icon_url: null,
       };
       existing.count += 1;
-      if (!existing.primary_logo_url && row.is_primary && row.hosted_logo_url) {
-        existing.primary_logo_url = row.hosted_logo_url;
-      }
-      if (!existing.primary_logo_url && row.hosted_logo_url) {
-        existing.primary_logo_url = row.hosted_logo_url;
+      const role = String(row.logo_role || "").trim().toLowerCase();
+      const url = pickUrl(row);
+      if (role === "icon") {
+        if ((row.is_selected_for_role || !existing.icon_url) && url) existing.icon_url = url;
+      } else if (role === "wordmark") {
+        if ((row.is_selected_for_role || !existing.wordmark_url) && url) existing.wordmark_url = url;
+      } else if (row.is_primary) {
+        if (!existing.wordmark_url && url) existing.wordmark_url = url;
+      } else if (!existing.icon_url && url) {
+        existing.icon_url = url;
+      } else if (!existing.wordmark_url && url) {
+        existing.wordmark_url = url;
       }
       map.set(key, existing);
     }
@@ -646,8 +718,16 @@ export default function BrandsShowsAndFranchisesPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={() => void syncShowsPageLogos()}
+                disabled={syncingPageLogos}
+                className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+              >
+                {syncingPageLogos ? "Syncing..." : "Sync Show/Franchise Logos"}
+              </button>
+              <button
+                type="button"
                 onClick={() => void refreshAll()}
-                disabled={rowsLoading || rulesLoading || franchiseLogoLoading || familyRulesLoading}
+                disabled={rowsLoading || rulesLoading || franchiseLogoLoading || familyRulesLoading || syncingPageLogos}
                 className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {rowsLoading || rulesLoading || franchiseLogoLoading || familyRulesLoading ? "Refreshing..." : "Refresh"}
@@ -672,6 +752,14 @@ export default function BrandsShowsAndFranchisesPage() {
           {franchiseLogoError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {franchiseLogoError}
+            </div>
+          ) : null}
+          {syncPageError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncPageError}</div>
+          ) : null}
+          {syncPageNotice ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              {syncPageNotice}
             </div>
           ) : null}
           {familyRulesError ? (
@@ -1036,11 +1124,52 @@ export default function BrandsShowsAndFranchisesPage() {
                     <p className="truncate text-sm font-semibold text-zinc-900">{item.franchise_name}</p>
                     <p className="truncate text-xs text-zinc-500">{item.franchise_key}</p>
                     <p className="mt-1 text-xs text-zinc-600">{item.count} logo{item.count === 1 ? "" : "s"}</p>
-                    {item.primary_logo_url ? (
-                      <div className="relative mt-2 h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <Image src={item.primary_logo_url} alt={`${item.franchise_name} logo`} fill className="object-contain p-1" unoptimized />
+                    <div className="mt-2 flex gap-2">
+                      <div className="relative h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                        <button
+                          type="button"
+                          className="relative h-full w-full"
+                          onClick={() =>
+                            setLogoPickerState({
+                              targetType: "franchise",
+                              targetKey: item.franchise_key,
+                              targetLabel: item.franchise_name,
+                              logoRole: "wordmark",
+                            })
+                          }
+                        >
+                          <Image
+                            src={item.wordmark_url || PLACEHOLDER_ICON_PATH}
+                            alt={`${item.franchise_name} wordmark`}
+                            fill
+                            className="object-contain p-1"
+                            unoptimized
+                          />
+                        </button>
                       </div>
-                    ) : null}
+                      <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                        <button
+                          type="button"
+                          className="relative h-full w-full"
+                          onClick={() =>
+                            setLogoPickerState({
+                              targetType: "franchise",
+                              targetKey: item.franchise_key,
+                              targetLabel: item.franchise_name,
+                              logoRole: "icon",
+                            })
+                          }
+                        >
+                          <Image
+                            src={item.icon_url || PLACEHOLDER_ICON_PATH}
+                            alt={`${item.franchise_name} icon`}
+                            fill
+                            className="object-contain p-1"
+                            unoptimized
+                          />
+                        </button>
+                      </div>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -1344,6 +1473,18 @@ export default function BrandsShowsAndFranchisesPage() {
             </div>
           </section>
         </main>
+        {logoPickerState ? (
+          <BrandLogoOptionsModal
+            isOpen={Boolean(logoPickerState)}
+            onClose={() => setLogoPickerState(null)}
+            preferredUser={user}
+            targetType={logoPickerState.targetType}
+            targetKey={logoPickerState.targetKey}
+            targetLabel={logoPickerState.targetLabel}
+            logoRole={logoPickerState.logoRole}
+            onSaved={loadFranchiseLogos}
+          />
+        ) : null}
       </div>
     </ClientOnly>
   );

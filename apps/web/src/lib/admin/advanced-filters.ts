@@ -3,6 +3,7 @@
 export type TextOverlayFilter = "text" | "no_text";
 export type PeopleGroupFilter = "solo" | "group";
 export type SeededFilter = "seeded" | "not_seeded";
+export type ReferenceFilter = "references" | "not_references";
 
 export type ContentTypeFilter =
   | "confessional"
@@ -20,6 +21,7 @@ export type AdvancedFilterState = {
   people: PeopleGroupFilter[];
   contentTypes: ContentTypeFilter[];
   seeded: SeededFilter[];
+  references: ReferenceFilter[];
   sort: string;
 };
 
@@ -29,6 +31,7 @@ export const DEFAULT_ADVANCED_FILTERS: AdvancedFilterState = {
   people: [],
   contentTypes: [],
   seeded: [],
+  references: [],
   sort: "newest",
 };
 
@@ -53,6 +56,7 @@ export function readAdvancedFilters(
     people: uniq(parseList(searchParams.get("af_people")) as PeopleGroupFilter[]),
     contentTypes: uniq(parseList(searchParams.get("af_content")) as ContentTypeFilter[]),
     seeded: uniq(parseList(searchParams.get("af_seeded")) as SeededFilter[]),
+    references: uniq(parseList(searchParams.get("af_refs")) as ReferenceFilter[]),
     sort: searchParams.get("af_sort") ?? base.sort,
   };
 }
@@ -76,6 +80,7 @@ export function writeAdvancedFilters(
   setList("af_people", next.people);
   setList("af_content", next.contentTypes);
   setList("af_seeded", next.seeded);
+  setList("af_refs", next.references);
 
   if (!next.sort || next.sort === base.sort) out.delete("af_sort");
   else out.set("af_sort", next.sort);
@@ -97,6 +102,7 @@ export function clearAdvancedFilters(
     people: [],
     contentTypes: [],
     seeded: [],
+    references: [],
     sort: base.sort,
   };
 }
@@ -112,6 +118,7 @@ export function countActiveAdvancedFilters(
   if (filters.people.length > 0) count += 1;
   if (filters.contentTypes.length > 0) count += 1;
   if (filters.seeded.length > 0) count += 1;
+  if (filters.references.length > 0) count += 1;
   if (filters.sort && filters.sort !== base.sort) count += 1;
   return count;
 }

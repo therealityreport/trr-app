@@ -61,6 +61,21 @@ const buildTraceId = (): string => {
   return randomUUID().replace(/-/g, "");
 };
 
+const readPositiveIntEnv = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+};
+
+export const SOCIAL_PROXY_SHORT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_SHORT_TIMEOUT_MS", 25_000);
+export const SOCIAL_PROXY_DEFAULT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_DEFAULT_TIMEOUT_MS", 45_000);
+
 const getServiceRoleKey = (): string => {
   const value = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
   if (!value) {

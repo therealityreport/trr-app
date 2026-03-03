@@ -162,9 +162,9 @@ export async function POST(request: NextRequest) {
       }
       episodeTitlePatterns = body.episode_title_patterns as string[];
     }
-    if ("episode_required_flares" in body) {
+    if ("episode_required_flairs" in body) {
       return NextResponse.json(
-        { error: "episode_required_flares is no longer supported; use analysis_all_flares" },
+        { error: "episode_required_flairs is no longer supported; use analysis_all_flairs" },
         { status: 400 },
       );
     }

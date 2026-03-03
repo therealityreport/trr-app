@@ -116,7 +116,7 @@ describe("reddit-discovery-service", () => {
     ).toBe(true);
   });
 
-  it("supports all-post and scan-by-terms flare modes", async () => {
+  it("supports all-post and scan-by-terms flair modes", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes(".json")) {
@@ -185,8 +185,8 @@ describe("reddit-discovery-service", () => {
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
       castNames: ["Meredith Marks", "Lisa Barlow"],
-      analysisFlares: ["Chat/Discussion 👄", ":Meredith: Meredith Marksss 🛀"],
-      analysisAllFlares: ["Salt Lake City"],
+      analysisFlairs: ["Chat/Discussion 👄", ":Meredith: Meredith Marksss 🛀"],
+      analysisAllFlairs: ["Salt Lake City"],
       sortModes: ["new"],
     });
 
@@ -232,7 +232,7 @@ describe("reddit-discovery-service", () => {
       subreddit: "BravoRealHousewives",
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
-      analysisAllFlares: ["Salt Lake City"],
+      analysisAllFlairs: ["Salt Lake City"],
       sortModes: ["new"],
     });
 
@@ -273,8 +273,8 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       castNames: ["Meredith Marks"],
       isShowFocused: true,
-      analysisFlares: ["Chat/Discussion"],
-      analysisAllFlares: ["Salt Lake City"],
+      analysisFlairs: ["Chat/Discussion"],
+      analysisAllFlairs: ["Salt Lake City"],
       sortModes: ["new"],
     });
 
@@ -364,7 +364,7 @@ describe("reddit-discovery-service", () => {
       subreddit: "BravoRealHousewives",
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
-      analysisAllFlares: ["Salt Lake City"],
+      analysisAllFlairs: ["Salt Lake City"],
       exhaustiveWindow: true,
       periodStart: "2026-01-01T00:00:00.000Z",
       periodEnd: "2026-01-31T23:59:59.000Z",
@@ -433,7 +433,7 @@ describe("reddit-discovery-service", () => {
       subreddit: "BravoRealHousewives",
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
-      analysisAllFlares: ["Salt Lake City"],
+      analysisAllFlairs: ["Salt Lake City"],
       exhaustiveWindow: true,
       periodStart: "2026-01-01T00:00:00.000Z",
       periodEnd: "2026-01-31T23:59:59.000Z",
@@ -526,7 +526,7 @@ describe("reddit-discovery-service", () => {
       subreddit: "BravoRealHousewives",
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
-      analysisAllFlares: ["Salt Lake City"],
+      analysisAllFlairs: ["Salt Lake City"],
       exhaustiveWindow: true,
       searchBackfill: true,
       periodStart: "2026-01-01T00:00:00.000Z",
@@ -605,7 +605,7 @@ describe("reddit-discovery-service", () => {
       subreddit: "BravoRealHousewives",
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
-      analysisAllFlares: ["Salt Lake City"],
+      analysisAllFlairs: ["Salt Lake City"],
       exhaustiveWindow: true,
       searchBackfill: true,
       maxPages: 1,
@@ -669,7 +669,7 @@ describe("reddit-discovery-service", () => {
       subreddit: "BravoRealHousewives",
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
-      analysisAllFlares: ["Salt Lake City"],
+      analysisAllFlairs: ["Salt Lake City"],
       exhaustiveWindow: true,
       searchBackfill: true,
       maxPages: 6,
@@ -712,8 +712,8 @@ describe("reddit-discovery-service", () => {
       subreddit: "BravoRealHousewives",
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
-      analysisFlares: ["Salt Lake City"],
-      analysisAllFlares: [],
+      analysisFlairs: ["Salt Lake City"],
+      analysisAllFlairs: [],
       sortModes: ["new"],
     });
     expect(baseline.threads).toHaveLength(0);
@@ -722,9 +722,9 @@ describe("reddit-discovery-service", () => {
       subreddit: "BravoRealHousewives",
       showName: "The Real Housewives of Salt Lake City",
       showAliases: ["RHOSLC"],
-      analysisFlares: ["Salt Lake City"],
-      analysisAllFlares: [],
-      forceIncludeFlares: ["Salt Lake City"],
+      analysisFlairs: ["Salt Lake City"],
+      analysisAllFlairs: [],
+      forceIncludeFlairs: ["Salt Lake City"],
       sortModes: ["new"],
     });
     expect(forced.threads.map((thread) => thread.reddit_post_id)).toEqual(["force-flair-1"]);
@@ -803,7 +803,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Live Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new"],
     });
@@ -876,7 +876,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Live Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new"],
     });
@@ -932,7 +932,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Live Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new"],
     });
@@ -970,7 +970,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Live Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: true,
       sortModes: ["new"],
     });
@@ -1021,7 +1021,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Live Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       periodStart: "2024-01-01T00:00:00.000Z",
       periodEnd: "2024-01-31T23:59:59.000Z",
@@ -1101,7 +1101,7 @@ describe("reddit-discovery-service", () => {
         "Post Episode Discussion",
         "Weekly Episode Discussion",
       ],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new"],
     });
@@ -1177,7 +1177,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Live Episode Discussion", "Post Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new", "hot", "top"],
     });
@@ -1224,7 +1224,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Weekly Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new"],
     });
@@ -1291,7 +1291,7 @@ describe("reddit-discovery-service", () => {
         "Post Episode Discussion",
         "Weekly Episode Discussion",
       ],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new"],
     });
@@ -1333,7 +1333,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Live Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new"],
     });
@@ -1358,7 +1358,7 @@ describe("reddit-discovery-service", () => {
       showAliases: ["RHOSLC"],
       seasonNumber: 6,
       episodeTitlePatterns: ["Live Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["top"],
     });
@@ -1410,7 +1410,7 @@ describe("reddit-discovery-service", () => {
         "Post Episode Discussion",
         "Weekly Episode Discussion",
       ],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new", "hot", "top"],
     });
@@ -1475,7 +1475,7 @@ describe("reddit-discovery-service", () => {
       seasonNumber: 6,
       seasonEpisodes: [{ episode_number: 1, air_date: "2025-09-16" }],
       episodeTitlePatterns: ["Live Episode Discussion"],
-      episodeRequiredFlares: ["Salt Lake City"],
+      episodeRequiredFlairs: ["Salt Lake City"],
       isShowFocused: false,
       sortModes: ["new"],
     });

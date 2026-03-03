@@ -19,7 +19,7 @@ import { POST } from "@/app/api/admin/trr-api/people/[personId]/reprocess-images
 const BACKEND_STREAM_URL = "https://backend.example.com/api/v1/admin/person/person-1/reprocess-images/stream";
 const BACKEND_HEALTH_URL = "https://backend.example.com/health";
 
-const makeRequest = (requestId?: string) =>
+const makeRequest = (requestId?: string, body?: Record<string, unknown>) =>
   new NextRequest(
     "http://localhost/api/admin/trr-api/people/person-1/reprocess-images/stream",
     {
@@ -28,7 +28,7 @@ const makeRequest = (requestId?: string) =>
         "content-type": "application/json",
         ...(requestId ? { "x-trr-request-id": requestId } : {}),
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify(body ?? {}),
     },
   );
 
@@ -124,6 +124,45 @@ describe("person reprocess-images stream proxy route", () => {
     const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
     const callHeaders = streamCall?.[1]?.headers as Record<string, string> | undefined;
     expect(callHeaders?.["x-trr-request-id"]).toBe("req-reprocess-forward");
+  });
+
+  it("forwards scoped reprocess payload fields to backend", async () => {
+    const requestBody = {
+      run_count: true,
+      run_tagging: true,
+      target_cast_photo_ids: ["cast-1", "cast-2"],
+      target_media_link_ids: ["link-1"],
+      sources: ["imdb", "tmdb"],
+    };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response("event: progress\ndata: {\"stage\":\"auto_count\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest("req-reprocess-scope", requestBody), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    await response.text();
+
+    const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
+    const streamBodyRaw = streamCall?.[1]?.body;
+    const parsedBody =
+      typeof streamBodyRaw === "string"
+        ? (JSON.parse(streamBodyRaw) as Record<string, unknown>)
+        : null;
+    expect(parsedBody).not.toBeNull();
+    expect(parsedBody?.target_cast_photo_ids).toEqual(["cast-1", "cast-2"]);
+    expect(parsedBody?.target_media_link_ids).toEqual(["link-1"]);
+    expect(parsedBody?.sources).toEqual(["imdb", "tmdb"]);
   });
 
   it("emits connect heartbeat progress while backend connect is pending", async () => {

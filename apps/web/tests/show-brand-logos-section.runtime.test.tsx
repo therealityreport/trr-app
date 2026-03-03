@@ -27,7 +27,7 @@ const buildLogoAsset = (
   }) as SeasonAsset;
 
 describe("ShowBrandLogosSection", () => {
-  it("renders color/black/white previews and featured badge", () => {
+  it("renders summary card with featured logo variants and change button", () => {
     const assets: SeasonAsset[] = [
       buildLogoAsset("logo-1", "media_assets", { logo_link_is_primary: true }),
       buildLogoAsset("logo-2", "show_images"),
@@ -40,24 +40,20 @@ describe("ShowBrandLogosSection", () => {
         featuredLogoSavingAssetId={null}
         selectedFeaturedLogoVariant="color"
         getAssetDisplayUrl={(asset) => asset.hosted_url}
-        onOpenAssetLightbox={vi.fn()}
         onSelectFeaturedLogoVariant={vi.fn()}
         onSetFeaturedLogo={vi.fn()}
       />
     );
 
+    expect(screen.getByText("Featured")).toBeInTheDocument();
     expect(screen.getAllByText("Color").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Black").length).toBeGreaterThan(0);
     expect(screen.getAllByText("White").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Show logo color variant").length).toBeGreaterThan(0);
-    expect(screen.getByText("Featured")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Change Featured Logo/i })).toBeInTheDocument();
   });
 
-  it("fires set featured callback for eligible non-featured logos", () => {
-    const assets: SeasonAsset[] = [buildLogoAsset("logo-2", "show_images")];
-    const onSetFeaturedLogo = vi.fn();
-    const onOpenAssetLightbox = vi.fn();
-    const onSelectFeaturedLogoVariant = vi.fn();
+  it("shows set button when no featured logo is selected", () => {
+    const assets: SeasonAsset[] = [buildLogoAsset("logo-1", "show_images")];
 
     render(
       <ShowBrandLogosSection
@@ -66,23 +62,18 @@ describe("ShowBrandLogosSection", () => {
         featuredLogoSavingAssetId={null}
         selectedFeaturedLogoVariant="color"
         getAssetDisplayUrl={(asset) => asset.hosted_url}
-        onOpenAssetLightbox={onOpenAssetLightbox}
-        onSelectFeaturedLogoVariant={onSelectFeaturedLogoVariant}
-        onSetFeaturedLogo={onSetFeaturedLogo}
+        onSelectFeaturedLogoVariant={vi.fn()}
+        onSetFeaturedLogo={vi.fn()}
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Set Featured Logo" }));
-    expect(onSetFeaturedLogo).toHaveBeenCalledWith(assets[0]);
-    fireEvent.click(screen.getAllByRole("button", { name: /Color/i })[0]);
-    expect(onOpenAssetLightbox).toHaveBeenCalledTimes(1);
-    expect(onSelectFeaturedLogoVariant).not.toHaveBeenCalled();
+    expect(screen.getByText("Not Set")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Set Featured Logo/i })).toBeInTheDocument();
   });
 
-  it("uses variant clicks to update top logo when row is featured", () => {
+  it("fires variant selection callback when clicking variant on featured logo", () => {
     const assets: SeasonAsset[] = [buildLogoAsset("logo-1", "media_assets", { logo_link_is_primary: true })];
-    const onSelectFeaturedLogoVariant = vi.fn();
-    const onOpenAssetLightbox = vi.fn();
+    const onSelectVariant = vi.fn();
 
     render(
       <ShowBrandLogosSection
@@ -91,14 +82,28 @@ describe("ShowBrandLogosSection", () => {
         featuredLogoSavingAssetId={null}
         selectedFeaturedLogoVariant="color"
         getAssetDisplayUrl={(asset) => asset.hosted_url}
-        onOpenAssetLightbox={onOpenAssetLightbox}
-        onSelectFeaturedLogoVariant={onSelectFeaturedLogoVariant}
+        onSelectFeaturedLogoVariant={onSelectVariant}
         onSetFeaturedLogo={vi.fn()}
       />
     );
 
     fireEvent.click(screen.getAllByRole("button", { name: /Black/i })[0]);
-    expect(onSelectFeaturedLogoVariant).toHaveBeenCalledWith(assets[0], "black");
-    expect(onOpenAssetLightbox).not.toHaveBeenCalled();
+    expect(onSelectVariant).toHaveBeenCalledWith(assets[0], "black");
+  });
+
+  it("shows empty state when no logos exist", () => {
+    render(
+      <ShowBrandLogosSection
+        logoAssets={[]}
+        featuredLogoAssetId={null}
+        featuredLogoSavingAssetId={null}
+        selectedFeaturedLogoVariant="color"
+        getAssetDisplayUrl={(asset) => asset.hosted_url}
+        onSelectFeaturedLogoVariant={vi.fn()}
+        onSetFeaturedLogo={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("No show logos found.")).toBeInTheDocument();
   });
 });

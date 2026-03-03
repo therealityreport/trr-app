@@ -46,12 +46,12 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     isValidSubredditMock.mockReturnValue(true);
   });
 
-  it("returns community payload including analysis flares", async () => {
+  it("returns community payload including analysis flairs", async () => {
     getRedditCommunityByIdMock.mockResolvedValue({
       id: COMMUNITY_ID,
       subreddit: "BravoRealHousewives",
-      analysis_flares: ["Episode Discussion", "Live Thread"],
-      analysis_all_flares: ["Salt Lake City"],
+      analysis_flairs: ["Episode Discussion", "Live Thread"],
+      analysis_all_flairs: ["Salt Lake City"],
       is_show_focused: false,
       network_focus_targets: ["Bravo"],
       franchise_focus_targets: ["Real Housewives"],
@@ -67,19 +67,19 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.community?.analysis_flares).toEqual(["Episode Discussion", "Live Thread"]);
-    expect(payload.community?.analysis_all_flares).toEqual(["Salt Lake City"]);
+    expect(payload.community?.analysis_flairs).toEqual(["Episode Discussion", "Live Thread"]);
+    expect(payload.community?.analysis_all_flairs).toEqual(["Salt Lake City"]);
     expect(payload.community?.network_focus_targets).toEqual(["Bravo"]);
     expect(payload.community?.franchise_focus_targets).toEqual(["Real Housewives"]);
     expect(payload.community?.episode_title_patterns).toEqual(["Live Episode Discussion"]);
   });
 
-  it("updates analysis flare modes when PATCH payload is valid", async () => {
+  it("updates analysis flair modes when PATCH payload is valid", async () => {
     updateRedditCommunityMock.mockResolvedValue({
       id: COMMUNITY_ID,
       subreddit: "realhousewivesofSLC",
-      analysis_flares: ["S1", "S3", "S4"],
-      analysis_all_flares: ["Salt Lake City"],
+      analysis_flairs: ["S1", "S3", "S4"],
+      analysis_all_flairs: ["Salt Lake City"],
       is_show_focused: true,
       network_focus_targets: [],
       franchise_focus_targets: [],
@@ -89,8 +89,8 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
       method: "PATCH",
       body: JSON.stringify({
-        analysis_flares: ["S3 ❄️", "S1 ❄️", "S4 ❄️"],
-        analysis_all_flares: ["Salt Lake City"],
+        analysis_flairs: ["S3 ❄️", "S1 ❄️", "S4 ❄️"],
+        analysis_all_flairs: ["Salt Lake City"],
       }),
       headers: { "Content-Type": "application/json" },
     });
@@ -101,23 +101,23 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.community?.analysis_flares).toEqual(["S1", "S3", "S4"]);
-    expect(payload.community?.analysis_all_flares).toEqual(["Salt Lake City"]);
+    expect(payload.community?.analysis_flairs).toEqual(["S1", "S3", "S4"]);
+    expect(payload.community?.analysis_all_flairs).toEqual(["Salt Lake City"]);
     expect(updateRedditCommunityMock).toHaveBeenCalledWith(
       { firebaseUid: "admin-uid", isAdmin: true },
       COMMUNITY_ID,
       expect.objectContaining({
-        analysisFlares: ["S3 ❄️", "S1 ❄️", "S4 ❄️"],
-        analysisAllFlares: ["Salt Lake City"],
+        analysisFlairs: ["S3 ❄️", "S1 ❄️", "S4 ❄️"],
+        analysisAllFlairs: ["Salt Lake City"],
       }),
     );
   });
 
-  it("rejects invalid analysis flare payloads", async () => {
+  it("rejects invalid analysis flair payloads", async () => {
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
       method: "PATCH",
       body: JSON.stringify({
-        analysis_flares: ["Episode Discussion", 123],
+        analysis_flairs: ["Episode Discussion", 123],
       }),
       headers: { "Content-Type": "application/json" },
     });
@@ -128,15 +128,15 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(400);
-    expect(payload.error).toContain("analysis_flares");
+    expect(payload.error).toContain("analysis_flairs");
     expect(updateRedditCommunityMock).not.toHaveBeenCalled();
   });
 
-  it("rejects invalid analysis_all_flares payloads", async () => {
+  it("rejects invalid analysis_all_flairs payloads", async () => {
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
       method: "PATCH",
       body: JSON.stringify({
-        analysis_all_flares: ["Salt Lake City", 123],
+        analysis_all_flairs: ["Salt Lake City", 123],
       }),
       headers: { "Content-Type": "application/json" },
     });
@@ -147,7 +147,7 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(400);
-    expect(payload.error).toContain("analysis_all_flares");
+    expect(payload.error).toContain("analysis_all_flairs");
     expect(updateRedditCommunityMock).not.toHaveBeenCalled();
   });
 
@@ -155,8 +155,8 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     updateRedditCommunityMock.mockResolvedValue({
       id: COMMUNITY_ID,
       subreddit: "BravoRealHousewives",
-      analysis_flares: [],
-      analysis_all_flares: [],
+      analysis_flairs: [],
+      analysis_all_flairs: [],
       is_show_focused: false,
       network_focus_targets: ["Bravo"],
       franchise_focus_targets: ["Real Housewives"],
@@ -197,8 +197,8 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     updateRedditCommunityMock.mockResolvedValue({
       id: COMMUNITY_ID,
       subreddit: "BravoRealHousewives",
-      analysis_flares: [],
-      analysis_all_flares: [],
+      analysis_flairs: [],
+      analysis_all_flairs: [],
       is_show_focused: false,
       network_focus_targets: ["Bravo"],
       franchise_focus_targets: ["Real Housewives"],
@@ -266,12 +266,12 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     expect(getRedditCommunityByIdMock).not.toHaveBeenCalled();
   });
 
-  it("rejects deprecated episode_required_flares payloads", async () => {
+  it("rejects deprecated episode_required_flairs payloads", async () => {
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
       method: "PATCH",
       body: JSON.stringify({
         episode_title_patterns: ["Live Episode Discussion"],
-        episode_required_flares: ["Salt Lake City", 123],
+        episode_required_flairs: ["Salt Lake City", 123],
       }),
       headers: { "Content-Type": "application/json" },
     });
@@ -282,7 +282,7 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(400);
-    expect(payload.error).toContain("episode_required_flares");
+    expect(payload.error).toContain("episode_required_flairs");
     expect(updateRedditCommunityMock).not.toHaveBeenCalled();
   });
 });

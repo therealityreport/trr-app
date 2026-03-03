@@ -233,6 +233,7 @@ function FinishProfileContent() {
       }
       
       const provider = u.providerData?.[0]?.providerId ?? "password";
+      const isUS = country.trim() === "United States";
       const payload: Partial<UserProfile> = {
         uid: u.uid,
         email: u.email ?? null,
@@ -241,9 +242,8 @@ function FinishProfileContent() {
         shows: parseShows(selectedShows),
         showRequests: parseShows(showRequests),
         gender: gender.trim(),
-        livesInUS: country.trim() === "United States",
-        state: country.trim() === "United States" ? state.trim() : undefined,
-        country: country.trim() !== "United States" ? country.trim() : undefined,
+        livesInUS: isUS,
+        ...(isUS ? { state: state.trim() } : { country: country.trim() }),
         provider,
       };
       
@@ -273,9 +273,8 @@ function FinishProfileContent() {
           shows: parseShows(selectedShows),
           showRequests: parseShows(showRequests),
           gender: gender.trim(),
-          livesInUS: country.trim() === "United States",
-          state: country.trim() === "United States" ? state.trim() : undefined,
-          country: country.trim() !== "United States" ? country.trim() : undefined,
+          livesInUS: isUS,
+          ...(isUS ? { state: state.trim() } : { country: country.trim() }),
           provider,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),

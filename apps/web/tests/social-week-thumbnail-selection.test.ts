@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isVideoLikeSocialUrl,
   pickFirstNonVideoUrl,
+  selectInstagramTikTokThumbnailUrl,
   selectTwitterThumbnailUrl,
 } from "../src/components/admin/social-week/social-media-thumbnails";
 
@@ -46,5 +47,30 @@ describe("social week twitter thumbnail selection", () => {
       mediaUrls: ["https://video.twimg.com/ext_tw_video/123/pu/vid/avc1/1280x720/main.mp4?tag=12"],
     });
     expect(selected).toBe("https://cdn.test/social/twitter/x/thumbnail.mp4");
+  });
+
+  it("prefers non-video tiktok/instagram thumbnail candidates across fields", () => {
+    const selected = selectInstagramTikTokThumbnailUrl({
+      hostedThumbnail: "https://cdn.test/social/tiktok/x/thumbnail.mp4",
+      thumbnail: "https://video.test/source-thumb.mp4",
+      hostedMediaUrls: ["https://cdn.test/social/tiktok/x/media-01.mp4"],
+      sourceMediaUrls: [
+        "https://video.test/source-main.mp4",
+        "https://images.test/source-frame.jpg",
+      ],
+      mediaUrls: ["https://video.test/source-main.mp4"],
+    });
+    expect(selected).toBe("https://images.test/source-frame.jpg");
+  });
+
+  it("falls back to first available tiktok/instagram candidate when all are video-like", () => {
+    const selected = selectInstagramTikTokThumbnailUrl({
+      hostedThumbnail: "",
+      thumbnail: "",
+      hostedMediaUrls: ["https://cdn.test/social/tiktok/x/media-01.mp4"],
+      sourceMediaUrls: ["https://video.test/source-main.mp4"],
+      mediaUrls: [],
+    });
+    expect(selected).toBe("https://cdn.test/social/tiktok/x/media-01.mp4");
   });
 });

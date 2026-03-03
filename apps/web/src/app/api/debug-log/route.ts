@@ -3,7 +3,8 @@ import { requireAdmin } from "@/lib/server/auth";
 
 const REDACTED = "[REDACTED]";
 const MAX_DEPTH = 6;
-const SENSITIVE_KEY_RE = /(token|secret|password|cookie|authorization|api[_-]?key|session|credential|jwt|bearer)/i;
+const SENSITIVE_KEY_RE =
+  /(token|secret|password|cookie|authorization|api[_-]?key|session|credential|jwt|bearer|email|uid|user[_-]?id)/i;
 
 function redactPayload(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return "[TRUNCATED]";

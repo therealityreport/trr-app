@@ -32,6 +32,7 @@ import {
   type BravodleWwhlAppearance,
 } from "./types";
 import { getBravodleDateKey } from "./utils";
+import { addIdentityToken } from "@/lib/games/identity";
 
 const USER_ANALYTICS_COLLECTION = "user_analytics";
 const USER_STATS_SUBCOLLECTION = "bravodle_userstats";
@@ -298,7 +299,7 @@ export class BravodleManager {
     }
 
     const talents = await this.getTalentIndex();
-    const normalizedCastId = answerKey.castId.toLowerCase();
+    const normalizedCastId = (answerKey.castId ?? "").toLowerCase();
     const normalizedName = answerKey.castName?.toLowerCase() ?? "";
 
     const talentMatch =
@@ -312,7 +313,7 @@ export class BravodleManager {
       castName:
         answerKey.castName && answerKey.castName.trim().length > 0
           ? answerKey.castName
-          : talentMatch?.name ?? answerKey.castId,
+          : talentMatch?.name ?? answerKey.castId ?? "",
       imageUrl: answerKey.imageUrl ?? talentMatch?.imageUrl,
     };
 
@@ -372,6 +373,8 @@ export class BravodleManager {
 
     const puzzleDate = gameDate;
     const dailyRef = this.getDailyDocRef(uid, puzzleDate);
+    const userAnalyticsRef = this.getUserAnalyticsDocRef(uid);
+    const globalAnalyticsRef = this.getGlobalAnalyticsDocRef(puzzleDate);
     const { answerKey, talent: answerTalent } = await this.getPuzzleContext(puzzleDate);
 
     await runTransaction(this.firestore, async (transaction) => {
@@ -432,6 +435,67 @@ export class BravodleManager {
           gameStartedAt: existingData?.gameStartedAt ?? serverTimestampValue,
           updatedAt: serverTimestampValue,
         });
+      }
+
+      if (completed) {
+        const userAnalyticsSnap = await transaction.get(userAnalyticsRef);
+        const userAnalytics = (userAnalyticsSnap.data() ?? {}) as Record<string, unknown>;
+        const prevAttempts = this.toFiniteNumber(userAnalytics.bravodle_puzzlesAttempted);
+        const prevWins = this.toFiniteNumber(userAnalytics.bravodle_puzzlesWon);
+        const prevCurrentStreak = this.toFiniteNumber(userAnalytics.bravodle_currentStreak);
+        const prevLongestStreak = this.toFiniteNumber(userAnalytics.bravodle_longestStreak);
+        const prevAverageGuesses = this.toFiniteNumber(userAnalytics.bravodle_averageGuesses);
+        const prevTotalGuesses = prevAverageGuesses * prevAttempts;
+
+        const nextAttempts = prevAttempts + 1;
+        const nextWins = prevWins + (isCorrect ? 1 : 0);
+        const nextCurrentStreak = isCorrect ? prevCurrentStreak + 1 : 0;
+        const nextLongestStreak = Math.max(prevLongestStreak, nextCurrentStreak);
+        const nextAverageGuesses = nextAttempts > 0 ? Number(((prevTotalGuesses + nextGuessCount) / nextAttempts).toFixed(2)) : 0;
+
+        transaction.set(
+          userAnalyticsRef,
+          {
+            bravodle_puzzlesAttempted: nextAttempts,
+            bravodle_puzzlesWon: nextWins,
+            bravodle_currentStreak: nextCurrentStreak,
+            bravodle_longestStreak: nextLongestStreak,
+            bravodle_averageGuesses: nextAverageGuesses,
+            updatedAt: serverTimestampValue,
+          },
+          { merge: true },
+        );
+
+        const globalAnalyticsSnap = await transaction.get(globalAnalyticsRef);
+        const globalAnalytics = (globalAnalyticsSnap.data() ?? {}) as Record<string, unknown>;
+        const globalAttempts = this.toFiniteNumber(globalAnalytics.totalAttempts);
+        const globalWins = this.toFiniteNumber(globalAnalytics.totalWins);
+        const globalAverageGuesses = this.toFiniteNumber(globalAnalytics.averageGuesses);
+        const globalTotalGuesses = globalAverageGuesses * globalAttempts;
+        const nextGlobalAttempts = globalAttempts + 1;
+        const nextGlobalWins = globalWins + (isCorrect ? 1 : 0);
+        const nextGlobalAverageGuesses =
+          nextGlobalAttempts > 0 ? Number(((globalTotalGuesses + nextGuessCount) / nextGlobalAttempts).toFixed(2)) : 0;
+        const nextGuessDistribution = this.normalizeDistribution(
+          (globalAnalytics.guessDistribution ?? {}) as Record<string, unknown>,
+        );
+        if (isCorrect) {
+          const bucket = String(guessNumber);
+          nextGuessDistribution[bucket] = (nextGuessDistribution[bucket] ?? 0) + 1;
+        }
+
+        transaction.set(
+          globalAnalyticsRef,
+          {
+            puzzleDate,
+            totalAttempts: nextGlobalAttempts,
+            totalWins: nextGlobalWins,
+            averageGuesses: nextGlobalAverageGuesses,
+            guessDistribution: nextGuessDistribution,
+            updatedAt: serverTimestampValue,
+          },
+          { merge: true },
+        );
       }
     });
   }
@@ -680,8 +744,17 @@ export class BravodleManager {
       guessNumberSolved: typeof data.guessNumberSolved === "number" ? data.guessNumberSolved : null,
       guesses,
       hasExistingDoc,
-      answerKey,
-      talent,
+      answerKey: this.toPublicAnswerKey(answerKey),
+      talent: null,
+    };
+  }
+
+  private toPublicAnswerKey(answerKey: BravodleAnswerKeyRecord | null): BravodleAnswerKeyRecord | null {
+    if (!answerKey) return null;
+    return {
+      id: answerKey.id,
+      clue: answerKey.clue,
+      imageUrl: answerKey.imageUrl,
     };
   }
 
@@ -1586,14 +1659,7 @@ private evaluateEpisodesField(
   }
 
   private collectToken(target: Set<string>, value: unknown): void {
-    if (typeof value === "string") {
-      const normalized = value.trim().toLowerCase();
-      if (normalized) target.add(normalized);
-      return;
-    }
-    if (typeof value === "number" && Number.isFinite(value)) {
-      target.add(String(value));
-    }
+    addIdentityToken(target, value);
   }
 
   private buildRawGuessPayload(params: {
@@ -2088,6 +2154,30 @@ private evaluateEpisodesField(
       }
     }
     return null;
+  }
+
+  private toFiniteNumber(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number.parseFloat(value.trim());
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return 0;
+  }
+
+  private normalizeDistribution(value: Record<string, unknown>): Record<string, number> {
+    const distribution: Record<string, number> = {};
+    Object.entries(value).forEach(([key, nested]) => {
+      const numeric = this.toFiniteNumber(nested);
+      if (numeric > 0) {
+        distribution[key] = numeric;
+      }
+    });
+    return distribution;
   }
 
   private extractAnswerRecord(

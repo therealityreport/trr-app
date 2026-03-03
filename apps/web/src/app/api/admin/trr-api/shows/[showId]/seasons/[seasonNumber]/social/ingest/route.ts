@@ -48,7 +48,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       seasonIdHint,
       fallbackError: "Failed to run social ingest",
       retries: 0,
-      timeoutMs: 60_000,
+      timeoutMs: 210_000,
     });
     return NextResponse.json(data);
   } catch (error) {

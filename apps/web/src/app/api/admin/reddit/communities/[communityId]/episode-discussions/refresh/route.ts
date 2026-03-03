@@ -442,7 +442,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       showAliases: show.alternative_names,
       isShowFocused: community.is_show_focused,
       episodeTitlePatterns: community.episode_title_patterns,
-      analysisAllFlares: community.analysis_all_flares,
+      analysisAllFlairs: community.analysis_all_flairs,
     });
 
     const discovery = await discoverEpisodeDiscussionThreads({
@@ -452,7 +452,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       seasonNumber: resolvedSeason.season_number,
       seasonEpisodes,
       episodeTitlePatterns: resolvedRules.effectiveEpisodeTitlePatterns,
-      episodeRequiredFlares: resolvedRules.effectiveRequiredFlares,
+      episodeRequiredFlairs: resolvedRules.effectiveRequiredFlairs,
       isShowFocused: community.is_show_focused,
       periodStart: parsedPeriodStart.value,
       periodEnd: parsedPeriodEnd.value,
@@ -580,8 +580,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         total_found: discovery.candidates.length,
         filters_applied: discovery.filters_applied,
         effective_episode_title_patterns: resolvedRules.effectiveEpisodeTitlePatterns,
-        effective_required_flares: resolvedRules.effectiveRequiredFlares,
-        auto_seeded_required_flares: resolvedRules.autoSeededRequiredFlares,
+        effective_required_flairs: resolvedRules.effectiveRequiredFlairs,
+        auto_seeded_required_flairs: resolvedRules.autoSeededRequiredFlairs,
         successful_sorts: discovery.successful_sorts,
         failed_sorts: discovery.failed_sorts,
         rate_limited_sorts: discovery.rate_limited_sorts,

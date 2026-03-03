@@ -1709,6 +1709,9 @@ export default function TrrShowDetailPage() {
   const [linksError, setLinksError] = useState<string | null>(null);
   const [linksLoadTimedOut, setLinksLoadTimedOut] = useState(false);
   const [linksNotice, setLinksNotice] = useState<string | null>(null);
+  const [showLogoSyncing, setShowLogoSyncing] = useState(false);
+  const [showLogoSyncError, setShowLogoSyncError] = useState<string | null>(null);
+  const [showLogoSyncNotice, setShowLogoSyncNotice] = useState<string | null>(null);
   const [linkBulkInput, setLinkBulkInput] = useState("");
   const [linkBulkSaving, setLinkBulkSaving] = useState(false);
   const [googleNewsLinkId, setGoogleNewsLinkId] = useState<string | null>(null);
@@ -4054,6 +4057,53 @@ export default function TrrShowDetailPage() {
     },
     [fetchShowLinks, getAuthHeaders, linksRefreshing, showId]
   );
+
+  const syncShowScopedBrandLogos = useCallback(async () => {
+    if (!showId) return;
+    setShowLogoSyncing(true);
+    setShowLogoSyncError(null);
+    setShowLogoSyncNotice(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchWithTimeout(
+        "/api/admin/trr-api/brands/logos/sync",
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            scope: "show",
+            show_id: showId,
+            target_types: ["publication", "social"],
+            only_missing: true,
+            force: false,
+            limit: 100,
+          }),
+          cache: "no-store",
+        },
+        SETTINGS_MUTATION_TIMEOUT_MS,
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        targets_scanned?: number;
+        imports_created?: number;
+        imports_updated?: number;
+        unresolved?: number;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to sync show-scoped brand logos");
+      }
+      setShowLogoSyncNotice(
+        `Scanned ${Number(payload.targets_scanned ?? 0)} targets, imported ${
+          Number(payload.imports_created ?? 0) + Number(payload.imports_updated ?? 0)
+        }, unresolved ${Number(payload.unresolved ?? 0)}.`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to sync show-scoped brand logos";
+      setShowLogoSyncError(message);
+    } finally {
+      setShowLogoSyncing(false);
+    }
+  }, [getAuthHeaders, showId]);
 
   const addShowLinks = useCallback(async () => {
     if (!showId) return;
@@ -8365,6 +8415,13 @@ export default function TrrShowDetailPage() {
       const label = getShowRefreshTargetLabel(target);
       const includeCastProfiles = options?.includeCastProfiles ?? true;
       const fastPhotoMode = options?.photoMode === "fast";
+      const seasonScopedPhotoRefresh =
+        target === "photos" &&
+        activeTab === "assets" &&
+        assetsView === "images" &&
+        selectedGallerySeason !== "all"
+          ? selectedGallerySeason
+          : null;
       const suppressSuccessNotice = options?.suppressSuccessNotice === true;
 
       let success = false;
@@ -8401,7 +8458,15 @@ export default function TrrShowDetailPage() {
       if (target === "photos" && fastPhotoMode) {
         appendRefreshLog({
           category: label,
-          message: "Fast mode enabled: reduced media crawl pages and skipped auto-count/word-detection.",
+          message: "Fast mode enabled: reduced media crawl pages and skipped word-detection (tagging retained).",
+          current: null,
+          total: null,
+        });
+      }
+      if (target === "photos" && typeof seasonScopedPhotoRefresh === "number") {
+        appendRefreshLog({
+          category: label,
+          message: `Season-scoped refresh enabled (Season ${seasonScopedPhotoRefresh}).`,
           current: null,
           total: null,
         });
@@ -8423,8 +8488,12 @@ export default function TrrShowDetailPage() {
                   skip_mirror: false,
                   limit_per_source: fastPhotoMode ? 20 : 50,
                   imdb_mediaindex_max_pages: fastPhotoMode ? 6 : 25,
-                  skip_auto_count: fastPhotoMode,
+                  skip_auto_count: false,
                   skip_word_detection: fastPhotoMode,
+                  season_number:
+                    typeof seasonScopedPhotoRefresh === "number"
+                      ? seasonScopedPhotoRefresh
+                      : undefined,
                 }
               : { targets: [target] };
           const streamController = new AbortController();
@@ -11252,7 +11321,6 @@ export default function TrrShowDetailPage() {
                       featuredLogoSavingAssetId={featuredLogoSavingAssetId}
                       selectedFeaturedLogoVariant={featuredLogoVariant}
                       getAssetDisplayUrl={getAssetDisplayUrl}
-                      onOpenAssetLightbox={openAssetLightbox}
                       onSelectFeaturedLogoVariant={selectFeaturedLogoVariant}
                       onSetFeaturedLogo={(asset) => {
                         void setFeaturedShowLogo(asset);
@@ -12107,21 +12175,38 @@ export default function TrrShowDetailPage() {
                     Links and Cast Role Catalog
                   </h3>
                 </div>
-                <button
-                  type="button"
-                  onClick={refreshAllShowData}
-                  disabled={isShowRefreshBusy}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void syncShowScopedBrandLogos()}
+                    disabled={showLogoSyncing}
+                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {showLogoSyncing ? "Syncing..." : "Sync Show Logo Targets"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={refreshAllShowData}
+                    disabled={isShowRefreshBusy || showLogoSyncing}
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
               </div>
 
-              {(linksError || linksNotice || rolesError || rolesWarning || googleNewsError || googleNewsNotice) && (
+              {(linksError ||
+                linksNotice ||
+                rolesError ||
+                rolesWarning ||
+                googleNewsError ||
+                googleNewsNotice ||
+                showLogoSyncError ||
+                showLogoSyncNotice) && (
                 <div className="mb-4 text-sm space-y-2">
                   <p
                     className={`${
-                      linksError || rolesError || googleNewsError
+                      linksError || rolesError || googleNewsError || showLogoSyncError
                         ? linksLoadTimedOut || rolesLoadTimedOut
                           ? "text-amber-700"
                           : "text-red-600"
@@ -12131,9 +12216,11 @@ export default function TrrShowDetailPage() {
                     {linksError ||
                       rolesError ||
                       googleNewsError ||
+                      showLogoSyncError ||
                       rolesWarning ||
                       linksNotice ||
-                      googleNewsNotice}
+                      googleNewsNotice ||
+                      showLogoSyncNotice}
                   </p>
                   {linksError && linksLoadTimedOut && (
                     <button

@@ -14,6 +14,7 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
+  SOCIAL_PROXY_SHORT_TIMEOUT_MS: 25_000,
 }));
 
 import { GET } from "@/app/api/admin/trr-api/social/ingest/health-dot/route";
@@ -49,7 +50,7 @@ describe("social ingest health-dot proxy route", () => {
       expect.objectContaining({
         fallbackError: "Failed to fetch ingest health indicator",
         retries: 1,
-        timeoutMs: 6_000,
+        timeoutMs: 25_000,
       }),
     );
   });

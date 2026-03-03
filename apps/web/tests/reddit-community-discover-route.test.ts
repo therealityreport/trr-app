@@ -111,8 +111,8 @@ describe("/api/admin/reddit/communities/[communityId]/discover route", () => {
       trr_season_id: SEASON_ID,
       subreddit: "BravoRealHousewives",
       is_show_focused: false,
-      analysis_flares: ["Salt Lake City"],
-      analysis_all_flares: ["Salt Lake City"],
+      analysis_flairs: ["Salt Lake City"],
+      analysis_all_flairs: ["Salt Lake City"],
     });
     getShowByIdMock.mockResolvedValue({
       id: SHOW_ID,
@@ -184,6 +184,29 @@ describe("/api/admin/reddit/communities/[communityId]/discover route", () => {
     expect(bulkBody.container_keys).toEqual(["period-preseason"]);
   });
 
+  it("degrades gracefully when cache lookup times out", async () => {
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/reddit/cache/bulk") {
+        throw new Error("Request timed out. Please try again.");
+      }
+      return {};
+    });
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/discover?season_id=${SEASON_ID}&period_start=2025-08-14T00:00:00.000Z&period_end=2025-09-16T23:00:00.000Z`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.source).toBe("cache");
+    expect(payload.discovery).toBeNull();
+    expect(String(payload.warning ?? "")).toContain("treating cache lookup as a miss");
+    expect(socialProxyErrorResponseMock).not.toHaveBeenCalled();
+  });
+
   it("starts backend refresh run and returns cached payload immediately when refresh=true", async () => {
     fetchSocialBackendJsonMock
       .mockResolvedValueOnce({
@@ -227,7 +250,7 @@ describe("/api/admin/reddit/communities/[communityId]/discover route", () => {
       (fetchSocialBackendJsonMock.mock.calls[0]?.[1] as { body?: string }).body ?? "{}",
     ) as Record<string, unknown>;
     expect(runBody.search_backfill).toBe(true);
-    expect(runBody.force_include_flares).toEqual(["Salt Lake City"]);
+    expect(runBody.force_include_flairs).toEqual(["Salt Lake City"]);
     expect(runBody.fetch_comments).toBe(true);
     expect(fetchSocialBackendJsonMock).toHaveBeenNthCalledWith(
       2,
@@ -378,8 +401,8 @@ describe("/api/admin/reddit/communities/[communityId]/discover route", () => {
       trr_season_id: seasonId,
       subreddit: "BravoRealHousewives",
       is_show_focused: false,
-      analysis_flares: ["Salt Lake City"],
-      analysis_all_flares: ["Salt Lake City"],
+      analysis_flairs: ["Salt Lake City"],
+      analysis_all_flairs: ["Salt Lake City"],
     });
 
     fetchSocialBackendJsonMock.mockImplementation(

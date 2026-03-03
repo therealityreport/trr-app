@@ -1,5 +1,5 @@
 import React from "react";
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SystemHealthModal, { HealthIndicator } from "@/components/admin/SystemHealthModal";
 
@@ -24,6 +24,30 @@ const jsonResponse = (body: unknown, status = 200): Response =>
   });
 
 describe("SystemHealthModal polling", () => {
+  let queueStatusPayload: {
+    queue_enabled: boolean;
+    workers: {
+      healthy: boolean;
+      healthy_workers: number;
+      active_workers: number;
+      total_workers: number;
+      stale_after_seconds: number;
+      workers: unknown[];
+      reason: string | null;
+    };
+    queue: {
+      by_status: Record<string, number>;
+      runs_by_status?: Record<string, number>;
+      runs_total?: number;
+      by_platform: Record<string, Record<string, number>>;
+      by_job_type: Record<string, Record<string, number>>;
+      recent_failures: unknown[];
+      stuck_jobs: Array<Record<string, unknown>>;
+      stuck_jobs_total: number;
+    };
+  };
+  let workerDetailPayload: Record<string, unknown>;
+
   beforeEach(() => {
     vi.useRealTimers();
     vi.spyOn(Math, "random").mockReturnValue(0);
@@ -36,7 +60,76 @@ describe("SystemHealthModal polling", () => {
       configurable: true,
       value: "visible",
     });
-    fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
+
+    queueStatusPayload = {
+      queue_enabled: true,
+      workers: {
+        healthy: true,
+        healthy_workers: 1,
+        active_workers: 1,
+        total_workers: 1,
+        stale_after_seconds: 60,
+        workers: [],
+        reason: null,
+      },
+      queue: {
+        by_status: { running: 0, pending: 0, queued: 0, retrying: 0, failed: 0, cancelled: 0, completed: 0 },
+        by_platform: {},
+        by_job_type: {},
+        recent_failures: [],
+        stuck_jobs: [],
+        stuck_jobs_total: 0,
+      },
+    };
+    workerDetailPayload = {
+      worker: {
+        worker_id: "social-worker:healthy",
+        stage: "posts",
+        status: "working",
+        run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        current_job_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        started_at: "2026-03-02T12:00:00.000Z",
+        last_seen_at: "2026-03-02T12:05:00.000Z",
+        metadata: {},
+        is_healthy: true,
+      },
+      current_job: {
+        id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        platform: "twitter",
+        job_type: "comments",
+        status: "running",
+        stage: "comments",
+        account_handle: "@bravotv",
+        items_found: 12,
+        attempt_count: 1,
+        max_attempts: 3,
+        started_at: "2026-03-02T12:00:00.000Z",
+        heartbeat_at: "2026-03-02T12:05:00.000Z",
+        error_message: null,
+        last_error_code: null,
+        metadata: {},
+      },
+      run: {
+        run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        status: "running",
+        source_scope: "bravo",
+        created_at: "2026-03-02T11:59:00.000Z",
+        started_at: "2026-03-02T12:00:00.000Z",
+        completed_at: null,
+        summary: {},
+      },
+      currently_scraping: "comments_scan",
+      progress_made: {
+        items_found: 12,
+        posts_upserted: 3,
+        comments_upserted: 9,
+        stage_counters: {},
+        phase: "comments_scan",
+      },
+    };
+
+    fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/api/admin/trr-api/social/ingest/health-dot")) {
         return jsonResponse({
@@ -47,22 +140,45 @@ describe("SystemHealthModal polling", () => {
         });
       }
       if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
-        return jsonResponse({
-          queue_enabled: true,
-          workers: {
-            healthy: true,
-            healthy_workers: 1,
-            active_workers: 1,
-            total_workers: 1,
-            stale_after_seconds: 60,
-            workers: [],
-            reason: null,
-          },
+        return jsonResponse(queueStatusPayload);
+      }
+      if (url.includes("/api/admin/trr-api/social/ingest/stuck-jobs/cancel")) {
+        queueStatusPayload = {
+          ...queueStatusPayload,
           queue: {
-            by_status: { running: 0, pending: 0, queued: 0, retrying: 0, failed: 0, cancelled: 0, completed: 0 },
-            by_platform: {},
-            by_job_type: {},
-            recent_failures: [],
+            ...queueStatusPayload.queue,
+            stuck_jobs: [],
+            stuck_jobs_total: 0,
+          },
+        };
+        return jsonResponse({ cancelled_jobs: 1, stuck_jobs_remaining: 0 });
+      }
+      if (url.includes("/api/admin/trr-api/social/ingest/workers/") && url.endsWith("/detail")) {
+        return jsonResponse(workerDetailPayload);
+      }
+      if (url.includes("/api/admin/trr-api/social/ingest/jobs/") && url.endsWith("/debug")) {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { apply_patch?: boolean } : {};
+        const applyPatch = Boolean(body.apply_patch);
+        return jsonResponse({
+          job_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          model_used: "gpt-5.3-codex",
+          fallback_used: false,
+          analysis: {
+            root_cause: "retry loop missing heartbeat refresh",
+            confidence: 0.92,
+            files_touched: ["trr_backend/repositories/social_season_analytics.py"],
+            tests_to_run: ["pytest -q tests/repositories/test_social_season_analytics.py -k queue_status"],
+          },
+          patch_unified_diff:
+            "--- a/trr_backend/repositories/social_season_analytics.py\n+++ b/trr_backend/repositories/social_season_analytics.py\n@@\n-foo\n+bar\n",
+          apply: {
+            enabled: true,
+            requested: applyPatch,
+            applied: applyPatch,
+            check_ok: applyPatch,
+            error: applyPatch ? null : null,
+            files_changed: applyPatch ? ["trr_backend/repositories/social_season_analytics.py"] : [],
           },
         });
       }
@@ -102,5 +218,240 @@ describe("SystemHealthModal polling", () => {
         ),
       ).toBe(true);
     }, { timeout: 4000 });
+  });
+
+  it("renders stuck jobs and cancels one", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      queue: {
+        ...queueStatusPayload.queue,
+        stuck_jobs_total: 1,
+        stuck_jobs: [
+          {
+            id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            platform: "twitter",
+            job_type: "comments",
+            status: "running",
+            worker_id: "social-worker:thomas",
+            created_at: "2026-03-02T13:00:00.000Z",
+            heartbeat_at: "2026-03-02T13:01:00.000Z",
+            available_at: null,
+            error_message: "stale_heartbeat_timeout: no heartbeat for >= 300 seconds",
+            last_error_code: "stale_heartbeat_timeout",
+            stuck_reason: "running_stale_heartbeat",
+            stuck_for_seconds: 450,
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Stuck Jobs")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/stuck-jobs/cancel"),
+        ),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Cancelled stuck job/)).toBeInTheDocument();
+    });
+  });
+
+  it("supports clear all stuck jobs", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      queue: {
+        ...queueStatusPayload.queue,
+        stuck_jobs_total: 2,
+        stuck_jobs: [
+          {
+            id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            run_id: null,
+            platform: "youtube",
+            job_type: "posts",
+            status: "retrying",
+            worker_id: null,
+            created_at: "2026-03-02T12:00:00.000Z",
+            heartbeat_at: null,
+            available_at: "2026-03-02T12:03:00.000Z",
+            error_message: "stale_heartbeat_timeout: no heartbeat for >= 300 seconds",
+            last_error_code: "stale_heartbeat_timeout",
+            stuck_reason: "retrying_stale_timeout",
+            stuck_for_seconds: 500,
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Clear all stuck jobs" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all stuck jobs" }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/stuck-jobs/cancel"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("renders failed last in queue summary and has scrollable modal body", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      queue: {
+        ...queueStatusPayload.queue,
+        by_status: { running: 1, pending: 2, queued: 3, retrying: 4, failed: 5, cancelled: 6, completed: 7 },
+        runs_by_status: { running: 1, pending: 2, queued: 3, retrying: 4, failed: 5, cancelled: 6, completed: 7 },
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Run Summary")).toBeInTheDocument();
+    });
+
+    const queueSection = screen.getByText("Run Summary").parentElement;
+    const queueText = queueSection?.textContent ?? "";
+    expect(queueText.indexOf("failed")).toBeGreaterThan(queueText.indexOf("completed"));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.className).toContain("max-h-[90vh]");
+    const hasScrollableBody = Array.from(dialog.querySelectorAll("div")).some((node) =>
+      typeof node.className === "string" && node.className.includes("max-h-[calc(90vh-8.5rem)]"),
+    );
+    expect(hasScrollableBody).toBe(true);
+  });
+
+  it("loads running worker detail and supports debug + apply patch actions", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      workers: {
+        ...queueStatusPayload.workers,
+        healthy_workers: 1,
+        total_workers: 1,
+        workers: [
+          {
+            worker_id: "social-worker:healthy",
+            stage: "posts",
+            status: "working",
+            run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            current_job_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            metadata: {},
+            last_seen_at: new Date().toISOString(),
+            is_healthy: true,
+          },
+        ],
+      },
+      queue: {
+        ...queueStatusPayload.queue,
+        recent_failures: [
+          {
+            id: "failure-1",
+            run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            platform: "twitter",
+            job_type: "comments",
+            status: "failed",
+            error_message: "x",
+            last_error_code: "E1",
+            last_error_class: "Error",
+            created_at: "2026-03-02T10:00:00.000Z",
+            completed_at: "2026-03-02T10:01:00.000Z",
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/run bbbbbbbb/i).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /social-worker:health/i }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/workers/social-worker%3Ahealthy/detail"),
+        ),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Currently scraping: comments_scan/)).toBeInTheDocument();
+      expect(screen.getByText(/Handle: @bravotv/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "🐛 Debug" }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/jobs/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/debug"),
+        ),
+      ).toBe(true);
+      expect(screen.getByText(/retry loop missing heartbeat refresh/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply Patch" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Patch applied for job aaaaaaaa/)).toBeInTheDocument();
+      expect(screen.getByText(/Patch applied to trr_backend\/repositories\/social_season_analytics.py/)).toBeInTheDocument();
+    });
+  });
+
+  it("hides stale worker rows from list while keeping health counts", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      workers: {
+        ...queueStatusPayload.workers,
+        healthy_workers: 1,
+        total_workers: 2,
+        stale_after_seconds: 180,
+        workers: [
+          {
+            worker_id: "social-worker:healthy",
+            stage: "posts",
+            status: "working",
+            last_seen_at: new Date().toISOString(),
+            is_healthy: true,
+          },
+          {
+            worker_id: "social-worker:stale",
+            stage: "any",
+            status: "idle",
+            last_seen_at: "2026-02-20T00:00:00.000Z",
+            is_healthy: false,
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Workers \(1\/2 healthy\)/)).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/1 stale worker heartbeat hidden/)).toBeInTheDocument();
+    expect(screen.getByText(/social-worker:health/)).toBeInTheDocument();
+    expect(screen.queryByText(/social-worker:stale/)).not.toBeInTheDocument();
   });
 });

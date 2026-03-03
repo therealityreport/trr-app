@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   fetchSocialBackendJson,
+  SOCIAL_PROXY_SHORT_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 import { isValidPositiveIntegerString, isValidUuid } from "@/lib/server/validation/identifiers";
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const data = await fetchSocialBackendJson("/ingest/worker-health", {
       fallbackError: "Failed to fetch social ingest worker health",
       retries: 0,
-      timeoutMs: 12_000,
+      timeoutMs: SOCIAL_PROXY_SHORT_TIMEOUT_MS,
     });
     return NextResponse.json(data);
   } catch (error) {

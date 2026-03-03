@@ -1565,7 +1565,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       expect(weekTwo.getByTestId("weekly-total-metrics-2")).toHaveTextContent("0 tags");
     });
     expect(weekTwo.queryByTestId("weekly-missing-metrics-2")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Ingest Metrics" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Sync All" })).toHaveLength(2);
   });
 
   it("persists selected progress metrics in the social_metrics query param", async () => {
@@ -2100,7 +2100,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const weekOne = within(weekOneRow as HTMLElement);
     expect(weekOne.getByTestId("weekly-total-progress-1")).toHaveTextContent("100.0%");
     expect(weekOne.queryByTestId("weekly-missing-metrics-1")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Ingest Metrics" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Sync All" })).toHaveLength(2);
   });
 
   it("flags stale active runs older than 45 minutes with pending/retrying counts", async () => {
@@ -2222,7 +2222,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.queryByText(/Potentially stalled ingest runs/i)).not.toBeInTheDocument();
   });
 
-  it("disables weekly Run Week and Sync Metrics actions when queue workers are unhealthy", async () => {
+  it("disables weekly Run Week and Sync All actions when queue workers are unhealthy", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
 
@@ -2259,7 +2259,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     screen.getAllByRole("button", { name: "Run Week" }).forEach((button) => {
       expect(button).toBeDisabled();
     });
-    screen.getAllByRole("button", { name: "Ingest Metrics" }).forEach((button) => {
+    screen.getAllByRole("button", { name: "Sync All" }).forEach((button) => {
       expect(button).toBeDisabled();
     });
   });
@@ -2395,6 +2395,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await screen.findByText("Top Sentiment Drivers");
     expect(screen.queryByText("Ingest + Export")).not.toBeInTheDocument();
     expect(screen.getByText("Viewer Discussion Highlights")).toBeInTheDocument();
+    expect(screen.getByText("Cast Mention Comparison (Prototype)")).toBeInTheDocument();
+    expect(screen.getByText("Viewer Attitude by Platform")).toBeInTheDocument();
 
     rerender(
       <SeasonSocialAnalyticsSection
@@ -3503,7 +3505,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByText("Ingest + Export");
-    fireEvent.click(screen.getByRole("button", { name: /Run Season Ingest \(All\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Run Season Sync \(All\)/i }));
 
     await waitFor(() => {
       expect(capturedPayloads.length).toBeGreaterThan(0);
@@ -3650,7 +3652,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /Sync Mode/i }), {
       target: { value: "full_refresh" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Run Season Ingest \(All\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Run Season Sync \(All\)/i }));
 
     await waitFor(() => {
       expect(capturedPayloads.length).toBeGreaterThan(0);
@@ -3659,7 +3661,25 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(capturedPayloads[0]?.allow_inline_dev_fallback).toBe(true);
   });
 
-  it("Sync Metrics triggers posts_and_comments ingest for the selected week", async () => {
+  it("uses Sync X label when twitter platform filter is active", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/official?social_platform=twitter");
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
+    expect(weekOneRow).not.toBeNull();
+    expect(within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync X" })).toBeInTheDocument();
+  });
+
+  it("Sync All triggers posts_and_comments ingest for the selected week", async () => {
     const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
     const capturedPayloads: Array<Record<string, unknown>> = [];
     const ingestUrls: string[] = [];
@@ -3694,7 +3714,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
     expect(weekOneRow).not.toBeNull();
-    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Ingest Metrics" });
+    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync All" });
     fireEvent.click(syncButton);
 
     await waitFor(() => {
@@ -3712,7 +3732,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(ingestUrls[0]).toContain("season_id=season-1");
   });
 
-  it("Sync Metrics does not short-circuit when comments are already up-to-date", async () => {
+  it("Sync All does not short-circuit when comments are already up-to-date", async () => {
     const capturedPayloads: Array<Record<string, unknown>> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -3744,7 +3764,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
     expect(weekOneRow).not.toBeNull();
-    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Ingest Metrics" });
+    const syncButton = within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync All" });
     fireEvent.click(syncButton);
 
     await waitFor(() => {
@@ -3891,7 +3911,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await screen.findByText("Ingest + Export");
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole("button", { name: /Run Season Ingest \(All\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Run Season Sync \(All\)/i }));
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);

@@ -80,7 +80,7 @@ export interface RealiteaseGameSnapshot {
   guesses: RealiteaseGuess[];
   hasExistingDoc: boolean;
   answerKey: RealiteaseAnswerKeyRecord | null;
-  talent: RealiteaseTalentRecord | null;
+  talent?: RealiteaseTalentRecord | null;
 }
 
 export interface RealiteaseAggregateStats {
@@ -164,9 +164,9 @@ export interface RealiteaseTalentRecord {
 
 export interface RealiteaseAnswerKeyRecord {
   id: string;
-  castId: string;
-  castName: string;
+  castId?: string;
+  castName?: string;
   clue?: string;
   imageUrl?: string;
-  metadata: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }

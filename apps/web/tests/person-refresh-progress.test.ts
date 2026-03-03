@@ -26,7 +26,7 @@ describe("person refresh progress mapping", () => {
 
   it("maps mirror/count/text stages to requested labels", () => {
     expect(mapPersonRefreshStage("mirroring")).toBe(PERSON_REFRESH_PHASES.mirroring);
-    expect(mapPersonRefreshStage("auto_count")).toBe(PERSON_REFRESH_PHASES.counting);
+    expect(mapPersonRefreshStage("auto_count")).toBe(PERSON_REFRESH_PHASES.tagging);
     expect(mapPersonRefreshStage("word_id")).toBe(PERSON_REFRESH_PHASES.findingText);
     expect(mapPersonRefreshStage("centering_cropping")).toBe(
       PERSON_REFRESH_PHASES.centeringCropping,
@@ -212,7 +212,9 @@ describe("person refresh progress mapping", () => {
 
   it("includes metadata repair step in reprocess mode", () => {
     const steps = createPersonRefreshPipelineSteps("reprocess");
-    expect(steps.some((step) => step.id === "metadata_repair")).toBe(true);
+    const metadataRepair = steps.find((step) => step.id === "metadata_repair");
+    expect(metadataRepair).toBeDefined();
+    expect(metadataRepair?.label).toBe("Fixing IMDb Details");
   });
 
   it("finalizes step summaries with completed vs failed details", () => {
@@ -246,7 +248,7 @@ describe("person refresh progress mapping", () => {
     const mirroring = finalized.find((step) => step.id === "mirroring");
 
     expect(sourceSync?.result).toContain("Fetched 12 photos");
-    expect(autoCount?.result).toContain("Saved people tags for 7/9 images");
+    expect(autoCount?.result).toContain("Saved tagging for 7/9 images");
     expect(mirroring?.status).toBe("failed");
   });
 
@@ -278,5 +280,37 @@ describe("person refresh progress mapping", () => {
     const metadataRepair = finalized.find((step) => step.id === "metadata_repair");
     expect(metadataRepair?.status).toBe("completed");
     expect(metadataRepair?.result).toContain("Repaired 5 IMDb rows");
+  });
+
+  it("marks tagging completed with reviewed existing rows when attempted count is zero", () => {
+    const initial = createPersonRefreshPipelineSteps("reprocess");
+    const finalized = finalizePersonRefreshPipelineSteps(initial, "reprocess", {
+      metadata_repair_attempted: 0,
+      existing_imdb_rows_repaired: 0,
+      metadata_enrichment_failed: 0,
+      auto_counts_attempted: 0,
+      auto_counts_succeeded: 0,
+      auto_counts_failed: 0,
+      auto_count_attempted_rows: 0,
+      auto_count_skipped_existing_rows: 306,
+      text_overlay_attempted: 0,
+      text_overlay_succeeded: 0,
+      text_overlay_unknown: 0,
+      text_overlay_failed: 0,
+      centering_attempted: 0,
+      centering_succeeded: 0,
+      centering_failed: 0,
+      centering_skipped_manual: 0,
+      resize_attempted: 0,
+      resize_succeeded: 0,
+      resize_failed: 0,
+      resize_crop_attempted: 0,
+      resize_crop_succeeded: 0,
+      resize_crop_failed: 0,
+    });
+
+    const autoCount = finalized.find((step) => step.id === "auto_count");
+    expect(autoCount?.status).toBe("completed");
+    expect(autoCount?.result).toContain("Reviewed 306 existing rows");
   });
 });

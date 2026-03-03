@@ -1,35 +1,50 @@
 import { ReactNode } from "react";
-// import { cookies } from "next/headers";
-// import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
-// Temporarily disabling server-side authentication guard due to Firebase admin credential issues
-// This guard was causing mounting/unmounting loops when trying to access game pages
-// The guard functionality is handled by client-side authentication in individual pages
+async function guard() {
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get("__session")?.value ?? null;
 
-// async function guard() {
-//   // Disabled: Server-side authentication check
-//   // Original issue: Firebase admin credentials not available in production environment
-//   // This was causing redirect loops and component mounting/unmounting issues
-//
-//   // const { adminAuth, adminDb } = await import("@/lib/firebaseAdmin");
-//   // const cookieStore = await cookies();
-//   // const cookie = cookieStore.get("__session")?.value;
-//   // if (!cookie) redirect("/auth/register");
-//   // try {
-//   //   const decoded = await adminAuth.verifySessionCookie(cookie, true);
-//   //   const uid = decoded.uid;
-//   //   const snap = await adminDb.collection("users").doc(uid).get();
-//   //   if (!snap.exists) redirect("/auth/finish");
-//   //   const data = snap.data();
-//   //   const complete = data && data.username && Array.isArray(data.shows) && data.shows.length >= 3 && data.birthday;
-//   //   if (!complete) redirect("/auth/finish");
-//   // } catch {
-//   //   redirect("/auth/register");
-//   // }
-// }
+  if (!sessionCookie) {
+    redirect("/auth/register");
+  }
+
+  const useEmulators = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
+  const hasServiceAccount = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT) || useEmulators;
+
+  // Avoid unstable redirect loops when Admin credentials are unavailable.
+  if (!hasServiceAccount) {
+    return;
+  }
+
+  try {
+    const { adminAuth, adminDb } = await import("@/lib/firebaseAdmin");
+    const decoded =
+      (await adminAuth.verifySessionCookie(sessionCookie, true).catch(() =>
+        adminAuth.verifyIdToken(sessionCookie, true),
+      )) ?? null;
+
+    if (!decoded?.uid) {
+      redirect("/auth/register");
+    }
+
+    const snap = await adminDb.collection("users").doc(decoded.uid).get();
+    if (!snap.exists) {
+      redirect("/auth/finish");
+    }
+
+    const data = snap.data();
+    const complete = data && data.username && Array.isArray(data.shows) && data.shows.length >= 3 && data.birthday;
+    if (!complete) {
+      redirect("/auth/finish");
+    }
+  } catch {
+    redirect("/auth/register");
+  }
+}
 
 export default async function BravodleLayout({ children }: { children: ReactNode }) {
-  // Temporarily disabling the authentication guard
-  // await guard();
+  await guard();
   return children;
 }

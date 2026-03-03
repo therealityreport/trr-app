@@ -27,6 +27,30 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/social\/analytics\/week\/\$\{weekIndex\}\?/);
   });
 
+  it("defaults first paint sorting to posted_at desc", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/useState<SortField>\("posted_at"\)/);
+    expect(contents).toMatch(/useState<SortDir>\("desc"\)/);
+  });
+
+  it("defers metrics fetch until idle time after the main week payload loads", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/requestIdleCallback/);
+    expect(contents).toMatch(/triggerMetricsFetch/);
+    expect(contents).toMatch(/setTimeout\(\(\) => \{\s*triggerMetricsFetch\(\);\s*\}, 1500\)/s);
+    expect(contents).not.toMatch(/useEffect\(\(\) => \{\s*void fetchWeekMetricsPosts\(\);\s*\}, \[fetchWeekMetricsPosts\]\);/s);
+  });
+
   it("includes season_id in week ingest and poll requests", () => {
     const filePath = path.resolve(
       __dirname,
@@ -52,11 +76,23 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/Week detail request timed out/);
     expect(contents).toMatch(/Sync runs request timed out/);
     expect(contents).toMatch(/Sync jobs request timed out/);
-    expect(contents).toMatch(/ingestKickoff:\s*25_000/);
-    expect(contents).toMatch(/Ingest kickoff request timed out/);
+    expect(contents).toMatch(/ingestKickoff:\s*210_000/);
+    expect(contents).toMatch(/Sync kickoff request timed out/);
+    expect(contents).toMatch(/SYNC_KICKOFF_MAX_ATTEMPTS = 1/);
+    expect(contents).toMatch(/recoverSyncRunAfterKickoffError/);
     expect(contents).toMatch(/SYNC_POLL_BACKOFF_MS/);
     expect(contents).toMatch(/syncPollFailureCountRef/);
     expect(contents).toMatch(/syncPollFailureCountRef\.current >= 2 && !isTransientDevRestartMessage\(message\)/);
+  });
+
+  it("defaults summary proxy include mode to totals_only", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/summary/route.ts",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/forwardedSearchParams\.set\("include", "totals_only"\)/);
   });
 
   it("keeps transient dev-restart poll failures below retry-banner threshold", () => {
@@ -174,6 +210,23 @@ describe("social week detail wiring", () => {
     expect(contents).not.toMatch(/key=\{`\$\{line\}-\$\{index\}`\}/);
   });
 
+  it("renders per-handle sync progress cards above summary KPI containers while syncing", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/Per-Handle Job Progress/);
+    expect(contents).toMatch(/syncHandleProgressCards\.map\(\(card\) => \(/);
+    expect(contents).toMatch(/Runner lanes:/);
+    expect(contents).toMatch(/formatSyncStageLabel\(stage\.stage\)/);
+    const handleProgressIndex = contents.indexOf("Per-Handle Job Progress");
+    const summaryIndex = contents.indexOf("/* Summary bar - Row 1");
+    expect(handleProgressIndex).toBeGreaterThan(-1);
+    expect(summaryIndex).toBeGreaterThan(handleProgressIndex);
+  });
+
   it("renders additive refresh diagnostics and youtube transcript metadata", () => {
     const filePath = path.resolve(
       __dirname,
@@ -184,6 +237,6 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/refresh\.comment_gap/);
     expect(contents).toMatch(/Refresh completed with warnings:/);
     expect(contents).toMatch(/Transcript/);
-    expect(contents).toMatch(/Media Asset Metadata/);
+    expect(contents).toMatch(/Slide \{boundedInstagramDrawerSlideIndex \+ 1\} of/);
   });
 });

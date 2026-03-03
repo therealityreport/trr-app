@@ -281,6 +281,15 @@ interface FaceBoxTag {
   person_id?: string;
   person_name?: string;
   label?: string;
+  match_similarity?: number | null;
+  match_status?: string | null;
+  match_reason?: string | null;
+  match_candidates?: Array<{
+    person_id?: string;
+    person_name?: string;
+    similarity: number;
+  }> | null;
+  label_source?: string | null;
 }
 
 interface FaceCropTag {
@@ -451,7 +460,25 @@ interface UnifiedNewsFacets {
 }
 
 type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom";
-type ReprocessStageKey = "all" | "count" | "crop" | "id_text" | "resize";
+type ReprocessStageKey = "all" | "tagging" | "crop" | "id_text" | "resize";
+type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery";
+
+const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
+  "fandom",
+  "fandom-gallery",
+  "imdb",
+  "tmdb",
+];
+
+const toCanonicalScopedSource = (value: string | null | undefined): CanonicalScopedSource | null => {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "imdb") return "imdb";
+  if (normalized === "tmdb") return "tmdb";
+  if (normalized === "fandom") return "fandom";
+  if (normalized === "fandom-gallery") return "fandom-gallery";
+  return null;
+};
 
 const parsePeopleCount = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -613,6 +640,56 @@ const normalizeFaceBoxes = (value: unknown): FaceBoxTag[] => {
       typeof candidate.label === "string" && candidate.label.trim().length > 0
         ? candidate.label.trim()
         : undefined;
+    const matchSimilarity =
+      typeof candidate.match_similarity === "number" && Number.isFinite(candidate.match_similarity)
+        ? clampFaceCoord(candidate.match_similarity)
+        : null;
+    const matchStatus =
+      typeof candidate.match_status === "string" && candidate.match_status.trim().length > 0
+        ? candidate.match_status.trim().toLowerCase()
+        : null;
+    const matchReason =
+      typeof candidate.match_reason === "string" && candidate.match_reason.trim().length > 0
+        ? candidate.match_reason.trim().toLowerCase()
+        : null;
+    const matchCandidates = Array.isArray(candidate.match_candidates)
+      ? candidate.match_candidates
+          .map((entry) => {
+            if (!entry || typeof entry !== "object") return null;
+            const item = entry as Record<string, unknown>;
+            const similarity =
+              typeof item.similarity === "number" && Number.isFinite(item.similarity)
+                ? clampFaceCoord(item.similarity)
+                : null;
+            if (similarity === null) return null;
+            const personId =
+              typeof item.person_id === "string" && item.person_id.trim().length > 0
+                ? item.person_id.trim()
+                : undefined;
+            const personName =
+              typeof item.person_name === "string" && item.person_name.trim().length > 0
+                ? item.person_name.trim()
+                : undefined;
+            return {
+              ...(personId ? { person_id: personId } : {}),
+              ...(personName ? { person_name: personName } : {}),
+              similarity,
+            };
+          })
+          .filter(
+            (
+              entry,
+            ): entry is {
+              person_id?: string;
+              person_name?: string;
+              similarity: number;
+            } => entry !== null,
+          )
+      : [];
+    const labelSource =
+      typeof candidate.label_source === "string" && candidate.label_source.trim().length > 0
+        ? candidate.label_source.trim()
+        : null;
     boxes.push({
       index,
       kind: "face",
@@ -624,6 +701,11 @@ const normalizeFaceBoxes = (value: unknown): FaceBoxTag[] => {
       ...(personId ? { person_id: personId } : {}),
       ...(personName ? { person_name: personName } : {}),
       ...(label ? { label } : {}),
+      ...(matchSimilarity !== null ? { match_similarity: matchSimilarity } : {}),
+      ...(matchStatus ? { match_status: matchStatus } : {}),
+      ...(matchReason ? { match_reason: matchReason } : {}),
+      ...(matchCandidates.length > 0 ? { match_candidates: matchCandidates } : {}),
+      ...(labelSource ? { label_source: labelSource } : {}),
     });
   }
   return boxes;
@@ -868,7 +950,7 @@ const buildThumbnailCropPreview = (
     zoom: persistedCrop?.zoom ?? THUMBNAIL_DEFAULTS.zoom,
     imageWidth: dims.width,
     imageHeight: dims.height,
-    aspectRatio: 4 / 5,
+    aspectRatio: 3 / 4,
   };
 };
 
@@ -1460,7 +1542,7 @@ function TagPeoplePanel({
       zoom: cropZoom,
       imageWidth: dims.width,
       imageHeight: dims.height,
-      aspectRatio: 4 / 5,
+      aspectRatio: 3 / 4,
     });
   }, [
     cropX,
@@ -1706,9 +1788,22 @@ function TagPeoplePanel({
         .map((crop) => {
           const matchingBox = faceBoxes.find((box) => box.index === crop.index);
           const label = matchingBox?.person_name || matchingBox?.label || `Face ${crop.index}`;
+          const matchStatus =
+            typeof matchingBox?.match_status === "string" && matchingBox.match_status.trim().length > 0
+              ? matchingBox.match_status.trim().toLowerCase()
+              : "unassigned";
+          const matchSimilarity =
+            typeof matchingBox?.match_similarity === "number" && Number.isFinite(matchingBox.match_similarity)
+              ? `${(matchingBox.match_similarity * 100).toFixed(1)}%`
+              : "—";
+          const detectConfidence =
+            typeof matchingBox?.confidence === "number" && Number.isFinite(matchingBox.confidence)
+              ? `${(matchingBox.confidence * 100).toFixed(1)}%`
+              : "—";
           return {
             index: crop.index,
             label,
+            diagnosticsLine: `Status ${matchStatus} | Sim ${matchSimilarity} | Detect ${detectConfidence}`,
             url:
               typeof crop.variant_url === "string" && crop.variant_url.trim().length > 0
                 ? crop.variant_url
@@ -2223,23 +2318,31 @@ function TagPeoplePanel({
               {faceCropItems.map((crop) => (
                 <div
                   key={`face-crop-chip-${crop.index}`}
-                  className="relative h-16 w-16 overflow-hidden rounded-full border border-white/20 bg-white/10"
-                  title={crop.label}
+                  className="w-20"
+                  title={`${crop.label} | ${crop.diagnosticsLine}`}
                 >
-                  {crop.url ? (
-                    <Image
-                      src={crop.url}
-                      alt={crop.label}
-                      fill
-                      sizes="64px"
-                      className="object-cover"
-                      unoptimized
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white/80">
-                      {crop.label.slice(0, 1).toUpperCase()}
+                  <div className="relative h-16 w-16 overflow-hidden rounded-full border border-white/20 bg-white/10">
+                    {crop.url ? (
+                      <Image
+                        src={crop.url}
+                        alt={crop.label}
+                        fill
+                        sizes="64px"
+                        className="object-cover"
+                        unoptimized
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white/80">
+                        {crop.label.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                      {crop.label}
                     </div>
-                  )}
+                  </div>
+                  <p className="mt-1 text-center text-[9px] leading-tight text-white/65">
+                    {crop.diagnosticsLine}
+                  </p>
                 </div>
               ))}
             </div>
@@ -2278,6 +2381,16 @@ function TagPeoplePanel({
                       {box.confidence !== undefined && box.confidence !== null && (
                         <span className="text-[11px] text-white/60">
                           Confidence {(box.confidence * 100).toFixed(0)}%
+                        </span>
+                      )}
+                      {box.match_status && (
+                        <span className="rounded-full border border-sky-300/40 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-sky-200">
+                          {box.match_status.replace(/_/g, " ")}
+                        </span>
+                      )}
+                      {box.match_similarity !== undefined && box.match_similarity !== null && (
+                        <span className="text-[11px] text-sky-200/80">
+                          Similarity {(box.match_similarity * 100).toFixed(0)}%
                         </span>
                       )}
                     </div>
@@ -3025,6 +3138,24 @@ export default function PersonProfilePage() {
     return Array.from(sources).sort();
   }, [photos]);
 
+  const activeReferenceCount = useMemo(
+    () =>
+      photos.filter((photo) => {
+        const metadata = photo.metadata as Record<string, unknown> | null;
+        const taggingReference = metadata?.tagging_reference;
+        return (
+          Boolean(taggingReference) &&
+          typeof taggingReference === "object" &&
+          (taggingReference as Record<string, unknown>).selected === true
+        );
+      }).length,
+    [photos]
+  );
+
+  const wantsReferences = advancedFilters.references.includes("references");
+  const wantsNotReferences = advancedFilters.references.includes("not_references");
+  const referencesFilterActive = wantsReferences !== wantsNotReferences;
+
   const isTextFilterActive = useMemo(() => {
     const wantsText = advancedFilters.text.includes("text");
     const wantsNoText = advancedFilters.text.includes("no_text");
@@ -3132,6 +3263,19 @@ export default function PersonProfilePage() {
       );
     }
 
+    // Apply references filter (if exactly one is selected)
+    if (referencesFilterActive) {
+      result = result.filter((photo) => {
+        const metadata = photo.metadata as Record<string, unknown> | null;
+        const taggingReference = metadata?.tagging_reference;
+        const isReference =
+          Boolean(taggingReference) &&
+          typeof taggingReference === "object" &&
+          (taggingReference as Record<string, unknown>).selected === true;
+        return wantsReferences ? isReference : !isReference;
+      });
+    }
+
     // Apply content type filter
     if (advancedFilters.contentTypes.length > 0) {
       result = result.filter((photo) =>
@@ -3187,7 +3331,10 @@ export default function PersonProfilePage() {
     advancedFilters.people,
     advancedFilters.contentTypes,
     advancedFilters.seeded,
+    advancedFilters.references,
     advancedFilters.sort,
+    referencesFilterActive,
+    wantsReferences,
     showIdForApi,
     allKnownShowNameMatches,
     allKnownShowAcronymMatches,
@@ -3199,6 +3346,39 @@ export default function PersonProfilePage() {
     selectedOtherShow,
     getPhotoSortDate,
   ]);
+
+  const scopedStageTargets = useMemo(() => {
+    const castPhotoIds = new Set<string>();
+    const mediaLinkIds = new Set<string>();
+    const sourceSet = new Set<CanonicalScopedSource>();
+    for (const photo of filteredPhotos) {
+      const canonicalSource = toCanonicalScopedSource(photo.source);
+      if (canonicalSource) sourceSet.add(canonicalSource);
+      if (photo.origin === "cast_photos") {
+        const photoId = String(photo.id || "").trim();
+        if (photoId) castPhotoIds.add(photoId);
+        continue;
+      }
+      if (photo.origin === "media_links") {
+        const linkId = String(photo.link_id || photo.id || "").trim();
+        if (linkId) mediaLinkIds.add(linkId);
+      }
+    }
+    const sources = Array.from(sourceSet).sort(
+      (a, b) =>
+        CANONICAL_SCOPED_SOURCE_ORDER.indexOf(a) - CANONICAL_SCOPED_SOURCE_ORDER.indexOf(b)
+    );
+    const targetCastPhotoIds = Array.from(castPhotoIds).sort((a, b) => a.localeCompare(b));
+    const targetMediaLinkIds = Array.from(mediaLinkIds).sort((a, b) => a.localeCompare(b));
+    return {
+      totalFiltered: filteredPhotos.length,
+      castCount: targetCastPhotoIds.length,
+      mediaLinkCount: targetMediaLinkIds.length,
+      targetCastPhotoIds,
+      targetMediaLinkIds,
+      sources,
+    };
+  }, [filteredPhotos]);
 
   const gallerySections = useMemo(() => {
     const profilePictures: TrrPersonPhoto[] = [];
@@ -4498,7 +4678,7 @@ export default function PersonProfilePage() {
         },
         count: {
           key: "count",
-          label: "Count",
+          label: "Tagging",
           endpoint: `/api/admin/trr-api/media-assets/${assetId}/auto-count`,
           payload: { force: true },
         },
@@ -4534,7 +4714,7 @@ export default function PersonProfilePage() {
       },
       count: {
         key: "count",
-        label: "Count",
+        label: "Tagging",
         endpoint: `/api/admin/trr-api/cast-photos/${photo.id}/auto-count`,
         payload: { force: true },
       },
@@ -4607,6 +4787,30 @@ export default function PersonProfilePage() {
         try {
           const responseData = await runPhotoMetadataJob(step.endpoint, step.payload);
           runCounts = resolveJobLiveCounts(runCounts, responseData);
+          if (step.key === "count") {
+            const referencesRaw = (responseData as { references_used?: unknown }).references_used;
+            if (Array.isArray(referencesRaw) && referencesRaw.length > 0) {
+              const referenceUrls = referencesRaw
+                .map((entry) => {
+                  if (!entry || typeof entry !== "object") return null;
+                  const url = (entry as { url?: unknown }).url;
+                  return typeof url === "string" && url.trim().length > 0 ? url.trim() : null;
+                })
+                .filter((url): url is string => Boolean(url));
+              if (referenceUrls.length > 0) {
+                logStep(
+                  "info",
+                  runLabel,
+                  `Tagging references used (${referenceUrls.length})`,
+                  referenceUrls.join(" | ")
+                );
+              } else {
+                logStep("info", runLabel, "Warning: No owner references accepted.");
+              }
+            } else {
+              logStep("info", runLabel, "Warning: No owner references accepted.");
+            }
+          }
           const durationMs = Date.now() - startedAt;
           const summary = summarizePhotoStepResponse(responseData);
           const countSummary = formatJobLiveCounts(runCounts);
@@ -4877,8 +5081,8 @@ export default function PersonProfilePage() {
   const handleLightboxCountStage = useCallback(
     async (photo: TrrPersonPhoto) =>
       runPhotoPipelineSteps(photo, ["count"], {
-        successNotice: "Image count complete.",
-        runLabel: "image_count",
+        successNotice: "Image tagging complete.",
+        runLabel: "image_tagging",
       }),
     [runPhotoPipelineSteps]
   );
@@ -4929,11 +5133,43 @@ export default function PersonProfilePage() {
   const handleRefreshImages = useCallback(async (mode: "full" | "sync" = "full") => {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
+    if (mode === "sync" && scopedStageTargets.totalFiltered === 0) {
+      const message = "No filtered images to sync.";
+      setRefreshNotice(message);
+      setRefreshError(null);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "syncing",
+        message,
+        level: "info",
+      });
+      return;
+    }
+    if (mode === "sync" && scopedStageTargets.sources.length === 0) {
+      const message = "No eligible filtered sources to sync.";
+      setRefreshNotice(message);
+      setRefreshError(null);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "syncing",
+        message,
+        level: "info",
+      });
+      return;
+    }
     const requestId = buildPersonRefreshRequestId();
     const pipelineMode: PersonRefreshPipelineMode = "refresh";
+    const speedExecutionConfig = {
+      execution_profile: "speed" as const,
+      prefer_fast_pass: true,
+      async_job: true,
+      max_parallelism: { sync: 3, mirror: 12, tagging: 8, crop: 8 },
+      batch_size: { tagging: 32, mirror: 200, crop: 64 },
+    };
     const refreshBody =
       mode === "sync"
         ? {
+            ...speedExecutionConfig,
             skip_mirror: false,
             force_mirror: false,
             limit_per_source: 200,
@@ -4943,10 +5179,12 @@ export default function PersonProfilePage() {
             skip_centering: true,
             skip_resize: true,
             skip_prune: true,
+            sources: scopedStageTargets.sources.length > 0 ? scopedStageTargets.sources : undefined,
             show_id: showIdForApi ?? undefined,
             show_name: activeShowName ?? undefined,
           }
         : {
+            ...speedExecutionConfig,
             skip_mirror: false,
             force_mirror: false,
             limit_per_source: 200,
@@ -4981,6 +5219,16 @@ export default function PersonProfilePage() {
       level: "info",
       runId: requestId,
     });
+    if (mode === "sync") {
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "syncing",
+        message: `Scoped sync sources: ${scopedStageTargets.sources.join(", ")}.`,
+        detail: `${scopedStageTargets.totalFiltered} filtered images`,
+        level: "info",
+        runId: requestId,
+      });
+    }
 
     try {
       const runStreamAttempt = async () => {
@@ -5819,11 +6067,39 @@ export default function PersonProfilePage() {
     showIdForApi,
     activeShowName,
     buildPersonRefreshRequestId,
+    scopedStageTargets,
   ]);
 
   const handleReprocessImages = useCallback(async (stage: ReprocessStageKey = "all") => {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
+    if (scopedStageTargets.totalFiltered === 0) {
+      const message = "No filtered images to reprocess.";
+      setRefreshNotice(message);
+      setRefreshError(null);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "reprocess_start",
+        message,
+        level: "info",
+      });
+      return;
+    }
+    if (
+      scopedStageTargets.targetCastPhotoIds.length === 0 &&
+      scopedStageTargets.targetMediaLinkIds.length === 0
+    ) {
+      const message = "No eligible filtered images to reprocess.";
+      setRefreshNotice(message);
+      setRefreshError(null);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "reprocess_start",
+        message,
+        level: "info",
+      });
+      return;
+    }
     const requestId = buildPersonRefreshRequestId();
     const pipelineMode: PersonRefreshPipelineMode = "reprocess";
     const stageRequest: Record<
@@ -5832,9 +6108,19 @@ export default function PersonProfilePage() {
         body: {
           run_metadata: boolean;
           run_count: boolean;
+          run_tagging?: boolean;
+          force_tagging_recount?: boolean;
+          execution_profile?: "speed" | "balanced" | "safe";
+          max_parallelism?: Partial<Record<"sync" | "mirror" | "tagging" | "crop", number>>;
+          batch_size?: Partial<Record<"tagging" | "mirror" | "crop", number>>;
+          prefer_fast_pass?: boolean;
+          async_job?: boolean;
           run_id_text: boolean;
           run_crop: boolean;
           run_resize: boolean;
+          sources?: CanonicalScopedSource[];
+          target_cast_photo_ids?: string[];
+          target_media_link_ids?: string[];
         };
         startLabel: string;
         startMessage: string;
@@ -5843,18 +6129,34 @@ export default function PersonProfilePage() {
       }
     > = {
       all: {
-        body: { run_metadata: true, run_count: true, run_id_text: true, run_crop: true, run_resize: true },
+        body: {
+          run_metadata: true,
+          run_count: true,
+          run_tagging: true,
+          force_tagging_recount: true,
+          run_id_text: true,
+          run_crop: true,
+          run_resize: false,
+        },
         startLabel: "Refresh Details started",
         startMessage: "Refreshing existing image details...",
         defaultSuccessMessage: "Refresh Details complete.",
         failureLabel: "Refresh Details failed",
       },
-      count: {
-        body: { run_metadata: false, run_count: true, run_id_text: false, run_crop: true, run_resize: false },
-        startLabel: "Count & Crop stage started",
-        startMessage: "Reprocessing count + crop stage...",
-        defaultSuccessMessage: "Count & Crop stage complete.",
-        failureLabel: "Count & Crop stage failed",
+      tagging: {
+        body: {
+          run_metadata: false,
+          run_count: true,
+          run_tagging: true,
+          force_tagging_recount: true,
+          run_id_text: false,
+          run_crop: false,
+          run_resize: false,
+        },
+        startLabel: "Tagging stage started",
+        startMessage: "Reprocessing tagging stage...",
+        defaultSuccessMessage: "Tagging stage complete.",
+        failureLabel: "Tagging stage failed",
       },
       crop: {
         body: { run_metadata: false, run_count: false, run_id_text: false, run_crop: true, run_resize: false },
@@ -5884,7 +6186,7 @@ export default function PersonProfilePage() {
     setRefreshPipelineSteps(createPersonRefreshPipelineSteps(pipelineMode));
     setRefreshLiveCounts(null);
     setRefreshProgress({
-      phase: PERSON_REFRESH_PHASES.counting,
+      phase: PERSON_REFRESH_PHASES.tagging,
       message: "Opening reprocess stream...",
       detailMessage: `${selectedStage.startMessage} Connecting to backend stream...`,
       current: null,
@@ -5908,6 +6210,17 @@ export default function PersonProfilePage() {
       level: "info",
       runId: requestId,
     });
+    appendRefreshLog({
+      source: "page_refresh",
+      stage: "reprocess_start",
+      message: `Scoped run: ${scopedStageTargets.totalFiltered} filtered (${scopedStageTargets.castCount} cast, ${scopedStageTargets.mediaLinkCount} media links).`,
+      detail:
+        scopedStageTargets.sources.length > 0
+          ? `sources: ${scopedStageTargets.sources.join(", ")}`
+          : "sources: all",
+      level: "info",
+      runId: requestId,
+    });
 
     try {
       const headers = await getAuthHeaders();
@@ -5922,6 +6235,14 @@ export default function PersonProfilePage() {
           },
           body: JSON.stringify({
             ...selectedStage.body,
+            execution_profile: "speed",
+            max_parallelism: { tagging: 8, crop: 8, mirror: 12, sync: 3 },
+            batch_size: { tagging: 32, crop: 64, mirror: 200 },
+            prefer_fast_pass: true,
+            async_job: true,
+            sources: scopedStageTargets.sources.length > 0 ? scopedStageTargets.sources : undefined,
+            target_cast_photo_ids: scopedStageTargets.targetCastPhotoIds,
+            target_media_link_ids: scopedStageTargets.targetMediaLinkIds,
             show_id: showIdForApi ?? undefined,
             show_name: activeShowName || undefined,
           }),
@@ -6459,6 +6780,7 @@ export default function PersonProfilePage() {
     personId,
     refreshLiveCounts,
     buildPersonRefreshRequestId,
+    scopedStageTargets,
     showIdForApi,
     activeShowName,
   ]);
@@ -7229,7 +7551,7 @@ export default function PersonProfilePage() {
                     <button
                       key={photo.id}
                       onClick={(e) => openLightbox(photo, index, e.currentTarget)}
-                      className="relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                      className="relative aspect-[3/4] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                     >
                       <GalleryPhoto
                         photo={photo}
@@ -7574,12 +7896,12 @@ export default function PersonProfilePage() {
                       Sync
                     </button>
                     <button
-                      onClick={() => void handleReprocessImages("count")}
+                      onClick={() => void handleReprocessImages("tagging")}
                       disabled={refreshingImages || reprocessingImages}
-                      title="Run count + crop stage for existing images."
+                      title="Run Tagging stage (face boxes + identity + owner focus) for existing images."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
                     >
-                      Count & Crop
+                      Tagging
                     </button>
                     <button
                       onClick={() => void handleReprocessImages("crop")}
@@ -7779,7 +8101,7 @@ export default function PersonProfilePage() {
                         return (
                           <div
                             key={photo.id}
-                            className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200"
+                            className="group relative aspect-[3/4] overflow-hidden rounded-lg bg-zinc-200"
                           >
                             <button
                               type="button"
@@ -7829,7 +8151,7 @@ export default function PersonProfilePage() {
                         return (
                           <div
                             key={photo.id}
-                            className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200"
+                            className="group relative aspect-[3/4] overflow-hidden rounded-lg bg-zinc-200"
                           >
                             <button
                               type="button"
@@ -7881,9 +8203,27 @@ export default function PersonProfilePage() {
                 </div>
               )}
               {filteredPhotos.length === 0 && photos.length > 0 && (
-                <p className="text-sm text-zinc-500">
-                  No photos match the current filter.
-                </p>
+                <div className="space-y-2">
+                  <p className="text-sm text-zinc-500">
+                    {referencesFilterActive && wantsReferences && activeReferenceCount === 0
+                      ? "No active reference images are currently selected for this person."
+                      : "No photos match the current filter."}
+                  </p>
+                  {referencesFilterActive && wantsReferences && activeReferenceCount === 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAdvancedFilters({
+                          ...advancedFilters,
+                          references: [],
+                        })
+                      }
+                      className="rounded border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Clear References Filter
+                    </button>
+                  )}
+                </div>
               )}
               {photos.length === 0 && (
                 <p className="text-sm text-zinc-500">
@@ -8613,6 +8953,7 @@ export default function PersonProfilePage() {
           onChange={setAdvancedFilters}
           availableSources={uniqueSources}
           showSeeded={true}
+          showReferences={true}
           sortOptions={[
             { value: "newest", label: "Newest First" },
             { value: "oldest", label: "Oldest First" },

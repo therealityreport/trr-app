@@ -106,11 +106,29 @@ interface PostCollaboratorDetail {
   avatar_url?: string | null;
   profile_image_url?: string | null;
   profileImageUrl?: string | null;
+  profile_url?: string | null;
+  profileUrl?: string | null;
+  user_url?: string | null;
+  url?: string | null;
   is_verified?: boolean | null;
   verified?: boolean | null;
   tag_x?: number | null;
   tag_y?: number | null;
   tag_position_source?: string | null;
+}
+
+interface InstagramChildPostData {
+  slide_index?: number | null;
+  media_url?: string | null;
+  thumbnail_url?: string | null;
+  source_media_url?: string | null;
+  hosted_media_url?: string | null;
+  source_thumbnail_url?: string | null;
+  hosted_thumbnail_url?: string | null;
+  media_urls?: string[] | null;
+  tagged_users_detail?: PostCollaboratorDetail[] | null;
+  profile_tags_detail?: PostCollaboratorDetail[] | null;
+  mentions_detail?: PostCollaboratorDetail[] | null;
 }
 
 interface BasePost {
@@ -139,6 +157,7 @@ interface BasePost {
   hosted_owner_profile_pic_url?: string | null;
   hosted_tagged_profile_pics?: Record<string, string> | null;
   collaborators_detail?: PostCollaboratorDetail[] | null;
+  child_posts_data?: InstagramChildPostData[] | null;
 }
 
 interface InstagramPost extends BasePost {
@@ -305,6 +324,7 @@ interface PostDetailResponse {
   mentions_detail?: PostCollaboratorDetail[] | null;
   collaborators_detail?: PostCollaboratorDetail[] | null;
   hosted_tagged_profile_pics?: Record<string, string> | null;
+  child_posts_data?: InstagramChildPostData[] | null;
   duration_seconds?: number | null;
   media_asset_meta?: {
     selection_policy?: string | null;
@@ -514,6 +534,21 @@ interface StageProgressSnapshot {
   saved: number;
 }
 
+interface HandleStageProgressSnapshot extends StageProgressSnapshot {
+  stage: string;
+}
+
+interface HandleJobProgressCard {
+  id: string;
+  platform: string;
+  platformLabel: string;
+  handle: string;
+  handleLabel: string;
+  runnerLanes: string[];
+  totals: StageProgressSnapshot;
+  stages: HandleStageProgressSnapshot[];
+}
+
 interface SocialMediaLightboxEntry {
   id: string;
   src: string;
@@ -531,6 +566,11 @@ interface PostDetailMediaFields {
   thumbnail_url?: string | null;
   source_thumbnail_url?: string | null;
   hosted_thumbnail_url?: string | null;
+}
+
+interface InstagramDrawerSlide {
+  index: number;
+  src: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -769,15 +809,17 @@ const REQUEST_TIMEOUT_MS = {
   weekDetail: 50_000,
   weekDetailRefresh: 90_000,
   weekDetailYoutubeRefresh: 120_000,
-  ingestKickoff: 125_000,
-  syncRuns: 15_000,
-  syncJobs: 15_000,
+  ingestKickoff: 210_000,
+  syncRuns: 30_000,
+  syncJobs: 30_000,
   commentsCoverage: 35_000,
   mirrorCoverage: 35_000,
-  workerHealth: 12_000,
+  workerHealth: 20_000,
 } as const;
 const SYNC_KICKOFF_TIMEOUT_MESSAGE = "Sync kickoff request timed out";
-const SYNC_KICKOFF_MAX_ATTEMPTS = 2;
+const SYNC_KICKOFF_MAX_ATTEMPTS = 1;
+const SYNC_KICKOFF_RECOVERY_LOOKBACK_MS = 5 * 60 * 1000;
+const SYNC_KICKOFF_RECOVERY_LIMIT = 25;
 const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 const RHOSLC_INSTAGRAM_ACCOUNTS = ["bravotv", "bravowwhl"] as const;
 const RHOSLC_REQUIRED_HASHTAG = "RHOSLC";
@@ -803,6 +845,7 @@ const TRANSIENT_DEV_RESTART_PATTERNS = [
   "invalid json",
   "load failed",
   "connection closed",
+  "could not reach trr-backend",
 ] as const;
 const SOCIAL_MEDIA_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|$)/i;
 const SOCIAL_MEDIA_VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|m3u8|mpd)(\?|$)/i;
@@ -871,9 +914,11 @@ const isTransientDevRestartMessage = (message: string | null | undefined): boole
   return TRANSIENT_DEV_RESTART_PATTERNS.some((pattern) => normalized.includes(pattern));
 };
 
-const isSyncKickoffTimeoutError = (error: unknown): boolean => {
-  if (!(error instanceof Error)) return false;
-  return error.message.toLowerCase().includes(SYNC_KICKOFF_TIMEOUT_MESSAGE.toLowerCase());
+const isRecoverableSyncKickoffMessage = (message: string | null | undefined): boolean => {
+  const normalized = String(message ?? "").toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes("timed out")) return true;
+  return isTransientDevRestartMessage(normalized);
 };
 
 const buildCanonicalRoute = (relativeUrl: string): string => {
@@ -1496,6 +1541,75 @@ function getPostDetailThumbnailUrl(data: PostDetailMediaFields): string | null {
   ]);
 }
 
+function resolveInstagramChildPostMediaSrc(childPost: Record<string, unknown>): string | null {
+  const childMediaUrls = Array.isArray(childPost.media_urls)
+    ? childPost.media_urls.filter((value): value is string => typeof value === "string")
+    : [];
+  return (
+    pickFirstNonHtmlUrl([
+      ...childMediaUrls,
+      pickNonEmptyStringFromRecord(childPost, ["hosted_media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["source_media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["hosted_thumbnail_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["thumbnail_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["source_thumbnail_url"]),
+    ]) ??
+    pickFirstUrl([
+      ...childMediaUrls,
+      pickNonEmptyStringFromRecord(childPost, ["hosted_media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["source_media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["hosted_thumbnail_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["thumbnail_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["source_thumbnail_url"]),
+    ])
+  );
+}
+
+function buildInstagramDrawerSlides(data: PostDetailResponse): InstagramDrawerSlide[] {
+  const sourceMediaUrls =
+    (data.source_media_urls ?? []).length > 0 ? (data.source_media_urls ?? []) : (data.media_urls ?? []);
+  const hostedMediaUrls = data.hosted_media_urls ?? [];
+  const mediaUrls = (data.media_urls ?? []).length > 0 ? (data.media_urls ?? []) : sourceMediaUrls;
+  const childPosts = getInstagramChildPostRecords(data);
+  const childPostsBySlide = new Map<number, Record<string, unknown>>();
+  for (const childPost of childPosts) {
+    if (!childPostsBySlide.has(childPost.slideIndex)) {
+      childPostsBySlide.set(childPost.slideIndex, childPost.record);
+    }
+  }
+
+  const totalSlides = Math.max(mediaUrls.length, sourceMediaUrls.length, hostedMediaUrls.length, childPosts.length);
+  const slides: InstagramDrawerSlide[] = [];
+
+  for (let index = 0; index < totalSlides; index += 1) {
+    const childPostRecord = childPostsBySlide.get(index) ?? childPosts[index]?.record ?? null;
+    const childMediaSrc = childPostRecord ? resolveInstagramChildPostMediaSrc(childPostRecord) : null;
+    const src =
+      pickFirstNonHtmlUrl([
+        hostedMediaUrls[index],
+        mediaUrls[index],
+        sourceMediaUrls[index],
+        childMediaSrc,
+      ]) ??
+      pickFirstUrl([
+        hostedMediaUrls[index],
+        mediaUrls[index],
+        sourceMediaUrls[index],
+        childMediaSrc,
+      ]);
+    if (!src) continue;
+    slides.push({ index, src });
+  }
+
+  if (slides.length > 0) return slides;
+
+  const fallbackSrc = getPostDetailThumbnailUrl(data);
+  if (!fallbackSrc) return [];
+  return [{ index: 0, src: fallbackSrc }];
+}
+
 function mergePostWithDetailMedia(post: AnyPost, detailMedia: PostDetailMediaFields | null | undefined): AnyPost {
   if (!detailMedia) return post;
   return {
@@ -1828,20 +1942,66 @@ function resolveDetailAvatarValue(detail: Record<string, unknown>): string | nul
   ]);
 }
 
+function resolveDetailProfileUrlValue(detail: Record<string, unknown>): string | null {
+  const directUrl = pickNonEmptyStringFromRecord(detail, [
+    "url",
+    "profile_url",
+    "profileUrl",
+    "user_url",
+    "userUrl",
+    "account_url",
+    "accountUrl",
+  ]);
+  if (directUrl) return normalizeExternalUrl(directUrl);
+  const userRecord = asRecord(detail.user);
+  return normalizeExternalUrl(
+    pickNonEmptyStringFromRecord(userRecord, [
+      "url",
+      "profile_url",
+      "profileUrl",
+      "user_url",
+      "userUrl",
+      "account_url",
+      "accountUrl",
+    ]),
+  );
+}
+
 function readNormalizedTagCoord(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   if (value < 0 || value > 1) return null;
   return Number(value.toFixed(4));
 }
 
-function buildInstagramTagMarkers(post: unknown): InstagramTagMarker[] {
+function normalizeSlideIndex(value: unknown, fallback: number): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.trunc(parsed));
+}
+
+function getInstagramChildPostRecords(post: unknown): Array<{ slideIndex: number; record: Record<string, unknown> }> {
   const postRecord = asRecord(post);
   if (!postRecord) return [];
+  return pickObjectArrayFromRecord(postRecord, "child_posts_data")
+    .map((record, index) => ({
+      slideIndex: normalizeSlideIndex(record.slide_index, index),
+      record,
+    }))
+    .sort((left, right) => left.slideIndex - right.slideIndex);
+}
+
+function buildInstagramTagMarkersFromRecord(record: Record<string, unknown> | null): InstagramTagMarker[] {
+  if (!record) return [];
   const markers: InstagramTagMarker[] = [];
   const seen = new Set<string>();
 
   for (const key of INSTAGRAM_TAG_MARKER_DETAIL_KEYS) {
-    for (const detail of pickObjectArrayFromRecord(postRecord, key)) {
+    for (const detail of pickObjectArrayFromRecord(record, key)) {
       const tagX = readNormalizedTagCoord(detail.tag_x);
       const tagY = readNormalizedTagCoord(detail.tag_y);
       if (tagX === null || tagY === null) continue;
@@ -1860,6 +2020,22 @@ function buildInstagramTagMarkers(post: unknown): InstagramTagMarker[] {
   }
 
   return markers;
+}
+
+function buildInstagramTagMarkers(post: unknown): InstagramTagMarker[] {
+  return buildInstagramTagMarkersFromRecord(asRecord(post));
+}
+
+function buildInstagramTagMarkersForSlide(post: unknown, slideIndex: number): InstagramTagMarker[] {
+  const childPosts = getInstagramChildPostRecords(post);
+  if (childPosts.length === 0) {
+    return slideIndex === 0 ? buildInstagramTagMarkers(post) : [];
+  }
+  const normalizedIndex = Math.max(0, Math.trunc(slideIndex));
+  const exactSlide = childPosts.find((entry) => entry.slideIndex === normalizedIndex);
+  if (exactSlide) return buildInstagramTagMarkersFromRecord(exactSlide.record);
+  const byOrder = childPosts[normalizedIndex];
+  return byOrder ? buildInstagramTagMarkersFromRecord(byOrder.record) : [];
 }
 
 function InstagramTagMarkersOverlay({
@@ -2259,6 +2435,7 @@ function resolveCaseInsensitiveRecordValue(
 type HandleProfile = {
   displayName: string | null;
   avatarUrl: string | null;
+  profileUrl: string | null;
 };
 
 const POST_HANDLE_PROFILE_CACHE = new WeakMap<object, Map<string, HandleProfile>>();
@@ -2293,15 +2470,18 @@ function setHandleProfile(
   handle: string | null | undefined,
   displayName: string | null | undefined,
   avatarUrl: string | null | undefined,
+  profileUrl: string | null | undefined,
 ): void {
   const normalizedHandle = normalizeHandle(handle);
   if (!normalizedHandle) return;
   const normalizedDisplayName = String(displayName ?? "").trim() || null;
   const normalizedAvatarUrl = String(avatarUrl ?? "").trim() || null;
-  const existing = profileMap.get(normalizedHandle) ?? { displayName: null, avatarUrl: null };
+  const normalizedProfileUrl = normalizeExternalUrl(profileUrl ?? null);
+  const existing = profileMap.get(normalizedHandle) ?? { displayName: null, avatarUrl: null, profileUrl: null };
   profileMap.set(normalizedHandle, {
     displayName: existing.displayName ?? normalizedDisplayName,
     avatarUrl: existing.avatarUrl ?? normalizedAvatarUrl,
+    profileUrl: existing.profileUrl ?? normalizedProfileUrl,
   });
 }
 
@@ -2320,10 +2500,18 @@ function buildPostHandleProfileMap(post: AnyPost): Map<string, HandleProfile> {
       pickNonEmptyStringFromRecord(postRecord, ["owner_full_name", "full_name", "fullName", "display_name", "displayName", "name", "nickname"]),
     pickNonEmptyStringFromRecord(userRecord, ["avatar_url", "user_avatar_url"]) ??
       (String(post.hosted_owner_profile_pic_url ?? "").trim() || String(post.owner_profile_pic_url ?? "").trim()),
+    pickNonEmptyStringFromRecord(userRecord, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]) ??
+      pickNonEmptyStringFromRecord(postRecord, ["user_profile_url", "profile_url", "profileUrl", "user_url", "userUrl"]),
   );
 
   for (const detail of getPostDetailObjects(post)) {
-    setHandleProfile(profileMap, resolveDetailHandleValue(detail), resolveDetailDisplayNameValue(detail), resolveDetailAvatarValue(detail));
+    setHandleProfile(
+      profileMap,
+      resolveDetailHandleValue(detail),
+      resolveDetailDisplayNameValue(detail),
+      resolveDetailAvatarValue(detail),
+      resolveDetailProfileUrlValue(detail),
+    );
   }
 
   const commentStack = Array.isArray(postRecord?.comments) ? [...(postRecord?.comments as unknown[])] : [];
@@ -2340,6 +2528,8 @@ function buildPostHandleProfileMap(post: AnyPost): Map<string, HandleProfile> {
         pickNonEmptyStringFromRecord(commentRecord, ["display_name", "displayName", "nickname", "name"]),
       pickNonEmptyStringFromRecord(commentUser, ["avatar_url", "user_avatar_url", "profile_pic_url", "profile_pic_url_hd"]) ??
         pickNonEmptyStringFromRecord(commentRecord, ["user_avatar_url", "avatar_url", "profile_pic_url", "profile_pic_url_hd"]),
+      pickNonEmptyStringFromRecord(commentUser, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]) ??
+        pickNonEmptyStringFromRecord(commentRecord, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]),
     );
     if (Array.isArray(commentRecord.replies)) {
       commentStack.push(...commentRecord.replies);
@@ -2359,6 +2549,8 @@ function buildPostHandleProfileMap(post: AnyPost): Map<string, HandleProfile> {
         pickNonEmptyStringFromRecord(quoteRecord, ["display_name", "displayName", "nickname", "name"]),
       pickNonEmptyStringFromRecord(quoteUser, ["avatar_url", "user_avatar_url", "profile_pic_url", "profile_pic_url_hd"]) ??
         pickNonEmptyStringFromRecord(quoteRecord, ["user_avatar_url", "avatar_url", "profile_pic_url", "profile_pic_url_hd"]),
+      pickNonEmptyStringFromRecord(quoteUser, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]) ??
+        pickNonEmptyStringFromRecord(quoteRecord, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]),
     );
   }
 
@@ -2378,7 +2570,13 @@ function buildPostHandleProfileMap(post: AnyPost): Map<string, HandleProfile> {
     }
     const record = asRecord(current.node);
     if (!record) continue;
-    setHandleProfile(profileMap, resolveDetailHandleValue(record), resolveDetailDisplayNameValue(record), resolveDetailAvatarValue(record));
+    setHandleProfile(
+      profileMap,
+      resolveDetailHandleValue(record),
+      resolveDetailDisplayNameValue(record),
+      resolveDetailAvatarValue(record),
+      resolveDetailProfileUrlValue(record),
+    );
     const nestedUser = asRecord(record.user);
     if (nestedUser) {
       setHandleProfile(
@@ -2386,6 +2584,7 @@ function buildPostHandleProfileMap(post: AnyPost): Map<string, HandleProfile> {
         pickNonEmptyStringFromRecord(nestedUser, ["username", "user_name", "userName", "handle"]),
         pickNonEmptyStringFromRecord(nestedUser, ["full_name", "fullName", "display_name", "displayName", "name", "nickname"]),
         pickNonEmptyStringFromRecord(nestedUser, ["avatar_url", "user_avatar_url", "profile_pic_url", "profile_pic_url_hd"]),
+        pickNonEmptyStringFromRecord(nestedUser, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]),
       );
     }
     for (const nested of Object.values(record)) {
@@ -2622,6 +2821,46 @@ function getJobActivitySummary(job: SocialJob): string {
   return parts.join(" · ");
 }
 
+function getJobRunnerLane(job: SocialJob): "A" | "B" | null {
+  const fromConfig = typeof job.config?.runner_lane === "string" ? job.config.runner_lane : null;
+  const fromMetadata = typeof job.metadata?.runner_lane === "string" ? job.metadata.runner_lane : null;
+  const lane = String(fromConfig ?? fromMetadata ?? "")
+    .trim()
+    .toUpperCase();
+  if (lane === "A" || lane === "B") return lane;
+  return null;
+}
+
+function getJobAccountHandle(job: SocialJob): string {
+  const configRecord = asRecord(job.config);
+  const metadataRecord = asRecord(job.metadata);
+  const candidates = [
+    configRecord?.account,
+    configRecord?.account_handle,
+    metadataRecord?.account,
+    metadataRecord?.account_handle,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const normalized = normalizeHandle(candidate);
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function formatSyncStageLabel(stage: string): string {
+  const normalized = String(stage || "").trim().toLowerCase();
+  if (normalized === "posts") return "Posts";
+  if (normalized === "comments") return "Comments";
+  if (normalized === "media_mirror") return "Mirror";
+  if (!normalized) return "Stage";
+  return normalized
+    .split("_")
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function getStageStatus(stage: StageProgressSnapshot): {
   label: string;
   toneClass: string;
@@ -2818,6 +3057,7 @@ function PostStatsDrawer({
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [hasRefreshed, setHasRefreshed] = useState(false);
   const [replyQuoteMode, setReplyQuoteMode] = useState<"replies" | "quotes">("replies");
+  const [instagramDrawerSlideIndex, setInstagramDrawerSlideIndex] = useState(0);
 
   const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
     const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
@@ -2876,6 +3116,7 @@ function PostStatsDrawer({
 
   useEffect(() => {
     setReplyQuoteMode("replies");
+    setInstagramDrawerSlideIndex(0);
   }, [platform, sourceId]);
 
   const handleRefreshComments = useCallback(async () => {
@@ -2973,10 +3214,46 @@ function PostStatsDrawer({
   const quotesIncomplete = savedQuoteCount < reportedQuoteCount;
   const activeComments =
     supportsReplyQuoteSwitch && replyQuoteMode === "quotes" ? quoteCommentsAsThreaded : (data?.comments ?? []);
-  const drawerThumbnailUrl = data ? getPostDetailThumbnailUrl(data) : null;
-  const preferredDrawerMediaSrc = data ? getPreferredPostDetailMediaSrc(data) : null;
+  const instagramDrawerSlides = useMemo(() => {
+    if (!data || data.platform !== "instagram") return [];
+    return buildInstagramDrawerSlides(data);
+  }, [data]);
+  const boundedInstagramDrawerSlideIndex =
+    instagramDrawerSlides.length > 0
+      ? Math.min(instagramDrawerSlideIndex, instagramDrawerSlides.length - 1)
+      : 0;
+  const activeInstagramDrawerSlide =
+    instagramDrawerSlides[boundedInstagramDrawerSlideIndex] ?? null;
+  const hasInstagramDrawerSlideNavigation =
+    (data?.platform === "instagram" && data.post_format === "carousel") ||
+    (data?.platform === "instagram" && instagramDrawerSlides.length > 1);
+  const drawerThumbnailUrl = data
+    ? data.platform === "instagram"
+      ? activeInstagramDrawerSlide?.src ?? getPostDetailThumbnailUrl(data)
+      : getPostDetailThumbnailUrl(data)
+    : null;
+  const preferredDrawerMediaSrc = data
+    ? data.platform === "instagram"
+      ? activeInstagramDrawerSlide?.src ?? getPreferredPostDetailMediaSrc(data)
+      : getPreferredPostDetailMediaSrc(data)
+    : null;
   const detailExternalUrl = data ? resolvePostExternalUrl(data.platform, data) : null;
-  const instagramTagMarkers = data?.platform === "instagram" ? buildInstagramTagMarkers(data) : [];
+  const instagramTagMarkers =
+    data?.platform === "instagram"
+      ? buildInstagramTagMarkersForSlide(data, boundedInstagramDrawerSlideIndex)
+      : [];
+
+  useEffect(() => {
+    if (instagramDrawerSlides.length === 0) {
+      if (instagramDrawerSlideIndex !== 0) {
+        setInstagramDrawerSlideIndex(0);
+      }
+      return;
+    }
+    if (instagramDrawerSlideIndex > instagramDrawerSlides.length - 1) {
+      setInstagramDrawerSlideIndex(instagramDrawerSlides.length - 1);
+    }
+  }, [instagramDrawerSlideIndex, instagramDrawerSlides.length]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -3105,28 +3382,58 @@ function PostStatsDrawer({
                         </div>
                       </button>
                     ) : (
-                      <>
-                        <div className="relative inline-block max-w-full">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={drawerThumbnailUrl}
-                            alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
-                            loading="lazy"
-                            referrerPolicy="no-referrer"
-                            onError={(event) => {
-                              event.currentTarget.style.display = "none";
-                            }}
-                            className="block max-h-[360px] max-w-full h-auto w-auto object-contain bg-black/5"
+                      <div className="relative inline-block max-w-full">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={drawerThumbnailUrl}
+                          alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                          className="block max-h-[360px] max-w-full h-auto w-auto object-contain bg-black/5"
+                        />
+                        {data.platform === "instagram" ? (
+                          <InstagramTagMarkersOverlay
+                            markers={instagramTagMarkers}
+                            testId={`instagram-tag-markers-drawer-${data.source_id}`}
                           />
-                          {data.platform === "instagram" ? (
-                            <InstagramTagMarkersOverlay
-                              markers={instagramTagMarkers}
-                              testId={`instagram-tag-markers-drawer-${data.source_id}`}
-                            />
-                          ) : null}
-                        </div>
-                      </>
+                        ) : null}
+                      </div>
                     )}
+                    {data.platform === "instagram" && hasInstagramDrawerSlideNavigation ? (
+                      <div className="flex items-center justify-between border-t border-gray-200 bg-white px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => setInstagramDrawerSlideIndex((current) => Math.max(0, current - 1))}
+                          disabled={boundedInstagramDrawerSlideIndex <= 0}
+                          className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="Previous slide"
+                        >
+                          Prev
+                        </button>
+                        <span
+                          className="text-xs font-medium text-gray-600"
+                          data-testid={`instagram-drawer-slide-indicator-${data.source_id}`}
+                        >
+                          Slide {boundedInstagramDrawerSlideIndex + 1} of {Math.max(1, instagramDrawerSlides.length)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setInstagramDrawerSlideIndex((current) =>
+                              Math.min(Math.max(0, instagramDrawerSlides.length - 1), current + 1),
+                            )
+                          }
+                          disabled={boundedInstagramDrawerSlideIndex >= instagramDrawerSlides.length - 1}
+                          className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="Next slide"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 )}
                 {data.title && (
@@ -3218,31 +3525,6 @@ function PostStatsDrawer({
                           {data.transcript_text}
                         </p>
                       </>
-                    )}
-                  </div>
-                )}
-                {data.media_asset_meta && (
-                  <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                    <p className="text-xs font-semibold text-gray-700 mb-1">Media Asset Metadata</p>
-                    <p className="text-xs text-gray-600">
-                      Policy: {data.media_asset_meta.selection_policy || "best_per_asset"}
-                      {data.media_asset_meta.selected_source ? ` · Source: ${data.media_asset_meta.selected_source}` : ""}
-                    </p>
-                    {Array.isArray(data.media_asset_meta.source_assets) && data.media_asset_meta.source_assets.length > 0 && (
-                      <p className="text-xs text-gray-600 mt-1">
-                        Source: {data.media_asset_meta.source_assets
-                          .slice(0, 3)
-                          .map((asset) => asset.resolution || `${asset.width ?? "?"}x${asset.height ?? "?"}`)
-                          .join(", ")}
-                      </p>
-                    )}
-                    {Array.isArray(data.media_asset_meta.hosted_assets) && data.media_asset_meta.hosted_assets.length > 0 && (
-                      <p className="text-xs text-gray-600 mt-1">
-                        Hosted: {data.media_asset_meta.hosted_assets
-                          .slice(0, 3)
-                          .map((asset) => asset.resolution || `${asset.width ?? "?"}x${asset.height ?? "?"}`)
-                          .join(", ")}
-                      </p>
                     )}
                   </div>
                 )}
@@ -3469,7 +3751,6 @@ function PostCard({
   const captionAuthorLabel = formatHandleLabel(post.author) || "@unknown";
   const normalizedCaptionText = normalizeCaptionPreviewText(platform, post.text);
   const topic = platform === "threads" ? getStr(post, "topic") : "";
-  const instagramTagMarkers = platform === "instagram" ? buildInstagramTagMarkers(post) : [];
 
   return (
     <>
@@ -3572,12 +3853,6 @@ function PostCard({
                       onError={() => setThumbnailFailed(true)}
                       className="block max-h-72 max-w-full h-auto w-auto object-contain"
                     />
-                    {platform === "instagram" ? (
-                      <InstagramTagMarkersOverlay
-                        markers={instagramTagMarkers}
-                        testId={`instagram-tag-markers-card-${post.source_id}`}
-                      />
-                    ) : null}
                   </div>
                 )}
               </div>
@@ -4709,6 +4984,113 @@ export default function WeekDetailPage() {
     [hasValidNumericPathParams, invalidPathParamsError, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
   );
 
+  const recoverSyncRunAfterKickoffError = useCallback(
+    async ({
+      headers,
+      pass,
+      dateStart,
+      dateEnd,
+      platforms,
+      kickoffStartedAtMs,
+    }: {
+      headers: Record<string, string>;
+      pass: number;
+      dateStart: string;
+      dateEnd: string;
+      platforms: Array<Exclude<PlatformFilter, "all">> | null;
+      kickoffStartedAtMs: number;
+    }): Promise<{ runId: string; jobs: number } | null> => {
+      if (!hasValidNumericPathParams) return null;
+
+      const ingestMode: IngestMode = pass > 1 ? "details_refresh" : "posts_and_comments";
+      const expectedPlatforms = platforms && platforms.length > 0 ? [...platforms].sort() : null;
+      const runsParams = new URLSearchParams({
+        source_scope: sourceScope,
+        limit: String(SYNC_KICKOFF_RECOVERY_LIMIT),
+      });
+      if (resolvedSeasonId) {
+        runsParams.set("season_id", resolvedSeasonId);
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runsParams.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.syncRuns,
+        "Sync run recovery request timed out",
+      );
+      if (!response.ok) return null;
+      const runsPayload = await parseResponseJson<{ runs?: SocialRun[] }>(response, "Failed to load sync runs");
+      const runs = Array.isArray(runsPayload.runs) ? runsPayload.runs : [];
+
+      const toTimestamp = (value: unknown): number | null => {
+        if (typeof value !== "string" || !value.trim()) return null;
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+      const normalizeRunPlatforms = (value: unknown): string[] | null => {
+        if (Array.isArray(value)) {
+          const normalized = value
+            .map((item) => String(item ?? "").trim().toLowerCase())
+            .filter((item) => item.length > 0)
+            .sort();
+          return normalized.length > 0 ? normalized : null;
+        }
+        if (typeof value === "string" && value.trim().toLowerCase() === "all") {
+          return null;
+        }
+        return null;
+      };
+      const windowsMatch = (candidate: unknown, expectedIso: string): boolean => {
+        if (typeof candidate !== "string" || !candidate.trim()) return true;
+        const candidateMs = Date.parse(candidate);
+        const expectedMs = Date.parse(expectedIso);
+        if (Number.isFinite(candidateMs) && Number.isFinite(expectedMs)) {
+          return candidateMs === expectedMs;
+        }
+        return candidate.trim() === expectedIso.trim();
+      };
+
+      const recoveredRun =
+        runs.find((run) => {
+          if (!run?.id) return false;
+          const config = isRecord(run.config) ? run.config : {};
+          const createdAtMs = toTimestamp(run.created_at);
+          if (
+            createdAtMs !== null &&
+            createdAtMs < kickoffStartedAtMs - SYNC_KICKOFF_RECOVERY_LOOKBACK_MS
+          ) {
+            return false;
+          }
+          const runScope =
+            (typeof run.source_scope === "string" && run.source_scope.trim().toLowerCase()) ||
+            (typeof config.source_scope === "string" && config.source_scope.trim().toLowerCase()) ||
+            "";
+          if (runScope && runScope !== sourceScope) return false;
+          const runMode =
+            typeof config.ingest_mode === "string" ? config.ingest_mode.trim().toLowerCase() : "";
+          if (runMode && runMode !== ingestMode) return false;
+          if (!windowsMatch(config.date_start, dateStart) || !windowsMatch(config.date_end, dateEnd)) {
+            return false;
+          }
+          const runPlatforms = normalizeRunPlatforms(config.platforms);
+          if (expectedPlatforms && expectedPlatforms.length > 0) {
+            if (!runPlatforms || runPlatforms.length !== expectedPlatforms.length) return false;
+            return expectedPlatforms.every((platform, index) => runPlatforms[index] === platform);
+          }
+          return runPlatforms === null;
+        }) ?? null;
+
+      if (!recoveredRun?.id) return null;
+      const summary = recoveredRun.summary ?? {};
+      const totalJobs = Number(summary.total_jobs ?? 0);
+      const completedJobs = Number(summary.completed_jobs ?? 0);
+      const failedJobs = Number(summary.failed_jobs ?? 0);
+      const activeJobs = Number(summary.active_jobs ?? 0);
+      const jobs = Math.max(0, totalJobs, completedJobs + failedJobs + activeJobs);
+      return { runId: recoveredRun.id, jobs };
+    },
+    [hasValidNumericPathParams, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+  );
+
   const queueSyncPass = useCallback(
     async ({
       pass,
@@ -4721,6 +5103,7 @@ export default function WeekDetailPage() {
       dateEnd: string;
       platforms: Array<Exclude<PlatformFilter, "all">> | null;
     }) => {
+      const kickoffStartedAtMs = Date.now();
       const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
       const ingestMode: IngestMode = pass > 1 ? "details_refresh" : "posts_and_comments";
       const payload: {
@@ -4787,7 +5170,21 @@ export default function WeekDetailPage() {
         },
         body: JSON.stringify(payload),
       };
+      const adoptRun = (runId: string) => {
+        setSyncRunId(runId);
+        setSyncRun(null);
+        setSyncJobs([]);
+        syncPollFailureCountRef.current = 0;
+        terminalCoverageFailureCountRef.current = 0;
+        missingRunConsecutiveCountRef.current = 0;
+        if (!syncStartTimeRef.current) {
+          syncStartTimeRef.current = Date.now();
+        }
+        setSyncPass(pass);
+        void fetchSyncProgress(runId).catch(() => {});
+      };
       let response: Response | null = null;
+      let kickoffRecoverableErrorMessage: string | null = null;
       for (let attempt = 1; attempt <= SYNC_KICKOFF_MAX_ATTEMPTS; attempt += 1) {
         try {
           response = await fetchWithTimeout(
@@ -4798,16 +5195,48 @@ export default function WeekDetailPage() {
           );
           break;
         } catch (error) {
-          if (!isSyncKickoffTimeoutError(error) || attempt >= SYNC_KICKOFF_MAX_ATTEMPTS) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (!isRecoverableSyncKickoffMessage(errorMessage)) {
             throw error;
+          }
+          kickoffRecoverableErrorMessage = errorMessage;
+          if (attempt >= SYNC_KICKOFF_MAX_ATTEMPTS) {
+            break;
           }
         }
       }
       if (!response) {
-        throw new Error(`Failed to start sync pass ${pass}`);
+        const recovered = await recoverSyncRunAfterKickoffError({
+          headers,
+          pass,
+          dateStart,
+          dateEnd,
+          platforms,
+          kickoffStartedAtMs,
+        }).catch(() => null);
+        if (recovered?.runId) {
+          adoptRun(recovered.runId);
+          return recovered;
+        }
+        throw new Error(kickoffRecoverableErrorMessage ?? `Failed to start sync pass ${pass}`);
       }
       if (!response.ok) {
-        throw new Error(await readApiErrorMessage(response, `Failed to start sync pass ${pass}`));
+        const kickoffError = await readApiErrorMessage(response, `Failed to start sync pass ${pass}`);
+        if (isRecoverableSyncKickoffMessage(kickoffError)) {
+          const recovered = await recoverSyncRunAfterKickoffError({
+            headers,
+            pass,
+            dateStart,
+            dateEnd,
+            platforms,
+            kickoffStartedAtMs,
+          }).catch(() => null);
+          if (recovered?.runId) {
+            adoptRun(recovered.runId);
+            return recovered;
+          }
+        }
+        throw new Error(kickoffError);
       }
 
       const result = (await response.json().catch(() => ({}))) as {
@@ -4817,22 +5246,32 @@ export default function WeekDetailPage() {
       const runId = typeof result.run_id === "string" ? result.run_id : null;
       const jobs = Number(result.queued_or_started_jobs ?? 0);
       if (!runId) {
+        const recovered = await recoverSyncRunAfterKickoffError({
+          headers,
+          pass,
+          dateStart,
+          dateEnd,
+          platforms,
+          kickoffStartedAtMs,
+        }).catch(() => null);
+        if (recovered?.runId) {
+          adoptRun(recovered.runId);
+          return recovered;
+        }
         throw new Error(`Sync pass ${pass} started without a run id`);
       }
-      setSyncRunId(runId);
-      setSyncRun(null);
-      setSyncJobs([]);
-      syncPollFailureCountRef.current = 0;
-      terminalCoverageFailureCountRef.current = 0;
-      missingRunConsecutiveCountRef.current = 0;
-      if (!syncStartTimeRef.current) {
-        syncStartTimeRef.current = Date.now();
-      }
-      setSyncPass(pass);
-      void fetchSyncProgress(runId).catch(() => {});
+      adoptRun(runId);
       return { runId, jobs };
     },
-    [fetchSyncProgress, isRhoslcSeason, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+    [
+      fetchSyncProgress,
+      isRhoslcSeason,
+      recoverSyncRunAfterKickoffError,
+      resolvedSeasonId,
+      seasonNumber,
+      showIdForApi,
+      sourceScope,
+    ],
   );
 
   const fetchCommentsCoverage = useCallback(
@@ -5052,7 +5491,7 @@ export default function WeekDetailPage() {
             ? "Failed to run full sync + mirror"
             : "Failed to start sync";
       const message =
-        rawMessage.toLowerCase().includes("timed out")
+        isRecoverableSyncKickoffMessage(rawMessage)
           ? `${rawMessage}. Retry in a minute; if it keeps failing, share the trace id with engineering.`
           : rawMessage;
       setSyncError(
@@ -5660,6 +6099,50 @@ export default function WeekDetailPage() {
     return byHandle;
   }, [summaryPosts]);
 
+  const tokenHandleProfileUrls = useMemo(() => {
+    const byHandle = new Map<string, string>();
+    const setProfileUrl = (handle: string, profileUrl: string | null) => {
+      const normalizedHandle = normalizeHandle(handle);
+      const normalizedProfileUrl = normalizeExternalUrl(profileUrl);
+      if (!normalizedHandle || !normalizedProfileUrl) return;
+      if (byHandle.has(normalizedHandle)) return;
+      byHandle.set(normalizedHandle, normalizedProfileUrl);
+    };
+
+    for (const { post } of summaryPosts) {
+      const authorHandle = resolvePostAuthorHandle(post);
+      setProfileUrl(authorHandle, resolveHandleProfile(post, authorHandle)?.profileUrl ?? null);
+
+      const candidateHandles = new Set<string>();
+      for (const handle of getStrArr(post, "collaborators")) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of getStrArr(post, "profile_tags")) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of getPostMentions(post)) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+
+      const postRecord = asRecord(post);
+      for (const key of TOKEN_HANDLE_DETAIL_KEYS) {
+        for (const detail of pickObjectArrayFromRecord(postRecord, key)) {
+          const normalized = resolveDetailHandleValue(detail);
+          if (normalized) candidateHandles.add(normalized);
+        }
+      }
+
+      for (const handle of candidateHandles) {
+        setProfileUrl(handle, resolveHandleProfile(post, handle)?.profileUrl ?? null);
+      }
+    }
+
+    return byHandle;
+  }, [summaryPosts]);
+
   const tokenModalRows = useMemo(() => {
     if (!tokenSummaryModal || !isHandleTokenKey(tokenSummaryModal.key)) return [];
     const preferredPlatform: PlatformFilter = platformFilter === "all" ? "instagram" : platformFilter;
@@ -5673,7 +6156,7 @@ export default function WeekDetailPage() {
           handleLabel: `@${handle}`,
           displayName: tokenHandleDisplayNames.get(handle) ?? null,
           avatarUrl: tokenHandleAvatarUrls.get(handle) ?? null,
-          profileUrl: buildHandleProfileUrl(handle, preferredPlatform),
+          profileUrl: tokenHandleProfileUrls.get(handle) ?? buildHandleProfileUrl(handle, preferredPlatform),
           isVerified: verifiedHandlesInView.has(handle),
         };
       })
@@ -5690,7 +6173,7 @@ export default function WeekDetailPage() {
           isVerified: boolean;
         } => row !== null,
       );
-  }, [platformFilter, tokenHandleAvatarUrls, tokenHandleDisplayNames, tokenSummaryModal, verifiedHandlesInView]);
+  }, [platformFilter, tokenHandleAvatarUrls, tokenHandleDisplayNames, tokenHandleProfileUrls, tokenSummaryModal, verifiedHandlesInView]);
 
   const tabTotals = useMemo(() => {
     const fallbackTotals: Record<SocialPlatform, number> = { ...EMPTY_PLATFORM_TOTALS };
@@ -5968,6 +6451,122 @@ export default function WeekDetailPage() {
     }
     return { posts, comments, mediaMirror };
   }, [syncJobs, syncRun?.summary?.stage_counts]);
+
+  const syncRunnerCount = useMemo(() => {
+    const runConfig = asRecord(syncRun?.config);
+    const parsed = Number(runConfig?.runner_count ?? 1);
+    if (!Number.isFinite(parsed) || parsed < 1) return 1;
+    return Math.floor(parsed);
+  }, [syncRun?.config]);
+
+  const syncHandleProgressCards = useMemo((): HandleJobProgressCard[] => {
+    const stageSortOrder: Record<string, number> = {
+      posts: 0,
+      comments: 1,
+      media_mirror: 2,
+    };
+    type MutableCard = {
+      platform: string;
+      handle: string;
+      runnerLanes: Set<string>;
+      totals: StageProgressSnapshot;
+      stages: Map<string, StageProgressSnapshot>;
+    };
+    const makeSnapshot = (): StageProgressSnapshot => ({
+      total: 0,
+      completed: 0,
+      failed: 0,
+      active: 0,
+      scraped: 0,
+      saved: 0,
+    });
+    const applyJobCounts = (snapshot: StageProgressSnapshot, job: SocialJob) => {
+      snapshot.total += 1;
+      if (job.status === "completed") snapshot.completed += 1;
+      else if (job.status === "failed") snapshot.failed += 1;
+      else if (ACTIVE_RUN_STATUSES.has(job.status)) snapshot.active += 1;
+    };
+    const cards = new Map<string, MutableCard>();
+    for (const job of syncJobs) {
+      const platform = String(job.platform || "")
+        .trim()
+        .toLowerCase();
+      if (!platform) continue;
+      const handle = getJobAccountHandle(job);
+      if (!handle) continue;
+      const cardId = `${platform}:${handle}`;
+      let card = cards.get(cardId);
+      if (!card) {
+        card = {
+          platform,
+          handle,
+          runnerLanes: new Set<string>(),
+          totals: makeSnapshot(),
+          stages: new Map<string, StageProgressSnapshot>(),
+        };
+        cards.set(cardId, card);
+      }
+
+      const stage = String(getJobStage(job) || "posts")
+        .trim()
+        .toLowerCase();
+      const stageKey = stage || "posts";
+      let stageSnapshot = card.stages.get(stageKey);
+      if (!stageSnapshot) {
+        stageSnapshot = makeSnapshot();
+        card.stages.set(stageKey, stageSnapshot);
+      }
+
+      applyJobCounts(card.totals, job);
+      applyJobCounts(stageSnapshot, job);
+
+      const stageCounters = getJobStageCounters(job);
+      const stageScraped = stageCounters ? stageCounters.posts + stageCounters.comments : Number(job.items_found ?? 0);
+      stageSnapshot.scraped += stageScraped;
+      card.totals.scraped += stageScraped;
+
+      const persistCounters = getJobPersistCounters(job);
+      if (persistCounters) {
+        const stageSaved = persistCounters.posts_upserted + persistCounters.comments_upserted;
+        stageSnapshot.saved += stageSaved;
+        card.totals.saved += stageSaved;
+      }
+
+      const runnerLane = getJobRunnerLane(job);
+      if (runnerLane) {
+        card.runnerLanes.add(runnerLane);
+      }
+    }
+
+    return [...cards.entries()]
+      .map(([id, card]) => {
+        const stageEntries: HandleStageProgressSnapshot[] = [...card.stages.entries()]
+          .sort(([left], [right]) => {
+            const leftOrder = stageSortOrder[left] ?? 99;
+            const rightOrder = stageSortOrder[right] ?? 99;
+            if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+            return left.localeCompare(right);
+          })
+          .map(([stage, snapshot]) => ({
+            stage,
+            ...snapshot,
+          }));
+        return {
+          id,
+          platform: card.platform,
+          platformLabel: PLATFORM_LABELS[card.platform] ?? card.platform,
+          handle: card.handle,
+          handleLabel: formatHandleLabel(card.handle),
+          runnerLanes: [...card.runnerLanes].sort(),
+          totals: card.totals,
+          stages: stageEntries,
+        };
+      })
+      .sort((left, right) => {
+        if (left.platform !== right.platform) return left.platform.localeCompare(right.platform);
+        return left.handle.localeCompare(right.handle);
+      });
+  }, [syncJobs]);
 
   const syncLogs = useMemo(() => {
     return [...syncJobs]
@@ -6617,6 +7216,71 @@ export default function WeekDetailPage() {
                       </p>
                     ))}
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {syncingComments && (
+            <div className="mb-5 rounded-lg border border-gray-200 bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Per-Handle Job Progress</h3>
+                  <p className="text-xs text-gray-500">
+                    {syncRunnerCount >= 2
+                      ? `Dual-runner mode (${syncRunnerCount} workers) · grouped by platform and handle`
+                      : "Grouped by platform and handle"}
+                  </p>
+                </div>
+              </div>
+              {syncHandleProgressCards.length === 0 ? (
+                <p className="mt-3 text-xs text-gray-500">
+                  Waiting for platform/handle jobs to report progress...
+                </p>
+              ) : (
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {syncHandleProgressCards.map((card) => (
+                    <div key={card.id} className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            PLATFORM_COLORS[card.platform] ?? "bg-gray-100 text-gray-700"
+                          }`}
+                        >
+                          {card.platformLabel}
+                        </span>
+                        <span className="text-xs font-semibold text-gray-900">{card.handleLabel}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Runner lanes: {card.runnerLanes.length > 0 ? card.runnerLanes.join(", ") : "Pending"}
+                      </p>
+                      <p className="mt-1 text-[11px] tabular-nums text-gray-600">
+                        {card.totals.completed + card.totals.failed}/{card.totals.total || "?"} complete
+                        {card.totals.active > 0 ? ` · ${card.totals.active} active` : ""}
+                        {` · ${fmtNum(card.totals.scraped)} scraped`}
+                        {card.totals.saved > 0 ? ` · ${fmtNum(card.totals.saved)} saved` : ""}
+                      </p>
+                      <div className="mt-2 space-y-1.5">
+                        {card.stages.map((stage) => (
+                          <div key={`${card.id}-${stage.stage}`} className="rounded border border-gray-200 bg-white px-2 py-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-medium text-gray-700">
+                                {formatSyncStageLabel(stage.stage)}
+                              </span>
+                              <span className="text-[11px] tabular-nums text-gray-500">
+                                {stage.completed + stage.failed}/{stage.total || "?"}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-[11px] tabular-nums text-gray-500">
+                              {stage.active > 0 ? `${stage.active} active · ` : ""}
+                              {fmtNum(stage.scraped)} scraped
+                              {stage.saved > 0 ? ` · ${fmtNum(stage.saved)} saved` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

@@ -27,7 +27,7 @@ const sanitizeStringArray = (input: string[] | null | undefined): string[] => {
 export const sanitizeEpisodeTitlePatterns = (input: string[] | null | undefined): string[] =>
   sanitizeStringArray(input);
 
-export const sanitizeEpisodeRequiredFlares = (input: string[] | null | undefined): string[] =>
+export const sanitizeEpisodeRequiredFlairs = (input: string[] | null | undefined): string[] =>
   sanitizeStringArray(input);
 
 const BRAVO_REAL_HOUSEWIVES_SUBREDDIT = "bravorealhousewives";
@@ -49,13 +49,13 @@ export interface ResolveEpisodeDiscussionRulesInput {
   showAliases?: string[] | null;
   isShowFocused: boolean;
   episodeTitlePatterns?: string[] | null;
-  analysisAllFlares?: string[] | null;
+  analysisAllFlairs?: string[] | null;
 }
 
 export interface ResolvedEpisodeDiscussionRules {
   effectiveEpisodeTitlePatterns: string[];
-  effectiveRequiredFlares: string[];
-  autoSeededRequiredFlares: boolean;
+  effectiveRequiredFlairs: string[];
+  autoSeededRequiredFlairs: boolean;
 }
 
 const isRhoslcShow = (showName: string, showAliases: string[] = []): boolean => {
@@ -75,18 +75,18 @@ export const resolveEpisodeDiscussionRules = (
       ? sanitizeEpisodeTitlePatterns([...basePatterns, ...BRAVO_EPISODE_DISCUSSION_PATTERNS])
       : basePatterns;
 
-  const baseRequiredFlares = sanitizeEpisodeRequiredFlares(input.analysisAllFlares ?? []);
+  const baseRequiredFlairs = sanitizeEpisodeRequiredFlairs(input.analysisAllFlairs ?? []);
   const shouldAutoSeedRhoslcFlair =
     !input.isShowFocused &&
     subredditKey === BRAVO_REAL_HOUSEWIVES_SUBREDDIT &&
-    baseRequiredFlares.length === 0 &&
+    baseRequiredFlairs.length === 0 &&
     isRhoslcShow(input.showName, input.showAliases ?? []);
 
   return {
     effectiveEpisodeTitlePatterns,
-    effectiveRequiredFlares: shouldAutoSeedRhoslcFlair
+    effectiveRequiredFlairs: shouldAutoSeedRhoslcFlair
       ? [RHOSLC_FALLBACK_REQUIRED_FLAIR]
-      : baseRequiredFlares,
-    autoSeededRequiredFlares: shouldAutoSeedRhoslcFlair,
+      : baseRequiredFlairs,
+    autoSeededRequiredFlairs: shouldAutoSeedRhoslcFlair,
   };
 };

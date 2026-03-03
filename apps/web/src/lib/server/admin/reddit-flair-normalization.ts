@@ -76,11 +76,11 @@ export const normalizeRedditFlairLabel = (
   return normalizeGenericFlair(rawFlair);
 };
 
-export const sanitizeRedditFlairList = (subreddit: string, rawFlares: string[]): string[] => {
+export const sanitizeRedditFlairList = (subreddit: string, rawFlairs: string[]): string[] => {
   const seen = new Set<string>();
   const out: string[] = [];
 
-  for (const raw of rawFlares) {
+  for (const raw of rawFlairs) {
     if (typeof raw !== "string") continue;
     const normalized = normalizeRedditFlairLabel(subreddit, raw);
     if (!normalized) continue;

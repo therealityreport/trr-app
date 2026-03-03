@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   fetchSeasonBackendJson,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 import { isValidPositiveIntegerString, isValidUuid } from "@/lib/server/validation/identifiers";
@@ -48,8 +49,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       queryString: forwardedSearchParams.toString(),
       seasonIdHint,
       fallbackError: "Failed to fetch social analytics",
-      retries: 2,
-      timeoutMs: 35_000,
+      retries: 0,
+      timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
     });
     return NextResponse.json(data);
   } catch (error) {

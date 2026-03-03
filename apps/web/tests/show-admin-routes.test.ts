@@ -5,6 +5,7 @@ import {
   buildPersonRouteSlug,
   buildShowRedditCommunityAnalyticsUrl,
   buildShowRedditCommunityUrl,
+  buildShowRedditCommunityWindowPostUrl,
   buildShowRedditCommunityWindowUrl,
   buildShowRedditSeasonFilterUrl,
   buildShowRedditUrl,
@@ -447,6 +448,16 @@ describe("show-admin-routes", () => {
         windowKey: "period-preseason",
       }),
     ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+
+    expect(
+      buildShowRedditCommunityWindowPostUrl({
+        showSlug: "rhoslc",
+        communitySlug: "BravoRealHousewives",
+        seasonNumber: 6,
+        windowKey: "e1",
+        postId: "1abcde",
+      }),
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1/post/1abcde");
 
     expect(
       buildShowRedditCommunityAnalyticsUrl({

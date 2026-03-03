@@ -21,6 +21,14 @@ describe("person refresh request-id diagnostics wiring", () => {
     expect(pageContents).toMatch(/"x-trr-request-id": requestId/);
   });
 
+  it("wires filtered-scope payload fields for stage runs", () => {
+    expect(pageContents).toContain("target_cast_photo_ids");
+    expect(pageContents).toContain("target_media_link_ids");
+    expect(pageContents).toContain("scopedStageTargets.sources.length > 0 ? scopedStageTargets.sources : undefined");
+    expect(pageContents).toContain("No filtered images to reprocess.");
+    expect(pageContents).toContain("No filtered images to sync.");
+  });
+
   it("renders refresh logs with request-id prefix", () => {
     expect(pageContents).toMatch(/\[req:\$\{entry\.runId\}\] \$\{entry\.message\}/);
     expect(pageContents).toMatch(/runId: requestId/);

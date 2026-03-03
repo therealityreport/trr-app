@@ -78,7 +78,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       subreddit: "BravoRealHousewives",
       is_show_focused: false,
       episode_title_patterns: ["Live Episode Discussion"],
-      analysis_all_flares: ["Salt Lake City"],
+      analysis_all_flairs: ["Salt Lake City"],
     });
     getSeasonByIdMock.mockResolvedValue({ id: SEASON_ID, show_id: SHOW_ID, season_number: 6 });
     getSeasonsByShowIdMock.mockResolvedValue([
@@ -188,7 +188,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,
@@ -208,8 +208,8 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     expect(response.status).toBe(200);
     expect(payload.meta?.season_context).toEqual({ season_id: SEASON_ID, season_number: 6 });
     expect(payload.episode_matrix).toHaveLength(1);
-    expect(payload.meta?.effective_required_flares).toEqual(["Salt Lake City"]);
-    expect(payload.meta?.auto_seeded_required_flares).toBe(false);
+    expect(payload.meta?.effective_required_flairs).toEqual(["Salt Lake City"]);
+    expect(payload.meta?.auto_seeded_required_flairs).toBe(false);
     expect(payload.meta?.successful_sorts).toEqual(["new"]);
     expect(payload.meta?.failed_sorts).toEqual([]);
     expect(payload.meta?.rate_limited_sorts).toEqual([]);
@@ -241,7 +241,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
           "Post Episode Discussion",
           "Weekly Episode Discussion",
         ],
-        episodeRequiredFlares: ["Salt Lake City"],
+        episodeRequiredFlairs: ["Salt Lake City"],
         seasonEpisodes: [{ episode_number: 4, air_date: "2026-02-24" }],
       }),
     );
@@ -360,7 +360,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,
@@ -422,7 +422,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       subreddit: "realhousewivesofSLC",
       is_show_focused: true,
       episode_title_patterns: ["Live Episode Discussion"],
-      analysis_all_flares: ["Salt Lake City"],
+      analysis_all_flairs: ["Salt Lake City"],
     });
 
     const request = new NextRequest(
@@ -435,12 +435,12 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     expect(discoverEpisodeDiscussionThreadsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         isShowFocused: true,
-        episodeRequiredFlares: ["Salt Lake City"],
+        episodeRequiredFlairs: ["Salt Lake City"],
       }),
     );
   });
 
-  it("auto-seeds Salt Lake City flair for BravoRealHousewives RHOSLC rows when all-post flares are empty", async () => {
+  it("auto-seeds Salt Lake City flair for BravoRealHousewives RHOSLC rows when all-post flairs are empty", async () => {
     getRedditCommunityByIdMock.mockResolvedValueOnce({
       id: COMMUNITY_ID,
       trr_show_id: SHOW_ID,
@@ -448,7 +448,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       subreddit: "BravoRealHousewives",
       is_show_focused: false,
       episode_title_patterns: [],
-      analysis_all_flares: [],
+      analysis_all_flairs: [],
     });
 
     const request = new NextRequest(
@@ -460,11 +460,11 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.meta?.auto_seeded_required_flares).toBe(true);
-    expect(payload.meta?.effective_required_flares).toEqual(["Salt Lake City"]);
+    expect(payload.meta?.auto_seeded_required_flairs).toBe(true);
+    expect(payload.meta?.effective_required_flairs).toEqual(["Salt Lake City"]);
     expect(discoverEpisodeDiscussionThreadsMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        episodeRequiredFlares: ["Salt Lake City"],
+        episodeRequiredFlairs: ["Salt Lake City"],
       }),
     );
   });
@@ -531,7 +531,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,
@@ -614,7 +614,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,
@@ -678,7 +678,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,
@@ -743,7 +743,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,
@@ -807,7 +807,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,
@@ -867,7 +867,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,
@@ -995,7 +995,7 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       filters_applied: {
         season_number: 6,
         title_patterns: ["Live Episode Discussion"],
-        required_flares: ["Salt Lake City"],
+        required_flairs: ["Salt Lake City"],
         show_focused: false,
         period_start: null,
         period_end: null,

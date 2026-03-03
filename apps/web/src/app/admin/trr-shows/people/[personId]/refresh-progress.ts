@@ -1,7 +1,8 @@
 export const PERSON_REFRESH_PHASES = {
   syncing: "SYNCING",
   mirroring: "MIRRORING",
-  counting: "COUNTING",
+  tagging: "TAGGING",
+  counting: "TAGGING",
   findingText: "FINDING TEXT",
   centeringCropping: "CENTERING/CROPPING",
   resizing: "RESIZING",
@@ -35,7 +36,7 @@ export function mapPersonRefreshStage(rawStage: string | null | undefined): Pers
 
   const normalized = trimmed.toLowerCase().replace(/-/g, "_");
   if (normalized === "mirroring") return PERSON_REFRESH_PHASES.mirroring;
-  if (normalized === "auto_count") return PERSON_REFRESH_PHASES.counting;
+  if (normalized === "auto_count") return PERSON_REFRESH_PHASES.tagging;
   if (normalized === "word_id") return PERSON_REFRESH_PHASES.findingText;
   if (normalized === "centering_cropping") return PERSON_REFRESH_PHASES.centeringCropping;
   if (normalized === "resizing") return PERSON_REFRESH_PHASES.resizing;
@@ -417,10 +418,10 @@ const REFRESH_PIPELINE_STEPS: PersonRefreshPipelineStepDefinition[] = [
   { id: "source_sync", label: "Source Sync", modes: new Set(["refresh"]) },
   { id: "metadata_enrichment", label: "Metadata", modes: new Set(["refresh"]) },
   { id: "upserting", label: "Saving Photos", modes: new Set(["refresh"]) },
-  { id: "metadata_repair", label: "IMDb Repair", modes: new Set(["refresh", "reprocess"]) },
+  { id: "metadata_repair", label: "Fixing IMDb Details", modes: new Set(["refresh", "reprocess"]) },
   { id: "mirroring", label: "S3 Mirroring", modes: new Set(["refresh"]) },
   { id: "pruning", label: "Pruning", modes: new Set(["refresh"]) },
-  { id: "auto_count", label: "People Count + Face Crops", modes: new Set(["refresh", "reprocess"]) },
+  { id: "auto_count", label: "Tagging (Face Boxes + Identity)", modes: new Set(["refresh", "reprocess"]) },
   { id: "word_id", label: "Text Overlay", modes: new Set(["refresh", "reprocess"]) },
   {
     id: "centering_cropping",
@@ -450,7 +451,8 @@ function messageIndicatesSkip(message: string): boolean {
 }
 
 function messageIndicatesFailure(message: string): boolean {
-  return /\b(fail(ed|ure)?|error|paused|unavailable)\b/i.test(message);
+  const cleaned = message.replace(/\(0 failed\)/gi, "");
+  return /\b(fail(ed|ure)?|error|paused|unavailable)\b/i.test(cleaned);
 }
 
 function messageIndicatesCompletion(message: string): boolean {
@@ -613,6 +615,8 @@ export function finalizePersonRefreshPipelineSteps(
   const autoCountsAttempted = toSummaryNumber(summaryRecord, "auto_counts_attempted");
   const autoCountsSucceeded = toSummaryNumber(summaryRecord, "auto_counts_succeeded");
   const autoCountsFailed = toSummaryNumber(summaryRecord, "auto_counts_failed");
+  const autoCountAttemptedRows = toSummaryNumber(summaryRecord, "auto_count_attempted_rows");
+  const autoCountSkippedExistingRows = toSummaryNumber(summaryRecord, "auto_count_skipped_existing_rows");
   const textOverlayAttempted = toSummaryNumber(summaryRecord, "text_overlay_attempted");
   const textOverlaySucceeded = toSummaryNumber(summaryRecord, "text_overlay_succeeded");
   const textOverlayUnknown = toSummaryNumber(summaryRecord, "text_overlay_unknown");
@@ -688,11 +692,18 @@ export function finalizePersonRefreshPipelineSteps(
   }
 
   updateStep("auto_count", {
-    status: autoCountsFailed > 0 ? "failed" : autoCountsAttempted > 0 ? "completed" : "skipped",
+    status:
+      autoCountsFailed > 0
+        ? "failed"
+        : autoCountsAttempted > 0 || autoCountAttemptedRows > 0 || autoCountSkippedExistingRows > 0
+          ? "completed"
+          : "skipped",
     result:
       autoCountsAttempted > 0
-        ? `Saved people tags for ${autoCountsSucceeded.toLocaleString()}/${autoCountsAttempted.toLocaleString()} images (${autoCountsFailed.toLocaleString()} failed)`
-        : "Not run",
+        ? `Saved tagging for ${autoCountsSucceeded.toLocaleString()}/${autoCountsAttempted.toLocaleString()} images (${autoCountsFailed.toLocaleString()} failed)`
+        : autoCountSkippedExistingRows > 0
+          ? `Reviewed ${autoCountSkippedExistingRows.toLocaleString()} existing rows (no updates applied)`
+          : "Not run",
   });
 
   updateStep("word_id", {

@@ -2044,6 +2044,15 @@ export interface FaceBoxTag {
   person_id?: string;
   person_name?: string;
   label?: string;
+  match_similarity?: number | null;
+  match_status?: string | null;
+  match_reason?: string | null;
+  match_candidates?: Array<{
+    person_id?: string | null;
+    person_name?: string | null;
+    similarity: number;
+  }> | null;
+  label_source?: string | null;
 }
 
 export interface FaceCropTag {
@@ -2246,6 +2255,48 @@ const toFaceBoxes = (value: unknown): FaceBoxTag[] | null => {
       typeof candidate.label === "string" && candidate.label.trim().length > 0
         ? candidate.label.trim()
         : undefined;
+    const matchSimilarity =
+      typeof candidate.match_similarity === "number" && Number.isFinite(candidate.match_similarity)
+        ? clampFaceCoord(candidate.match_similarity)
+        : null;
+    const matchStatus =
+      typeof candidate.match_status === "string" && candidate.match_status.trim().length > 0
+        ? candidate.match_status.trim().toLowerCase()
+        : null;
+    const matchReason =
+      typeof candidate.match_reason === "string" && candidate.match_reason.trim().length > 0
+        ? candidate.match_reason.trim().toLowerCase()
+        : null;
+    const matchCandidates = Array.isArray(candidate.match_candidates)
+      ? candidate.match_candidates
+          .map((entry) => {
+            if (!entry || typeof entry !== "object") return null;
+            const candidateEntry = entry as Record<string, unknown>;
+            const similarity =
+              typeof candidateEntry.similarity === "number" && Number.isFinite(candidateEntry.similarity)
+                ? clampFaceCoord(candidateEntry.similarity)
+                : null;
+            if (similarity === null) return null;
+            const personId =
+              typeof candidateEntry.person_id === "string" && candidateEntry.person_id.trim().length > 0
+                ? candidateEntry.person_id.trim()
+                : null;
+            const personName =
+              typeof candidateEntry.person_name === "string" && candidateEntry.person_name.trim().length > 0
+                ? candidateEntry.person_name.trim()
+                : null;
+            return {
+              similarity,
+              ...(personId ? { person_id: personId } : {}),
+              ...(personName ? { person_name: personName } : {}),
+            };
+          })
+          .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      : [];
+    const labelSource =
+      typeof candidate.label_source === "string" && candidate.label_source.trim().length > 0
+        ? candidate.label_source.trim()
+        : null;
 
     boxes.push({
       index,
@@ -2258,6 +2309,11 @@ const toFaceBoxes = (value: unknown): FaceBoxTag[] | null => {
       ...(personId ? { person_id: personId } : {}),
       ...(personName ? { person_name: personName } : {}),
       ...(label ? { label } : {}),
+      ...(matchSimilarity !== null ? { match_similarity: matchSimilarity } : {}),
+      ...(matchStatus ? { match_status: matchStatus } : {}),
+      ...(matchReason ? { match_reason: matchReason } : {}),
+      ...(matchCandidates.length > 0 ? { match_candidates: matchCandidates } : {}),
+      ...(labelSource ? { label_source: labelSource } : {}),
     });
   }
   return boxes;

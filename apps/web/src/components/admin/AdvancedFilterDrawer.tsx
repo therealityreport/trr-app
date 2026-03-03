@@ -8,6 +8,7 @@ import {
   type AdvancedFilterState,
   type ContentTypeFilter,
   type PeopleGroupFilter,
+  type ReferenceFilter,
   type SeededFilter,
   type TextOverlayFilter,
 } from "@/lib/admin/advanced-filters";
@@ -30,6 +31,7 @@ export function AdvancedFilterDrawer({
   onChange,
   availableSources,
   showSeeded,
+  showReferences,
   sortOptions,
   defaults,
   unknownTextCount,
@@ -42,6 +44,7 @@ export function AdvancedFilterDrawer({
   onChange: (next: AdvancedFilterState) => void;
   availableSources: string[];
   showSeeded?: boolean;
+  showReferences?: boolean;
   sortOptions: Array<{ value: string; label: string }>;
   defaults?: Partial<AdvancedFilterState>;
   unknownTextCount?: number;
@@ -73,6 +76,8 @@ export function AdvancedFilterDrawer({
     onChange({ ...filters, people: toggleInList(filters.people, value) });
   const toggleSeeded = (value: SeededFilter) =>
     onChange({ ...filters, seeded: toggleInList(filters.seeded, value) });
+  const toggleReferences = (value: ReferenceFilter) =>
+    onChange({ ...filters, references: toggleInList(filters.references, value) });
   const toggleContentType = (value: ContentTypeFilter) =>
     onChange({
       ...filters,
@@ -246,6 +251,36 @@ export function AdvancedFilterDrawer({
                     onClick={() => toggleSeeded(opt.value)}
                     className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                       filters.seeded.includes(opt.value)
+                        ? "border-zinc-900 bg-zinc-900 text-white"
+                        : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {showReferences && (
+            <section>
+              <h4 className="text-sm font-bold text-zinc-900">References</h4>
+              <p className="mt-1 text-xs text-zinc-500">
+                Selecting both (or none) does not filter.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(
+                  [
+                    { value: "references", label: "REFERENCES" },
+                    { value: "not_references", label: "NOT REFERENCES" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => toggleReferences(opt.value)}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                      filters.references.includes(opt.value)
                         ? "border-zinc-900 bg-zinc-900 text-white"
                         : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                     }`}
