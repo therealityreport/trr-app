@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import Link from "next/link";
@@ -2662,7 +2662,7 @@ function InlineCaptionText({
   if (!normalizedText) return <span>(No caption)</span>;
 
   const captionTokenRe = /#[A-Za-z0-9_]+|@[A-Za-z0-9_.]+/g;
-  const segments: JSX.Element[] = [];
+  const segments: React.ReactElement[] = [];
   let cursor = 0;
   let tokenIndex = 0;
   const authorHandle = post ? resolvePostAuthorHandle(post) : "";
