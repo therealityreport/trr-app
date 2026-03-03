@@ -563,15 +563,17 @@ const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
+const getSyncActionPlatformLabel = (platform: Platform): string =>
+  platform === "twitter" ? "X" : (PLATFORM_LABELS[platform] ?? platform);
 const getWeekSyncActionLabel = (platformFilter: "all" | Platform): string => {
   const selectedPlatform = platformFilter === "all" ? null : platformFilter;
-  const platformLabel = selectedPlatform ? PLATFORM_LABELS[selectedPlatform] : null;
+  const platformLabel = selectedPlatform ? getSyncActionPlatformLabel(selectedPlatform) : null;
   if (SOCIAL_FULL_SYNC_MIRROR_ENABLED) {
     return selectedPlatform
-      ? `Full Ingest ${platformLabel} + Mirror`
-      : "Full Ingest + Mirror";
+      ? `Full Sync ${platformLabel} + Mirror`
+      : "Full Sync All + Mirror";
   }
-  return selectedPlatform ? `Ingest ${platformLabel} Metrics` : "Ingest Metrics";
+  return selectedPlatform ? `Sync ${platformLabel}` : "Sync All";
 };
 const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter", "facebook", "threads"];
 const STALE_RUN_THRESHOLD_DEFAULT_MINUTES = 45;
@@ -911,8 +913,8 @@ const REQUEST_TIMEOUT_MS = {
   weekDetail: 35_000,
   workerHealth: 12_000,
 } as const;
-const ANALYTICS_POLL_REFRESH_MS = 30_000;
-const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 10_000;
+const ANALYTICS_POLL_REFRESH_MS = 60_000;
+const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 20_000;
 const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 const WEEK_DETAIL_FETCH_CONCURRENCY = 2;
 
@@ -1110,7 +1112,7 @@ export const formatIngestErrorMessage = (payload: IngestProxyErrorPayload): stri
       : null) ??
     payload.error ??
     payload.detail ??
-    "Failed to run social ingest";
+    "Failed to run social sync";
 
   if (upstreamCode === "SOCIAL_WORKER_UNAVAILABLE") {
     const workerHealth =
@@ -1532,18 +1534,52 @@ const formatJobActivitySummary = (activity: Record<string, unknown> | null): str
   if (!activity) return "";
   const segments: string[] = [];
   if (typeof activity.phase === "string" && activity.phase.trim()) {
-    segments.push(activity.phase.replaceAll("_", " "));
+    const phaseLabels: Record<string, string> = {
+      posts_start: "Starting",
+      posts_scan: "Scanning for posts",
+      posts_complete: "Posts complete",
+      comments_start: "Starting comments",
+      comments_scan: "Collecting comments",
+      comments_complete: "Comments complete",
+    };
+    const raw = activity.phase.trim();
+    segments.push(phaseLabels[raw] ?? raw.replaceAll("_", " "));
   }
   if (typeof activity.pages_scanned === "number") {
-    segments.push(`${activity.pages_scanned}pg`);
+    segments.push(`scanned ${activity.pages_scanned} ${activity.pages_scanned === 1 ? "page" : "pages"}`);
   }
   if (typeof activity.posts_checked === "number") {
-    segments.push(`${activity.posts_checked}chk`);
+    segments.push(`checked ${activity.posts_checked} ${activity.posts_checked === 1 ? "post" : "posts"}`);
   }
   if (typeof activity.matched_posts === "number") {
-    segments.push(`${activity.matched_posts}match`);
+    segments.push(`${activity.matched_posts} matched`);
   }
-  return segments.join(" · ");
+  return segments.join(", ");
+};
+
+const STAGE_LABELS_PLAIN: Record<string, string> = {
+  posts: "Finding Posts",
+  comments: "Collecting Comments",
+  media_mirror: "Uploading Media",
+  mirror: "Uploading Media",
+  comment_media_mirror: "Uploading Comment Media",
+};
+
+const JOB_STATUS_PLAIN: Record<string, string> = {
+  running: "In progress",
+  completed: "Done",
+  failed: "Failed",
+  queued: "Waiting",
+  pending: "Waiting",
+  retrying: "Retrying",
+  cancelled: "Cancelled",
+};
+
+const formatCountersPlain = (posts: number, comments: number): string => {
+  const parts: string[] = [];
+  parts.push(`${posts.toLocaleString()} ${posts === 1 ? "post" : "posts"}`);
+  parts.push(`${comments.toLocaleString()} ${comments === 1 ? "comment" : "comments"}`);
+  return parts.join(", ");
 };
 
 const isVideoLikeThumbnailUrl = (url: string): boolean => {
@@ -1747,6 +1783,7 @@ export default function SeasonSocialAnalyticsSection({
   const [syncCommentsCoveragePreview, setSyncCommentsCoveragePreview] = useState<CommentsCoverageResponse | null>(null);
   const [syncMirrorCoveragePreview, setSyncMirrorCoveragePreview] = useState<MirrorCoverageResponse | null>(null);
   const [runningIngest, setRunningIngest] = useState(false);
+  const [syncDetailsExpanded, setSyncDetailsExpanded] = useState(false);
   const [cancellingRun, setCancellingRun] = useState(false);
   const [syncStrategy, setSyncStrategy] = useState<SyncStrategy>("incremental");
   const [weeklyMetric, setWeeklyMetric] = useState<WeeklyMetric>("posts");
@@ -1776,6 +1813,7 @@ export default function SeasonSocialAnalyticsSection({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
+  const [expandedJobErrors, setExpandedJobErrors] = useState<Set<string>>(new Set());
   const [elapsedTick, setElapsedTick] = useState(0);
   const [pollingStatus, setPollingStatus] = useState<"idle" | "retrying" | "recovered">("idle");
   const [sectionLastSuccessAt, setSectionLastSuccessAt] = useState<{
@@ -3128,21 +3166,28 @@ export default function SeasonSocialAnalyticsSection({
         const counters = getJobStageCounters(job);
         const persistCounters = getJobPersistCounters(job);
         const activity = getJobActivity(job);
-        const counterSummary = counters
-          ? ` · ${counters.posts}p/${counters.comments}c`
-          : typeof job.items_found === "number"
-            ? ` · ${job.items_found.toLocaleString()} items`
-            : "";
-        const persistSummary = persistCounters
-          ? ` · saved ${persistCounters.posts_upserted}p/${persistCounters.comments_upserted}c`
-          : "";
-        const activitySummary = formatJobActivitySummary(activity);
         const account = typeof job.config?.account === "string" && job.config.account ? ` @${job.config.account}` : "";
+        const stagePlain = STAGE_LABELS_PLAIN[stage] ?? stage;
+        const statusPlain = JOB_STATUS_PLAIN[statusToLogVerb(job.status)] ?? statusToLogVerb(job.status);
+
+        let msg = `${PLATFORM_LABELS[job.platform] ?? job.platform}${account} \u2014 ${stagePlain}: ${statusPlain}`;
+        if (counters) {
+          msg += `. Found ${formatCountersPlain(counters.posts, counters.comments)}`;
+        } else if (typeof job.items_found === "number" && job.items_found > 0) {
+          msg += `. ${job.items_found.toLocaleString()} items found`;
+        }
+        if (persistCounters) {
+          msg += `. Saved ${formatCountersPlain(persistCounters.posts_upserted, persistCounters.comments_upserted)}`;
+        }
+        const actPlain = formatJobActivitySummary(activity);
+        if (actPlain) {
+          msg += `. ${actPlain}`;
+        }
         return {
           id: job.id,
           timestampMs: Number.isNaN(ts) ? 0 : ts,
           timestampLabel: formatTime(timestamp),
-          message: `${PLATFORM_LABELS[job.platform] ?? job.platform} ${stage}${account} ${statusToLogVerb(job.status)}${counterSummary}${persistSummary}${activitySummary ? ` · ${activitySummary}` : ""}`,
+          message: msg,
         };
       })
       .sort((a, b) => b.timestampMs - a.timestampMs)
@@ -3185,7 +3230,7 @@ export default function SeasonSocialAnalyticsSection({
       const totalItems = Number(summary.items_found_total ?? 0);
       const elapsed = ingestStartedAt ? ` in ${Math.round((Date.now() - ingestStartedAt.getTime()) / 1000)}s` : "";
       const finalVerb = activeRun.status === "cancelled" ? "cancelled" : activeRun.status === "failed" ? "failed" : "complete";
-      let terminalMessage = `Ingest ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
+      let terminalMessage = `Sync ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
       if (totalJobs > 0) {
         terminalMessage += ` of ${totalJobs}`;
       }
@@ -3744,7 +3789,7 @@ export default function SeasonSocialAnalyticsSection({
       };
       const runId = typeof result.run_id === "string" && result.run_id ? result.run_id : null;
       if (!runId) {
-        throw new Error(result.message ?? "Ingest started without a run id");
+        throw new Error(result.message ?? "Sync started without a run id");
       }
 
       const autoContinueEnabled =
@@ -4527,7 +4572,7 @@ export default function SeasonSocialAnalyticsSection({
     <article
       ref={ingestPanelRef}
       tabIndex={-1}
-      aria-label="Ingest and export controls"
+      aria-label="Sync and export controls"
       className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
     >
       <h4 className="mb-4 text-lg font-semibold text-zinc-900">Ingest + Export</h4>
@@ -4642,7 +4687,7 @@ export default function SeasonSocialAnalyticsSection({
               type="button"
               onClick={() => {
                 if (!dayFilter) {
-                  setError("Choose a day before running a day-specific ingest.");
+                  setError("Choose a day before running a day-specific sync.");
                   return;
                 }
                 void runIngest({ day: dayFilter, platform: dailyRunPlatform });
@@ -4667,7 +4712,7 @@ export default function SeasonSocialAnalyticsSection({
           disabled={runningIngest}
           className="w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {runningIngest ? "Running Ingest..." : "Run Season Ingest (All)"}
+          {runningIngest ? "Syncing..." : "Run Season Sync (All)"}
         </button>
         {activeRunId && hasRunningJobs && (
           <button
@@ -4908,7 +4953,6 @@ export default function SeasonSocialAnalyticsSection({
         const failedJobs = activeJobs.filter((j) => j.status === "failed");
         const finishedCount = completedJobs.length + failedJobs.length;
         const progressPct = totalJobs > 0 ? Math.round((finishedCount / totalJobs) * 100) : 0;
-        const totalItemsFound = activeJobs.reduce((s, j) => s + (j.items_found ?? 0), 0);
         const elapsedSec = Math.floor(elapsedTick / 1000);
         const elapsedMin = Math.floor(elapsedSec / 60);
         const elapsedStr = elapsedMin > 0 ? `${elapsedMin}m ${String(elapsedSec % 60).padStart(2, "0")}s` : `${elapsedSec}s`;
@@ -4925,18 +4969,19 @@ export default function SeasonSocialAnalyticsSection({
           return stage === "media_mirror" || stage === "mirror";
         });
 
-        const stageProgress = (stageJobs: SocialJob[], label: string) => {
+        const stageProgress = (stageJobs: SocialJob[], stageKey: string) => {
           if (stageJobs.length === 0) return null;
           const done = stageJobs.filter((j) => j.status === "completed" || j.status === "failed").length;
           const pct = Math.round((done / stageJobs.length) * 100);
           const items = stageJobs.reduce((s, j) => s + (j.items_found ?? 0), 0);
-          return { label, total: stageJobs.length, done, pct, items, jobs: stageJobs };
+          const label = STAGE_LABELS_PLAIN[stageKey] ?? stageKey;
+          return { label, stageKey, total: stageJobs.length, done, pct, items, jobs: stageJobs };
         };
 
         const stages = [
-          stageProgress(postsStageJobs, "Posts"),
-          stageProgress(commentsStageJobs, "Comments"),
-          stageProgress(mirrorStageJobs, "Mirror"),
+          stageProgress(postsStageJobs, "posts"),
+          stageProgress(commentsStageJobs, "comments"),
+          stageProgress(mirrorStageJobs, "media_mirror"),
         ].filter(Boolean) as
           NonNullable<ReturnType<typeof stageProgress>>[];
 
@@ -4948,6 +4993,14 @@ export default function SeasonSocialAnalyticsSection({
           existing.posts += counters?.posts ?? 0;
           existing.comments += counters?.comments ?? 0;
           platformStats.set(j.platform, existing);
+        }
+
+        // Per-platform grouping for summary rows
+        const platformGrouped = new Map<string, SocialJob[]>();
+        for (const j of activeJobs) {
+          const existing = platformGrouped.get(j.platform) ?? [];
+          existing.push(j);
+          platformGrouped.set(j.platform, existing);
         }
 
         const statusDotClass: Record<string, string> = {
@@ -4968,15 +5021,14 @@ export default function SeasonSocialAnalyticsSection({
           retrying: "text-amber-600",
           cancelled: "text-zinc-400",
         };
-        const statusVerb: Record<string, string> = {
-          running: "scraping",
-          completed: "done",
-          failed: "failed",
-          queued: "queued",
-          pending: "queued",
-          retrying: "retrying",
-          cancelled: "cancelled",
-        };
+
+        // Derive a friendly header from active platforms
+        const activePlatformNames = [...new Set(activeJobs.map((j) => PLATFORM_LABELS[j.platform] ?? j.platform))];
+        const friendlyHeader = runningIngest
+          ? `Collecting data from ${activePlatformNames.length > 0 ? activePlatformNames.join(", ") : "social platforms"}...`
+          : failedJobs.length > 0
+            ? `Sync complete with ${failedJobs.length} ${failedJobs.length === 1 ? "error" : "errors"}`
+            : "Sync complete";
 
         return (
           <div className={`rounded-xl border px-5 py-4 text-sm ${
@@ -4986,9 +5038,9 @@ export default function SeasonSocialAnalyticsSection({
                 ? "border-amber-200 bg-amber-50 text-amber-800"
                 : "border-green-200 bg-green-50 text-green-700"
           }`}>
-            {/* Header row: message + elapsed */}
+            {/* Header row: friendly message + elapsed */}
             <div className="flex items-center justify-between gap-3">
-              <p className="font-semibold">{ingestMessage}</p>
+              <p className="font-semibold">{friendlyHeader}</p>
               {runningIngest && ingestStartedAt && (
                 <span className="shrink-0 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-mono font-semibold text-blue-700 tabular-nums">
                   {elapsedStr}
@@ -5001,7 +5053,7 @@ export default function SeasonSocialAnalyticsSection({
               <div className="mt-3">
                 <div className="mb-1.5 flex items-center justify-between text-xs">
                   <span className="font-medium">
-                    {finishedCount}/{totalJobs} jobs · {totalItemsFound.toLocaleString()} items
+                    {finishedCount} of {totalJobs} tasks complete
                   </span>
                   <span className="font-semibold tabular-nums">{progressPct}%</span>
                 </div>
@@ -5014,126 +5066,58 @@ export default function SeasonSocialAnalyticsSection({
               </div>
             )}
 
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
-              {workerHealth?.queueEnabled === true ? (
-                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                  Workers: {workerHealth.healthyWorkers ?? 0} healthy{workerHealth.reason ? ` (${workerHealth.reason})` : ""}
-                </span>
-              ) : (
-                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">Workers: queue disabled</span>
-              )}
-              {syncCommentsCoveragePreview && (
-                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                  Comments:{" "}
-                  {`${formatInteger(Number(syncCommentsCoveragePreview.total_saved_comments ?? 0))}/${formatInteger(
-                    Number(syncCommentsCoveragePreview.total_reported_comments ?? 0),
-                  )}`}
-                </span>
-              )}
-              {SOCIAL_FULL_SYNC_MIRROR_ENABLED && syncMirrorCoveragePreview && (
-                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                  Mirror:{" "}
-                  {formatMirrorCoverageLabel(
-                    Math.max(
-                      0,
-                      Number(syncMirrorCoveragePreview.posts_scanned ?? 0) -
-                        Number(syncMirrorCoveragePreview.needs_mirror_count ?? 0),
-                    ),
-                    Number(syncMirrorCoveragePreview.posts_scanned ?? 0),
-                  )}{" "}
-                  · pending {formatInteger(Number(syncMirrorCoveragePreview.pending_count ?? 0))} · failed{" "}
-                  {formatInteger(Number(syncMirrorCoveragePreview.failed_count ?? 0))}
-                </span>
-              )}
-            </div>
+            {/* Per-platform summary rows */}
+            {runningIngest && platformGrouped.size > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {Array.from(platformGrouped.entries())
+                  .sort(([a], [b]) => (PLATFORM_LABELS[a] ?? a).localeCompare(PLATFORM_LABELS[b] ?? b))
+                  .map(([platform, jobs]) => {
+                    const label = PLATFORM_LABELS[platform] ?? platform;
+                    const runningJob = jobs.find((j) => j.status === "running" || j.status === "retrying");
+                    const doneCount = jobs.filter((j) => j.status === "completed").length;
+                    const failCount = jobs.filter((j) => j.status === "failed").length;
+                    const totalCount = jobs.length;
+                    const counters = runningJob ? getJobStageCounters(runningJob) : null;
+                    const activity = runningJob ? getJobActivity(runningJob) : null;
+                    const pStats = platformStats.get(platform);
 
-            {/* Per-stage progress */}
-            {runningIngest && stages.length > 0 && (
-              <div className="mt-4 space-y-4">
-                {stages.map((s) => {
-                  const allDone = s.done === s.total;
-                  const hasActive = s.jobs.some((j) => j.status === "running" || j.status === "retrying");
-                  return (
-                    <div key={s.label}>
-                      <div className="mb-1.5 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold uppercase tracking-wide">{s.label}</span>
-                          {hasActive && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
-                              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-                              Active
-                            </span>
-                          )}
-                          {allDone && (
-                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
-                              Complete
-                            </span>
-                          )}
-                        </div>
-                        <span className="tabular-nums">{s.done}/{s.total} · {s.items.toLocaleString()} items</span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-blue-200">
-                        <div
-                          className={`h-1.5 rounded-full transition-all duration-500 ${allDone ? "bg-green-500" : "bg-blue-500"}`}
-                          style={{ width: `${Math.max(2, s.pct)}%` }}
-                        />
-                      </div>
-                      {/* Per-platform rows within stage */}
-                      <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                        {s.jobs.map((j) => {
-                          const counters = getJobStageCounters(j);
-                          const persistCounters = getJobPersistCounters(j);
-                          const activitySummary = formatJobActivitySummary(getJobActivity(j));
-                          const postsFound = counters?.posts ?? 0;
-                          const commentsFound = counters?.comments ?? 0;
-                          const account = getAccount(j);
-                          const jobDuration = j.started_at
-                            ? `${Math.round(((j.completed_at ? new Date(j.completed_at).getTime() : Date.now()) - new Date(j.started_at).getTime()) / 1000)}s`
-                            : null;
-                          return (
-                            <div key={j.id} className="flex items-center gap-1.5 rounded bg-white/50 px-2 py-1 text-xs">
-                              <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusDotClass[j.status] ?? "bg-zinc-300"}`} />
-                              <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
-                              {account && <span className="text-blue-600">@{account}</span>}
-                              <span className={`ml-auto ${statusTextClass[j.status] ?? "text-zinc-500"}`}>
-                                {statusVerb[j.status] ?? j.status}
-                              </span>
-                              {counters ? (
-                                <span className="tabular-nums text-zinc-700">{postsFound}p/{commentsFound}c</span>
-                              ) : (
-                                <span className="tabular-nums text-zinc-700">{(j.items_found ?? 0).toLocaleString()} items</span>
-                              )}
-                              {persistCounters && (
-                                <span className="tabular-nums text-zinc-500">
-                                  saved {persistCounters.posts_upserted}p/{persistCounters.comments_upserted}c
-                                </span>
-                              )}
-                              {activitySummary && <span className="text-zinc-400">{activitySummary}</span>}
-                              {jobDuration && j.status !== "queued" && j.status !== "pending" && (
-                                <span className="tabular-nums text-zinc-400">{jobDuration}</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    let actionText: string;
+                    if (runningJob) {
+                      const stageName = STAGE_LABELS_PLAIN[getStage(runningJob)] ?? getStage(runningJob);
+                      actionText = stageName;
+                      if (counters) {
+                        actionText += ` \u2014 ${formatCountersPlain(counters.posts, counters.comments)} found`;
+                      }
+                      if (activity && typeof activity.pages_scanned === "number" && activity.pages_scanned > 0) {
+                        actionText += ` (${activity.pages_scanned} ${activity.pages_scanned === 1 ? "page" : "pages"} scanned)`;
+                      }
+                    } else if (doneCount + failCount === totalCount) {
+                      actionText = pStats
+                        ? `Done \u2014 ${formatCountersPlain(pStats.posts, pStats.comments)} collected`
+                        : "Done";
+                    } else {
+                      actionText = "Waiting to start";
+                    }
 
-            {/* Live activity log (latest events) */}
-            {runningIngest && liveRunLogs.length > 0 && (
-              <div className="mt-4 border-t border-blue-200 pt-3">
-                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-blue-600">Activity Log</p>
-                <div className="space-y-0.5">
-                  {liveRunLogs.slice(0, 6).map((entry) => (
-                    <p key={entry.id} className="flex items-center gap-2 text-xs">
-                      <span className="shrink-0 font-mono text-[10px] tabular-nums text-blue-500">{entry.timestampLabel}</span>
-                      <span className="text-blue-900">{entry.message}</span>
-                    </p>
-                  ))}
-                </div>
+                    const dotClass = runningJob
+                      ? "bg-blue-500 animate-pulse"
+                      : failCount > 0
+                        ? "bg-red-500"
+                        : doneCount === totalCount
+                          ? "bg-green-500"
+                          : "bg-zinc-300";
+
+                    return (
+                      <div key={platform} className="flex items-center gap-2 text-xs">
+                        <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
+                        <span className="font-semibold min-w-[5rem]">{label}</span>
+                        <span className="text-zinc-600 truncate">{actionText}</span>
+                        <span className="ml-auto shrink-0 tabular-nums text-zinc-500">
+                          {doneCount} of {totalCount} tasks
+                        </span>
+                      </div>
+                    );
+                  })}
               </div>
             )}
 
@@ -5150,17 +5134,171 @@ export default function SeasonSocialAnalyticsSection({
                           : "bg-green-100 text-green-700"
                       }`}>
                         {PLATFORM_LABELS[platform] ?? platform}
-                        <span className="font-semibold tabular-nums">{stats.posts}p / {stats.comments}c</span>
+                        <span className="font-semibold tabular-nums">
+                          {stats.posts.toLocaleString()} {stats.posts === 1 ? "post" : "posts"}, {stats.comments.toLocaleString()} {stats.comments === 1 ? "comment" : "comments"}
+                        </span>
                       </span>
                     ))}
                 </div>
                 {failedJobs.length > 0 && (
                   <div className="text-xs text-red-600">
-                    {failedJobs.length} job{failedJobs.length !== 1 ? "s" : ""} failed:{" "}
-                    {failedJobs.map((j) => `${PLATFORM_LABELS[j.platform] ?? j.platform} ${getStage(j)}`).join(", ")}
+                    {failedJobs.length} {failedJobs.length !== 1 ? "tasks" : "task"} failed:{" "}
+                    {failedJobs.map((j) => `${PLATFORM_LABELS[j.platform] ?? j.platform} ${STAGE_LABELS_PLAIN[getStage(j)] ?? getStage(j)}`).join(", ")}
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Expand/collapse toggle for details */}
+            <button
+              type="button"
+              className={`mt-3 flex items-center gap-1 text-xs font-medium ${
+                runningIngest ? "text-blue-600 hover:text-blue-800" : "text-zinc-500 hover:text-zinc-700"
+              }`}
+              onClick={() => setSyncDetailsExpanded((prev) => !prev)}
+            >
+              {syncDetailsExpanded ? "Hide details" : "Show details"}
+              <svg
+                className={`h-3 w-3 transition-transform ${syncDetailsExpanded ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {/* Expandable details section */}
+            {syncDetailsExpanded && (
+              <>
+                {/* Infrastructure status pills */}
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+                  {workerHealth?.queueEnabled === true ? (
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                      Background workers: {workerHealth.healthyWorkers ?? 0} healthy{workerHealth.reason ? ` (${workerHealth.reason})` : ""}
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">Background workers: off</span>
+                  )}
+                  {syncCommentsCoveragePreview && (
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                      {formatInteger(Number(syncCommentsCoveragePreview.total_saved_comments ?? 0))} of{" "}
+                      {formatInteger(Number(syncCommentsCoveragePreview.total_reported_comments ?? 0))} comments collected
+                    </span>
+                  )}
+                  {SOCIAL_FULL_SYNC_MIRROR_ENABLED && syncMirrorCoveragePreview && (
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                      Media uploads:{" "}
+                      {formatMirrorCoverageLabel(
+                        Math.max(
+                          0,
+                          Number(syncMirrorCoveragePreview.posts_scanned ?? 0) -
+                            Number(syncMirrorCoveragePreview.needs_mirror_count ?? 0),
+                        ),
+                        Number(syncMirrorCoveragePreview.posts_scanned ?? 0),
+                      )}{" "}
+                      complete, {formatInteger(Number(syncMirrorCoveragePreview.pending_count ?? 0))} pending,{" "}
+                      {formatInteger(Number(syncMirrorCoveragePreview.failed_count ?? 0))} failed
+                    </span>
+                  )}
+                </div>
+
+                {/* Raw ingest message for debugging */}
+                {ingestMessage && (
+                  <p className="mt-2 text-[10px] font-mono text-zinc-400 break-all">{ingestMessage}</p>
+                )}
+
+                {/* Per-stage progress */}
+                {runningIngest && stages.length > 0 && (
+                  <div className="mt-4 space-y-4">
+                    {stages.map((s) => {
+                      const allDone = s.done === s.total;
+                      const hasActive = s.jobs.some((j) => j.status === "running" || j.status === "retrying");
+                      return (
+                        <div key={s.stageKey}>
+                          <div className="mb-1.5 flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold tracking-wide">{s.label}</span>
+                              {hasActive && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
+                                  In progress
+                                </span>
+                              )}
+                              {allDone && (
+                                <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+                                  Complete
+                                </span>
+                              )}
+                            </div>
+                            <span className="tabular-nums">{s.done} of {s.total} complete, {s.items.toLocaleString()} items found</span>
+                          </div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-blue-200">
+                            <div
+                              className={`h-1.5 rounded-full transition-all duration-500 ${allDone ? "bg-green-500" : "bg-blue-500"}`}
+                              style={{ width: `${Math.max(2, s.pct)}%` }}
+                            />
+                          </div>
+                          {/* Per-platform rows within stage */}
+                          <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                            {s.jobs.map((j) => {
+                              const counters = getJobStageCounters(j);
+                              const persistCounters = getJobPersistCounters(j);
+                              const activitySummary = formatJobActivitySummary(getJobActivity(j));
+                              const postsFound = counters?.posts ?? 0;
+                              const commentsFound = counters?.comments ?? 0;
+                              const account = getAccount(j);
+                              const jobDuration = j.started_at
+                                ? `${Math.round(((j.completed_at ? new Date(j.completed_at).getTime() : Date.now()) - new Date(j.started_at).getTime()) / 1000)}s`
+                                : null;
+                              return (
+                                <div key={j.id} className="flex items-center gap-1.5 rounded bg-white/50 px-2 py-1 text-xs">
+                                  <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusDotClass[j.status] ?? "bg-zinc-300"}`} />
+                                  <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
+                                  {account && <span className="text-blue-600">@{account}</span>}
+                                  <span className={`ml-auto ${statusTextClass[j.status] ?? "text-zinc-500"}`}>
+                                    {JOB_STATUS_PLAIN[j.status] ?? j.status}
+                                  </span>
+                                  {counters ? (
+                                    <span className="tabular-nums text-zinc-700">{formatCountersPlain(postsFound, commentsFound)} found</span>
+                                  ) : (
+                                    <span className="tabular-nums text-zinc-700">{(j.items_found ?? 0).toLocaleString()} items</span>
+                                  )}
+                                  {persistCounters && (
+                                    <span className="tabular-nums text-zinc-500">
+                                      {formatCountersPlain(persistCounters.posts_upserted, persistCounters.comments_upserted)} saved
+                                    </span>
+                                  )}
+                                  {activitySummary && <span className="text-zinc-400">{activitySummary}</span>}
+                                  {jobDuration && j.status !== "queued" && j.status !== "pending" && (
+                                    <span className="tabular-nums text-zinc-400">{jobDuration}</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Live activity log (latest events) */}
+                {runningIngest && liveRunLogs.length > 0 && (
+                  <div className="mt-4 border-t border-blue-200 pt-3">
+                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-blue-600">Activity Log</p>
+                    <div className="space-y-0.5">
+                      {liveRunLogs.slice(0, 6).map((entry) => (
+                        <p key={entry.id} className="flex items-center gap-2 text-xs">
+                          <span className="shrink-0 font-mono text-[10px] tabular-nums text-blue-500">{entry.timestampLabel}</span>
+                          <span className="text-blue-900">{entry.message}</span>
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         );
@@ -6069,7 +6207,7 @@ export default function SeasonSocialAnalyticsSection({
                                   : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
                               }`}
                             >
-                              {runningIngest && ingestingWeek === week.week_index ? "Ingesting..." : "Run Week"}
+                              {runningIngest && ingestingWeek === week.week_index ? "Syncing..." : "Run Week"}
                             </button>
                             <button
                               type="button"
@@ -6536,23 +6674,23 @@ export default function SeasonSocialAnalyticsSection({
                           </span>
                           {account && <span className="text-xs text-zinc-500">@{account}</span>}
                           <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-xs font-medium text-zinc-600">
-                            {stage}
+                            {STAGE_LABELS_PLAIN[stage] ?? stage}
                           </span>
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge[job.status] ?? "bg-zinc-100 text-zinc-500"}`}>
-                            {job.status}
+                            {JOB_STATUS_PLAIN[job.status] ?? job.status}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-zinc-500">
                           {counters ? (
                             <span className="font-semibold tabular-nums text-zinc-700">
-                              {counters.posts}p / {counters.comments}c
+                              {formatCountersPlain(counters.posts, counters.comments)} found
                             </span>
                           ) : (
                             <span className="font-semibold tabular-nums text-zinc-700">{(job.items_found ?? 0).toLocaleString()} items</span>
                           )}
                           {persistCounters && (
                             <span className="tabular-nums text-zinc-500">
-                              saved {persistCounters.posts_upserted}p/{persistCounters.comments_upserted}c
+                              {formatCountersPlain(persistCounters.posts_upserted, persistCounters.comments_upserted)} saved
                             </span>
                           )}
                           {activitySummary && <span className="text-zinc-400">{activitySummary}</span>}
@@ -6560,7 +6698,26 @@ export default function SeasonSocialAnalyticsSection({
                         </div>
                       </div>
                       {job.error_message && (
-                        <p className="mt-1.5 rounded bg-red-100 px-2 py-1 text-xs text-red-700">{job.error_message}</p>
+                        <div className="mt-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedJobErrors((prev) => {
+                                const next = new Set(prev);
+                                next.has(job.id) ? next.delete(job.id) : next.add(job.id);
+                                return next;
+                              })
+                            }
+                            className="text-xs text-red-500 underline"
+                          >
+                            {expandedJobErrors.has(job.id) ? "Hide error" : "Show error"}
+                          </button>
+                          {expandedJobErrors.has(job.id) && (
+                            <pre className="mt-1 max-h-32 overflow-auto rounded bg-red-50 p-2 text-[10px] text-red-700">
+                              {job.error_message}
+                            </pre>
+                          )}
+                        </div>
                       )}
                       {job.status === "failed" && (
                         <div className="mt-1.5">
